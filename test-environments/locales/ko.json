@@ -1,0 +1,58 @@
+{
+  "name": "테스트 환경",
+  "description": "실제 테스트 계정을 추가하고 선택하며 앱이 저장한 로그인을 재사용합니다. 빌드, 시작 및 테스트는 대화로 처리합니다.",
+  "whenToUse": "실제 테스트 계정을 추가하고 선택하며 앱이 저장한 로그인을 재사용합니다. 빌드, 시작 및 테스트는 대화로 처리합니다.",
+  "mainView": {
+    "title": "테스트 환경"
+  },
+  "tools": {
+    "catalog": {
+      "description": "프로젝트, 실제 계정 참조와 이 컴퓨터의 프로필 기록, 실행 설정과 사례를 조회합니다. 자격 증명은 없습니다. 목록에 있다는 사실은 유효한 로그인을 증명하지 않습니다."
+    },
+    "save_project": {
+      "description": "프로젝트와 명령 인수를 저장합니다. 인수에 비밀 정보를 저장하지 마세요."
+    },
+    "save_profile": {
+      "description": "재사용할 실행 설정을 저장합니다. Cindy의 영구 격리 프로필에서도 실제 계정을 씁니다. 검수에는 debugPort가 필요하며 컴퓨터마다 로그인합니다."
+    },
+    "save_case": {
+      "description": "테스트 단계와 예상 결과를 저장합니다. 저장만으로 실행하지 않습니다."
+    },
+    "remove": {
+      "description": "목록 항목만 삭제합니다. 앱 데이터와 인증 정보는 유지됩니다."
+    },
+    "import_cindy": {
+      "description": "소유한 Cindy 작업의 앱 계정 동기화 API로 저장된 모든 계정을 기록합니다. jobId 생략 시 일치하는 활성 작업이 하나여야 합니다. 자격 증명을 복사하거나 일상 호스트를 검색하지 않습니다."
+    },
+    "plan": {
+      "description": "시작, 계정 선택, 샘플 준비, 검수 실행, 중지의 명령과 흐름을 실행 없이 미리 봅니다. 모바일은 Baguette를 사용합니다. 전달되지 않은 WIP 인수는 쓰지 않습니다."
+    },
+    "start": {
+      "description": "실행 후 영구 jobId를 반환합니다. Cindy 검수는 앱의 실제 계정을 자동 기록하고 한 번 전환을 요청한 뒤 온라인 인증을 확인합니다. 미로그인 또는 만료 시 일반 로그인을 기다립니다. 샘플과 사례는 실제 실행이 필요합니다. 대기 중 다시 시작하지 마세요."
+    },
+    "status": {
+      "description": "실행, 계정 기록, 온라인 신원 확인을 조회합니다. ready는 계정과 앱이 사용 가능함을 뜻하며 샘플이나 검수 통과가 아닙니다. unknown이면 정확한 인스턴스를 확인하세요."
+    },
+    "stop": {
+      "description": "소유권을 확인한 이 작업의 프로세스만 중지합니다. 앱에 저장된 모든 계정, 암호화 세션, 데이터와 기록을 보존하며 로그아웃하지 않습니다. stopped까지 확인하세요."
+    },
+    "inspect": {
+      "description": "소유한 데스크톱의 전용 디버그 포트만 검사합니다. 잠금 중에도 선별된 로그인 상태, 계정 수와 선택적 비공개 이미지를 반환합니다. 토큰, Cookie, 원시 인증 상태나 다른 앱을 반환하지 않습니다."
+    },
+    "select_account": {
+      "description": "이 플러그인이 소유한 Cindy 검수 작업을 같은 프로젝트의 기록된 실제 계정으로 전환하도록 요청합니다. 성공이 아닌 요청됨을 반환합니다. 각 컴퓨터에서 앱에 로그인하고 상태를 확인하세요. 불확실할 때 자동 재시도하지 않고 확인 후 명시적으로 다시 요청합니다. 자격 증명을 내보내지 않습니다."
+    },
+    "remote": {
+      "description": "공통 SSH 검증입니다. catalog는 대상 설정과 하드웨어를 읽습니다. plan은 target, profile, PR repo/number 및 선택적 commit을 받으며 생략 시 대상 Git에서 현재 SHA를 읽습니다. 확인 후 start는 새 worktree와 B의 로그인을 사용합니다. status/stop/select_account/action/collect는 같은 runId를 사용합니다. action은 저장된 prepare/verify만 실행하며 collect는 제한된 로그·이미지·결과의 해시를 확인합니다. 기존 SSH 신뢰를 사용하고 키·비밀번호 저장, Agent 전달이나 자격 증명 복사를 하지 않습니다. B 미로그인은 정상 인증이 필요하며 기기 간 최초 인증은 미구현입니다. 응답이 불명확하면 같은 실행을 먼저 확인하세요. 실제 기기·사람의 증거가 필요하며 PR에 자동 공개하지 않습니다."
+    },
+    "login_accounts": {
+      "description": "List this computer’s saved test account references across projects. Available means a matching app-owned profile was observed, not proof that its login is still valid. No credentials. Optionally remember the selected account for the next test. Returns selectedAccount; bind_login_account uses it when account is omitted."
+    },
+    "bind_login_account": {
+      "description": "Choose a saved test account for a Cindy source project and reuse its existing app-owned isolated profile. Use the app-reported region when available, otherwise the observed profile version. Does not launch or copy credentials. Stop any instance already using that profile first. Omit account to use the account selected on the plugin page."
+    },
+    "add_account": {
+      "description": "Open the real client login to add another account. The app saves its session and supplies its real server data. Omit project/region only when an unambiguous existing client setup is available; otherwise the conversation sets up the intended source project first. Never request credentials or API configuration."
+    }
+  }
+}

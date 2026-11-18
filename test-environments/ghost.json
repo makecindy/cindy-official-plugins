@@ -1,0 +1,639 @@
+{
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.124",
+  "id": "test-environments",
+  "name": "Test Environments",
+  "description": "Add and choose real test accounts. Reuse app-owned login on this computer; ask the conversation to handle builds, startup and tests.",
+  "whenToUse": "Add and choose real test accounts. Reuse app-owned login on this computer; ask the conversation to handle builds, startup and tests.",
+  "version": "1.4.0",
+  "kind": "chip",
+  "entry": "main.js",
+  "icon": "assets/icon.png",
+  "tools": [
+    {
+      "name": "catalog",
+      "description": "List projects, real account references with local profile history, launch profiles and acceptance cases. No credentials. A listed account is not proof of a valid login.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "save_project",
+      "description": "Save a project and its argv commands. Commands execute as this computer user. Never store secrets in arguments.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "root": {
+                "type": "string"
+              },
+              "adapter": {
+                "type": "string",
+                "enum": [
+                  "cindy",
+                  "command"
+                ]
+              },
+              "commands": {
+                "type": "object",
+                "properties": {
+                  "prepare": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  },
+                  "start": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  },
+                  "verify": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "root",
+              "adapter"
+            ],
+            "additionalProperties": false
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "save_profile",
+      "description": "Save reusable launch settings. Cindy desktop uses a persistent isolated data profile that can hold real accounts; acceptance requires debugPort. Each computer signs in separately.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              },
+              "account": {
+                "type": "string"
+              },
+              "isolated": {
+                "type": "string"
+              },
+              "fixture": {
+                "type": "string",
+                "description": "Sample name for AI preparation using normal application tools. Saving does not inject data or execute acceptance."
+              },
+              "loginSource": {
+                "type": "string",
+                "description": "Legacy WIP field retained for catalog compatibility; unsupported for execution. Use normal sign-in separately on each computer."
+              },
+              "serveLogin": {
+                "type": "string",
+                "description": "Legacy WIP field retained for catalog compatibility; unsupported for execution. Use normal sign-in separately on each computer."
+              },
+              "deviceId": {
+                "type": "string"
+              },
+              "artifactPath": {
+                "type": "string"
+              },
+              "bundleId": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string",
+                "enum": [
+                  "desktop",
+                  "ios",
+                  "android",
+                  "linux"
+                ]
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "legacy",
+                  "acceptance"
+                ]
+              },
+              "region": {
+                "type": "string",
+                "enum": [
+                  "global",
+                  "cn"
+                ]
+              },
+              "remoteControl": {
+                "type": "string",
+                "enum": [
+                  "inherit",
+                  "off",
+                  "on"
+                ]
+              },
+              "background": {
+                "type": "string",
+                "enum": [
+                  "inherit",
+                  "off",
+                  "on"
+                ]
+              },
+              "debugPort": {
+                "type": "integer",
+                "minimum": 1024,
+                "maximum": 65535
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "project",
+              "platform",
+              "mode"
+            ],
+            "additionalProperties": false
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "save_case",
+      "description": "Save ordered acceptance actions and expected outcomes. Saving does not run a test.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "testCase": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "profile": {
+                "type": "string"
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "expected": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "expected"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 50
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "profile",
+              "steps"
+            ],
+            "additionalProperties": false
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "testCase"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "remove",
+      "description": "Remove a catalog entry only. Dependencies must be reassigned first; application data and credentials remain.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "projects",
+              "accounts",
+              "profiles",
+              "cases"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "import_cindy",
+      "description": "Remember all accounts saved in this plugin job’s owned Cindy app, using the app account-sync interface. Optionally choose jobId; otherwise exactly one live job must match the project. Never copies credentials or scans daily-host profiles.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string",
+            "description": "Exact owned live job. Required when multiple jobs match."
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "select_account",
+      "description": "Request switching the exact owned live Cindy acceptance job to a remembered real account from the same project. Returns requested, not success. The app must have its own login on this computer; uncertainty never triggers an automatic repeat. Query status and inspect before explicitly requesting another switch. Does not export credentials.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string",
+            "description": "Account ID from catalog, not a token or display name."
+          }
+        },
+        "required": [
+          "jobId",
+          "account"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "plan",
+      "description": "Preview commands and the complete start/select-account/prepare-samples/execute-cases/stop workflow without execution. Mobile uses Baguette. No missing client WIP flags are passed.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "prepare",
+              "verify"
+            ]
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "start",
+      "description": "Start a saved profile action and return a persistent jobId. Cindy acceptance automatically remembers app-saved real accounts, selects the requested saved identity once and verifies online authentication. Missing/expired local login waits for normal sign-in. Samples and cases still need real execution; never repeat start while waiting.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "prepare",
+              "verify"
+            ]
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "status",
+      "description": "Read jobs, account observation and online identity verification. Ready means the account and app are usable, not that samples or acceptance cases passed. Unknown requires inspecting the exact instance.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "stop",
+      "description": "Stop only this job and its verified owned process. Preserve every app-saved account, encrypted session, data and plugin account history. Does not log out. Query until stopped.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "inspect",
+      "description": "Inspect only this job’s owned desktop app through its local debug port, even while locked. Return projected login state, remembered-account count and optional private screenshot. Never return tokens, cookies, raw auth state or another app.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "screenshot": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "jobId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "remote",
+      "description": "SSH test workflow. catalog(target) reads the chosen computer’s profiles/hardware. plan(target,profile,pr{repo,number,commit?}) previews an exact revision; omit commit to read the PR head with target Git. start(runId) uses a new worktree and B-local login. status/stop/select_account/action/collect keep that runId. action executes saved prepare/verify argv only. collect returns bounded, hashed results and optional logs/private screenshot. Existing OpenSSH trust; no password/key storage, agent forwarding or credential copying. Missing B login needs normal sign-in; cross-device first authorization is not implemented. Lost replies are unknown: query the same run before repeating operations. Human/device checks need real evidence and stay pending after script success. No automatic PR publication; review/redact evidence.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "catalog",
+              "plan",
+              "start",
+              "status",
+              "stop",
+              "select_account",
+              "action",
+              "collect"
+            ]
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "host": {
+                "type": "string",
+                "description": "Exact preconfigured SSH Host alias/hostname. Never passwords, private keys or ssh options."
+              },
+              "node": {
+                "type": "string",
+                "description": "node or an absolute Node executable path on the target."
+              }
+            },
+            "required": [
+              "host"
+            ],
+            "additionalProperties": false
+          },
+          "profile": {
+            "type": "string"
+          },
+          "pr": {
+            "type": "object",
+            "properties": {
+              "repo": {
+                "type": "string",
+                "description": "GitHub owner/repo matching B repository origin."
+              },
+              "number": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "commit": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{40}$",
+                "description": "Optional exact PR head SHA. If omitted, B reads the PR head with Git and previews its exact SHA before starting."
+              }
+            },
+            "required": [
+              "repo",
+              "number"
+            ],
+            "additionalProperties": false
+          },
+          "requirements": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "human",
+                    "device-tool"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "deviceId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "label"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "runId": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "prepare",
+              "verify"
+            ]
+          },
+          "logs": {
+            "type": "boolean",
+            "default": false
+          },
+          "screenshot": {
+            "type": "boolean",
+            "default": false
+          },
+          "outputDir": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "login_accounts",
+      "description": "List this computer’s saved test account references across projects. Available means a matching app-owned profile was observed, not proof that its login is still valid. No credentials. Optionally remember the selected account for the next test. Returns selectedAccount; bind_login_account uses it when account is omitted.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Optional saved account ID to select for subsequent tests. Does not switch a running client."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "bind_login_account",
+      "description": "Choose a saved test account for a Cindy source project and reuse its existing app-owned isolated profile. Use the app-reported region when available, otherwise the observed profile version. Does not launch or copy credentials. Stop any instance already using that profile first. Omit account to use the account selected on the plugin page.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "add_account",
+      "description": "Open the real client login to add another account. The app saves its session and supplies its real server data. Omit project/region only when an unambiguous existing client setup is available; otherwise the conversation sets up the intended source project first. Never request credentials or API configuration.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string",
+            "enum": [
+              "global",
+              "cn"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "node": {
+    "entry": "node/worker.cjs",
+    "protocol": "json-rpc-stdio",
+    "lifecycle": "on-demand",
+    "idleTimeoutSeconds": 120
+  },
+  "command": "test-environments",
+  "mainView": {
+    "title": "Test Environments",
+    "icon": "code",
+    "html": "manage.html"
+  },
+  "settingsHtml": "manage.html",
+  "manual": {
+    "items": [
+      {
+        "dir": "manual/start",
+        "name": "start",
+        "description": "Accounts, profiles, launch lifecycle, CLI and simulator handoff."
+      }
+    ]
+  },
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "releaseNotes": "Account-only page: add a real account in the client, remember the selected account and view app-owned storage. Project, PR, package, SSH and test orchestration belong in the conversation. Remove configuration forms and the unused directory-picker permission. No client/server changes or credential copying."
+}
