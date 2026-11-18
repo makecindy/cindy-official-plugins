@@ -14,11 +14,10 @@ A unified Cindy browser companion candidate. **0.4.10** brings compact reading c
 - Compact webpage panel, selection translation, contextual explanation, summary and reading aloud; bilingual pages with dynamic content and restore. Closing the panel keeps page translations.
 - YouTube automatically shows captions inside its player. The player menu offers bilingual, translation-only, original-only and off; video language is independent of webpage language. Native HTML5 captions, SRT/VTT import, sentence navigation, loop, pause and bilingual export remain under More. Live services have not been individually verified; universal coverage is not claimed.
 - Common languages are listed first; “Try other languages” opens a searchable language directory and custom names. This directory is **not a verified model support list**. Available languages and quality depend on the selected text model; the host currently does not provide verified per-language capability metadata.
-- PDF.js local PDF reading and Tesseract OCR for English, Chinese, Japanese, Korean, French, German, Spanish, Italian, Portuguese and Russian. Recognize a selected region and ask questions about its text. This is not visual chart understanding. Text and Markdown reading are included.
 - Speaking practice, collections and review controls are removed at the user's request. Existing Library records and legacy API operations are preserved. This package is not a full Trancy replacement.
 - New Cindy task: uses the ordinary task API, creates an explicitly owned task and separates user instructions from quoted webpage material. It never takes over an unrelated active task; uncertain submissions retain their request keys.
 
-Requires **Cindy 0.1.97+**, an available task model and Library. The plugin logic and local bridge remain resident to receive user clicks. Model credentials stay in Cindy. Task permission follows the existing Host approval flow; refusing it prevents model translation but does not prevent browser reading/control.
+Requires **Cindy 0.1.140+**, an available task model and Library. The plugin logic and local bridge remain resident to receive user clicks. Model credentials stay in Cindy. Task permission follows the existing Host approval flow; refusing it prevents model translation but does not prevent browser reading/control.
 
 Shortcuts: `Alt+Shift+T` toggles page translation; `Alt+Shift+C` opens Cindy. Pages open before installation need a user refresh to load content scripts and establish current-document address evidence.
 
@@ -65,7 +64,7 @@ Installation cards appear only for connected browsers or installed browsers with
 
 The official settings flow does not open a ZIP. The contributor-only `package-my-browser-zip.py` helper can create a development archive with the local `key`; do not present or upload that archive as a user installation. For Chrome Web Store releases, use `node scripts/build-my-browser.mjs /absolute/new-output-directory chrome`: its upload ZIP omits `key`. The published Chrome extension ID and store URL are already recorded in `distribution.json`; keep them unchanged for future releases and keep the local development key unchanged.
 
-The bridge uses first-party JS and Node built-ins. PDF.js and Tesseract are bundled, integrity-verified browser components; no runtime dependency installation or CDN code/model loading. `node/worker.cjs` activates unconditionally because Cindy requires the entry rather than running it as `require.main`. Runtime subprocesses are restricted to fixed browser/app launchers and Safari signature checks.
+The bridge uses first-party JS and Node built-ins. The extension bundles no third-party browser components; no runtime dependency installation or CDN code loading. `node/worker.cjs` activates unconditionally because Cindy requires the entry rather than running it as `require.main`. Runtime subprocesses are restricted to fixed browser/app launchers and Safari signature checks.
 
 ```sh
 python3 scripts/package-my-browser-zip.py
@@ -360,7 +359,7 @@ A few actions need Chrome's debugger and are not available: PDF export and site 
 
 On these Cindy hosts there is one way to drive your browser: Cindy's `browser` tool with the My browser target. The plugin declares that its own `browser_status`, `browser_read`, `browser_act` and `browser_tabs` tools and their manual are replaced (`browserExtension.pageControlReplaces`), so the host hides them from the agent while it provides My browser. If the host bridge is not running, and on older Cindy hosts, the plugin's tools remain available as before.
 
-You can tell what the agent works on. A page the agent acts on, including one of your own tabs, shows a thin Cindy-red glow around the page and a small "Cindy is working on this page" label at the top until about 20 seconds after the last action (long enough to bridge the agent's thinking between steps), then fades; the Cindy toolbar icon shows an AI badge on that tab for the same time. The mark never takes clicks, sits in a closed shadow root so page reads do not see it, and is hidden while a screenshot is taken. Pages Cindy opens can also go into a red "Cindy automation" tab group in Cindy's window: tab groups add a Chrome install warning, so this is an optional permission you turn on from the extension's Options page; your own tabs are never moved.
+You can tell what the agent works on. A page the agent acts on, including one of your own tabs, shows a thin Cindy-red glow around the page and a small "Cindy is working on this page" label at the top until about 20 seconds after the last action (long enough to bridge the agent's thinking between steps), then fades; the Cindy toolbar icon shows an AI badge on that tab for the same time. The mark never takes clicks, sits in a closed shadow root so page reads do not see it, and is hidden while a screenshot is taken. Pages opened by Cindy have a `[Cindy]` title prefix by default until you take over. Pages Cindy opens can also go into a red "Cindy automation" tab group in Cindy's window: tab groups add a Chrome install warning, so this is an optional permission you turn on from the extension's Options page; your own tabs are never moved.
 
 When the agent's task stops, Cindy clears the mark on the pages it worked on right away instead of letting it fade. On pages whose Content Security Policy blocks Cindy's scripts (for example Play Console and X), `evaluate` does not work; snapshots and refs do. A page Browser Use opened keeps a small "Opened by Cindy" label in its corner and an AI badge on the toolbar icon, across the agent's own navigation, until you act on it yourself (a real click or key press; scrolling and the agent's simulated input do not count). From then on it is your tab and is no longer closed as an idle agent tab. If you have Cindy's window open, new pages open behind the one you are on. Cindy's window is created minimized, so it never appears over your work; you can open it from the Dock or taskbar to watch. Screenshots of its pages show it unfocused just for the capture. Every browser call and every job has a time limit, so one page that stops responding can no longer stall the extension and make it look disconnected. Nothing the agent does changes what you are looking at: it never switches a tab in your windows and never brings a window to the front. When it needs you on a page in Cindy's window (to sign in or pass a check), `focus` shows that page inside Cindy's window and flashes the browser icon, and the agent tells you where to look. Cindy's window is remembered across extension updates and forgotten when the browser restarts.
 
@@ -577,3 +576,80 @@ Sampled Instagram, Facebook and Douyin videos have no readable captions, and thi
 - The extension does not press Enter on its own afterwards: a page can update its state later than the extension can tell, and a second toggle would close what the click opened. If a click leaves the page unchanged, the agent reads the page and presses Enter or Space itself.
 - Hover sends the same pointer-enter and move events as a mouse, so menus and tooltips that open on hover respond.
 - Input is still synthetic. Sites that accept only trusted input may ignore it; no new permission is requested.
+
+## 0.4.64 a leaner browser panel; the PDF reader is retired (host package 0.4.86)
+
+- **One main button:** the panel opens on "Translate to" and "Translate this page", with a single explanatory line. The heading and the "Model settings" and "Open PDF / text / Markdown" rows are gone. The settings icon is now a set of sliders instead of a sun that looked like an appearance toggle.
+- **No duplicate subtitle button:** YouTube, X, Vimeo, TED, Bilibili, TikTok and Dailymotion, and embedded YouTube and Vimeo players, already show the Cindy button in the player, so the panel no longer repeats it. Videos on other sites, and embedded players without a player button (Bilibili, Dailymotion), still get "Translate video subtitles" in the panel.
+- **Settings:** a "‹ Settings" back control; every option is a switch; the webpage language that duplicated the home view is removed. "Change in Cindy" opens this plugin's settings in Cindy.
+- **Appearance follows the system:** the Appearance option is removed. The panel and the player menu follow the macOS / Chrome light or dark setting instead of the page background; a previously chosen appearance no longer applies. Caption background stays a separate choice.
+- **Automatic subtitles on more sites:** "Apply automatically on YouTube" becomes "Turn on subtitles automatically for videos" and covers YouTube, Vimeo, TED, Bilibili and Dailymotion. X and TikTok are scrolling feeds where starting automatically would translate every video scrolled past, so they still start from the player button. Players embedded in other pages still do not start on their own. Automatic subtitles never interrupt a page translation in progress; where "Translate this site automatically" is on, page translation takes precedence, runs once per address, and stays off after you restore the original.
+- **PDF / text / Markdown reader retired:** the reader page, PDF.js and Tesseract OCR are removed. The extension bundles no third-party components, is about 7.7 MB smaller, and its pages no longer need permission to run WASM. Chrome's own PDF viewer is unaffected.
+
+Update both the Chrome extension and the Cindy plugin. Verification: the extension unit tests and the plugin package contract pass; the real content scripts were checked in Chromium for the light and dark panel, the settings view, and automatic subtitles per site. `my-browser-learning.browser.test.mjs` is updated for the new interface, but since 0.4.81 moved the extension connection to the host it cannot reach its test double locally (it fails the same way on main); this release does not repair that test environment.
+
+## 0.4.65 X feed videos are recognised, and subtitles survive opening the post (host package 0.4.87)
+
+- **Feed videos are identified by the video:** opening Cindy subtitles in the home feed used to find no video id and fall back to the page address `https://x.com/home`, so every feed video shared one translation task and one cache. The same video was translated once on its post page and again in the feed, a second feed video was translated with the first one's context, and "Clear this video's cache" cleared every feed video. The media id is now read from the poster, the stream address or the thumbnail the feed draws first, then the post id from the post's timestamp link (also when the timestamp is wrapped). A video inside a post no longer borrows the post number in the address bar, so a video in the replies is not taken for the main post's.
+- **Unrecognised videos stay separate:** on X and TikTok, where a page holds many videos, a video that still cannot be identified gets an identity of its own for that session instead of sharing a task and cache with the page.
+- **Subtitles continue into the post:** opening a post from the feed with subtitles on (or going back to the feed) makes X show the same video in a new player. Within 10 seconds the same video is recognised and its subtitles continue there under the same task and cache, so finished passages are not translated again. A different video, a session you cancelled or that failed, or a page being translated (including one that "Translate this site automatically" starts at the same moment) does not start by itself, and any click on Cindy cancels a pending continuation; matching uses the media id when known, and a post id only when exactly one video on the page matches it.
+- No new permission; the signed protocol is unchanged. Only the Chrome extension needs updating.
+
+Verification: `my-browser-x-subtitles.browser.test.mjs` adds feed fixtures (no poster attribute, thumbnail image only, wrapped timestamp, a player with no identifier at all) and the switch to the post page, passing with the real content scripts in Chromium; the same test fails on the code before this change. The fixtures follow X's page structure by hand and were not checked against the live X feed; verify after installing the new extension.
+
+## 0.4.66 Cindy subtitles on X videos without a captions button (host package 0.4.88)
+
+- **The entry no longer needs X's captions button:** on X, the Cindy subtitles button used to sit only beside X's own captions button. Some videos (seen on a portrait video) carry X's auto-generated English caption track while the player shows no captions button, so the Cindy entry disappeared with it. When the video has a caption track and X shows no captions button, the entry now sits in the same row, before the fullscreen button. The position comes from the control bar's structure and its "0:08 / 0:40" time display, not from button labels, so any interface language works.
+- **Everything else is unchanged:** X videos without a caption track still show no entry, collapsed controls get no entry, and feed videos still wait for the button.
+- No new permission; the signed protocol is unchanged. Only the Chrome extension needs updating.
+
+Verification: `my-browser-x-subtitles.browser.test.mjs` adds fixtures following a real X portrait player (caption track without a captions button, no caption track, collapsed controls), passing with the real content scripts in Chromium; the same test fails on the code before this change. The control bar structure was checked layer by layer on a signed-in X page.
+
+## 0.4.67 the activity mark reaches pages that are still loading (host package 0.4.89)
+
+- **Shown when the page is ready, not only at the moment of the action:** the extension sent the red "Cindy is working on this page" mark once per action. Right after a navigation, a heavy page (seen on chatgpt.com) has no content script yet, so that one message was dropped and the mark only appeared with the agent's next action. The mark is now re-sent for a few seconds until the page receives it.
+- **A page the agent's action leads to keeps the mark:** clicking a link or navigating replaces the page and the mark with it. When a tab finishes loading while its mark is still on, the new page gets it back for the time that is left, and "Opened by Cindy" returns on tabs Cindy opened. A mark that has run out or that the task cleared does not come back, and a page loading during a screenshot is not re-marked.
+- **Toolbar badge:** a navigation no longer wipes the AI badge from a tab Cindy is working on.
+- Marks go to the top page only, so an embedded player frame answering first cannot stop the retries. No new permission; the signed protocol is unchanged. Only the Chrome extension needs updating.
+
+Verification: `my-browser-parity.browser.test.mjs` adds a click that leads to a page answering after 2.5 s; in Chromium the new page shows the mark once it loads, and the same check fails on the code before this change. `my-browser-parity.test.mjs` covers the retry, the re-send after a load, the remaining time, the hidden capture and the cleared or expired mark. On the user's own Chrome (0.4.66), the mark was missing after navigating to chatgpt.com and appeared only with the following action; this version has not yet been installed there.
+
+## 0.4.68 same-language subtitles leave the player alone (host package 0.4.90)
+
+When an automatic subtitle session detects that the source and target are the same language (including Chinese variants), it now hides Cindy captions in both bilingual and translation-only mode and restores the site's native caption visibility and track state. Previously only translation stopped, so source captions could still appear. The inactive subtitle icon and learning shortcuts follow the same state. Changing to another target language or explicitly choosing Translate anyway resumes subtitles; the saved display preference is preserved.
+
+Verification: `my-browser-same-language.browser.test.mjs` runs the real content scripts in isolated Chromium with fixture caption transport/model responses. It covers both display modes, native captions initially showing or disabled, repeated reads and DOM changes, target-language changes and Translate anyway. The regression fails on the previous content script. The broader learning browser test also fails on the unchanged base at “No visible button 翻译此页面”, before subtitle checks. This version has not been installed in the user's Chrome.
+
+
+## 0.4.69 browser connection recovery (host package 0.4.91)
+
+The worker refreshes the same bridge session independently of page operations. A long wait no longer
+expires the host's 35-second connection lease, and the extension API call on each heartbeat keeps an
+active connection from relying solely on JavaScript timers for the MV3 worker lifetime. Startup and
+alarms remain recovery entry points. This uses the existing `/health` handshake, including on older
+hosts; a changed session causes rediscovery, never a replay of the acknowledged page operation.
+
+Idle tab cleanup runs once in the background, so a stalled tabs/storage call cannot stop polling or
+spawn duplicate close operations. Request deadlines cover boot identity, response headers and body;
+authentication and badge/storage updates are also bounded. Regression tests simulate long operations,
+hung cleanup and response bodies, and a lost result without repeating the operation. The real-browser
+connection test uses an isolated Chromium profile and a fenced fixture bridge, not a user's browser.
+
+## 0.4.70 Default tab ownership marks (host package 0.4.92)
+
+Pages Cindy opens now carry a `[Cindy]` title prefix by default, without extra permissions. It follows changes to the page title and is removed when you take over with real input or the old extension content script is disposed. Your existing pages are not marked as Cindy-owned. Chrome-protected pages that do not allow content scripts cannot show this prefix. The optional red tab group remains available through **Tab group settings** in the extension panel settings. No permission or host API changes.
+
+Verified with the real content script in isolated headless Chrome, in light and dark modes: repeated ownership messages, dynamic and missing titles, simulated versus real input, late messages after takeover, disposal, and the settings entry. Extension transport is a fixture; this is not installed-Cindy or live-site verification.
+
+
+## Chat with the current webpage
+
+Click the extension icon (or press Alt+Shift+C) to open Chrome's native side panel and ask about the page you are on. Each send reads the visible page text (up to 18,000 characters, never form inputs); a partial excerpt is noted. Chats are separate per page, and switching pages cancels pending work.
+
+- **Model picker** beside the send button, matching the Cindy app's composer: recent, favorites, all and per-provider views, search, and a configuration card for effort, Fast and engine; "Default model" at the top of All goes back to the model set in the plugin's settings. Favorites are the app's own and stay in sync both ways; recent models are read-only. Needs a Cindy that offers `agent.modelPreferences` (declared by this plugin; Cindy asks once on install/update). Older Cindy versions show the model list only.
+- **Answers** stream in while they are written (Cindy with `runPreview`) and render as Markdown in the app's styles (bundled `marked`, raw HTML dropped, only http(s)/mailto links).
+- **Visible in Cindy**: every side panel chat is an ordinary task titled "Webpage chat · <page title>"; the message shows your question, and the page excerpt travels as attached context. Chats are not archived automatically.
+- **Translate** in the panel header translates the page in place (or shows the original); no page panel opens. Text blocks built from divs are translated too, and Settings → Display offers bilingual or translation only (in translation only, paragraphs with links or buttons stay bilingual so they keep working).
+- **Settings** (gear) hold translation language and display, per-site auto translation, the text-selection toolbar (Translate / Explain), automatic video subtitles, the translation model link, and the optional red tab group with an illustration. The page panel's settings button opens these.
+
+Update both the extension and the plugin. The new Chrome `sidePanel` permission only enables the native panel; site permissions, pairing and model authorization are unchanged.

@@ -4,6 +4,113 @@
 
 ## Read first
 
+### 2.1.31: Recognition submission variable fix
+
+Correct both V10 stop checks in the 0.0.41 recipe from source to the actual
+source2 parameter, updating the bundle and hashes together. Regression tests
+execute the bundled recognition function through initial submission, recovery
+of the original request, and both stop paths. Upgrade checks must reach request
+dispatch; early returns or string matches do not verify patched variable bindings.
+
+### 2.1.30: Windows PAT integration verification
+
+On 2026-11-12, installed commit 5896bcc from fix/taptap-maker-pat-stdin in place
+as local 2.1.30 on Windows 10 / Cindy 0.1.133 (source commit
+95e70d24407638cac83220f46f0751c42017fe1e). A temporary verification package used
+the real Cindy account worker, childSpawn, and Runtime 0.0.41: both user-provided
+valid PATs saved successfully, replacement and repeated saving succeeded, an
+invalid placeholder returned PAT_AUTH_REQUIRED / HTTP 401, and restoring a valid
+PAT returned connected status and a working project query.
+
+The original settings.html / settings.js were also loaded inside the plugin
+sandbox, exercising the original form submission, BroadcastChannel, main.js,
+and account worker. Valid saves cleared the input, displayed success, and loaded
+projects. Invalid input displayed the localized error and error class; recovery
+cleared that error state. Test placeholders were mapped to the PAT file only
+inside the temporary account entry; credentials were not returned to the page
+or model. This is settings-script integration verification in the actual host,
+not manual interaction with the plugin detail page or visual color verification;
+it does not replace the recorded macOS visual evidence.
+
+After testing, removed the temporary tools and file-reading entry and reinstalled
+the original 5896bcc package, retaining the valid account. All 109 Maker tests
+and 53 contract/localization/provisioning tests passed, as did the 0.0.41 recipe
+check. Publishing workflow tests had 8 passes and 4 failures because jq is absent
+on this computer; no publishing scripts or assertions were weakened. Neither
+PAT appeared in the main or Agent log. No additional production code or logging
+was needed to verify this fix.
+
+### 2.1.30: Account error message color
+
+Settings uses the host error color for account failures, restoring normal text
+when messages are cleared, another operation starts, or an operation succeeds.
+On 2026-11-12, installed local 2.1.30 on macOS / Cindy 0.1.133 showed a red
+credential error after saving a numeric placeholder in the actual dark-mode
+settings page. Restoring the valid Prod PAT succeeded and removed the red color.
+All 187 regressions passed. Colors use theme variables; light mode was not
+tested in this run. PAT validation still calls /api/v1/user/taptap-token;
+nonempty input is not accepted based on local format alone. The server can
+reject bad credentials quickly. Runtime still persists the PAT before validation.
+
+### 2.1.29: PAT failure reasons and repeated saves
+
+A single successful save in 2.1.28 did not cover credential replacement failures.
+On 2026-11-12, querying projects with the credential persisted after the user's
+failure returned HTTP 401 / AUTH_TOKEN_EXPIRED. Three consecutive settings saves
+with a valid Prod PAT succeeded on that same installation. A failure on the second
+save alone does not establish a stdin regression.
+The account adapter maps 401, 403 and network failures to fixed codes and recovery
+messages. The main entry preserves those codes and settings renders localized
+messages in all four languages, without exposing raw Runtime errors or credentials.
+Runtime 0.0.41 and V1–V12 remain unchanged, including the existing save-before-token-
+exchange behavior. Failed validation does not roll back the previous credential;
+save a valid PAT again to recover.
+Verified on 2026-11-12 with macOS / Cindy 0.1.133 and installed local 2.1.29:
+two successful Prod PAT saves → invalid placeholder rejected with the credential
+error message → successful Prod PAT restoration, all through the settings UI.
+The final input was empty, status connected, and the plugin's project query
+succeeded. All 187 regressions passed. The 403 and network classifications have
+automated coverage only; no real permission/network outage was induced.
+Windows/Linux settings pages were not tested in this run.
+
+### 2.1.28: PAT stdin compatibility
+
+Runtime remains at 0.0.41. Add V12-pat-virtual-stdin to the recipe and retain V1–V11.
+`pat set --pat-stdin` (including the `--pat-from-stdin` alias) reads `process.stdin`
+asynchronously through EOF instead of reading OS fd 0; Cindy supplies virtual stdin
+over IPC. Preserve UTF-8 chunks, empty-input rejection and stream errors. Runtime
+continues to own credential persistence and account verification; PATs stay out of
+command arguments, logs and Cindy storage. Regressions cover buffered input, delayed
+EOF, whitespace and stream failures. Before release, also save a PAT through the
+actual Cindy settings page and verify connected status and project loading.
+Verified on 2026-11-12 with macOS, Cindy 0.1.133 and installed local plugin 2.1.28:
+clicking Save PAT succeeded, the input cleared, the persisted credential matched,
+and a subsequent project query succeeded. No Maker child-process abnormal exit
+or plaintext PAT appeared in the operation's host log. Windows/Linux settings
+pages were not tested in this run.
+
+### 2.1.27: Runtime 0.0.41
+
+Use the official npm release with a separate 0.0.41 recipe. Retain V1-V10:
+adapt V1/V5/V10 bundle aliases, including the injected stop-state check, and
+retain both Chinese and English cloud-workspace blocking messages in V9.
+The new project-check and UI-motion assets come from the verified release.
+V11 removes the requested Neon Ink demo and its dedicated resource mappings;
+the other six styles and all 43 motion effects remain.
+Fengari and sprintf-js license texts are included. On 2026-11-11, LuaTween's
+author liangdong confirmed authorship and MIT licensing; the complete MIT
+notice is bundled. An unavailable source URL does not invalidate that confirmation.
+Use an existing published, working local game for plugin acceptance. Attribute
+game-resource and native-engine errors separately; do not expand a Maker MCP
+upgrade into engine fixes or gameplay acceptance for unchanged input paths.
+The 0.0.41 recipe also records exact patches for three bundled files: explicit
+positions skip automatic anchoring only on the specified axis; furniture exports
+reject animations exceeding 128 MiB of retained RGBA pixels before allocating
+frames and release each animation after export; preview directories cannot overlap
+the output directory or ZIP path; the furniture guide links to the bundled Skill.
+These patches run in staging alongside bundle patches before the complete inventory
+check, so failure leaves the installed vendor unchanged.
+
 ### 2.1.26: Runtime 0.0.40
 
 Use the official npm release and a separate 0.0.40 recipe, retaining V1-V10.

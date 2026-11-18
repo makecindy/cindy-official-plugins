@@ -30,7 +30,7 @@ test('an updated extension keeps a paired older bridge connected while negotiati
  const calls=[];const context={chrome,MyBrowserNetwork:{create:()=>({})},MyBrowserPolicy:{},navigator:{userAgent:'Chrome'},URL,AbortController,setTimeout,clearTimeout,crypto:globalThis.crypto,TextEncoder,Buffer,btoa:value=>Buffer.from(value,'binary').toString('base64'),__testAuth:auth,
    fetch:async(url,options)=>{const headers=options.headers;calls.push({url,key:headers['X-My-Browser-Key'],proof:headers['X-My-Browser-Proof']});return {ok:true,json:async()=>headers['X-My-Browser-Key']?{plugin:'my-browser',protocol:3,extensionId:'fixture',version:'0.4.12',session:'old-session',capabilities:[]}:{plugin:'my-browser',protocol:3,extensionId:'fixture',version:'0.4.12',session:'old-session',challenge:'old-challenge',auth_required:false}};}};
  context.globalThis=context;
- vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,'').replaceAll('auth=auth||await authReady().catch(()=>null)','auth=auth||globalThis.__testAuth||await authReady().catch(()=>null)')+'\nglobalThis.discoverTest=discover;',context);
+ vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,'').replaceAll("auth=auth||await withDeadline(authReady(),3000,Error('AUTH_TIMEOUT')).catch(()=>null)","auth=auth||globalThis.__testAuth||await withDeadline(authReady(),3000,Error('AUTH_TIMEOUT')).catch(()=>null)")+'\nglobalThis.discoverTest=discover;',context);
  const found=await context.discoverTest();assert.equal(found.session,'old-session');assert.equal(found.learning,false);assert.equal(saved.connection.connected,true);
 });
 
@@ -83,4 +83,69 @@ test('cancel during discovery prevents submission and cannot be forged by anothe
  const a=request(first),b=request(second);await new Promise(r=>setImmediate(r));
  for(const fn of listeners){fn({type:'cindy-cancel',id:first},sender,()=>{});fn({type:'cindy-cancel',id:second},{...sender,documentId:'other'},()=>{});}
  release();assert.equal(await a,'REQUEST_CANCELLED');assert.equal((await b).ok,true);assert.deepEqual(starts,[second]);
+});
+
+// Regression: the host's 35s lease expired during a long page job; a stalled
+// cleanup also stopped all future polls while the watchdog only saw running=true.
+function connectionWorker(t, { stuckCleanup = false, job = false, failResult = false, stuckBody = false } = {}) {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const noop = { addListener() {} }, requests = [], alarms = [];
+  const chrome = {
+    runtime: { id: 'fixture', getManifest: () => ({ version: installedVersion }), getURL: () => 'chrome-extension://fixture/', onStartup: noop, onInstalled: noop, onMessage: noop },
+    storage: { local: { get: async () => ({ clientId: 'fixture' }), set: async () => {} }, session: { get: async () => ({}), set: async () => {} } },
+    tabs: { onRemoved: noop, onActivated: noop }, alarms: { create() {}, onAlarm: { addListener: f => alarms.push(f) } },
+    action: { setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {} },
+  };
+  let issued = false, release;
+  const pageJob = new Promise(r => { release = r; });
+  const context = { chrome, MyBrowserNetwork: { create: () => ({}) }, MyBrowserPolicy: { normalizePolicy: x => x }, navigator: { userAgent: 'Chrome' }, URL, AbortController, setTimeout, clearTimeout, Date, crypto: globalThis.crypto,
+    fetch: async (url, opts) => {
+      const path = new URL(url).pathname;
+      requests.push({ path, time: Date.now() });
+      let data = { ok: true };
+      if (path === '/health') data = { plugin: 'my-browser', protocol: 3, extensionId: 'fixture', version, session: 'session' };
+      if (path === '/poll') {
+        if (job && !issued) { issued = true; data = { job: { id: 'one', action: 'wait', payload: { timeMs: 60000 } } }; }
+        else { await new Promise(r => setTimeout(r, 20000)); data = { job: null }; }
+      }
+      if (path === '/result' && failResult) throw Error('lost response');
+      return { ok: true, json: async () => stuckBody ? new Promise(() => {}) : data };
+    },
+    pageJob, stuckCleanup,
+  };
+  vm.runInNewContext(source.replace(/\nchain\(\);\s*$/, '') + `
+    handle = () => pageJob;
+    if (stuckCleanup) cleanup = () => new Promise(() => {});
+    globalThis.api = {chain, heartbeat, fetchJSON};`, context);
+  const flush = async () => { for (let i = 0; i < 60; i++) await Promise.resolve(); };
+  return { ...context.api, requests, release, flush, alarm: () => alarms.forEach(f => f({ name: 'my-browser-watchdog' })),
+    advance: async ms => { for (let i = 0; i < ms; i += 1000) { t.mock.timers.tick(1000); await flush(); } } };
+}
+
+test('long page jobs keep the bridge alive without taking or replaying another job', async t => {
+  const h = connectionWorker(t, { job: true, failResult: true });
+  void h.chain(); await h.flush();
+  await h.advance(50000);
+  const health = h.requests.filter(r => r.path === '/health');
+  assert.ok(health.some(r => r.time >= 40000), 'heartbeat continues during the page job');
+  assert.equal(h.requests.filter(r => r.path === '/ack').length, 1);
+  assert.equal(h.requests.filter(r => r.path === '/poll').length, 1);
+  h.release({ ok: true }); await h.flush(); await h.advance(5000);
+  assert.equal(h.requests.filter(r => r.path === '/result').length, 1, 'lost result is not resubmitted');
+  assert.equal(h.requests.filter(r => r.path === '/ack').length, 1, 'operation is never replayed');
+});
+
+test('a hanging idle cleanup cannot block polling or multiply loops on alarms', async t => {
+  const h = connectionWorker(t, { stuckCleanup: true });
+  void h.chain(); await h.flush();
+  await h.advance(65000); h.alarm(); h.alarm(); await h.flush();
+  assert.equal(h.requests.filter(r => r.path === '/poll').length, 4);
+  assert.ok(h.requests.some(r => r.path === '/health' && r.time >= 60000));
+});
+
+
+test('a stalled response body times out and releases the connection request', async t => {
+  const h = connectionWorker(t, { stuckBody: true });
+  const rejected = assert.rejects(h.fetchJSON('http://127.0.0.1:18810','/health','session',undefined,5000), /BRIDGE_REQUEST_FAILED/);
+  await h.flush(); await h.advance(5000); await rejected;
 });

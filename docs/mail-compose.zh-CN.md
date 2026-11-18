@@ -22,7 +22,13 @@ Cindy 默认定位当前邮件，展开其他邮件时才通过同一个工具�
 会话摘要读取失败时仍返回当前邮件，附加 `conversationUnavailable: true`，不能把不完整的会话当成完整结果。
 旧客户端忽略这些可选字段，继续显示当前邮件；旧插件返回的单封邮件仍可正常显示。
 
-邮件卡片、样式、自动保存、发送和任务续接由 Cindy 统一提供。插件只实现账号和邮箱操作，通过主机 `cindyMail` SDK（version 1）注册适配器，不打包公共流程，也不生成卡片 HTML。Gmail 已接入；QQ、IMAP、Graph 等可以使用同一契约，具体插件仍需接入和真实邮箱联调。
+邮件卡片、样式、自动保存、发送和任务续接由 Cindy 统一提供。插件只实现账号和邮箱操作，通过主机 `cindyMail` SDK（version 1）注册适配器，不打包公共流程，也不生成卡片 HTML。已接入的插件：Gmail、Outlook（Microsoft Graph），以及 IMAP/SMTP 的 QQ 邮箱、163 邮箱、iCloud Mail、Yahoo Mail。Gmail 已用真实邮箱验证；Outlook 和各 IMAP 插件目前只在模拟邮箱中验证（见下方「各邮箱实现说明」）。
+
+## 各邮箱实现说明
+
+- **IMAP/SMTP**（QQ、163、iCloud、Yahoo）共用一套适配：Node Worker 中的 `src/mail-compose.cjs` 与 `main.js` 中的 `cindy-imap-compose` 代码块。各插件副本必须一致，`.tests/imap-mail-compose.test.mjs` 会核对并对每个插件运行同一组端到端测试。草稿的 Message-ID 作为稳定的 `draftId`；locator 为 folder + UID + UIDVALIDITY，失效时按 Message-ID 查找。IMAP 不能原地修改邮件，每次保存先追加新版本、读回核对，确认后才删除旧版本；fingerprint 为所存邮件的 SHA-256。发送时按已核对的草稿重建邮件且不含 Bcc 头（密送只放在 SMTP 信封中），成功后删除草稿；SMTP 在 DATA 之前拒收全部收件人记为 `not_executed`，其余中断一律为 `unknown`。是否在「已发送」保存副本仍由邮箱服务决定，与以前一致。
+- **Outlook** 使用 Graph 原生草稿、`createReply`/`createReplyAll`/`createForward` 和 `/send`，并通过 `mailReader` 支持 Outlook 网页链接的侧栏阅读。它没有 Node Worker，暂不支持在卡片中新增本地文件；删除、改名或把已有附件设为内嵌可以使用。
+- 以上插件都拒绝直接发送的工具动作，邮件只能经草稿卡流程发出。
 
 ## 适配接口
 
@@ -89,7 +95,7 @@ Cindy 在展示、自动同步和发送前统一整理图文内容：回复中�
 
 编辑和自动同步原位更新当前卡片；后续重新读取展示时，同一插件实例、账号、草稿 ID 在当前任务内只显示最新卡片，旧卡片及其插件标签不再重复展示，历史快照仍保留。主题不作为身份依据。旧发送入口由主机拒绝，发送成功后不能再次发送。
 
-运行 `.tests/mail-compose.test.mjs` 和 Gmail 测试；`.tests/contracts/cindy-mail-runtime.js` 是 Cindy SDK 的测试快照，不进入插件安装包。Cindy 仓库直接测试 SDK 源码、卡片生命周期、归属和客户端呈现。模拟 IMAP/Graph 测试不代表对应插件已经接入或邮件实际送达。
+运行 `.tests/mail-compose.test.mjs` 和 Gmail 测试；`.tests/contracts/cindy-mail-runtime.js` 是 Cindy SDK 的测试快照，不进入插件安装包。Cindy 仓库直接测试 SDK 源码、卡片生命周期、归属和客户端呈现。IMAP 插件还要运行 `.tests/<插件>.test.mjs`，其中包含共用的端到端测试。模拟 IMAP/Graph 测试不代表真实邮箱已验证或邮件实际送达。
 
 默认先展示草稿卡，等用户确认收件人和内容后发送。只有用户已明确确认该邮件，或有效的用户/任务指令明确授权该范围内直接发送时，才不再询问；写信/回复请求、编辑和自动审批本身不代表确认。点击卡片发送即为确认。即使已授权直接发送，也必须展示同一草稿卡、使用最新编辑内容，不得通过底层直发、CLI 或其他旁路跳过。卡片和 AI 发送均先等待 10 秒，卡片提供“撤销”和“立即发送”，倒计时结束后才调用适配器 send:true。beforeTool(send) 等待最终回执；撤销保留草稿，不自动重试；重启不恢复等待中的发送。直发工具命令必须进入同一流程。
 

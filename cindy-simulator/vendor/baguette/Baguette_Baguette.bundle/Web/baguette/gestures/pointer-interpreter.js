@@ -31,10 +31,10 @@
      *   perspective-foreshortened quad. `inside` is false when the
      *   point falls outside that quad (bezel/body/background).
      */
-    constructor(screen, { overlay, getOrientation, log, mapClientPoint } = {}) {
-      this._optionHoverPreview = new root.Baguette._OptionHoverPreview(screen, { overlay });
+    constructor(screen, { overlay, getOrientation, log, mapClientPoint, mapScreenPoint } = {}) {
+      this._optionHoverPreview = new root.Baguette._OptionHoverPreview(screen, { overlay, mapClientPoint, mapScreenPoint });
       const mouseSource = new root.Baguette._MouseGestureSource(screen, {
-        overlay, getOrientation, log, mapClientPoint,
+        overlay, getOrientation, log, mapClientPoint, mapScreenPoint,
         // The one piece of state MouseGestureSource and OptionHoverPreview
         // share — threaded explicitly instead of having either reach into
         // the other. See option-hover-preview.js for why.
@@ -43,14 +43,18 @@
       this._sources = [
         mouseSource,
         this._optionHoverPreview,
-        new root.Baguette._TouchGestureSource(screen, { overlay, getOrientation, mapClientPoint }),
-        new root.Baguette._WheelGestureSource(screen, { overlay }),
-        new root.Baguette._SafariGestureEventSource(screen, { overlay }),
+        new root.Baguette._TouchGestureSource(screen, { overlay, getOrientation, mapClientPoint, mapScreenPoint }),
+        new root.Baguette._WheelGestureSource(screen, { overlay, mapClientPoint, mapScreenPoint }),
+        new root.Baguette._SafariGestureEventSource(screen, { overlay, mapClientPoint, mapScreenPoint }),
       ];
     }
 
     attach(el) {
       for (const source of this._sources) source.attach(el);
+    }
+
+    cancel() {
+      for (const source of this._sources) source._cancel?.();
     }
 
     detach() {

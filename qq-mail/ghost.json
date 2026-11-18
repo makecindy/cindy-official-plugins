@@ -4,7 +4,7 @@
   "name": "QQ 邮箱",
   "description": "通过 QQ 邮箱 IMAP/SMTP 搜索、阅读、整理邮件，并创建草稿或发送邮件。授权码由 Cindy 安全保存，仅在执行邮箱请求时临时提供给插件 Worker。",
   "whenToUse": "需要查找、阅读或整理 QQ 邮箱邮件，以及创建草稿或发送邮件时使用。首次使用前请在插件详情页输入 QQ 邮箱地址和 IMAP/SMTP 授权码并完成连接测试。",
-  "version": "0.2.12",
+  "version": "0.3.0",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -41,7 +41,7 @@
     },
     {
       "name": "qq_mail",
-      "description": "执行 QQ 邮箱 IMAP/SMTP 查询及邮件操作。send/draft 的 attachment_paths 仅接收明确授权的本机绝对路径，最多 10 个、合计 32 MiB；Worker 读取指定普通文件，经 smtp.qq.com 发送或 imap.qq.com 保存草稿，不修改源文件。send/draft/read 返回附件名称、字节数与 SHA-256；read 不下载附件。勿用顶层 dir/attachments。发送与修改须有用户明确要求；结果不确定时先核对邮箱，禁止盲目重试。 read 拒绝超过 48 MiB 的编码邮件（含正文和 MIME）；先检查 search 返回的 size。 search按received_at收信时间筛选（since含、before不含）；每批最多20封，has_more=true时用next_page_token作为page_token并保持原筛选继续。只有coverage_complete=true且翻页结束才可称查全。标题/地址在本地元数据筛选；全文可能漏搜，text_scope:metadata只查标题/地址。",
+      "description": "执行 QQ 邮箱 IMAP/SMTP 查询及邮件操作。attachment_paths 仅接收明确授权的本机绝对路径（最多 10 个，新增附件单个不超过 16 MiB、合计 25 MiB）；Worker 读取指定普通文件存入 imap.qq.com 草稿箱，不修改源文件；邮件仅在草稿卡倒计时结束后经 smtp.qq.com 发送。read 返回附件名称、字节数与 SHA-256，不下载附件。勿用顶层 dir/attachments。发送与修改须有用户明确要求；结果不确定时先核对邮箱，禁止盲目重试。 read 拒绝超过 48 MiB 的编码邮件（含正文和 MIME）；先检查 search 返回的 size。 search按received_at收信时间筛选（since含、before不含）；每批最多20封，has_more=true时用next_page_token作为page_token并保持原筛选继续。只有coverage_complete=true且翻页结束才可称查全。标题/地址在本地元数据筛选；全文可能漏搜，text_scope:metadata只查标题/地址。 写信用 draft/reply/reply_all/forward（回复默认用 reply_all），草稿在 Cindy 显示为可编辑的草稿卡；send_draft 在 10 秒可撤销倒计时后发送卡片内容，只在用户确认后调用，不支持直接发送。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -51,20 +51,27 @@
               "list_folders",
               "search",
               "read",
-              "send",
               "draft",
+              "reply",
+              "reply_all",
+              "forward",
+              "get_draft",
+              "update_draft",
+              "send_draft",
+              "delete_draft",
               "mark_read",
               "mark_unread",
               "move"
-            ]
+            ],
+            "description": "draft 新建；reply 仅回复发件人；reply_all 回复全部（默认，排除自己、重复地址和原密送）；forward 转发并带原附件。reply/reply_all/forward 用 folder 与 message_uid 指定原邮件。草稿存入草稿箱并在 Cindy 显示可编辑、自动同步的草稿卡，返回 draft_id（Message-ID）。get_draft/update_draft/delete_draft/send_draft 传 draft_id；send_draft 按卡片最新内容 10 秒倒计时后发送，只在用户确认该邮件后调用。草稿箱 search 结果的 message_id 即 draft_id。"
           },
           "folder": {
             "type": "string",
-            "description": "IMAP 文件夹原始名称，默认 INBOX。非 INBOX 操作前先调用 list_folders，逐字使用服务器返回的 path，不要翻译。"
+            "description": "IMAP 文件夹原始名称，默认 INBOX。非 INBOX 操作前先调用 list_folders，逐字使用服务器返回的 path，不要翻译。reply/reply_all/forward 时为原邮件所在文件夹。"
           },
           "message_uid": {
             "type": "integer",
-            "description": "邮件 UID。UID 只在对应 folder 内有效，必须与搜索结果返回的 folder 一起使用。"
+            "description": "邮件 UID。UID 只在对应 folder 内有效，必须与搜索结果返回的 folder 一起使用。reply/reply_all/forward 时为原邮件 UID。"
           },
           "target_folder": {
             "type": "string",
@@ -79,21 +86,21 @@
             "description": "search发件人名称/地址子串，本地解码元数据不区分大小写筛选。建议同时限定since/before。"
           },
           "to": {
-            "description": "search为收件人名称/地址字符串子串，本地元数据筛选；send/draft可传逗号分隔字符串或字符串数组。"
+            "description": "search为收件人名称/地址字符串子串，本地元数据筛选；draft/reply/reply_all/forward/update_draft可传逗号分隔字符串或字符串数组。回复时省略即按原邮件自动计算。"
           },
           "cc": {
-            "description": "send/draft 的抄送地址，可传逗号分隔字符串或字符串数组。"
+            "description": "draft/reply/reply_all/forward/update_draft 的抄送地址，可传逗号分隔字符串或字符串数组。回复时省略即按原邮件自动计算。"
           },
           "bcc": {
-            "description": "send/draft 的密送地址，可传逗号分隔字符串或字符串数组。"
+            "description": "draft/reply/reply_all/forward/update_draft 的密送地址，可传逗号分隔字符串或字符串数组。回复时省略即按原邮件自动计算。"
           },
           "subject": {
             "type": "string",
-            "description": "search 时是主题关键词；send/draft 时是邮件主题。"
+            "description": "search 时是主题关键词；draft/update_draft 时是邮件主题。"
           },
           "body_text": {
             "type": "string",
-            "description": "send/draft 的纯文本正文。"
+            "description": "draft/reply/reply_all/forward/update_draft 的纯文本正文（不含引用的原邮件，回复会自动附上引用）。"
           },
           "unread": {
             "type": "boolean",
@@ -119,7 +126,7 @@
             "items": {
               "type": "string"
             },
-            "description": "send/draft 的附件绝对路径列表，文件必须位于运行 Cindy 的电脑上；最多 10 个、合计 32 MiB，仅使用用户明确授权发送的文件。不传文件字节或 URL。"
+            "description": "draft/reply/reply_all/forward/update_draft 追加的附件：运行 Cindy 的电脑上的本机文件绝对路径，最多 10 个，新增附件单个不超过 16 MiB、合计 25 MiB；仅使用用户明确授权发送的文件。"
           },
           "page_token": {
             "type": "string",
@@ -134,6 +141,14 @@
               "metadata"
             ],
             "description": "search的text范围，默认full兼容正文全文搜索（QQ服务器可能漏搜，会标明coverage_complete=false）；metadata只查已解码标题/发件人/收件人，本地筛选且不读正文。完整日期检查应省略text。"
+          },
+          "body_html": {
+            "type": "string",
+            "description": "可选 HTML 正文片段，用于图文邮件；与 body_text 表达同一内容。内嵌图片用 cid: 引用附件。"
+          },
+          "draft_id": {
+            "type": "string",
+            "description": "get_draft/update_draft/delete_draft/send_draft 的草稿 ID：创建或读取草稿时返回的 draft_id（Message-ID，含尖括号）。"
           }
         },
         "required": [
@@ -158,5 +173,13 @@
       }
     }
   ],
-  "minCindyVersion": "0.1.92"
+  "minCindyVersion": "0.1.112",
+  "cindy": {
+    "media": [
+      "deposit"
+    ]
+  },
+  "agent": {},
+  "sessionContext": true,
+  "mail": true
 }

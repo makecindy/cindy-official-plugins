@@ -176,3 +176,138 @@ test('a hidden viewer throttles its stream sockets and restores them when shown 
  flat.fire('close');document.visibilityState='hidden';docListeners.forEach(fn=>fn());
  assert.deepEqual([flat.sent,three.sent],[[2,60],[2,60,2]],'a closed socket is forgotten');
 });
+
+test('3D view measurement excludes blank canvas margins and follows the lit pieces',async()=>{
+ const vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
+ const window={innerWidth:1000,innerHeight:1068,matchMedia:()=>null};
+ const context=vm.createContext({window,document:{getElementById:()=>null,addEventListener(){}},Promise,getComputedStyle:()=>({getPropertyValue:()=>''})});
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../../cindy-simulator/node/viewer-stage.js'),'utf8'),context);
+ const web=path.join(__dirname,'../../cindy-simulator/vendor/baguette/Baguette_Baguette.bundle/Web');
+ for(const file of ['screen-quad','screen-pieces'])vm.runInContext(fs.readFileSync(path.join(web,'baguette/gestures/'+file+'.js'),'utf8'),context);
+ function Panel(){}
+ Panel.prototype.attach=async function(){};Panel.prototype.setBackground=function(){};Panel.prototype.placePosePicker=function(){};Panel.prototype.detach=function(){};
+ window.Sim3DPanel=Panel;
+ const p=new window.Sim3DPanel();await p.attach();p.placePosePicker({hingeDegrees:180});
+ p.canvas={width:1000,height:500,hasAttribute:()=>true,getBoundingClientRect:()=>({left:0,top:0,width:1000,height:1000})};
+ p.screenQuad=window.Baguette._ScreenPieces.fromMessage({corners:[[.1,.1],[.9,.1],[.9,.9],[.1,.9]]});p.litPanel='primary';
+ const view=window.__cindyView();assert.equal(view.width,800);assert.equal(view.height,400);
+ assert.equal(view.fit.width,864);assert.equal(view.fit.height,464);assert.equal(view.fit.centerX,500);assert.equal(view.fit.centerY,500);
+ p.cindyButtons=[{at:[.9,.5],control:[.98,.5]}];
+ assert.equal(window.__cindyView().fit.width,912,'hardware anchors are included separately from fixed-size glyphs');
+ p.cindyButtons=[];
+ assert.equal(view.stageHeight,500,'letterboxing is excluded');assert.equal(view.insetY,68,'fixed toolbar is not part of the scaled content');
+ p.canvas.width=2000;p.canvas.height=1000;assert.equal(window.__cindyView().width,800,'Retina backing density does not redefine 100%');
+ p.litPanel='secondary';assert.equal(window.__cindyView().panel,'secondary');
+ p.screenQuad=null;assert.equal(window.__cindyView(),null);p.detach();assert.equal(window.__cindyView(),null);
+});
+
+test('the first 3D frame waits for fitted layout and metadata/paint notify the controller immediately',async()=>{
+ const vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
+ let notifications=0,painted=false;const states=[],motions=[],attrs=new Set();
+ const window={parent:{cindySim:{measure:async options=>{notifications++;motions.push(options.animate);}}},innerWidth:1000,innerHeight:1068,matchMedia:()=>null};
+ const context=vm.createContext({window,document:{getElementById:()=>null,addEventListener(){}},Promise,getComputedStyle:()=>({getPropertyValue:()=>''})});
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../../cindy-simulator/node/viewer-stage.js'),'utf8'),context);
+ const web=path.join(__dirname,'../../cindy-simulator/vendor/baguette/Baguette_Baguette.bundle/Web');
+ for(const file of ['screen-quad','screen-pieces'])vm.runInContext(fs.readFileSync(path.join(web,'baguette/gestures/'+file+'.js'),'utf8'),context);
+ const stage={setAttribute:k=>attrs.add(k),removeAttribute:k=>attrs.delete(k)};
+ const canvas={width:1000,height:500,hasAttribute:()=>painted,setAttribute:()=>{painted=true;},getBoundingClientRect:()=>({left:0,top:0,width:1000,height:1000})};
+ function Panel(){}
+ Panel.prototype.attach=async function(){this.stage=stage;this.canvas=canvas;};
+ Panel.prototype.setBackground=function(){};Panel.prototype.placePosePicker=function(){};Panel.prototype.detach=function(){};
+ Panel.prototype.setState=function(message){states.push(message);if(!message)painted=true;};
+ window.Sim3DPanel=Panel;
+ const p=new Panel();await p.attach();
+ assert.equal(attrs.has('data-cindy-layout-pending'),true);
+ p.screenQuad=window.Baguette._ScreenPieces.fromMessage({corners:[[.1,.1],[.9,.1],[.9,.9],[.1,.9]]});
+ p.placePosePicker({hingeDegrees:0});assert.equal(notifications,1,'metadata initiates calibration without a timer');
+ assert.equal(window.__cindyView(),null,'the default canvas aspect is never treated as a decoded frame');
+ window.__cindyLayoutReady();assert.equal(attrs.has('data-cindy-layout-pending'),true,'metadata without a paint cannot reveal');
+ p.setState('',false);assert.equal(notifications,2,'first paint remeasures immediately');
+ assert.ok(window.__cindyView());assert.deepEqual(states,[],'loading state survives while the decoded picture is fitted');
+ p.setState('',false);assert.equal(notifications,2,'later paints do not flood geometry reads');
+ p.setState('3D stream failed',false,true);assert.deepEqual(states,['3D stream failed'],'errors stay visible while waiting');
+ window.__cindyLayoutReady();assert.equal(attrs.has('data-cindy-layout-pending'),false);assert.equal(states.at(-1),'');
+ window.__cindyLayoutReady();assert.equal(states.length,2,'reveal is idempotent');
+ assert.deepEqual(motions,[false,false],'initial layout is immediate, never eased from a miniature frame');
+ p.placePosePicker({hingeDegrees:180});assert.equal(motions.at(-1),true,'subsequent pose metadata requests a smooth fit');
+ p.detach();window.__cindyLayoutReady();assert.equal(states.length,2,'a detached panel cannot reveal');
+});
+
+test('3D starts at standard resolution and zoom, window size and DPR never reopen the stream',async()=>{
+ const vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
+ const web=path.join(__dirname,'../../cindy-simulator/vendor/baguette/Baguette_Baguette.bundle/Web');
+ const timers=new Map(),observers=[],listeners=new Map(),requests=[];let next=0;
+ const box={left:0,top:0,width:400,height:800};
+ const window={devicePixelRatio:2,matchMedia:()=>null,
+  addEventListener:(k,v)=>listeners.set(k,v),removeEventListener:(k,v)=>{if(listeners.get(k)===v)listeners.delete(k);}};
+ const context=vm.createContext({window,document:{getElementById:()=>null,addEventListener(){}},Promise,URLSearchParams,
+  location:{protocol:'http:',host:'example.test'},getComputedStyle:()=>({getPropertyValue:()=>''}),
+  setTimeout:fn=>{timers.set(++next,fn);return next;},clearTimeout:id=>timers.delete(id),cancelAnimationFrame(){},
+  ResizeObserver:class{constructor(fn){this.fn=fn;observers.push(this);}observe(){}disconnect(){this.disconnected=true;}}});
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../../cindy-simulator/node/viewer-stage.js'),'utf8'),context);
+ vm.runInContext(fs.readFileSync(path.join(web,'baguette/gestures/screen-quad.js'),'utf8'),context);
+ vm.runInContext(fs.readFileSync(path.join(web,'sim-3d.js'),'utf8'),context);
+ const Panel=window.Sim3DPanel;
+ window.StreamSession=function(options){this.opts=options;this.start=()=>requests.push(new URL(options.url));this.stop=()=>{};};
+ let painted=false;const p=new Panel();p.stage={getBoundingClientRect:()=>box,querySelector:()=>null};p.canvas={width:300,height:150,hasAttribute:()=>painted,getBoundingClientRect:()=>box};p.model={};p.udid='phone';
+ p.cancelPointer=()=>{};p.setState=()=>{};
+ // attach uses the production async wrapper with a minimal DOM-independent
+ // setup; start/outputSize/stop/scheduleRestart are the actual vendor methods.
+ context.fetch=async()=>({ok:true,json:async()=>({variantSets:[]})});
+ p.renderLoading=()=>{};p.renderControls=()=>{};p.mountStage=()=>{};
+ await p.attach({},p.stage,'phone',{deviceSize:{width:1000,height:1600}});await Promise.resolve();
+ const size=()=>[Number(requests.at(-1).searchParams.get('width')),Number(requests.at(-1).searchParams.get('height'))];
+ assert.deepEqual(size(),[2560,4096],'even a small first window gets the standard high-resolution stream');
+ const session=p.session;
+ p.canvas.width=2560;p.canvas.height=4096;painted=true;
+ for(const [width,height,dpr] of [[800,1600,2],[1600,3200,2],[250,400,1],[1200,600,3],[400,800,2]]){
+  box.width=width;box.height=height;window.devicePixelRatio=dpr;
+  for(const observer of observers)observer.fn();
+  listeners.get('resize')?.();
+  assert.deepEqual(JSON.parse(JSON.stringify(p.outputSize())),{width:2560,height:4096});
+  assert.equal(p.session,session,'the live stream survives every layout change');
+  assert.equal(timers.size,0,'zoom and resize schedule no reconnect');
+ }
+ assert.equal(observers.length,1,'only hardware-control layout is observed');assert.equal(listeners.has('resize'),false);assert.equal(requests.length,1);
+ p.interactiveScreen=null;p.keyboard=null;p.host={innerHTML:''};p.stage.innerHTML='';
+ p.detach();assert.equal(timers.size,0);assert.equal(observers[0].disconnected,true);
+
+});
+
+test('3D high-resolution playback avoids H.264 seed-only black screens and recovers failed startup once',async()=>{
+ const vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
+ const web=path.join(__dirname,'../../cindy-simulator/vendor/baguette/Baguette_Baguette.bundle/Web');
+ const timers=new Map(),sessions=[];let next=0;
+ const box={left:0,top:0,width:1280,height:2048};
+ const window={devicePixelRatio:2,matchMedia:()=>null,addEventListener(){},removeEventListener(){}};
+ const context=vm.createContext({window,document:{getElementById:()=>null,addEventListener(){}},Promise,URLSearchParams,
+  location:{protocol:'http:',host:'example.test'},getComputedStyle:()=>({getPropertyValue:()=>''}),
+  setTimeout:(fn,delay)=>{timers.set(++next,{fn,delay});return next;},clearTimeout:id=>timers.delete(id),cancelAnimationFrame(){},
+  fetch:async()=>({ok:true,json:async()=>({variantSets:[]})})});
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../../cindy-simulator/node/viewer-stage.js'),'utf8'),context);
+ for(const file of ['baguette/gestures/screen-quad.js','sim-3d.js'])vm.runInContext(fs.readFileSync(path.join(web,file),'utf8'),context);
+ window.StreamSession=function(opts){this.opts=opts;this.start=()=>sessions.push(this);this.stop=()=>{this.stopped=true;};};
+ const p=new window.Sim3DPanel(),state={querySelector:()=>({}),toggleAttribute(){}};
+ p.stage={getBoundingClientRect:()=>box,querySelector:()=>state};
+ p.canvas={width:300,height:150,hasAttribute:()=>false,setAttribute(){},getBoundingClientRect:()=>box};
+ p.cancelPointer=()=>{};p.renderLoading=()=>{};p.renderControls=()=>{};p.mountStage=()=>{};
+ const flush=()=>{for(const [id,{fn}] of [...timers]){timers.delete(id);fn();}};
+ await p.attach({},p.stage,'phone',{format:'avcc',deviceSize:{width:1280,height:2048}});await Promise.resolve();
+ assert.equal(p.session.opts.format,'mjpeg');assert.match(p.session.opts.url,/stream\.3d\.mjpeg\?[^#]*width=2560&height=4096/);
+ assert.equal(p.format,'avcc','fallback does not replace the preferred codec');
+ p.session.opts.onPaint();assert.equal(timers.size,0,'MJPEG has no H.264 startup watchdog');
+ p.deviceSize={width:512,height:1024};p.start();assert.equal(p.session.opts.format,'avcc');
+ p.session.opts.onPaint();assert.equal([...timers.values()][0].delay,4000,'the JPEG seed alone is not playback success');
+ p.session.opts.onPaint();assert.equal(timers.size,0,'the first video paint completes startup');
+ p.start();const stale=p.session;p.session.opts.onPaint();const pending=[...timers.values()][0].fn;
+ p.start();assert.equal(timers.size,0);pending();assert.equal(p.session.opts.format,'avcc','a retired stream cannot trigger fallback');
+ stale.opts.onLog('decoder: late failure',true);assert.equal(timers.size,0,'generation rejects stale decoder errors');
+ p.session.opts.onPaint();flush();assert.equal(p.session.opts.format,'mjpeg','seed-only startup recovers at the same resolution');
+ assert.equal(p.cindyH264Failed,true);assert.equal(timers.size,0);p.start();assert.equal(p.session.opts.format,'mjpeg','resize does not retry the broken codec');
+ p.cindyH264Failed=false;p.start();p.session.opts.onLog('decoder: Unsupported configuration',true);
+ assert.equal([...timers.values()][0].delay,0,'decoder failures recover on the event without waiting for timeout');
+ flush();assert.equal(p.session.opts.format,'mjpeg');assert.equal(timers.size,0);
+ p.cindyH264Failed=false;p.start();p.session.opts.onPaint();const retired=[...timers.values()][0].fn;
+ p.interactiveScreen=null;p.keyboard=null;p.host={innerHTML:''};p.stage.innerHTML='';
+ p.detach();assert.equal(timers.size,0);const count=sessions.length;retired();assert.equal(sessions.length,count,'detached views never restart');
+});

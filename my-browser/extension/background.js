@@ -11,6 +11,7 @@ let bridge = null;
 let discovery;
 let wireVersion=WIRE_VERSION;
 let running = false;
+let pageJobActive = false;
 const b64url = bytes => {
   let binary=''; for(const byte of new Uint8Array(bytes)) binary+=String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
@@ -135,7 +136,7 @@ const saveAgentTabs = () => agentStore.set({agentTabs:[...agentTabs]});
 async function markAgentOpened(tabId) {
   (await loadAgentTabs()).add(tabId); await saveAgentTabs();
   quietly(() => chrome.action.setBadgeText({tabId,text:'AI'}));
-  quietly(() => withDeadline(chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',opened:true}),1500,Error('MARK_TIMEOUT')));
+  sendMarkMessage(tabId,() => agentTabs.has(tabId) && {type:'cindy-agent-mark',opened:true});
 }
 async function userTookOver(tabId) {
   if (!(await loadAgentTabs()).delete(tabId)) return;
@@ -153,18 +154,54 @@ function withDeadline(promise,ms,error) {
   let timer;
   return Promise.race([promise,new Promise((_,reject) => { timer = setTimeout(() => reject(error),ms); })]).finally(() => clearTimeout(timer));
 }
+// A page that is still loading has no content script yet and misses the message. Marks are re-sent
+// for a few seconds until one lands; message() returns null once the mark is no longer wanted.
+// Only the top page draws marks: an embedded player frame answering first would stop the retries.
+const MARK_RETRY_MS = 700, MARK_RETRIES = 6, TOP_FRAME = {frameId:0};
+function sendMarkMessage(tabId,message,attempt = 0) {
+  const m = message();
+  if (!m) return Promise.resolve();
+  let sent;
+  try { sent = chrome.tabs.sendMessage(tabId,m,TOP_FRAME); } catch (e) { sent = Promise.reject(e); }
+  return withDeadline(Promise.resolve(sent),1500,Error('MARK_TIMEOUT')).catch(() => {
+    if (attempt < MARK_RETRIES) setTimeout(() => sendMarkMessage(tabId,message,attempt+1),MARK_RETRY_MS);
+  });
+}
+// Tab id → when its activity mark ends. A page that loads while the mark is on (the agent navigated or
+// clicked a link) gets it again for the time that is left, and a capture in progress is never re-marked.
+const AGENT_MARK_MS = 20000, agentMarkUntil = new Map(), agentMarkHidden = new Set();
+function agentMarkMessage(tabId,until) {
+  const ms = until - Date.now();
+  return agentMarkUntil.get(tabId) === until && !agentMarkHidden.has(tabId) && ms > 0 && {type:'cindy-agent-mark',ms};
+}
 // mode: undefined shows (or extends) the mark, 'hidden' hides it for a capture, 'clear' ends it now.
 function markAgentTab(tabId,mode) {
-  const sent = quietly(() => withDeadline(chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',...(mode === 'hidden' ? {hidden:true} : mode === 'clear' ? {clear:true} : {})}),1500,Error('MARK_TIMEOUT')));
-  if (mode === 'clear') {
-    clearTimeout(agentMarkTimers.get(tabId)); agentMarkTimers.delete(tabId);
-    quietly(() => chrome.action.setBadgeText({tabId,text:restingBadge(tabId)}));
-  } else if (!mode) {
-    quietly(() => chrome.action.setBadgeText({tabId,text:'AI'}));
-    clearTimeout(agentMarkTimers.get(tabId));
-    agentMarkTimers.set(tabId,setTimeout(() => { agentMarkTimers.delete(tabId); quietly(() => chrome.action.setBadgeText({tabId,text:restingBadge(tabId)})); },20000));
+  if (mode === 'hidden') {
+    agentMarkHidden.add(tabId);
+    return quietly(() => withDeadline(chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',hidden:true},TOP_FRAME),1500,Error('MARK_TIMEOUT')));
   }
+  agentMarkHidden.delete(tabId);
+  clearTimeout(agentMarkTimers.get(tabId));
+  if (mode === 'clear') {
+    agentMarkTimers.delete(tabId); agentMarkUntil.delete(tabId);
+    quietly(() => chrome.action.setBadgeText({tabId,text:restingBadge(tabId)}));
+    return quietly(() => withDeadline(chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',clear:true},TOP_FRAME),1500,Error('MARK_TIMEOUT')));
+  }
+  const until = Date.now()+AGENT_MARK_MS;
+  agentMarkUntil.set(tabId,until);
+  const sent = quietly(() => sendMarkMessage(tabId,() => agentMarkMessage(tabId,until)));
+  quietly(() => chrome.action.setBadgeText({tabId,text:'AI'}));
+  agentMarkTimers.set(tabId,setTimeout(() => {
+    agentMarkTimers.delete(tabId); agentMarkUntil.delete(tabId);
+    quietly(() => chrome.action.setBadgeText({tabId,text:restingBadge(tabId)}));
+  },AGENT_MARK_MS));
   return sent;
+}
+// A loaded page starts without marks: give it back the ones its tab still carries.
+function remarkLoadedTab(tabId) {
+  const until = agentMarkUntil.get(tabId);
+  if (until) sendMarkMessage(tabId,() => agentMarkMessage(tabId,until));
+  quietly(async () => { if ((await loadAgentTabs()).has(tabId)) await sendMarkMessage(tabId,() => agentTabs.has(tabId) && {type:'cindy-agent-mark',opened:true}); });
 }
 
 // ── Chrome's debugger ──────────────────────────────────────────────────────────────────────
@@ -529,9 +566,11 @@ async function debuggerScreenshot(tab,a) {
   return {ok:true,execution:'executed',tabId:tab.id,mimeType:'image/'+format,data:shot.data,bytes:Math.floor(shot.data.length*3/4),viaDebugger:true};
 }
 async function connection(state) {
-  await sessionStore.set({connection:{...state,version:VERSION,browser:family,clientId}});
-  await chrome.action.setBadgeText({text:state.connected ? '' : '!'});
-  await chrome.action.setBadgeBackgroundColor({color:state.connected ? '#287ad7' : '#b87820'});
+  await withDeadline(Promise.all([
+    sessionStore.set({connection:{...state,version:VERSION,browser:family,clientId}}),
+    chrome.action.setBadgeText({text:state.connected ? '' : '!'}),
+    chrome.action.setBadgeBackgroundColor({color:state.connected ? '#287ad7' : '#b87820'})
+  ]),2000,Error('CONNECTION_UI_TIMEOUT')).catch(() => {});
 }
 // One id per browser launch: storage.session survives the worker restarting but is cleared when the
 // browser restarts. Cindy drops the tab handles it remembered for this browser when the id changes,
@@ -547,16 +586,17 @@ function bootId() {
   } catch { return Promise.resolve(''); } // No session storage: connect without a launch id.
 }
 async function fetchJSON(base,path,session,body,timeout = 5000,version = wireVersion,auth = {}) {
-  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(),timeout);
-  const boot = await bootId();
-  try {
+  const controller = new AbortController();
+  try { return await withDeadline((async () => {
+    const boot = await bootId();
     const response = await fetch(base+path,{method:body === undefined ? 'GET' : 'POST',
       headers:{...(boot ? {'X-My-Browser-Boot':boot} : {}),'X-My-Browser-Extension':chrome.runtime.id,'X-My-Browser-Origin':chrome.runtime.getURL('').replace(/\/$/,''),'X-My-Browser-Client':clientId,'X-My-Browser-Family':family,'X-My-Browser-Version':version,'X-My-Browser-Installed-Version':VERSION,...(auth.publicKey ? {'X-My-Browser-Key':auth.publicKey} : {}),...(auth.learningChallenge ? {'X-My-Browser-Learning-Challenge':auth.learningChallenge} : {}),...(auth.proof ? {'X-My-Browser-Proof':auth.proof} : {}),...(session ? {'X-My-Browser-Session':session} : {}),...(body === undefined ? {} : {'Content-Type':'application/json'})},
       ...(body === undefined ? {} : {body:JSON.stringify(body)}),signal:controller.signal}).catch(()=>{throw Error('BRIDGE_REQUEST_FAILED');});
     const data = await response.json().catch(()=>{throw Error('BRIDGE_REQUEST_FAILED');});
     if (!response.ok) throw new Error(data.error || 'BRIDGE_REQUEST_FAILED');
     return data;
-  } finally { clearTimeout(timer); }
+  })(),timeout,Error('BRIDGE_REQUEST_FAILED'));
+  } finally { controller.abort(); }
 }
 function discover() {
   if(discovery)return discovery;
@@ -564,7 +604,7 @@ function discover() {
   return discovery;
 }
 async function discoverBridge() {
-  await restore;
+  await withDeadline(restore,3000,Error('STORAGE_TIMEOUT'));
   if (bridge) return bridge;
   let auth=null;
   let diagnostic;
@@ -575,17 +615,17 @@ async function discoverBridge() {
       const port=first+offset,base='http://127.0.0.1:'+port;
       try{
         let r=await fetchJSON(base,'/health',null,undefined,450,WIRE_VERSION);
-        if(r.auth_required){auth=auth||await authReady().catch(()=>null);if(!auth)return null;r=await fetchJSON(base,'/health',null,undefined,450,WIRE_VERSION,{publicKey:auth.publicKey});}
-        if(r.challenge){auth=auth||await authReady().catch(()=>null);if(!auth)return null;const proof=await auth.sign(r.challenge);r=await fetchJSON(base,'/health',null,undefined,450,WIRE_VERSION,{publicKey:auth.publicKey,proof});}
+        if(r.auth_required){auth=auth||await withDeadline(authReady(),3000,Error('AUTH_TIMEOUT')).catch(()=>null);if(!auth)return null;r=await fetchJSON(base,'/health',null,undefined,450,WIRE_VERSION,{publicKey:auth.publicKey});}
+        if(r.challenge){auth=auth||await withDeadline(authReady(),3000,Error('AUTH_TIMEOUT')).catch(()=>null);if(!auth)return null;const proof=await withDeadline(auth.sign(r.challenge),2000,Error('AUTH_TIMEOUT'));r=await fetchJSON(base,'/health',null,undefined,450,WIRE_VERSION,{publicKey:auth.publicKey,proof});}
         if(r.plugin!=='my-browser'||r.protocol!==3||r.extensionId!==chrome.runtime.id)return null;
         if(r.version!==WIRE_VERSION&&!['0.4.0','0.4.1','0.4.2','0.4.3','0.4.4','0.4.5','0.4.6','0.4.7','0.4.8','0.4.9','0.4.10','0.4.11','0.4.12'].includes(r.version)&&!/^0\.3\.\d+$/.test(r.version)){diagnostic='UPDATE_CINDY_CHROME';return null;}
         const version=r.version;
-        if(version!==WIRE_VERSION){r=await fetchJSON(base,'/health',null,undefined,450,version);if(r.auth_required){auth=auth||await authReady().catch(()=>null);if(!auth)return null;r=await fetchJSON(base,'/health',null,undefined,450,version,{publicKey:auth.publicKey});}if(r.challenge){auth=auth||await authReady().catch(()=>null);if(!auth)return null;const proof=await auth.sign(r.challenge);if(!proof)return null;r=await fetchJSON(base,'/health',null,undefined,450,version,{publicKey:auth.publicKey,proof});}if(r.plugin!=='my-browser'||r.protocol!==3||r.extensionId!==chrome.runtime.id||r.version!==version)return null;}
+        if(version!==WIRE_VERSION){r=await fetchJSON(base,'/health',null,undefined,450,version);if(r.auth_required){auth=auth||await withDeadline(authReady(),3000,Error('AUTH_TIMEOUT')).catch(()=>null);if(!auth)return null;r=await fetchJSON(base,'/health',null,undefined,450,version,{publicKey:auth.publicKey});}if(r.challenge){auth=auth||await withDeadline(authReady(),3000,Error('AUTH_TIMEOUT')).catch(()=>null);if(!auth)return null;const proof=await withDeadline(auth.sign(r.challenge),2000,Error('AUTH_TIMEOUT'));if(!proof)return null;r=await fetchJSON(base,'/health',null,undefined,450,version,{publicKey:auth.publicKey,proof});}if(r.plugin!=='my-browser'||r.protocol!==3||r.extensionId!==chrome.runtime.id||r.version!==version)return null;}
         if(r.native_binding_required){
           try {
             const registered=await Promise.race([chrome.runtime.sendNativeMessage('com.makecindy.browser',{port,clientId,publicKey:auth.publicKey}),sleep(10000).then(()=>{throw Error('NATIVE_BINDING_UNAVAILABLE');})]);
             if(!registered?.ok)throw Error('NATIVE_BINDING_UNAVAILABLE');
-            const proof=await auth.sign(r.challenge);
+            const proof=await withDeadline(auth.sign(r.challenge),2000,Error('AUTH_TIMEOUT'));
             r=await fetchJSON(base,'/health',null,undefined,1500,version,{publicKey:auth.publicKey,proof});
           }catch{diagnostic='NATIVE_BINDING_UNAVAILABLE';return null;}
         }
@@ -613,8 +653,12 @@ async function getTab(id) {
   }
 }
 async function closeOwned(url) {
+  if (pageJobActive) return false;
   const rec = owned.get(url); if (!rec) return true;
   const tab = await getTab(rec.id);
+  // Cleanup may have waited on Chrome while a job renewed/replaced this record
+  // or the user claimed the tab. Check before closing OR forgetting the record.
+  if (pageJobActive || owned.get(url) !== rec || Date.now()-rec.used <= 600000) return false;
   if (tab) {
     // Keep protected tabs counted. Deleting only the ledger entry made the old three-tab limit illusory.
     if (!rec.created || rec.claimed || tab.active || tab.url !== rec.actualUrl) return false;
@@ -1428,17 +1472,55 @@ async function handle(job,policy,target) {
     return {...fail(e.message in messages ? e.message : 'CHROME_OPERATION_FAILED',messages[e.message] || 'Browser access failed. Inspect the existing page and extension permissions; do not automatically open a replacement.',failureState()),...(e.message==='ADDRESS_UNVERIFIED' ? {reason:e.reason || 'UNKNOWN'} : {}),...(e.message==='PAGE_LOAD_TIMEOUT'?{tabId:e.tabId,status:e.tabStatus}:{}),retryable:false};
   }
 }
+// Separate liveness from page jobs: a valid 60s wait must not expire the host's
+// 35s lease. /health is supported by older hosts too and never takes a page job.
+let heartbeatTimer;
+let heartbeatPending = false;
+async function heartbeat() {
+  if (heartbeatPending) return;
+  heartbeatPending = true;
+  clearTimeout(heartbeatTimer);
+  const target = bridge;
+  try {
+    // An extension API call resets Chrome's service-worker idle timer. A cached
+    // bootId and plain fetch alone do not do that while the browser is idle.
+    await withDeadline(sessionStore.get('cindyBrowserBoot'),2000,Error('STORAGE_TIMEOUT'));
+    if (target) {
+      const status = await fetchJSON(target.base,'/health',target.session,undefined,5000);
+      if (status.plugin !== 'my-browser' || status.extensionId !== chrome.runtime.id ||
+          status.protocol !== 3 || status.session !== target.session) throw Error('SESSION_CHANGED');
+    }
+  } catch {
+    // Keep the target captured by an already acknowledged job. Reconnect only
+    // the next poll; never resend that job to a new bridge or session.
+    if (target && bridge === target) bridge = null;
+  } finally {
+    heartbeatPending = false;
+    heartbeatTimer = setTimeout(heartbeat,10000);
+  }
+}
+let cleanupPending;
+function cleanupInBackground() {
+  // One best-effort cleanup at a time. A stuck tabs/storage call cannot hold up
+  // polling, and must not cause parallel close operations on the same tab.
+  if (!cleanupPending) cleanupPending = cleanup().catch(() => {}).finally(() => { cleanupPending = null; });
+}
 async function chain() {
   if (running) return;
   running = true;
+  void heartbeat();
   try {
     for (;;) {
       let target;
       try {
         target = await discover();
-        if (!target) { await cleanup(); await sleep(3000); continue; }
+        if (!target) { cleanupInBackground(); await sleep(3000); continue; }
         const {job} = await fetchJSON(target.base,'/poll',target.session,undefined,25000);
-        if (!job) { await cleanup(); continue; }
+        if (!job) { cleanupInBackground(); continue; }
+        pageJobActive = true;
+        for (const rec of owned.values()) {
+          if (rec.id === job.payload?.tabId || rec.actualUrl === job.payload?.url) rec.used = Date.now();
+        }
         // A failed/expired ack means DO NOT execute. Only use the exact bridge session that issued the job.
         const ack = await fetchJSON(target.base,'/ack',target.session,{id:job.id});
         if (!ack.ok) continue;
@@ -1451,12 +1533,12 @@ async function chain() {
         // Never retry the browser operation after losing its response.
         bridge = null; await connection({connected:false,message:'Connection interrupted. Check any in-progress action before retrying.'});
         await sleep(1500);
-      }
+      } finally { pageJobActive = false; }
     }
   } finally { running = false; }
 }
 chrome.alarms.create('my-browser-watchdog',{periodInMinutes:0.5});
-chrome.alarms.onAlarm.addListener(a => { if (a.name === 'my-browser-watchdog') chain(); });
+chrome.alarms.onAlarm.addListener(a => { if (a.name === 'my-browser-watchdog') { void heartbeat(); void chain(); } });
 chrome.runtime.onStartup.addListener(chain);
 chrome.runtime.onInstalled.addListener(chain);
 // An update or reload leaves the pages already open with the previous copy of the content
@@ -1543,6 +1625,16 @@ async function learningRequest(message,sender) {
     const request=globalThis.CindyLearning.validate(message.request);
     // Which tab asked: translation tasks follow the video per tab, not per browser.
     if(Number.isInteger(sender.tab?.id))request.view='tab:'+sender.tab.id;else delete request.view;
+    // The app's model favorites and recents are for the side panel's model menu only.
+    if(['models','model-favorite'].includes(request.op)&&sender.url!==chrome.runtime.getURL('sidepanel.html'))throw Error('INVALID_SOURCE');
+    if(internal && request.op==='conversation' && request.scenario==='webpage-chat') {
+      if(sender.url!==chrome.runtime.getURL('sidepanel.html') || !Number.isInteger(message.tabId) || typeof message.documentId!=='string'||! /^[a-f0-9-]{36}$/.test(message.chatId||''))throw Error('INVALID_SOURCE');
+      page=await chrome.tabs.get(message.tabId);boundDocument=message.documentId;
+      if(page.url!==request.source.url)throw Error('PAGE_CHANGED');
+      await checkCurrent();
+      request.view='page-chat:'+page.id+':'+message.chatId;
+      request.source={url:page.url,title:(page.title||'').slice(0,500)};
+    }
     if(!internal) {
       // Besides the top document, only known video player frames may ask.
       const embedded=sender.frameId>0&&globalThis.CindySiteCaptions.embedded(sender.url);
@@ -1567,7 +1659,10 @@ async function learningRequest(message,sender) {
       await checkCurrent();
       const result=await learningFetch(target,'/learning/result',{id},()=>checkCurrent(),deadline);
       if(result.done)return result.result;
-      if(page&&result.progress){const serialized=JSON.stringify(result.progress);if(serialized!==lastProgress){lastProgress=serialized;await chrome.tabs.sendMessage(page.id,{type:'cindy-learning-progress',id,progress:result.progress},{documentId:sender.documentId}).catch(()=>{});}}
+      if(result.progress){const serialized=JSON.stringify(result.progress);if(serialized!==lastProgress){lastProgress=serialized;
+        // The side panel follows its own requests (and streams the answer text); pages get theirs by document.
+        if(internal)await chrome.runtime.sendMessage({type:'cindy-learning-progress',id,progress:result.progress}).catch(()=>{});
+        else if(page)await chrome.tabs.sendMessage(page.id,{type:'cindy-learning-progress',id,progress:result.progress},{documentId:sender.documentId}).catch(()=>{});}}
       await sleep(450);
     }
     throw Error('TIMEOUT');
@@ -1579,6 +1674,18 @@ async function learningRequest(message,sender) {
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   if(sender.id!==chrome.runtime.id)return;
+  if(message?.type==='cindy-open-sidepanel'&&sender.tab?.windowId!=null&&chrome.sidePanel) {
+    // Open first, while the page click still counts as the user gesture Chrome requires.
+    const view=message.view==='settings'?'settings':null;
+    // A panel that is about to load reads the requested view; one already open gets the message.
+    chrome.storage.session?.set({sidepanelView:view}).catch(()=>{});
+    chrome.sidePanel.open({windowId:sender.tab.windowId}).then(()=>{
+      chrome.runtime.sendMessage({type:'cindy-sidepanel-view',view}).catch(()=>{});reply({ok:true});
+    },()=>reply({ok:false}));return true;
+  }
+  if(message?.type==='cindy-open-options') {
+    chrome.runtime.openOptionsPage().then(()=>reply({ok:true}),()=>reply({ok:false}));return true;
+  }
   if(message?.type==='cindy-agent-tab'&&sender.tab?.id!=null) {
     loadAgentTabs().then(set=>reply({opened:set.has(sender.tab.id)}),()=>reply({opened:false}));return true;
   }
@@ -1617,9 +1724,10 @@ async function openOnTab(tabId,action='open') {
   } finally {chrome.tabs.onUpdated?.removeListener(navigated);}
 }
 chrome.tabs.onUpdated?.addListener((tabId,change)=>{
+  if(change.status==='complete')remarkLoadedTab(tabId);
   if(change.status==='loading'||change.url) {
-    // Navigation/refresh replaces the document that could not receive the click.
-    chrome.action.setBadgeText({tabId,text:null}).catch(()=>{});
+    // Navigation/refresh replaces the document that could not receive the click. Cindy's own badge stays.
+    chrome.action.setBadgeText({tabId,text:agentMarkUntil.has(tabId)?'AI':restingBadge(tabId)}).catch(()=>{});
   }
 });
 if(chrome.contextMenus) {
@@ -1631,7 +1739,9 @@ if(chrome.contextMenus) {
   });
   chrome.contextMenus.onClicked.addListener((info,tab)=>{if(tab?.id)openOnTab(tab.id,info.menuItemId==='cindy-selection'?'selection':'translate-page');});
 }
-chrome.action.onClicked?.addListener(tab=>{if(tab?.id)openOnTab(tab.id);});
+// Native Chrome panel; page tools remain available from the panel and context menu.
+chrome.sidePanel?.setPanelBehavior({openPanelOnActionClick:true}).catch(()=>{});
+chrome.action.onClicked?.addListener(tab=>{if(!chrome.sidePanel&&tab?.id)openOnTab(tab.id);});
 // Toolbar icon follows the browser's light or dark appearance, reported by open pages.
 let actionScheme=null; // unknown after a worker restart: the first report always applies
 chrome.runtime.onMessage.addListener((m,sender)=>{
@@ -1641,14 +1751,10 @@ chrome.runtime.onMessage.addListener((m,sender)=>{
 });
 chrome.commands?.onCommand.addListener(async command=>{
   const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
-  if(tab?.id)openOnTab(tab.id,command==='translate-page'?'translate-page':'open');
+  if(command==='open-cindy'&&chrome.sidePanel&&tab?.windowId!=null)await chrome.sidePanel.open({windowId:tab.windowId});
+  else if(tab?.id)openOnTab(tab.id,command==='translate-page'?'translate-page':'open');
 });
 
-chrome.runtime.onMessage.addListener((m,sender,reply)=>{
-  if(sender.id===chrome.runtime.id&&['cindy-open-library','cindy-open-reader'].includes(m?.type)) {
-    chrome.tabs.create({url:chrome.runtime.getURL('library.html')}).then(()=>reply({ok:true}));return true;
-  }
-});
 // Captions some sites publish outside text tracks. Authorized like every other
 // caption read, and the site comes from the asking document, never from the message.
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{

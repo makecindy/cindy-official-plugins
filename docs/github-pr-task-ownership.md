@@ -1,0 +1,19 @@
+# One active PR follow-up, selectable task
+
+Cards may appear in multiple tasks. When nobody is following, each task has an interactive card and the user can choose “Auto-follow until merged”. Displaying an existing PR never applies post-publication auto-follow or rename settings. Publishing from an approval card still applies those settings once.
+
+Within one GitHub plugin installation, the host-injected `session_context.session_id`, case-insensitive repository plus PR number, and serialized card queue coordinate following. Only `following: true`, pending start, or pending stop reserve a task. Idle cards do not permanently own the PR. A start click saves its reservation before handing off. Agent-initiated starts use `claim_follow: true` and require `follow_claimed: true` before scheduling. A rejected handoff releases its reservation; an unknown result retains it until reconciled. Active records survive ordinary history pruning and plugin restarts.
+
+While another task holds a reservation, `pr_card` returns `disposition: existing_task`, `follow_claimed: false`, an empty todo list, and a task URL. Its local card shows PR status, explains that another task is following (or starting/stopping), and contains one “Open follow-up task” link. It has no action/settings/archive controls. Do not repeat that link outside the card. Each task keeps its own card record; repeated calls reuse it. Refreshes and stale button clicks recheck the reservation before any operation. No foreign card record is mutated.
+
+Stop order matters: delete the schedule and verify deletion before reporting `following: false`. Only then can another task start. Paused schedules still require reconciliation or deletion before a replacement is created. The bundled workflow checks all existing schedules, including paused schedules, before creating one. Older schedules without card metadata must be reconciled in their own task. The general scheduler does not enforce PR uniqueness; independent plugin installations do not share this registry.
+
+PR status uses the host's live status slot. Follow ownership is recalculated when a card is refreshed or clicked; it is not pushed into already-settled cards in other tasks. The host's same-task card-update restriction remains intact. This means an older card can temporarily show stale controls or a stale jump link until refreshed, but a stale action cannot start a duplicate through this plugin. Release acceptance must include that limitation, rather than claiming instant cross-task synchronization.
+
+Legacy active cards without task identity block new claims until explicitly refreshed in their original task. Idle legacy cards do not prevent another task from following. Already-duplicated historical schedules are not bulk-deleted. Unreadable card history fails closed. Archived or removed tasks do not silently release an active reservation.
+
+The in-card link requires the companion host implementation for the narrow `cindy://session/<id>` URL. Ship that host change before publishing this plugin version, and pin its actual minimum compatible release then. Arbitrary app commands remain forbidden. No new GitHub/OAuth scopes are used.
+
+## Verification — 2026-11-07
+
+Tests exercise concurrent claims and stale clicks, idle cards in multiple tasks, stop/start transfer, refresh reuse, restart persistence, foreign mutation rejection, missing context, active legacy adoption, corrupt history, pruning, publication auto-follow reservation, and known/unknown handoff failures. UI previews render actual card source with test data, not an installed build. The running development host reports version 0.0.0; its exact source commit was not verified. Before release, verify two real tasks, native task-link navigation, and actual scheduler creation/deletion on a supported host. No installation or publication was performed.

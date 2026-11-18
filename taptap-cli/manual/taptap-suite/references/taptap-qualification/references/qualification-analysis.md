@@ -1,86 +1,72 @@
 # Qualification analysis
 
-## 适用场景
+## 读取与能力判断
 
-用户问“还缺哪些资质”“资质齐不齐”“能不能上架”，或纠正游戏的联网、内购、AI、IP、文字剧情等事实时使用本 reference。
+先通过 identity 手册确认开发者和游戏，再读取命令 schema，调用 `qualification get-qualification-assessment`。结合 `app analyze-app-status` 查看资料问题，用 `app list-packages` 核对包体绑定。目标版本处于审核中或待发布时仍应分析该版本，不能因为它不可编辑而改查其他版本。
 
-## 核心原则
+`assessment` 的解释：
 
-`qualification get-qualification-status` 只返回 8 类资质的**客观状态登记表**（`qualifications[]`），**不做必须性判断**。
-
-- 8 项 `pending_upload` 只表示“8 个资质槽位当前都没有材料”，**不等于 8 项都必须交**。
-- “哪些资质是必须的”由 app-edit 手册的 `app analyze-app-status` 按游戏事实（联网 / 内购 / 文字剧情 / AI / IP + 包体类型）计算，本 reference 不做这个判断。
-- 离线、无内购、无 AI、无 IP 的游戏，必须资质集合可能为空——此时 8 项 `pending_upload` 也不阻断上架。
-- 不要把 `pending_upload` 直接读成“必须补齐”。那是把客观登记表误读成了必须性判断。
-
-## 输入判断
-
-1. 缺 `developerId` / `appId` 时先转 `taptap-identity`。
-2. 先读取 `app list-packages`；`data.result.current_bindings` 中存在 `slot=windows` 时，确认当前草稿已绑定 Windows 包体。它是只读事实，不能作为 `select-package` / `clear-package` 的写入快照。
-3. 读取当前 `qualification get-qualification-status` 结果。该 operation 只接受 `app_id` / `developer_id`，资质事实一律来自它的返回，不要臆造或补造输入字段。
-
-## 命令
-
-```text
-call_tool(name:"schema", args:{_positional:["qualification","get-qualification-status"]})
-call_tool(name:"app list-packages", args:{developer_id:"<developerId>", app_id:"<appId>"})
-call_tool(name:"qualification get-qualification-status", args:{developer_id:"<developerId>", app_id:"<appId>"})
-```
-
-## 资质类型与状态
-
-8 类资质（`qualification_type`）：
-
-| 业务名称 | `qualification_type` |
+| 字段 | 用法 |
 | --- | --- |
-| 游戏版号 | `game-license` |
-| ICP 备案 | `icp-filing` |
-| 隐私合规 | `privacy-compliance` |
-| 防沉迷 | `anti-addiction` |
-| AI 内容声明 | `ai-declaration` |
-| 软件著作权 | `software-copyright` |
-| IP 授权书 | `authorization-letters` |
-| 安全评估 | `security-assessment` |
+| read_state | complete / partial；partial 保留成功域，失败域的状态为空并附 read_error，不变成 pending_upload |
+| material_summary | 非敏感材料读回：适龄值、版号/软著、AI 分包证明、隐私模式/链接；编辑前复核，不回显主体证件/联系人 |
+| requirements | 完整清单；required / optional / unknown / not_applicable，含 age_grade |
+| unknown_facts | 需要确认的事实；缺失不等于 false，只读不自动补写 |
+| package_types / declared_package_types / package_conflict | 展示分析依据与声明；仅按服务端 conflict 判定是否需要核对，声明内包体尚未全部绑定不算冲突 |
+| target_source | unpublished 优先，再 published，再 declaration；可编辑性另判 |
+| submission_eligibility | eligible / blocked / unknown，来自服务端提交判据，可包含豁免 |
+| confirmation_guarantee | preflight_only_no_atomic_cas：仅检查执行前的变更，无法防止检查后其他操作者同时修改 |
 
-5 种状态（`status`）：
+逐项读取审核状态、是否已生效、是否已保存材料、办理渠道及提交/撤回阻塞项，向用户解释对应结果。驳回原因取自 `reason` / `field_reject_reasons`；提交后用 `submitted_fields` 核对审核范围，适龄也按此处理。材料已经生效与修改申请被驳回可以同时成立，是否允许继续操作应根据阻塞项和服务端校验判断，不能只允许 `uploaded` 状态。
 
-| 值 | 面向用户的含义 | 处理 |
+当前资质是否满足要求，以 required 项的 `effective_approved` 为准：true 表示已有生效材料，false 表示尚未生效，null 或缺失表示无法确认。`status` 描述申请进度，不能覆盖生效结论。
+
+例如，`effective_approved=true` 且 `status=reviewing` 时，说明当前资质有效、修改申请审核中；`status=rejected` 时，说明当前资质仍有效、修改申请被驳回，应展示驳回原因，不把当前资质列为缺口。首次提交且 `effective_approved=false` 时，即使已保存或正在审核，也仍待完成。read_state=partial/unknown、未知事实、冲突、读取失败或资格 unknown 必须单独展示；非必须空槽不列入缺口。资质齐全、可提审、已发布、分发开放分别确认。
+
+## 缺口输出格式（给用户看）
+
+`requirements[].subject` 是英文 key，输出时按下面映射成中文，并把「已保存待审核」与「需补材料」分开，不要笼统说“待完成”：
+
+| subject | 中文名 | 需要的材料 / 下一步 |
 | --- | --- | --- |
-| `pending_upload` | 该槽位暂无材料（不一定必须） | 是否为缺口取决于必须性判断；非必须项不要称为“缺口”，改为询问是否需要补充 |
-| `uploaded` | 已保存草稿、未提交 | 待提交审核 |
-| `reviewing` | 审核中 | 等待结果 |
-| `rejected` | 已驳回 | 读取 `reason` 与 `field_reject_reasons` 后重新处理 |
-| `approved` | 已通过 | 完成 |
+| `privacy-compliance` | 隐私合规 | 隐私政策链接或托管模式；小游戏域走专用命令 |
+| `anti-addiction` | 防沉迷合规 | 防沉迷接入方式与对应材料 |
+| `ai-declaration` | AI 接入声明 | 是否提供 AIGC、适用包体；不提供时也要声明 `package_types` |
+| `age-grade` | 适龄分级 | 适龄等级及审核 |
+| `game-license` | 游戏版号 | 版号批文与扫描件 |
+| `icp-filing` | ICP 备案 | 备案号、主体信息与文件 |
+| `software-copyright` | 软件著作权 | 登记号与证书 |
+| `authorization-letters` | IP 授权书 | 授权书文件 |
+| `security-assessment` | 安全评估 | 安全评估报告 |
 
-## 判断“必须资质”（哪些真的缺）
+输出建议（示例）：
 
-如果要回答“还缺哪些资质”“能否上架”，必须资质由 app-edit 手册的 `app analyze-app-status` 计算，不在这里判断：
+- 已保存但未通过审核（`effective_approved=false`，`status` 为 uploaded / reviewing / rejected）：<中文名>，需要提交资质审核（或处理驳回原因）。
+- 尚未保存材料（`status=pending_upload` 或 `has_saved_material=false`）：<中文名>，需要先准备 <材料>。
+- 只列 required 或用户确认适用的项；optional 空槽单独说明，不混进“必须缺项”。
 
-1. 先转 app-edit 手册走 `app analyze-app-status`，看 `warnings[]` 里的 `QUALIFICATION_INCOMPLETE`。
-2. `QUALIFICATION_INCOMPLETE` 的 message 里列出的才是“按游戏事实算出的必须资质缺口”。
-3. 没有 `QUALIFICATION_INCOMPLETE` → 必须资质集合为空（或已满足），资质维度不阻断。
-4. 拿到必须资质清单后，再回到本手册用 `qualification get-qualification-status` 看这些资质的客观状态和下一步。
+字段口径：`status` 是草稿/申请状态（已保存的草稿也是 uploaded），`effective_status` 是当前生效（已审核通过）状态；不要把 `status=uploaded` 说成“已生效”，也不要把 `effective_status=pending_upload` 说成“材料一定缺失”。
 
-## 执行步骤
+保存 AI 声明/资质材料后，回读 assessment 时比较前后 `snapshot`：快照变化说明本次写入生效；快照不变说明是幂等确认或没有变化，应结合 `has_saved_material` 与 `status` 说明，不能只凭接口 ok 判断。
 
-0. **先确认「资质判断事实」**：用 `save-qualification-draft` 的 `app_features`（`is_internet_required` / `has_in_app_purchase` / `has_ai_content` / `has_ip_authorization` / `has_text_story_simulation` 及包体类型）逐项向用户确认（是否联网 / 内购 / AI / IP / 文字剧情），不确定时必须询问，不默认、不跳过；确认后写入 `app_features`。这些事实决定“哪些资质必须”，是后续判断的输入，不能跳过直接列 8 项。
-1. 走 app-edit 手册的 `app analyze-app-status`，取 `warnings[]` 里的 `QUALIFICATION_INCOMPLETE`；它 message 里列出的才是“按游戏事实算出的必须资质缺口”。没有它 = 资质维度不阻断。
-2. 调用 `qualification get-qualification-status`，记录 `version` 与 `qualifications[]`；该接口只是客观槽位登记表，不做必须性判断。
-3. 报告客观状态：逐项列出 8 类资质的 `status`，但必须按“必须性”分层：
-   - **必须资质**（来自 `QUALIFICATION_INCOMPLETE`）：`pending_upload` / `rejected` 才是“缺口 / 待补 / 待重提”，要说明对提交的影响。
-   - **非必须资质**（其余 `pending_upload`）：只说明“该槽位暂无材料、按当前游戏事实非必须”，**不要称为缺口，不要并入待补清单**；主动询问用户是否需要补充其中某项，并说明补充价值（例如版号决定能否从“开放试玩”升级为“正式上线”）。
-   - `rejected` 项单独列出 `reason` 与 `field_reject_reasons`；`submitted_fields` 用于说明“审核中已提交了哪些字段”。
-4. 结论：
-   - 必须资质里存在 `pending_upload` 或 `rejected` 时，明确表述“当前不能确认满足上架条件”，并列出这些必须项的待补 / 待重提。
-   - 必须资质为空（或已满足）时，表述“按当前游戏事实无必须资质缺口”，不要用 8 项客观状态否定它。
-   - 全部 `approved` 时表述“资质状态均为已通过”。
-5. 输出不要平铺“资质 8 项全部未提交”这类全量缺口清单：先给必须缺口，再把非必须空槽作为可选项 + 一个询问。
-6. 如果用户目标是完整发布，说明资质通过不等于资料、包体和版本发布条件全部通过，并转 app-edit 手册。
+## 信息不完整时的处理
 
-## 输出边界
+查询失败或缺少 assessment 时，说明无法完成资质核验，重新查询或前往开发者后台核实。不得把缺失字段或没有警告解释为资质齐全。
 
-- 结论必须以本次 `qualification get-qualification-status` 结果为准，不引用旧结果。
-- agent 只报告服务端返回的客观状态，不自行追加或删除资质项，也不臆断“某场景必须某资质”。Windows 联网场景是否要求 ICP、隐私合规或其它材料，以服务端当前返回为准；需要规则确认时标注“需产品/服务端确认”。
-- 不把测试玩家资格、激活码资格或普通资料缺口混入上架资质结论。
-- 不默认输出 raw schema、接口路径、审核单 ID 或完整内部字段。
-- 顶层 `ok=false` 时按 `error.type` / `error.subtype` 处理；缺少预期结果字段按异常处理，不能当成“没有资质要求”。
+声明 APK+Windows、当前只绑定 APK 或 Windows 时，说明其余包体尚待准备，按包体流程继续；不要求仅为集合不相等而前往网页。无冲突不等于包体全部就绪，仍以包体状态及正式预检判断。
+
+## 发布目标
+
+目标不明确时，询问用户准备开放预约、测试还是正式上线，同时继续查询资料。规划预约时，先确认开发者认证或豁免，把后续需要的材料列为待办；测试和正式上线按完整适用清单检查。上述规划不替代实际预检，目标变化后应重新分析。
+
+## H5 与创意工坊升级
+
+身份以服务端保存的 `is_level` 为准，H5 不等于关卡。普通离线 H5 仍需隐私、AI 声明和适龄；未知事实由服务端标识，不在手册里复制计算矩阵。关卡的普通资质不适用不代表可以升级/发布。
+
+升级独立查询 `entry_enabled`、`can_apply`、目标包匹配及各 blocker。H5 自身 ICP 不是升级前置，隐私审核中不自行增加门槛；Maker 不能继承 H5 豁免。选包、备案、签约转开发者后台；有限“不处理个人信息”声明依 [创意工坊升级](taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md) 的独立确认流程。升级必须单独确认。成功后按 [升级后的资料与资质检查](taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md#升级后的资料与资质检查) 重新核对身份、资料及完整资质；已生效且仍适用的材料复用，审核中不重复提审。只处理实际缺项或需修改材料，升级成功不代表资料已提审或游戏已上线，不自动发布。
+
+## 开发者后台交接
+
+告诉用户要在哪个游戏、哪个资料版本中填写或核对哪项材料，为什么需要到开发者后台办理，以及完成后 CLI 将查询什么。优先使用服务端返回的可信页面链接；自行构造链接时，必须确认当前环境的开发者后台地址和页面路径，不能固定使用生产环境地址、把敏感值塞进 URL 或编造入口。无可靠链接时说明入口未确认，指引当前环境开发者后台对应页面。
+
+主体认证、证件、联系人、ICP 主体信息和复杂隐私正文由用户在开发者后台填写；CLI 不支持的材料保存、文件上传、升级选包/备案/签约或整单撤回，也由用户在对应页面办理。小游戏隐私、防沉迷和备案的具体分工见 [全类型资料交接与接续](taptap-suite/references/taptap-qualification/references/material-handoff-resume.md)。完成页面操作后，CLI 查询对应资质、升级或版本状态，确认结果后再继续；尚未完成、没有权限、链接失效或查询失败时，明确保留待办，不能仅凭用户返回就认定成功。

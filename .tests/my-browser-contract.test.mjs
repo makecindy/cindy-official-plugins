@@ -1,0 +1,70 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+
+const content=await fs.readFile(new URL('../my-browser/extension/content.js',import.meta.url),'utf8');
+const bridge=await fs.readFile(new URL('../my-browser/node/bridge.cjs',import.meta.url),'utf8');
+const background=await fs.readFile(new URL('../my-browser/extension/background.js',import.meta.url),'utf8');
+const settings=await fs.readFile(new URL('../my-browser/settings.js',import.meta.url),'utf8');
+
+test('content script listens for cross-tab preference changes',()=>{
+  assert.match(content,/storage\?\.onChanged\?\.addListener\(onPreferencesChanged\)/);
+  assert.match(content,/api\.storage\.local\.get\('cindyReadingPreferences'\)/);
+  assert.match(content,/const merged=\{\.\.\.stored,\.\.\.changes\}/);
+  assert.match(content,/Object\.assign\(prefs,merged\)/);
+  assert.match(content,/autoSites:\{\[location\.origin\]:value\?true:undefined\}/);
+  assert.match(content,/const videoWasEnabled=previous\.autoVideo!==false,videoIsEnabled=stored\.autoVideo!==false/);
+  assert.match(content,/const relevantEnable=youtube&&!videoWasEnabled&&videoIsEnabled\|\|!siteWasEnabled&&siteIsEnabled/);
+  assert.match(content,/if\(relevantEnable\)\{nextAutoAttempt=0;if\(!videoSession\)autoOpen\(\);\}/);
+  assert.match(content,/const videoTargetChanged=nextVideoTarget!==prefs\.videoTarget/);
+  assert.match(content,/if\(videoTargetChanged&&videoSession\)reapplyVideoTarget\(nextVideoTarget\);/);
+  assert.match(content,/function setVideoTarget\(value\)\{prefs\.videoTarget=value;reapplyVideoTarget\(value\);/);
+  assert.match(content,/if\(translated\|\|translations\.size\)return;/);
+  // The first native-track read already runs the same-language check, so the
+  // automatic mark must exist when the session is created, not after showVideo returns.
+  assert.match(content,/const session=videoSession=\{src:media\.currentSrc,auto,/);
+  assert.match(content,/makePanel\(\);await showVideo\(true\);/);
+  assert.doesNotMatch(content,/videoSession\.auto=true/);
+  // Every caption source runs the same-language check before its cues are merged
+  // (an imported file is the reader's own choice), and switching sources forgets the old judgment.
+  const merges=[...content.matchAll(/([^;{}]*;)mergeCues\(/g)].map(m=>m[1]);
+  assert.equal(merges.length,4);
+  for(const before of merges)assert.match(before,/^(checkSameLanguage\(session,(track|result)\.language\)|session\.sameLanguage=false);$/);
+  assert.match(content,/function dropTimeline\(session\)\{session\.languageChecked=false;session\.sameLanguage=false;session\.language=null;/);
+  assert.match(content,/removeListener\(onPreferencesChanged\)/);
+});
+
+test('bridge learning access requires the paired extension challenge key and stays in the legacy port range',()=>{
+  assert.match(bridge,/const pairedCredential\s*=/);
+  assert.match(bridge,/const verifyProof\s*=/);
+  assert.match(bridge,/const authRequired=client\.version===WIRE_VERSION/);
+  assert.match(bridge,/const learning = new Map\(\), learningChallenges = new Map\(\)/);
+  assert.match(bridge,/h\['x-my-browser-session'\] !== client\.session/);
+  assert.match(bridge,/x-my-browser-learning-challenge/);
+  assert.match(bridge,/verifyProof\(client\.publicKey,payload,proof\)/);
+  assert.match(bridge,/capabilities:sessionAllowed&&authRequired\?\['learning-v1','learning-auth-v2'\]:\[\]/);
+  assert.match(bridge,/bodyDigest=crypto\.createHash\('sha256'\)/);
+  assert.match(bridge,/payload=challenge\+'\\\\n'\+req\.method\+'\\\\n'\+req\.url\+'\\\\n'\+bodyDigest/);
+  assert.match(bridge,/req\.url\.startsWith\('\/learning\/'\)/);
+  assert.match(bridge,/Array\.from\(\{length:10\},\(_,i\)=>18810\+i\)/);
+  assert.match(background,/crypto\.subtle\.generateKey\(\{name:'ECDSA',namedCurve:'P-256'\}/);
+  assert.match(background,/X-My-Browser-Key/);
+  assert.match(background,/X-My-Browser-Learning-Challenge/);
+  assert.match(background,/X-My-Browser-Proof/);
+  assert.match(background,/learning-auth-v2/);
+  assert.match(background,/if\(r\.challenge\)\{auth=auth\|\|await withDeadline\(authReady\(\),3000,Error\('AUTH_TIMEOUT'\)\)\.catch\(\(\)=>null\);if\(!auth\)return null/);
+  assert.match(background,/const digest=b64url\(await crypto\.subtle\.digest\('SHA-256'/);
+  assert.match(background,/path\+'\\\\n'\+digest/);
+  assert.match(background,/learningFetch\(call\.target,'\/learning\/cancel'/);
+  assert.match(background,/target\.auth\|\|await authReady\(\)/);
+  assert.match(background,/const videoIdentity = async url =>/);
+  assert.match(background,/crypto\.subtle\.digest\('SHA-256'/);
+  assert.match(background,/sessionStore\.set\(\{\[key\]:marker\}\)/);
+});
+
+test('installation copy matches the directory-only developer fallback',()=>{
+  assert.match(settings,/storeNote:'The store is the normal installation path\. Directory loading is the only developer fallback included in this package; contributor build archives are not an installation route\.'/);
+  assert.match(settings,/storeNote:'商店是普通安装路径；正式包只在「开发者安装（备用）」中提供目录加载，贡献者构建的归档不用于安装。'/);
+  assert.doesNotMatch(settings,/zip(Open|Note|Step|Opened)/);
+  assert.doesNotMatch(settings,/ZIP/);
+});

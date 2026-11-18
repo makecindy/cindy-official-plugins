@@ -322,10 +322,13 @@ function Settings({ strings }) {
               aria-describedby="default-help"
               onSelect={() =>
                 void perform(async () => {
-                  const kv = await request('/kv');
-                  await request('/kv', {
-                    method: 'PUT',
-                    body: JSON.stringify({ ...kv, default_cloud: selected }),
+                  // Shares the mail SDK lock: draft card records live in the same KV.
+                  await navigator.locks.request('outlook-mail-kv', async () => {
+                    const kv = await request('/kv');
+                    await request('/kv', {
+                      method: 'PUT',
+                      body: JSON.stringify({ ...kv, default_cloud: selected }),
+                    });
                   });
                   setMessage(t('saved'));
                 })

@@ -16,7 +16,7 @@
 
 哪些请求算提审意图、哪些只算目标方向，以 [shared execution](taptap-suite/references/shared-execution.md)「提审意图门禁」的唯一词表为准，本文件不另立清单；本节流程从“用户已明确提审”开始。
 
-标准流程固定为：`prepare-review-snapshot` → `precheck-app-review` → 单独最终确认 → `submit-app-review --idempotency-key <submit-key> --yes`。**第 2、3 步必须传完全相同的 `release_schedule`**；第 1 步的入参只有 scope，不接受该字段（`additionalProperties: false`，多传即校验失败）。用 `version_id` 校验第 2、3 步仍在复核第 1 步的同一版本（`revision` 只有第 1 步返回）。当前 metadata 把前两步标为 `read`，无需 `--yes` 与幂等键；`submit-app-review` 仍为 `write`，需稳定幂等键与 `--yes`。CLI 不覆盖其风险分类。
+默认流程为：`prepare-review-snapshot` → `precheck-app-review` → 单独最终确认 → `submit-app-review --idempotency-key <submit-key> --yes`。**第 2、3 步必须传完全相同的 `release_schedule`**；第 1 步的入参只有 scope，不接受该字段（`additionalProperties: false`，多传即校验失败）。用 `version_id` 校验第 2、3 步仍在复核第 1 步的同一版本（`revision` 只有第 1 步返回）。当前 metadata 把前两步标为 `read`，无需 `--yes` 与幂等键；`submit-app-review` 仍为 `write`，需稳定幂等键与 `--yes`。CLI 不覆盖其风险分类。用户明确要求跳过预检或继续提交时可直接进入 `submit-app-review`，由服务端校验裁决。
 
 发布前必须把“版本发布”和“平台分发状态”拆开处理：
 
@@ -32,7 +32,7 @@ H5 开通 PC 分发入口时按两阶段执行：
 
 1. 读取 `platform-status`。若 `app_platforms.current_value` 尚无 `PC_OFFICIAL`，构造新值时保留其中全部现有平台并追加 `PC_OFFICIAL`；不得替换成仅 PC，也不得加入 `PC_STEAM`。按普通字段流程 dry-run、确认、写入并立即重读。
 2. 只使用重读结果继续。仅当 `region_flag_pc` 已实际返回且其 `options` 包含 `4` 时，才以最新 `current_value` 作为 `expected` 写 `region_flag_pc=4`，完成后再次重读。若首次读取已经包含 `PC_OFFICIAL` 且 `region_flag_pc.options` 已含 `4`，可以直接执行本步骤。
-3. 不把 `app_platforms` 与尚不可见的 `region_flag_pc` 放在同一批写入，不硬编码 `4`；任一步返回的字段或 options 不符合上述条件都停止并报告。此流程只开启 PC 分发入口，不创建 Windows 包体槽；H5 包体继续使用 `package_slots.main`。
+3. 不把 `app_platforms` 与尚不可见的 `region_flag_pc` 放在同一批写入，不硬编码 `4`；任一步返回的字段或 options 不符合上述条件都停止并报告。H5 游戏包继续使用 `package_slots.main`。H5 的 PC 分发不代表可以上传 Windows 包；无论是否为关卡，H5 游戏均不绑定 Windows 槽。若预检仍要求 H5 提供 Windows 包，报告契约冲突并交接核查，不通过上传其它包体绕过。
 
 三步：
 
@@ -62,9 +62,9 @@ H5 开通 PC 分发入口时按两阶段执行：
 
 取值不在上述三态内（未来新增或拼写异常）时按「没有结论」处理：既不当作 `passed`，也不当作阻断项。
 
-若响应里没有 `preaudit_status`（旧服务端），退回按 `preaudit_passed` 判断：`true` 视为已通过；`false` 且 `blockers` 为空时按「机审未通过」处理，不要自行当成「没审成」。
+响应缺少 `preaudit_status` 时，说明无法确认机审结论，不推断通过或拒绝。
 
-`preaudit_passed` 只用于内部流程判断，不得向用户原样输出 `Blocker`、`preaudit_passed=true` 等机器字段。存在阻断项时，逐项展示服务端返回的阻断原因，不得输出“可提交审核”；用户明确「强制提交」时说明提交可能被服务端拒绝，允许继续。
+向用户解释预审结论和具体问题，不直接输出内部字段。存在阻断项时逐项展示原因，不得声称可提交；用户明确要求继续提交时，说明服务端仍可能拒绝，再执行提交。
 
 | 返回 | 含义 | 处理 |
 | --- | --- | --- |
@@ -107,6 +107,11 @@ H5 开通 PC 分发入口时按两阶段执行：
 成功后告知"已成功提交审核，请耐心等待审核结果，通常 1-3 个工作日"，并附最新读回的各可见 `region_flag_*` 分发状态。仍为“敬请期待”的入口要说明：本次提交未调整该入口，发布后它仍会保持“敬请期待”；如需开放下载或游玩，请在下一轮提审前先调整对应分发状态。这不代表发布失败。
 
 最后按 shared execution 的“运营阶段手册交接”补充一个后续运营入口和一句官方描述摘要；进入提审链路时先用 `list-app-versions --page-all` 读取完整发布历史并保存本次证据，作为后续阶段判定的输入。提审成功本身不能证明运营阶段，历史不完整或证据冲突时只给快速入门总入口。
+
+### 提审失败与重复调用防护
+
+- 正式提交明确拒绝时，原样说明服务端原因，不自动重复提交或换幂等键重放；不要用改包或重建草稿处理无关的业务拒绝。条件变化后按用户当前授权重新决策。
+- 正式提交结果未知时，先用 `list-app-versions` / `get-app-version` 读回状态；已在审核中则不重复提交，无法确认时报告结果未知并停止自动重放。
 
 ### F. 撤销 / 回退（字段级）
 
@@ -166,17 +171,17 @@ H5 开通 PC 分发入口时按两阶段执行：
 
 用户场景："这一版改乱了 / 重来 / 回到线上那一版重新改"——当前 `status` 为 `"draft"` 或 `"rejected"` 且**存在线上版本**。
 
-⚠️ **不可逆**：当前 draft 相对线上版本的所有未发布改动都会丢失（包括已保存到草稿但尚未发布的内容；用户的"草稿里改了一半"不会被保留）。底层实现是 `delete + create` 两步组合，**非原子**——第二步失败会留下无 unpublished 的中间态，由下方「失败恢复」段的重试 + `create-draft` 兜底。
+⚠️ **不可逆**：当前 draft 相对线上版本的所有未发布改动都会丢失（包括已保存到草稿但尚未发布的内容；用户的"草稿里改了一半"不会被保留）。底层实现是 `delete + create` 两步组合，**非原子**——第二步失败会留下无 unpublished 的中间态，由下方「幂等与失败恢复」段的回读 + `create-draft` 恢复路径兜底。
 
 **前置条件警示**：
 
 - 首版应用 / 无线上版本时，工具会直接返回错误"还没有线上版本，无法重置"——这种情况下用户的意图通常是"清空当前 draft 的字段"，引导用户用 `save-changes` 清空具体字段而不是 reset。
 - 当前版本若处于 `1/3/4/5` 状态，不能 reset；先按 G-1 撤审或 G-2 撤定时让版本回到可编辑态。
 
-**失败恢复**：底层是 `delete + create` 两步。第二步上游故障时工具内部已做有限重试（500ms / 1s 间隔），若仍失败会返回明确错误：
+**幂等与失败恢复**：预览和执行均必须显式传 `--idempotency-key`；同一操作的重试复用原 key，新的一次重置使用新 key。底层是 `delete + create` 两步，第二步失败可能已经删除旧草稿，不能假定自动重试或自动恢复：
 
 - 收到错误时**不要**告诉用户"系统会自动新建"；先用 `list-app-versions` 重新确认是否仍有 unpublished。
-- 正确做法：直接调 `create-draft` 基于线上版本把草稿建回来（zeus 端会拷贝线上 form_data，不是空白草稿）；仍失败时明确说明 CLI 未能完成恢复。该写错误不保证返回资料编辑 `page_path`；若 app scope 已明确，可提供 CLI 推导的规范资料页地址并标记来源，其它页面仍只有后续读取接口实际返回时才能作为人工入口，不得自行猜测。
+- 仅当回读确认没有 unpublished 且存在线上版本时，才按已授权的恢复意图用新的 key 调 `create-draft` 基于线上版本重建；仍失败时明确说明 CLI 未能完成恢复。已有草稿时不得换 key 再次重置。该写错误不保证返回资料编辑 `page_path`；若 app scope 已明确，可提供 CLI 推导的规范资料页地址并标记来源，其它页面仍只有后续读取接口实际返回时才能作为人工入口，不得自行猜测。
 
 #### G-6. 基于线上版本开新草稿 → `create-draft`
 
@@ -186,6 +191,8 @@ H5 开通 PC 分发入口时按两阶段执行：
 2. 当前状态分析显示 `has_unpublished=false && has_published=true`——常见于网页端误删草稿、上游瞬时故障、reset-draft 部分失败。
 
 前置：`has_unpublished=false`（已有草稿时拒绝）且 `has_published=true`（首版应用无线上版本时拒绝——这种情况告知用户首版还没有可回退的基线，引导走开发者后台首版流程）。
+
+预览、执行与同一意图的重试必须提供相同的显式 `--idempotency-key`；后续发布后再次开版是新意图，不能沿用旧创建 key。收到旧回执状态失效或幂等冲突时先回读版本，不能把换 key 当作自动恢复。
 
 纯恢复路径通常不需要额外确认；但如果工具标记为不可逆或返回确认门禁，仍按 shared execution rules 处理。
 
@@ -272,7 +279,7 @@ call_tool(name:"app get-app-version", args:{app_id:"<appId>", developer_id:"<dev
 3. 若用户没说清楚是哪一种，先追问**一个**高价值问题，不要连发问卷式问题：
    - "这次是想做首曝、开放预约、开放测试、更新版本，还是正式上线？"
 4. 目标明确后，再只围绕该目标需要的模块补资料；不要一上来把所有可选字段全盘罗列给用户
-5. 资料与设置补齐后，只报告准备状态和提审选项；只有用户明确说“提交审核 / 提审”后，才进入 `prepare-review-snapshot` → `precheck-app-review`，预审结果后仍需最终确认才进入 `submit-app-review`
+5. 资料与设置补齐后，只报告准备状态和提审选项；只有用户明确说“提交审核 / 提审”后，才进入 `prepare-review-snapshot` → `precheck-app-review`，预审后确认或用户明确要求跳过预检并提交时进入 `submit-app-review`
 
 关键约束：
 

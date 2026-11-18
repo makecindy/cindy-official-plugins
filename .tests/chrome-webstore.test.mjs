@@ -35,7 +35,7 @@ test('numeric Chrome versions; do not downgrade or duplicate a release', () => {
 });
 
 test('package changes require a higher Chrome version; plugin-only changes do not', () => {
-  for (const file of ['my-browser/extension/background.js', 'my-browser/extension/manifest.json', 'my-browser/binary-dependencies.json', 'my-browser/THIRD-PARTY-LICENSES.txt', 'scripts/build-my-browser.mjs', '.github/scripts/package-plugin.sh', '.github/scripts/binary-dependencies.py']) {
+  for (const file of ['my-browser/extension/background.js', 'my-browser/extension/manifest.json', 'my-browser/THIRD-PARTY-LICENSES.txt', 'scripts/build-my-browser.mjs']) {
     assert.throws(() => validateVersionChange('0.4.60', '0.4.60', [file]), /bump/);
     assert.throws(() => validateVersionChange('0.4.60', '0.4.59', [file]), /bump/);
     assert.doesNotThrow(() => validateVersionChange('0.4.60', '0.4.61', [file]));
@@ -43,10 +43,10 @@ test('package changes require a higher Chrome version; plugin-only changes do no
   assert.doesNotThrow(() => validateVersionChange('0.4.60', '0.4.60', ['my-browser/ghost.json', 'my-browser/README.md', '.github/scripts/chrome-webstore.mjs']));
 });
 
-test('transitive dependency packagers also trigger Chrome publishing on main', async () => {
+test('every file that changes the Chrome package also triggers Chrome publishing on main', async () => {
   const workflow = await fs.readFile(new URL('../.github/workflows/publish-chrome-extension.yml', import.meta.url), 'utf8');
   const pushPaths = workflow.split('    paths:\n')[1].split('  workflow_dispatch:')[0];
-  for (const file of ['.github/scripts/package-plugin.sh', '.github/scripts/binary-dependencies.py']) {
+  for (const file of ['my-browser/extension/**', 'my-browser/THIRD-PARTY-LICENSES.txt', 'scripts/build-my-browser.mjs']) {
     assert.ok(pushPaths.includes(`      - '${file}'\n`), `${file} must trigger a store version check`);
   }
 });

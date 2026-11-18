@@ -52,7 +52,7 @@ call_tool(name:"app +list", args:{dev_id:"1", page_size:50})
 - `--dev-id` / `--app-id` 只在 operation 声明对应 scope 时注册；其余字段按 schema 放入 `--data`
 - 动态命令的 `--data` 是完整 operation input；资源发现优先使用命令树中的 `developer` / `app` 命令
 - `data` 支持内联 JSON 对象,或字符串 `"@relative-file.json"`(相对会话工作目录的文件);经本插件调用时没有可用的 stdin,`-` 不可用
-- 短 JSON 用内联对象;复杂或多行 JSON 用 `@file`,文件必须位于会话工作目录(CLI 以会话工作目录为 cwd 解析该相对路径)
+- 短 JSON 用内联对象;复杂或多行 JSON 用 `@file`,文件必须位于会话工作目录(CLI 以会话工作目录为 cwd 解析该相对路径),并且是 UTF-8 无 BOM 的 JSON。插件直接把 JSON 作为参数传给 CLI,没有 shell 引号问题;`data` 解析失败先检查 JSON 语法与文件编码,不要原样重发。
 - `--dev-id` / `--app-id` 与 `--data` 中同名字段冲突时返回 validation error，不静默覆盖
 - 默认输出是 JSON，普通命令、脚本、Skill 示例和生成命令都不追加冗余的 `--format json`
 - 只有命令自身默认输出文本或原始内容，而调用方明确需要结构化 JSON 时才显式追加
@@ -74,7 +74,7 @@ call_tool(name:"app submit-app-review", args:{app_id:"1", developer_id:"2", data
 - `list_tools(category:"<service>")` 浏览该域的操作；`call_tool(name:"schema", args:{_positional:[service, method]})` 返回完整 input/output schema,它会在 metadata 缓存到期时做一次有界刷新。真实 operation 执行前若发现 catalog 已更新，CLI 会停止并要求重跑。
 - metadata 标记为 write / high-risk-write 的 operation 缺 `yes:true` 时返回 `CONFIRM_REQUIRED`；`dry_run:true` 只预览最终 HTTP 请求。命令接受幂等键时，预览和真实写入都要传稳定 `idempotency_key`，并在同一业务意图内复用。当前提审前两步（`prepare-review-snapshot`、`precheck-app-review`）标为 `read`，无需确认；`submit-app-review` 仍为 `write`，需用户确认与稳定幂等键。
 - 当前 schema 没有声明的风险确认或协议凭证字段不得由 CLI 补造。`precheck-app-review` 只在 `blockers` / `warnings` 里给出要求；SCE 等协议签署走独立的 `agree-sce-agreement`，`submit-app-review` 只传 `release_schedule`，其它无法完成的要求应向用户说明具体未完成事项及其对提审的影响。
-- 分页 flag 只在 operation 声明分页时注册（OpenAPI 名 `x-pagination`，catalog 里序列化为 `pagination`）；输出字段以 output schema 为准。
+- 分页 flag 只在 operation 声明分页时注册（接口定义字段 `x-pagination`，catalog 里序列化为 `pagination`）；输出字段以 output schema 为准。
 - `aliases` 只提供人类友好的转发，例如 `audit:submit`；手写 workflow shortcut 只编排 metadata 已声明的能力，不能扩展 API capability。
 - `completion zsh|bash|fish|powershell` 从当前注册命令树生成补全（用户在本机终端执行，插件不提供）。
 

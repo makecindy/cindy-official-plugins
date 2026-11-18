@@ -51,7 +51,7 @@
      * where `element` is the whole canvas and the screen sits inside it
      * as a rotated, perspective-foreshortened quad.
      */
-    bindInteraction({ element, overlayHost, mapClientPoint }) {
+    bindInteraction({ element, overlayHost, mapClientPoint, mapScreenPoint }) {
       this.unbindInteraction();
       this.element = element;
       this.transport.setScreenSize(this.def.rect.width, this.def.rect.height);
@@ -60,7 +60,7 @@
         overlay: this._overlay,
         getOrientation: this.getOrientation,
         log: this.log,
-        mapClientPoint,
+        mapClientPoint, mapScreenPoint,
       });
       this._interpreter.attach(element);
     }
@@ -69,6 +69,8 @@
       if (this._interpreter) { this._interpreter.detach(); this._interpreter = null; }
       if (this._overlay) { this._overlay.detach(); this._overlay = null; }
     }
+
+    cancelInput() { this._interpreter?.cancel(); }
 
     detach() {
       this.unbindInteraction();

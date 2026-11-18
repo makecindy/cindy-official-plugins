@@ -100,7 +100,11 @@
         if (attempts <= 8) {
           log('Reconnecting simulator stream…');
           this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.start(); }, 1500);
-        } else { log('Stream disconnected. Reopen the viewer to retry.', true); }
+        } else {
+          log('Stream disconnected. Reopen the viewer to retry.', true);
+          // Cindy's controller reloads this page once the device is running again.
+          document.documentElement.setAttribute('data-viewer-unavailable', '');
+        }
       }
     };
     socket.onerror   = () => {

@@ -6,7 +6,7 @@
 ## 开始
 
 1. 调用 `maker_status` 确认当前项目，然后按目标选择要验证的入口、断言与截图状态。
-   本插件入口仅支持单机；Runtime 0.0.40 的 --network 尚未映射到插件参数。联网项目不可擅自改为单机，也不绕过插件执行 CLI。只读会话拒绝执行。
+   本插件入口仅支持单机；Runtime 0.0.41 的 --network 尚未映射到插件参数。联网项目不可擅自改为单机，也不绕过插件执行 CLI。只读会话拒绝执行。
 2. 默认 `mode=validate` 取得报告；需要看画面用 `mode=both` 或 `screenshot`，并按当前游戏
    加载流程选择 `screenshot_frame`，没有固定帧数保证就绪。可选 `entry`、`test` 都是项目脚本目录下的相对路径。
    frames、test 仅适用于 validate/both；screenshot_frame 仅适用于 screenshot/both。

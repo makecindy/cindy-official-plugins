@@ -7,5 +7,5 @@
 
 | id | 标题 | 官方页面 | 版本 | 源 HTML SHA-256 | 快照 SHA-256 | 快照文件 |
 | --- | --- | --- | --- | --- | --- | --- |
-| material | 游戏物料要求 | https://developer.taptap.cn/docs/store/release/publish/material/ | v4 | `881a3f5c061cc0660d975014dbcd359bc0688359fb55e8bf7dbce5426ecca847` | `94d6464d9bdef32b785b50ee7249a712b4ef399e43d0073592c644e28266300c` | [material.md](taptap-suite/references/sources/v4/material.md) |
-| agree | TapTap 游戏审核规范细则 | https://developer.taptap.cn/docs/store/release/publish/agree/ | v4 | `8b5b628806e3831a6fe9c02114e1303d266c951d08c8ac4282c319a13314d248` | `86288c9bb0309176b4cd402a6d58c0475be3b8c3dcf7f6e39fa218305405c194` | [agree.md](taptap-suite/references/sources/v4/agree.md) |
+| material | 游戏物料要求 | https://developer.taptap.cn/docs/store/release/publish/material/ | v4 | `881a3f5c061cc0660d975014dbcd359bc0688359fb55e8bf7dbce5426ecca847` | `5bd74533f1f145cd94cf5135d6ee1b90b7178668807de48f6497bfbb93ac98f7` | [material.md](taptap-suite/references/sources/v4/material.md) |
+| agree | TapTap 游戏审核规范细则 | https://developer.taptap.cn/docs/store/release/publish/agree/ | v4 | `8b5b628806e3831a6fe9c02114e1303d266c951d08c8ac4282c319a13314d248` | `e5a1c309af00bd4308b7bc9b092af0c7fce698cbf88beb9037863c5f9cb7d6e4` | [agree.md](taptap-suite/references/sources/v4/agree.md) |

@@ -20,6 +20,17 @@ export function applyPatches(source, recipe) {
   return source;
 }
 
+export function applyVendorFilePatches(directory, recipe) {
+  for (const file of recipe.filePatches || []) {
+    if (!Object.hasOwn(recipe.vendorHashes, file.path) || path.isAbsolute(file.path) ||
+        file.path.includes('\\') || file.path.split('/').some((part) => !part || part === '.' || part === '..')) {
+      throw new Error('Unsafe vendor patch path');
+    }
+    const filename = path.join(directory, file.path);
+    writeFileSync(filename, applyPatches(readFileSync(filename, 'utf8'), file));
+  }
+}
+
 export function fileHashes(directory, prefix = '') {
   const hashes = {};
   for (const name of readdirSync(directory).sort()) {
@@ -87,6 +98,7 @@ async function main() {
     fileHashes(next);
     const bundle = path.join(next, 'dist/maker.js');
     writeFileSync(bundle, applyPatches(readFileSync(bundle, 'utf8'), recipe));
+    applyVendorFilePatches(next, recipe);
     cpSync(path.join(vendor, 'LICENSE'), path.join(next, 'LICENSE'));
     verifyVendor(next, recipe);
     execFileSync(process.execPath, ['--check', bundle]);

@@ -8,7 +8,7 @@
 // {type:'screen', width, height, rotation} before the first frame and on change.
 // An open stream counts as a viewer; every call honours the run switch.
 const http=require('node:http');
-const {randomBytes}=require('node:crypto');
+const {randomBytes,randomUUID}=require('node:crypto');
 const {deviceId}=require('./device-id.cjs');
 const M=require('./control-model.js');
 const {chord}=require('./keys.cjs');
@@ -26,6 +26,13 @@ const QUIET_MS=200;
 const TURN_MS=1500,TURN_FRAMES=12,CONFIRM_MS=1000;
 // Closing the screen while a touch runs: try to lift the finger for this long.
 const RELEASE_TRIES=30,RELEASE_WAIT_MS=100;
+// Apple TV and Vision Pro fingers: a finger that moves less than SLOP (of the
+// picture's width) is a tap; one held still HOLD_MS is a long press (TV) or a
+// held pinch (Vision Pro).
+const SLOP=.03,HOLD_MS=450;
+// A held contact repeats its last sample this often (the native helpers lift
+// after 750 ms without input), like the desktop viewer's heartbeat.
+const BEAT_MS=250;
 // A device shut down while shown keeps its stream open and simply stops
 // sending, like a still screen: once the picture is still this long, check
 // (at most this often) that it still runs.
@@ -35,18 +42,25 @@ const ORIENTATIONS=['portrait','landscape-left','portrait-upside-down','landscap
 const PHASES=['began','moved','stationary','ended','cancelled'],ENDED=new Set(['ended','cancelled']);
 const MODIFIERS=['shift','control','option','command'];
 const HEAD={'Content-Type':'application/x-cindy-live-screen','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};
-const CAPS={ios:{touches:2,keyboard:true},ipados:{touches:2,keyboard:true},android:{touches:10,keyboard:true},tvos:{touches:0,keyboard:false},visionos:{touches:0,keyboard:true}};
+const CAPS={ios:{touches:2,keyboard:true},ipados:{touches:2,keyboard:true},android:{touches:10,keyboard:true},tvos:{touches:1,keyboard:false},visionos:{touches:2,keyboard:true}};
+// Apple TV and Vision Pro take the picture's fingers as gestures (see remoteStep);
+// buttons add only what a finger cannot do.
 // [button id, Cindy icon]. Ids are this plugin's existing press buttons where one exists.
 // orientation-* set an absolute pose, so a phone can make the device follow its own.
 const TURN=[['orientation-portrait','rotate-right'],['orientation-landscape','rotate-left']];
 const ORIENTATION_BUTTONS={'orientation-portrait':'portrait','orientation-landscape':'landscape-left'};
 const HANDHELD=[['home','home'],['app-switcher','recents'],['lock','lock'],['volume-up','volume-up'],['volume-down','volume-down'],['rotate-left','rotate-left'],['rotate-right','rotate-right'],['shake','shake'],...TURN];
+// A foldable (iPhone Duo) also takes the hinge poses the desktop viewer offers;
+// listed only for a device whose stream reports a hinge. The icon is one every
+// Cindy accepts; Cindy versions that know these ids draw them as their own row.
+const POSTURE=[['posture-closed','menu'],['posture-open','menu'],['posture-flat','menu']];
+const POSTURES={'posture-closed':'closed','posture-open':'open','posture-flat':'flat'};
 const BUTTONS={ios:HANDHELD,ipados:HANDHELD,
   android:[['back','back'],['home','home'],['recents','recents'],['power','power'],['volume-up','volume-up'],['volume-down','volume-down'],['rotate-left','rotate-left'],['rotate-right','rotate-right'],...TURN],
-  tvos:[['home','home'],['menu','menu'],['play-pause','play-pause']],visionos:[['home','home']]};
+  tvos:[['home','home'],['menu','menu'],['play-pause','play-pause']],visionos:[['home','home'],['view-reset','rotate-left']]};
 const LABELS={
-  en:{home:'Home','app-switcher':'App Switcher',back:'Back',recents:'Recents',lock:'Lock',power:'Power','volume-up':'Volume Up','volume-down':'Volume Down','rotate-left':'Rotate Left','rotate-right':'Rotate Right','orientation-portrait':'Portrait','orientation-landscape':'Landscape',shake:'Shake',menu:'Menu','play-pause':'Play/Pause'},
-  'zh-CN':{home:'主屏幕','app-switcher':'App 切换器',back:'返回',recents:'最近任务',lock:'锁定',power:'电源','volume-up':'调高音量','volume-down':'调低音量','rotate-left':'向左旋转','rotate-right':'向右旋转','orientation-portrait':'竖屏','orientation-landscape':'横屏',shake:'摇一摇',menu:'菜单','play-pause':'播放/暂停'},
+  en:{home:'Home','app-switcher':'App Switcher',back:'Back',recents:'Recents',lock:'Lock',power:'Power','volume-up':'Volume Up','volume-down':'Volume Down','rotate-left':'Rotate Left','rotate-right':'Rotate Right','orientation-portrait':'Portrait','orientation-landscape':'Landscape','posture-closed':'Closed','posture-open':'Half Open','posture-flat':'Flat',shake:'Shake',menu:'Menu','play-pause':'Play/Pause','view-reset':'Reset View'},
+  'zh-CN':{home:'主屏幕','app-switcher':'App 切换器',back:'返回',recents:'最近任务',lock:'锁定',power:'电源','volume-up':'调高音量','volume-down':'调低音量','rotate-left':'向左旋转','rotate-right':'向右旋转','orientation-portrait':'竖屏','orientation-landscape':'横屏','posture-closed':'合上','posture-open':'半展开','posture-flat':'展开',shake:'摇一摇',menu:'菜单','play-pause':'播放/暂停','view-reset':'复位视角'},
 };
 const MESSAGES={
   en:{NOT_FOUND:'This device is not in the simulator plugin. Refresh the device list.',NOT_OPEN:'This screen is not open. Open it again.',NOT_RUNNING:'The device is not running. Start it first.',
@@ -188,7 +202,21 @@ function describeOrientation(base,udid){
     request.once('error',reject);
   });
 }
-function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=process.platform==='darwin'&&process.arch==='arm64',describeUi=describeOrientation,
+// Whether the device folds and its lit panel, from Baguette's hinge route:
+// answers at once, while the probe takes over a second on iPhone Duo.
+function readHinge(base,udid){
+  return new Promise((resolve,reject)=>{
+    const request=http.get(`${base}/simulators/${encodeURIComponent(udid)}/hinge`,{timeout:PROBE_MS,headers:{origin:base}},res=>{
+      const chunks=[];let size=0;
+      res.on('data',chunk=>{size+=chunk.length;if(size>MAX_PROBE)request.destroy(Error('Hinge answer too large'));else chunks.push(chunk);});
+      res.on('end',()=>{try{resolve(res.statusCode===200?JSON.parse(Buffer.concat(chunks).toString('utf8')):null);}catch{resolve(null);}});
+      res.on('error',reject);
+    });
+    request.once('timeout',()=>request.destroy(Error('Hinge read timed out')));
+    request.once('error',reject);
+  });
+}
+function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=process.platform==='darwin'&&process.arch==='arm64',describeUi=describeOrientation,hinge=readHinge,
   serve=(...a)=>require('./android/stream.cjs').serve(...a),rpc=(...a)=>require('./android/grpc.cjs').rpc(...a),WebSocket=globalThis.WebSocket,now=Date.now}){
   const sessions=new Map(),tokens=new Map(),releasing=new Map();let server=null,listening=null;
   const timer=setInterval(()=>sweep(),1000);timer.unref?.();
@@ -276,7 +304,7 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     if(stale)return;
     const rotation=ORIENTATIONS.indexOf(env?.ok&&env.tree?.screen?.orientation);
     if(rotation<0)return;
-    s.oriented=true;
+    s.oriented=true;s.panel=env.tree.screen.target?.litPanel||'primary';
     // Someone else turned the device (or the App did): step from what shows.
     if(rotation!==s.rotation)s.requested=undefined;
     s.rotation=rotation;if(s.res&&s.size)screen(s);
@@ -290,11 +318,21 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     let settle;const ready=new Promise((resolve,reject)=>{settle={resolve,reject};});
     const timeout=setTimeout(()=>settle.reject(fail('NOT_RUNNING',locale,'STREAM')),READY_MS);
     ws.onopen=()=>{send(s,{type:'set_fps',fps:s.fps||60});send(s,{type:'force_idr'});probe(s);};
-    ws.onmessage=e=>{if(typeof e.data!=='string'){binary(s,Buffer.from(e.data));if(s.size)settle.resolve();}};
+    ws.onmessage=e=>{
+      if(typeof e.data!=='string'){binary(s,Buffer.from(e.data));if(s.size)settle.resolve();return;}
+      // Only a foldable's stream reports its hinge (before the first frame).
+      try{if(JSON.parse(e.data)?.type==='hinge')s.foldable=true;}catch{}
+    };
     ws.onerror=ws.onclose=()=>{settle.reject(fail('NOT_RUNNING',locale,'STREAM'));end(s);};
     try{await ready;}finally{clearTimeout(timeout);}
     // The first orientation, so the first 0x10 is usually already right.
+    // The hinge route also tells a foldable whose stream reports the hinge only after the first frame.
+    const panel=(s.kind==='ios'||s.foldable)&&hinge(s.base,s.udid).then(h=>{
+      if(h?.foldable)s.foldable=true;
+      if(s.foldable&&!s.panel&&(h?.litPanel==='primary'||h?.litPanel==='secondary'))s.panel=h.litPanel;
+    },()=>{});
     for(let i=0;i<15&&s.probing&&!s.oriented&&!s.closed;i++)await new Promise(r=>setTimeout(r,100));
+    await panel;
     return s.size;
   }
   function attach(s,res){
@@ -320,7 +358,8 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     if(sessions.get(s.key)===s)sessions.delete(s.key);
     tokens.delete(s.token);
     // Lift a finger the phone left down.
-    if(s.kind!=='android'&&s.size)for(const value of appleRelease(s.touch,s.size))send(s,value);
+    if((s.kind==='ios'||s.kind==='ipados')&&s.size)for(const value of appleRelease(s.touch,s.size))send(s,value);
+    if(s.kind==='tvos'||s.kind==='visionos')remoteLift(s).catch(()=>{});
     if(s.kind==='android'&&s.down){
       const promise=releaseAndroid(s).finally(()=>{if(releasing.get(s.key)===promise)releasing.delete(s.key);});
       releasing.set(s.key,promise);
@@ -385,7 +424,7 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
       await pending;
     }
     const s={key,udid:device.udid,kind,token:randomBytes(32).toString('hex'),seen:now(),res:null,size:null,sent:null,rotation:0,
-      touch:{mode:null,ids:[],last:new Map(),edge:null},control:{},closed:false};
+      touch:{mode:null,ids:[],last:new Map(),edge:null},remote:{mode:null},chain:Promise.resolve(),control:{},closed:false};
     sessions.set(key,s);
     try{
       const base=await listen();
@@ -393,9 +432,9 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
       else await connect(s,device,locale);
       if(s.closed)throw fail('NOT_RUNNING',locale,'STREAM');
       tokens.set(s.token,s);s.seen=now();controls().touch();
-      const caps=CAPS[kind];
+      const caps=CAPS[kind];s.buttons=s.foldable?[...BUTTONS[kind],...POSTURE]:BUTTONS[kind];
       return {url:`${base}/live-screen/${s.token}`,screen:{platform:kind,width:s.size.width,height:s.size.height,cornerRadius:M.screenCorner(device),
-        maxTouches:caps.touches,keyboard:caps.keyboard,buttons:BUTTONS[kind].map(([id,icon])=>({id,icon,label:LABELS[locale][id]}))}};
+        maxTouches:caps.touches,keyboard:caps.keyboard,buttons:s.buttons.map(([id,icon])=>({id,icon,label:LABELS[locale][id]}))}};
     }catch(error){end(s);try{s.ws?.close();}catch{}throw error;}
   }
   // Results of the existing guarded operations (run switch, device lock, activity).
@@ -418,7 +457,131 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
       c.touch();
     },'device:'+deviceId(s.udid));
   }
+  // The interface turns `rotation` quarters from portrait (what the probe
+  // reports). iPhone Duo's inner (secondary) panel sits a quarter turn from the
+  // device: held upright it shows landscape-left, so the device pose differs.
+  async function turnTo(s,rotation){
+    const orientation=ORIENTATIONS[(rotation-(s.panel==='secondary'?1:0)+4)%4];
+    s.pendingTurn={rotation,until:now()+TURN_MS,frames:0};
+    try{await operation('set_state',{udid:s.udid,orientation});}catch(error){s.pendingTurn=null;throw error;}
+    // `asked` outlives the probe's reset of `requested`: a fold keeps it.
+    s.requested=s.asked=rotation;s.framed=true;settle(s);
+  }
+  // Apple TV and Vision Pro have no touch screen: the phone's fingers become
+  // their native gestures, through the same contacts the desktop viewer uses.
+  // TV: a moving finger is the Siri Remote's touch surface; a tap clicks, a
+  // still hold is a long click. Vision Pro: one finger pinches where it
+  // touches (tap, drag or hold); two fingers turn the head.
+  // Every contact sample (a step, a hold's timer, the heartbeat, the lift on
+  // closing) runs on one queue per screen, in order, so a lift never overtakes
+  // a sample still in flight; once the screen closes only the lift is sent.
+  function remoteChain(s,fn){const next=s.chain.then(fn);s.chain=next.catch(()=>{});return next;}
+  const remoteSize=s=>s.size||{width:1,height:1};
+  const HELD=new Set(['trackpad','interact','tilt']);
+  async function trackpadSend(s,r,phase,p){await operation('viewer_trackpad',{udid:s.udid,gesture:r.gesture,phase,x:p.x,y:p.y});}
+  async function spatialSend(s,value,phases){
+    const {width,height}=remoteSize(s),gesture=value.gesture||randomUUID();
+    for(const phase of phases)await operation('viewer_spatial',{udid:s.udid,gesture,phase,x:0,y:0,aspect:Math.min(4,Math.max(.5,width/height)),...value,gesture});
+    return gesture;
+  }
+  const resend=(s,r)=>r.mode==='trackpad'?trackpadSend(s,r,'changed',r.last):spatialSend(s,{gesture:r.gesture,mode:r.mode,...r.sample},['changed']);
+  const centre=ts=>({x:ts.reduce((a,t)=>a+t.x,0)/ts.length,y:ts.reduce((a,t)=>a+t.y,0)/ts.length});
+  // A failed sample: the native contact is gone or unknown. Forget it and let
+  // the fingers lift before the next gesture.
+  function drop(s,r){clearTimeout(r.timer);clearInterval(r.beat);if(s.remote===r)s.remote={mode:'drain'};}
+  // The native helpers lift a contact after 750 ms without input, while a
+  // phone sends nothing for a still finger: repeat the last sample, as the
+  // desktop viewer does, until the contact ends.
+  function heartbeat(s,r){
+    clearInterval(r.beat);
+    r.beat=setInterval(()=>{
+      if(s.remote!==r||s.closed||!HELD.has(r.mode)){clearInterval(r.beat);return;}
+      remoteChain(s,async()=>{if(s.remote===r&&!s.closed&&HELD.has(r.mode))await resend(s,r);}).catch(()=>drop(s,r));
+    },BEAT_MS);
+    r.beat.unref?.();
+  }
+  // Start a Vision Pro pinch at the finger's first point (a hold or a drag).
+  async function pinchBegin(s,r){
+    r.gesture=randomUUID();r.mode='interact';r.sample={x:r.start.x,y:r.start.y};
+    await spatialSend(s,{gesture:r.gesture,mode:'interact',x:r.start.x,y:r.start.y},['began']);
+    heartbeat(s,r);
+  }
+  async function tiltBegin(s,ts){
+    const r={mode:'tilt',ids:ts.map(t=>t.id),start:centre(ts),gesture:randomUUID(),sample:{x:0,y:0}};
+    s.remote=r;
+    await spatialSend(s,{gesture:r.gesture,mode:'tilt',x:0,y:0},['began']);
+    heartbeat(s,r);
+  }
+  // On the queue: end the contact the phone holds, if any.
+  async function liftNow(s){
+    const r=s.remote;s.remote={mode:null};clearTimeout(r.timer);clearInterval(r.beat);
+    if(r.mode==='trackpad')await trackpadSend(s,r,'ended',r.last);
+    else if(r.mode==='interact'||r.mode==='tilt')await spatialSend(s,{gesture:r.gesture,mode:r.mode,...r.sample},['ended']);
+  }
+  const remoteLift=s=>remoteChain(s,()=>liftNow(s));
+  function remoteStep(s,e){
+    return remoteChain(s,async()=>{
+      const r=s.remote;
+      try{await remoteTouch(s,e);}catch(error){drop(s,s.remote===r?r:s.remote);throw error;}
+    });
+  }
+  async function remoteTouch(s,e){
+    if(e.kind==='release')return liftNow(s);
+    if(s.closed)return;
+    const live=e.touches.filter(t=>!ENDED.has(t.phase)),by=new Map(e.touches.map(t=>[t.id,t]));
+    const vision=s.kind==='visionos',{width,height}=remoteSize(s);
+    const after=async()=>{await liftNow(s);s.remote={mode:live.length?'drain':null};};
+    // Fingers that stay after a gesture ends start nothing until all lift; a
+    // touch whose every finger just landed is a new gesture.
+    if(s.remote.mode==='drain'){if(live.length&&!live.every(t=>t.phase==='began'))return;s.remote={mode:null};}
+    const r=s.remote;
+    if(r.mode===null){
+      const fresh=live.filter(t=>t.phase==='began');
+      if(!fresh.length||live.length>fresh.length){if(live.length)s.remote={mode:'drain'};return;}
+      if(vision&&fresh.length>1)return tiltBegin(s,fresh);
+      const t=fresh[0];
+      const pending=s.remote={mode:'pending',id:t.id,start:{x:t.x,y:t.y},last:{x:t.x,y:t.y},at:now()};
+      // Held still: Vision Pro pinches and keeps holding; TV waits for the lift.
+      if(vision)pending.timer=setTimeout(()=>{
+        remoteChain(s,async()=>{if(s.remote===pending&&pending.mode==='pending'&&!s.closed)await pinchBegin(s,pending);}).catch(()=>drop(s,pending));
+      },HOLD_MS);
+      return;
+    }
+    if(r.mode==='tilt'){
+      if(r.ids.some(id=>!by.has(id)||ENDED.has(by.get(id).phase)))return after();
+      const c=centre(r.ids.map(id=>by.get(id)));
+      r.sample={x:Math.max(-4,Math.min(4,c.x-r.start.x)),y:Math.max(-4,Math.min(4,c.y-r.start.y))};
+      return resend(s,r);
+    }
+    const t=by.get(r.id);
+    // A second finger: Vision Pro turns the head instead; TV keeps one finger.
+    if(vision&&live.length>1&&t&&!ENDED.has(t.phase)){await liftNow(s);return tiltBegin(s,live.slice(0,2));}
+    if(!t)return;
+    const p={x:t.x,y:t.y},far=Math.hypot((p.x-r.start.x)*width,(p.y-r.start.y)*height)>SLOP*width;
+    if(t.phase==='cancelled')return after();
+    if(r.mode==='pending'&&t.phase==='moved'&&far){
+      clearTimeout(r.timer);r.last=p;
+      // Closed while the contact began: only the lift follows.
+      if(vision){await pinchBegin(s,r);r.sample={x:p.x,y:p.y};return s.closed?undefined:resend(s,r);}
+      r.mode='trackpad';r.gesture=randomUUID();
+      await trackpadSend(s,r,'began',r.start);heartbeat(s,r);return s.closed?undefined:resend(s,r);
+    }
+    if(r.mode==='trackpad'||r.mode==='interact'){
+      r.last=p;if(r.mode==='interact')r.sample={x:p.x,y:p.y};
+      if(t.phase==='moved')return resend(s,r);
+      if(t.phase==='ended')return after();
+      return;
+    }
+    if(r.mode==='pending'&&t.phase==='ended'){
+      clearTimeout(r.timer);s.remote={mode:live.length?'drain':null};
+      if(vision)return spatialSend(s,{mode:'interact',x:r.start.x,y:r.start.y},['began','ended']);
+      const held=(now()-r.at)/1000;
+      return operation('press',{udid:s.udid,button:'select',...(held*1000>=HOLD_MS?{duration:Math.min(5,held)}:{})});
+    }
+  }
   async function appleStep(s,e,locale){
+    if((s.kind==='tvos'||s.kind==='visionos')&&(e.kind==='touch'||e.kind==='release'))return remoteStep(s,e);
+    if(e.button==='view-reset')return remoteChain(s,()=>spatialSend(s,{mode:'reset'},['began','ended']));
     if(e.kind==='touch'||e.kind==='release'){
       if(e.kind==='touch'&&(s.ws?.readyState!==1||!s.size))throw fail('NOT_RUNNING',locale,'STREAM');
       for(const value of e.kind==='touch'?appleTouches(s.touch,e,s.size,s.rotation):appleRelease(s.touch,s.size||{width:0,height:0}))
@@ -427,22 +590,26 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     }
     if(e.kind==='text')return operation('type_text',{udid:s.udid,text:e.text,method:'paste'});
     if(e.kind==='key')return operation('type_text',{udid:s.udid,keys:[[...e.modifiers,e.code].join('+')]});
-    if(Object.hasOwn(ORIENTATION_BUTTONS,e.button)){
-      const orientation=ORIENTATION_BUTTONS[e.button];
-      s.pendingTurn={rotation:ORIENTATIONS.indexOf(orientation),until:now()+TURN_MS,frames:0};
-      try{await operation('set_state',{udid:s.udid,orientation});}catch(error){s.pendingTurn=null;throw error;}
-      s.requested=ORIENTATIONS.indexOf(orientation);s.framed=true;settle(s);return;
-    }
+    // orientation-* ask for a shape: portrait, or landscape-left as before.
+    if(Object.hasOwn(ORIENTATION_BUTTONS,e.button))return turnTo(s,ORIENTATIONS.indexOf(ORIENTATION_BUTTONS[e.button]));
     if(e.button==='rotate-left'||e.button==='rotate-right'){
       // An iPhone's Home Screen and most Apps never turn upside down: skip that
       // pose, so every press visibly turns the picture. An iPad takes all four.
       const turn=e.button==='rotate-right'?1:3;
       let next=((s.requested??s.rotation??0)+turn)%4;
       if(s.kind==='ios'&&ORIENTATIONS[next]==='portrait-upside-down')next=(next+turn)%4;
-      const orientation=ORIENTATIONS[next];
-      s.pendingTurn={rotation:next,until:now()+TURN_MS,frames:0};
-      try{await operation('set_state',{udid:s.udid,orientation});}catch(error){s.pendingTurn=null;throw error;}
-      s.requested=ORIENTATIONS.indexOf(orientation);s.framed=true;settle(s);return;
+      return turnTo(s,next);
+    }
+    if(Object.hasOwn(POSTURES,e.button)){
+      const posture=POSTURES[e.button],asked=s.asked,panel=s.panel;
+      await operation('set_state',{udid:s.udid,posture});
+      // Closed lights the outer panel; half open and flat light the inner one.
+      // The hinge is still moving now, so a probe asked before reads the old panel.
+      s.panel=posture==='closed'?'primary':'secondary';s.turnedAt=now();
+      s.framed=true;settle(s);
+      // The other panel shows the device's pose its own way: keep the shape asked for.
+      if(asked!==undefined&&s.panel!==panel)await turnTo(s,asked);
+      return;
     }
     if(e.button==='shake')return shake(s);
     return operation('press',{udid:s.udid,button:e.button});
@@ -485,7 +652,7 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     // The whole batch is checked before anything is sent.
     events.forEach((e,i)=>{
       if((e.kind==='touch'&&!caps.touches)||((e.kind==='text'||e.kind==='key')&&!caps.keyboard))throw fail('UNSUPPORTED',locale,undefined,`events[${i}]`);
-      if(e.kind==='press'&&!BUTTONS[s.kind].some(([id])=>id===e.button))throw fail('INVALID_ARGUMENT',locale,undefined,`events[${i}]: unknown button`);
+      if(e.kind==='press'&&!(s.buttons||BUTTONS[s.kind]).some(([id])=>id===e.button))throw fail('INVALID_ARGUMENT',locale,undefined,`events[${i}]: unknown button`);
       if(e.kind==='key')try{if(s.kind==='android')androidKey(e.code,e.modifiers);else chord(e.code,e.modifiers);}catch{throw fail('INVALID_ARGUMENT',locale,undefined,`events[${i}]: unsupported key`);}
     });
     await enabled(locale);

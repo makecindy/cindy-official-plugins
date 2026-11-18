@@ -143,9 +143,8 @@ manifest/icon/locale/Skill/Manual 单文件上限、安全路径、大小写路�
 不得超过 300 字符。放宽或移除安全/交付门禁需维护者批准；保持约束的正确性修复
 不因文件路径转人工，须以实际打包回归验证。
 
-官方仓提交的是 Server public release：禁止 `oidc-token` secret；携带 Skill bundle
-的 public 插件仅允许 Server 现有豁免 id（`ios-simulator` / `taptap-maker` /
-`x-manager`）；携带 Manual 的插件必须声明 `minCindyVersion`。不要用 Greptile 对
+官方仓提交的是 Server public release：禁止 `oidc-token` secret；携带 Manual 的插件
+必须声明 `minCindyVersion`。不要用 Greptile 对
 manifest schema 的猜测替代 CI 的确定性校验结果。
 
 `.tests/plugin-contract.test.mjs` 同时接受未改动的 legacy v2 与合法 v3；但新插件，

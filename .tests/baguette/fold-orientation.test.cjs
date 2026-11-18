@@ -216,3 +216,48 @@ test('an opened foldable starts at the guest orientation and rotation writes the
  assert.equal(make('secondary',null).orientation(),'landscape-left','without a reading the book opens upright');
  assert.equal(make('secondary','sideways').orientation(),'landscape-left');
 });
+
+test('embedded rotation fits and centres the animated snapshot independently of live iframe layout',()=>{
+ let now=0,next=0,index=0,reduced=false;const frames=new Map(),timers=new Map(),appended=[],listeners=new Map();
+ const style=()=>({removeProperty(k){delete this[k];if(k==='pointer-events')delete this.pointerEvents;}});
+ const element=()=>({style:style(),children:[],setAttribute(){},append(n){this.children.push(n);},getContext:()=>({drawImage(){}}),remove(){this.removed=true;}});
+ const stage={getBoundingClientRect:()=>({left:0,top:0,width:400,height:800})};
+ const parentDoc={getElementById:id=>id==='stage'?stage:{},createElement:element,body:{append:n=>appended.push(n)}};
+ const iframe={getBoundingClientRect:()=>({left:0,top:0}),addEventListener:(k,fn)=>listeners.set(k,fn),removeEventListener:k=>listeners.delete(k)};
+ let view={width:200,height:400,centerX:200,centerY:400};
+ const host={state:{zoom:{mode:'fit'}},measure(){view=index%2?{width:300,height:150,centerX:180,centerY:360}:{width:200,height:400,centerX:200,centerY:400};}};
+ const window={frameElement:iframe,parent:{document:parentDoc,cindySim:host,getComputedStyle:()=>({paddingLeft:'0',paddingRight:'0',paddingTop:'0',paddingBottom:'60'})},matchMedia:()=>({matches:reduced}),
+  Baguette:{_ScreenQuad:{contentRect:()=>({left:0,top:0,width:400,height:800})}}};
+ const context=vm.createContext({window,document:{getElementById:()=>null,addEventListener(){}},getComputedStyle:()=>({getPropertyValue:()=>''}),Promise,
+  performance:{now:()=>now},requestAnimationFrame:fn=>{frames.set(++next,fn);return next;},cancelAnimationFrame:id=>frames.delete(id),
+  setTimeout:fn=>{timers.set(++next,fn);return next;},clearTimeout:id=>timers.delete(id)});
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../../cindy-simulator/node/viewer-stage.js'),'utf8'),context);
+ function Panel(){}Panel.prototype.attach=function(){};Panel.prototype.detach=function(){};Panel.prototype.placePosePicker=function(){};Panel.prototype.setBackground=function(){};
+ window.Sim3DPanel=Panel;const panel=new Panel();panel.attach();
+ panel.stage={style:style()};panel.canvas={isConnected:true,width:800,height:1600};panel.litPanel='primary';panel.interfaceOrientation='portrait';panel.placePosePicker({hingeDegrees:0});
+ window.__cindyView=()=>view;
+ window.__nativeRotateBy=step=>{index=(index+step+4)%4;panel.interfaceOrientation=['portrait','landscape-left','portrait-upside-down','landscape-right'][index];};
+ const step=time=>{now=time;const callbacks=[...frames.values()];frames.clear();callbacks.forEach(fn=>fn(time));};
+ const flush=()=>{const callbacks=[...timers.values()];timers.clear();callbacks.forEach(fn=>fn());};
+ assert.equal(window.__cindyPose.turn(1),true);assert.equal(window.__cindyTurnActive(),true);
+ assert.equal(panel.stage.style.opacity,'0');assert.equal(panel.stage.style.pointerEvents,'none','the hidden live screen cannot receive a new gesture during rotation');assert.equal(appended.length,1);
+ const root=appended[0],ghost=root.children[0];step(0);
+ assert.match(ghost.style.transform,/translate\(0px,0px\) rotate\(0deg\) scale\(1\)/,'snapshot starts at its old visible position');
+ step(100);const middle=ghost.style.transform;assert.notEqual(middle,'rotate(90deg)');
+ // Incoming live frame/layout updates cannot directly move the parent snapshot.
+ iframe.getBoundingClientRect=()=>({left:25,top:10});assert.equal(ghost.style.transform,middle);
+ window.__cindyPose.turn(-1);assert.equal(appended.length,1,'reversal reuses the visible snapshot');
+ step(100);assert.equal(ghost.style.transform,middle,'retarget starts exactly at the displayed transform');
+ step(420);assert.match(ghost.style.transform,/translate\(25px,10px\) rotate\(0deg\) scale\(1\)/);
+ assert.equal(panel.stage.style.opacity,'1');flush();assert.equal(root.removed,true);assert.equal(panel.stage.style.opacity,undefined);
+ assert.equal(window.__cindyTurnActive(),false);assert.equal(panel.stage.style.pointerEvents,undefined);assert.equal(listeners.size,0);
+ // During a quarter turn, the screen plus bezel fits even at diagonal angles.
+ iframe.getBoundingClientRect=()=>({left:0,top:0});window.__cindyPose.turn(1);step(470);
+ const transform=appended.at(-1).children[0].style.transform;
+ const angle=Number(transform.match(/rotate\(([^d]+)deg/)[1])*Math.PI/180,scale=Number(transform.match(/scale\(([^)]+)\)/)[1]);
+ assert.ok((200*Math.abs(Math.cos(angle))+400*Math.abs(Math.sin(angle)))*scale*1.08<=364+.001);
+ listeners.get('load')();assert.equal(appended.at(-1).removed,true,'iframe replacement removes the parent overlay');assert.equal(frames.size,0);
+ reduced=true;const count=appended.length;window.__cindyPose.turn(-1);assert.equal(appended.length,count);assert.equal(window.__cindyTurnActive(),false);
+ reduced=false;window.__cindyPose.turn(1);panel.placePosePicker({hingeDegrees:180});assert.equal(window.__cindyTurnActive(),false,'folding interrupts a stale rotation snapshot');
+ window.__cindyPose.turn(1);panel.detach();assert.equal(window.__cindyTurnActive(),false,'detach restores live visibility and clears animation');
+});

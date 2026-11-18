@@ -157,13 +157,25 @@ call_tool(name:"community-management get-community-forum-publish-options", args:
 | --- | --- | --- |
 | `paragraph` | 段落;`style` 可为 `block-quote` / `collapse` | `style`、`collapse_title` |
 | `heading` | 标题 | `level`(正整数) |
-| `list` / `list-item` | 列表;项放在 `children` | `li-level` |
+| `list` / `list-item` | `list-item` 只放在 `list.children`,不能作为顶层节点 | 每项 `info.li-level` 是正整数,首项为 1,后续最多比上一项增加 1;不能用 0 |
 | `image` | 正文图片 | `img_url`、`width`、`height`、`description`(alt) |
 | `video` | 正文视频 | `video_id`(**整数**) |
 | `code-block` | 代码块 | `language` |
 | `table` / `table-row` / `table-cell` | 表格;单元格 `header: true` 为表头 | `header`、`align` |
 | `app` | App 卡片 | `app_id`(十进制字符串) |
 | `linkcard` | 链接卡片 | `url`、`title`、`description`、`icon_url` |
+
+合法列表正文示例(外层请求的 `contents` 仍需序列化为 JSON 字符串):
+
+```json
+[
+  {"type":"list","children":[
+    {"type":"list-item","info":{"li-level":1},"children":[{"text":"第一项"}]},
+    {"type":"list-item","info":{"li-level":2},"children":[{"text":"子项"}]},
+    {"type":"list-item","info":{"li-level":1},"children":[{"text":"第二项"}]}
+  ]}
+]
+```
 
 行内片段放在 `children` 里,`type` 缺省即纯文本:`mention`(`info.id` + `info.name`)、`link`(`info.url`),以及 `bold` / `italic` / `underline` / `strikethrough` / `code` / `color` / `highlight` 这类样式布尔或颜色值。
 
@@ -244,7 +256,8 @@ call_tool(name:"community-management publish-community-topic-draft", args:{
 | `CONFIRM_REQUIRED`(CLI exit 10) | 缺 `yes:true` | 说明这是写操作,取得同意后带 `yes:true` 重跑 |
 | 400 提示存在未知字段 | `draft_id` 放进了 `document`,或混入了文档结构外的字段 | 把 `draft_id` 移到顶层,`document` 只留文档字段 |
 | 400 提示 `contents` 非法 | 传了数组或非法节点 | 序列化成字符串,按上表校验节点 `type` |
-| 403 `permission_denied` | 不是该 App 的论坛管理员,或没有官方发布资格 | 换账号 / 改 `identity: "personal"` / 补权限 |
+| 403 `permission_denied` | scope、资源权限或官方身份资格被拒绝,单凭状态码无法区分 | 核对已授权 scope、目标论坛及发布选项;不要轮换 scope、账号或自动降为 `personal` 来试权限。仅当实际选项允许个人身份且符合用户发布意图时,才重新决定身份 |
+| 503 `result_unknown` / `ambiguous_outcome` | 写入可能已生效,但服务端无法确认或保存幂等结果 | 有 `draft_id` 时先 `get-community-topic-draft` 回读;没有句柄时报告未知并停止。不能改 key 再建草稿,不能发布结果未知的草稿 |
 | 404 `not_found` | `draft_id` 不存在,或草稿已发布被删除 | 已发布就不要再改;需要新内容就重新建草稿 |
 | 422 帖子审核中 | 帖子正在审核,详情不可读 | 等待过审,不要重发 |
 | 超时 / 结果未知(`unknown`) | 发布请求可能已经生效 | 先 `get-community-topic-draft` 核对 `moment_id`:已发布就用首次结果;确认没有 `moment_id` 后,才对同一 `draft_id` 重试 |

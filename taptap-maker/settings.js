@@ -41,6 +41,9 @@
       enterPat: 'Enter a TapTap Maker PAT.', savingPat: 'Validating and saving PAT...',
       patSaved: 'The TapTap Maker Runtime validated and saved the PAT.',
       patSaveFailed: 'Could not save the TapTap Maker PAT. Try again.',
+      patAuthRequired: 'This PAT has expired or is invalid. Click “Get PAT” to create a new credential, then save it.',
+      patForbidden: 'Maker denied access for this PAT. Check your account permissions or get a new PAT.',
+      patNetworkError: 'Could not connect to Maker to validate the PAT. Check your network and try again.',
       openConsole: 'Open Maker console',
       consoleHint: 'Starts a local service; does not build, submit, or install a game runtime. Closing the page does not stop the service; stop it in the console. Media switches apply to Agent tools, not manual console actions.',
       consoleReady: 'Console ready. Use the link if it did not open.',
@@ -90,6 +93,9 @@
       patPageFailed: '无法打开 TapTap Maker PAT 页面，请重试', enterPat: '请输入 TapTap Maker PAT',
       savingPat: '正在验证并保存 PAT…', patSaved: 'PAT 已由 TapTap Maker Runtime 验证并保存',
       patSaveFailed: 'TapTap Maker PAT 保存失败，请重试',
+      patAuthRequired: 'PAT 已过期或无效，请点击“获取 PAT”生成新凭证后重新保存',
+      patForbidden: 'Maker 拒绝此 PAT 的访问权限，请检查账号权限或重新获取 PAT',
+      patNetworkError: '无法连接 Maker 验证 PAT，请检查网络后重试',
       openConsole: '打开 Maker 控制台',
       consoleHint: '启动本地服务，不自动构建或安装游戏运行环境。关闭页面不会停止服务，请在控制台停止。媒体开关只限制 Agent 工具，不限制控制台中的手动操作。',
       consoleReady: '控制台已就绪，未自动打开时请点击链接。',
@@ -138,6 +144,9 @@
       patPageFailed: 'PAT ページを開けませんでした。再試行してください。', enterPat: 'TapTap Maker PAT を入力してください。',
       savingPat: 'PAT を検証して保存しています…', patSaved: 'Runtime が PAT を検証して保存しました。',
       patSaveFailed: 'PAT を保存できませんでした。再試行してください。',
+      patAuthRequired: 'PAT が期限切れか無効です。「PAT を取得」から新しい認証情報を作成して保存してください。',
+      patForbidden: 'この PAT のアクセスが Maker に拒否されました。アカウントの権限を確認するか、新しい PAT を取得してください。',
+      patNetworkError: 'PAT の検証のために Maker に接続できませんでした。ネットワークを確認して再試行してください。',
       openConsole: 'Maker コンソールを開く',
       consoleHint: 'ローカルサービスを起動します。ビルド、提出、ゲームランタイムのインストールは行いません。ページを閉じても停止しません。サービスはコンソールで停止してください。メディア設定は Agent ツールのみ対象で、手動操作には適用されません。',
       consoleReady: 'コンソールの準備ができました。開かない場合はリンクを使用してください。',
@@ -186,6 +195,9 @@
       patPageFailed: 'PAT 페이지를 열 수 없습니다. 다시 시도하세요.', enterPat: 'TapTap Maker PAT를 입력하세요.',
       savingPat: 'PAT를 검증하고 저장하는 중...', patSaved: 'Runtime이 PAT를 검증하고 저장했습니다.',
       patSaveFailed: 'PAT를 저장하지 못했습니다. 다시 시도하세요.',
+      patAuthRequired: 'PAT가 만료되었거나 유효하지 않습니다. “PAT 가져오기”에서 새 인증 정보를 만든 후 저장하세요.',
+      patForbidden: 'Maker가 이 PAT의 접근을 거부했습니다. 계정 권한을 확인하거나 새 PAT를 발급받으세요.',
+      patNetworkError: 'PAT를 검증하기 위해 Maker에 연결하지 못했습니다. 네트워크를 확인한 후 다시 시도하세요.',
       openConsole: 'Maker 콘솔 열기',
       consoleHint: '로컬 서비스를 엽니다. 빌드하거나 게임 런타임을 설치하지 않습니다. 페이지를 닫아도 서비스는 계속됩니다. 콘솔에서 서비스를 중지하세요. 미디어 설정은 Agent 도구에만 적용되며 수동 콘솔 작업에는 적용되지 않습니다.',
       consoleReady: '콘솔이 준비되었습니다. 열리지 않으면 링크를 사용하세요.',
@@ -336,6 +348,9 @@
       LOGIN_FAILED: 'loginFailed',
       PAT_PAGE_FAILED: 'patPageFailed',
       PAT_SAVE_FAILED: 'patSaveFailed',
+      PAT_AUTH_REQUIRED: 'patAuthRequired',
+      PAT_FORBIDDEN: 'patForbidden',
+      PAT_NETWORK_ERROR: 'patNetworkError',
       PROJECTS_FAILED: 'projectListFailed',
       PICK_FAILED: 'syncFailed',
       MISSING_PATH: 'syncFailed',
@@ -413,6 +428,11 @@
         reject(new Error(t('responseTimeout')));
       }, longRunning ? 15 * 60 * 1000 : 60 * 1000);
     });
+  }
+
+  function setAccountMessage(text, isError) {
+    message.className = isError ? 'hint error' : 'hint';
+    message.textContent = text;
   }
 
   function renderState(state, patHint) {
@@ -550,7 +570,7 @@
   }
 
   async function refreshAccount() {
-    message.textContent = '';
+    setAccountMessage('');
     try {
       var result = await request('status', {}, false);
       renderState(result.state || 'unknown', result.patHint);
@@ -564,14 +584,14 @@
   connectButton.addEventListener('click', async function connect() {
     setBusy(true);
     accountState.textContent = t('completeAuth');
-    message.textContent = '';
+    setAccountMessage('');
     try {
       var result = await request('login', {}, true);
       renderState('connected', result.patHint);
       await refreshProjects();
     } catch (error) {
       renderState('unknown');
-      message.textContent = error.message || t('loginFailed');
+      setAccountMessage(error.message || t('loginFailed'), true);
     } finally {
       setBusy(false);
     }
@@ -579,12 +599,12 @@
 
   getPatButton.addEventListener('click', async function openPatPage() {
     setBusy(true);
-    message.textContent = '';
+    setAccountMessage('');
     try {
       await request('open_pat_page', {}, false);
-      message.textContent = t('patPageOpened');
+      setAccountMessage(t('patPageOpened'));
     } catch (error) {
-      message.textContent = error.message || t('patPageFailed');
+      setAccountMessage(error.message || t('patPageFailed'), true);
     } finally {
       setBusy(false);
     }
@@ -610,22 +630,22 @@
     event.preventDefault();
     var pat = patInput.value.trim();
     if (!pat) {
-      message.textContent = t('enterPat');
+      setAccountMessage(t('enterPat'), true);
       patInput.focus();
       return;
     }
     setBusy(true);
     accountState.textContent = t('savingPat');
-    message.textContent = '';
+    setAccountMessage('');
     try {
       var result = await request('set_pat', { pat: pat }, true);
       patInput.value = '';
       renderState('connected', result.patHint);
-      message.textContent = t('patSaved');
+      setAccountMessage(t('patSaved'));
       await refreshProjects();
     } catch (error) {
       renderState('unknown');
-      message.textContent = error.message || t('patSaveFailed');
+      setAccountMessage(error.message || t('patSaveFailed'), true);
     } finally {
       // 完整 PAT 不写入任何持久化状态，交给 Runtime 后立即丢弃页面引用。
       pat = '';

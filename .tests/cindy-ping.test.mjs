@@ -42,7 +42,7 @@ function clockedScheduler(capture = async () => ({ text: 'example' })) {
   } };
 }
 
-async function host({ saved = {}, send, cancel, create, list, capabilities, beginDispatch = () => ({ current: true }), modelCatalog = [], failWrite = () => false } = {}) {
+async function host({ saved = {}, send, cancel, create, list, capabilities, readSnapshot, beginDispatch = () => ({ current: true }), modelCatalog = [], failWrite = () => false } = {}) {
   let stored = clone(saved), handler;
   const writes = [], calls = [], events = [];
   const snapshot = { capturedAt: 1000, text: 'fixture-window-text', jpeg: 'ZmFrZS1pbWFnZQ==',
@@ -75,13 +75,13 @@ async function host({ saved = {}, send, cancel, create, list, capabilities, begi
             case 'current': return { current: true };
             case 'beginDispatch': return beginDispatch(params);
             case 'complete': return { current: true };
-            case 'readSnapshot': return clone(snapshot);
+            case 'readSnapshot': return readSnapshot ? readSnapshot(params) : clone(snapshot);
             case 'wheelTargets': return { current: true };
             case 'resolveTarget': return { current: true };
             default: throw new Error(`Unexpected node method: ${method}`);
           }
         })();
-        return { ok: true, result: clone(result) };
+        return { ok: true, result: clone(await result) };
       } },
       tasks: { capabilities: async () => capabilities || info, models: async () => ({ models: modelCatalog }),
         create: async params => { calls.push({ method: 'create', params: clone(params) }); return create(params); },
@@ -306,6 +306,52 @@ async function workerFixture(config, captureSnapshot = {}) {
     },
   };
 }
+
+// Regression: optional window material must not block an already valid instruction.
+// Use the production worker's readSnapshot boundary and the real main.js dispatcher.
+for (const promptMode of ['preset', 'input']) {
+  test(`empty capture still delivers a valid ${promptMode} instruction through both send APIs`, async () => {
+    for (const useTarget of [false, true]) {
+      const config = defaults();
+      config.emotes[0] = { ...sendEmote(config), action: 'new', target: undefined,
+        screenshot: false, promptMode, prompt: promptMode === 'preset' ? 'Release this project' : '' };
+      const f = await workerFixture(config, { text: '', jpeg: null });
+      f.trigger(config.emotes[0].id, 'empty-capture');
+      await f.tick();
+      if (promptMode === 'input') {
+        const opened = f.native.find(call => call.method === 'openInput');
+        assert.ok(opened);
+        f.emit({ kind: 'input-submit', id: opened.params.id, text: 'Release this project' });
+      }
+      await f.tick(2000);
+      const prepared = f.notifications.find(event => event.kind === 'prepared');
+      assert.ok(prepared);
+      const h = await host({ saved: { config },
+        readSnapshot: params => f.api.execute('readSnapshot', params),
+        create: async () => ({ taskId: 'fixture-new-task', title: 'New task', status: 'active', revision: 1 }) });
+      h.api.invalidate(prepared.id);
+      await h.api.dispatch({ ...prepared,
+        ...(useTarget ? { target: { kind: 'project', id: 'fixture-project', label: 'Example' } } : {}) });
+      const sent = h.calls.find(call => call.method === (useTarget ? 'send' : 'taskSend'));
+      assert.ok(sent);
+      assert.equal(sent.params.text, 'Release this project');
+      assert.equal('attachments' in sent.params, false);
+      assert.equal(f.native.find(call => call.method === 'capture').params.screenshot, false);
+    }
+  });
+}
+
+test('worker still rejects missing captures and cancelled operations', async () => {
+  const config = defaults();
+  config.emotes[0] = { ...sendEmote(config), action: 'new', target: undefined };
+  const f = await workerFixture(config, { text: '', jpeg: null });
+  f.trigger(config.emotes[0].id, 'missing-capture');
+  const id = f.api.scheduler.current.id;
+  await assert.rejects(f.api.execute('readSnapshot', { id }), /NO_CONTENT/);
+  await f.tick(2000);
+  f.emit({ kind: 'cancel-action', gestureId: 'missing-capture' });
+  await assert.rejects(f.api.execute('readSnapshot', { id }), /SUPERSEDED/);
+});
 
 test('worker opens native input only for the selected input-mode sender and ignores stale submission', async () => {
   const config = defaults();

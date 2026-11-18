@@ -1021,8 +1021,6 @@ test('main.js 写邮箱的动作没有 Worker 的明确判断时提示先核对�
     [{ ok: false, errorCode: 'PROTOCOL_ERROR', message: workerMessage, data: { execution: 'unknown' } }, 'worker'],
   ];
   const writes = [
-    [{ action: 'send', to: 'recipient@example.test', subject: 'Hi', body_text: 'Body' }, 'sendUnconfirmed'],
-    [{ action: 'draft', to: 'recipient@example.test', subject: 'Hi', body_text: 'Body' }, 'draftUnconfirmed'],
     [{ action: 'move', message_uid: 7, target_folder: 'Archive' }, 'moveUnconfirmed'],
     [{ action: 'mark_read', message_uid: 7 }, 'flagsUnconfirmed'],
     [{ action: 'mark_unread', message_uid: 7 }, 'flagsUnconfirmed'],
@@ -1111,8 +1109,9 @@ test('main.js 按宿主 app-context 语言返回错误，并把语言传给 Work
     const unknownAction = await harness.call('icloud_mail', { action: 'delete_all' });
     assert.equal(unknownAction.message, messages.unknownAction.replace('{action}', 'delete_all'));
 
+    // Composing goes through the shared mail-card flow; direct send is refused.
     const compose = await harness.call('icloud_mail', { action: 'send', to: 'a@example.test' });
-    assert.equal(compose.message, messages.composeNeedsFields.replace('{action}', 'send'));
+    assert.match(compose.message, /^\[not_executed\] .*send_draft/);
 
     const unknownTool = await harness.call('icloud_mail_purge');
     assert.equal(unknownTool.message, messages.unknownTool.replace('{tool}', 'icloud_mail_purge'));
@@ -1509,6 +1508,9 @@ function stripComments(text) {
 test('main.js、settings.js、settings.html、Worker 源码在文案表之外没有中文', () => {
   // zh-CN 和 ja 表允许汉字（日文与中文共用汉字）。Worker 表用 Object.freeze 包了一层。
   const cjkTables = /\n {2}(?:'zh-CN'|ja): (?:Object\.freeze\()?\{[\s\S]*?\n {2}\}\)?,(?=\n)/g;
+  // The shared mail-card block carries its own four-language table; the shared
+  // suite checks it identically for every IMAP plugin.
+  const sharedCompose = /\/\* BEGIN cindy-imap-compose[\s\S]*?\/\* END cindy-imap-compose \*\//;
   // Worker 里这两处比对的是 iCloud 服务器返回的文本，不是界面文案，必须保留中文。
   const serverText = [
     "/(^|[/])drafts?$|草稿箱/i",
@@ -1521,7 +1523,7 @@ test('main.js、settings.js、settings.html、Worker 源码在文案表之外没
     ['settings.html', settingsHtml],
     ['src/worker.cjs', workerSource],
   ]) {
-    let outside = stripComments(text).replace(cjkTables, '');
+    let outside = stripComments(text.replace(sharedCompose, '')).replace(cjkTables, '');
     for (const literal of serverText) outside = outside.split(literal).join('');
     const offenders = outside.split('\n').filter((line) => hanRe.test(line));
     assert.deepEqual(offenders, [], label);
@@ -1544,7 +1546,6 @@ test('main.js zh-CN 运行时输出与迁移前的硬编码字符串逐字一致
   assert.equal((await harness.call('icloud_mail', { action: 'read', message_uid: 0 })).message, 'message_uid 必须是有效的正整数');
   assert.equal((await harness.call('icloud_mail', { action: 'nuke' })).message, '未知 action：nuke');
   assert.equal((await harness.call('icloud_mail', { action: 'move', message_uid: 1 })).message, 'move 需要 target_folder；请先调用 list_folders');
-  assert.equal((await harness.call('icloud_mail', { action: 'draft', to: 'a@b.c' })).message, 'draft 需要 to、subject 和 body_text');
   assert.equal((await harness.call('icloud_mail_x')).message, '未知工具：icloud_mail_x');
   assert.equal((await harness.settings('connect', { email: 'bad' })).message, '请输入有效的 iCloud Mail 邮箱地址');
   assert.equal((await harness.settings('reset', {})).message, '未知设置动作');
@@ -1639,3 +1640,7 @@ test('插件代码不读取 navigator.language', () => {
     assert.doesNotMatch(text, /navigator\s*\.\s*languages?\b/, label);
   }
 });
+
+// Shared common-mail-card adapter, exercised end to end with Cindy's SDK.
+import { runImapComposeSuite } from './imap-mail-compose.test.mjs';
+runImapComposeSuite('icloud-mail', { email: 'user@icloud.com', kv: { credentialSlot: 'a' }, secretKeys: ['icloud_mail_app_password'], providerName: 'iCloud Mail' });

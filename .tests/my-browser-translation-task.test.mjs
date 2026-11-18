@@ -442,3 +442,72 @@ test('per-video mode: two tabs of one browser on two videos keep their own tasks
   assert.throws(()=>core.validate({op:'config',view:'tab:1 <x>'}),/INVALID_INPUT/);
   assert.equal(core.validate({op:'config',view:'tab:12'}).view,'tab:12');
 });
+
+test('webpage chat reaches the task with question answering instructions',async()=>{
+  const f=fixture();await f.make()({purpose:'webpage-chat',prompt:'Answer: what is on the page?',source:{url:'https://example.test/article'}});
+  assert.match(f.sends[0].text,/Answer the supplied user question/);
+  assert.doesNotMatch(f.sends[0].text,/Return the requested translation/);
+  assert.match(f.sends[0].text,/Do not call tools/);
+});
+
+test('a model picked in the side panel runs that exact route; other requests keep the plugin default',async()=>{
+  const f=fixture(),core=createRequire(import.meta.url)('../my-browser/extension/learning-core.js'),routes=[];
+  f.tasks.capabilities=async()=>({operations:['create','get','send','getRun','readMessages','cancel','setModel'],pluginDefaultModel:true});
+  f.tasks.setModel=async req=>{routes.push(req.route);f.task.revision++;return {task:structuredClone(f.task)};};
+  const edits=[];const service=createLearningService({core,model:f.make(),models:async()=>({models:[]}),favorite:async m=>{edits.push(m);return {favorites:[]};}});
+  const profile='11111111-1111-4111-8111-111111111111',route={agentKind:'codex',providerId:'b',model:'deep',effort:'high',fastMode:false};
+  f.messages.push=function(m){m.content=[{type:'text',text:'Page answer'}];return Array.prototype.push.call(this,m);};
+  const r=await service.handle(profile,{op:'conversation',scenario:'webpage-chat',instruction:'What is this?',text:'Page text',source:{url:'https://example.test/a'},route});
+  assert.equal(r.text,'Page answer');
+  await f.make()({prompt:'translate me'});
+  assert.deepEqual(routes,[route,'plugin-default']);
+  assert.ok((await service.handle(profile,{op:'config'})).features.includes('webpage-chat-models-v1'));
+  // Only this computer's routes, and only for webpage chat.
+  assert.throws(()=>core.validate({op:'conversation',scenario:'webpage-chat',instruction:'q',text:'t',route:{...route,agentDeviceId:'other'}}),/INVALID_INPUT/);
+  assert.throws(()=>core.validate({op:'translate',text:'t',route}),/INVALID_INPUT/);
+  // 2026-11-17 review: the picker offers "Off" (`none`) where a model has it; validation must accept it.
+  assert.equal(core.validate({op:'conversation',scenario:'webpage-chat',instruction:'q',text:'t',route:{...route,effort:'none'}}).route.effort,'none');
+  assert.equal(core.validate({op:'model-favorite',mutation:{kind:'add',item:{providerId:'b',modelId:'deep',agent:'codex',effort:'none'}}}).mutation.item.effort,'none');
+  // Favorite edits keep Cindy's favorite shape; anything else is rejected before reaching Cindy.
+  await service.handle(profile,{op:'model-favorite',mutation:{kind:'add',item:{providerId:'b',modelId:'deep',agent:'codex',effort:'high',extra:'x'}}});
+  assert.deepEqual(edits,[{kind:'add',item:{providerId:'b',modelId:'deep',agent:'codex',effort:'high'}}]);
+  assert.throws(()=>core.validate({op:'model-favorite',mutation:{kind:'remove',expected:{providerId:'b',modelId:'deep',agent:'codex'}}}),/INVALID_INPUT/);
+  assert.throws(()=>core.validate({op:'model-favorite',mutation:{kind:'add',item:{providerId:'b',modelId:'deep',agent:'gpt'}}}),/INVALID_INPUT/);
+});
+
+// 2026-11-17 product decision: side panel chats are visible Cindy tasks, never hidden or archived;
+// the chat shows the question and the page travels as attached context.
+test('side panel chats are visible tasks with the question as the message and are never archived',async()=>{
+  const f=fixture(),creates=[],archived=[];
+  f.tasks.capabilities=async()=>({operations:['create','get','send','getRun','readMessages','cancel','archive'],hiddenTasks:true,messageContext:true});
+  f.tasks.create=async args=>{creates.push(args);return f.task;};
+  f.tasks.archive=async({taskId})=>{archived.push(taskId);return {ok:true};};
+  const model=f.make(),source={url:'https://example.test/article',title:'An article'};
+  await model({purpose:'webpage-chat',scope:'p/page-chat:1:a',question:'What is this?',prompt:'Answer: what is on the page?',source});
+  assert.equal(creates[0].hidden,undefined);assert.equal(creates[0].title,'网页问答 · An article');
+  assert.equal(f.sends[0].text,'What is this?');
+  assert.match(f.sends[0].context,/Answer the supplied user question/);assert.match(f.sends[0].context,/what is on the page/);
+  // Another chat and another page: the earlier chat's task stays in the user's task list.
+  await model({purpose:'webpage-chat',scope:'p/page-chat:1:a',question:'And this?',prompt:'Answer: next page',source:{url:'https://example.test/other',title:'Other'}});
+  assert.deepEqual(archived,[]);
+  // Subtitle tasks keep their background behavior.
+  await model({prompt:'translate',source:{url:'https://www.youtube.com/watch?v=x'}});
+  assert.equal(creates.at(-1).hidden,true);
+});
+
+// 2026-11-17: side panel chats stream the answer from hosts that expose the run's text so far.
+test('side panel chats forward the run text while it is written; subtitles do not',async()=>{
+  const f=fixture();f.auto(false);const getRun=f.tasks.getRun;let polls=0;
+  f.tasks.getRun=async req=>{const run=await getRun(req);polls++;
+    if(polls===1)return {...run,preview:{text:'## Partial'}};
+    if(polls===2)return {...run,preview:{text:'y'.repeat(globalThis.CindyLearning.progressTextMax+50)}};
+    f.runs.get(run.runId).status='completed';return {...run,status:'completed'};};
+  const seen=[],progress=async(stage,detail)=>{seen.push({stage,...detail});};
+  await f.make()({purpose:'webpage-chat',question:'q',prompt:'Answer: q',source:{url:'https://example.test/a'}},{progress});
+  assert.ok(seen.some(p=>p.stage==='generating'&&p.text==='## Partial'));
+  // Long answers keep streaming within the limit every relay accepts.
+  assert.ok(seen.some(p=>p.text?.length===globalThis.CindyLearning.progressTextMax));
+  seen.length=0;polls=0;
+  await f.make()({prompt:'translate',source:{url:'https://www.youtube.com/watch?v=x'}},{progress});
+  assert.ok(!seen.some(p=>p.text));
+});

@@ -25,13 +25,13 @@
   function dispose(){
     if(disposed)return;disposed=true;panelEpoch++;generation++;lifecycle.abort();clearInterval(navigationTimer);
     requests.clear();progressHandlers.clear();stopPage();stopVideo();
-    for(const rec of translations.values())rec.host.remove();translations.clear();
+    for(const rec of translations.values())unpresent(rec);translations.clear();
     for(const entry of document.querySelectorAll('[data-cindy-player-entry]'))entry.remove();
     selectionButton?.remove();selectionButton=null;host?.remove();host=null;shadow=null;footer=null;status=null;
-    clearTimeout(agentMarkTimer);agentMark?.remove();agentMark=null;openedMark?.remove();openedMark=null;
+    clearTimeout(agentMarkTimer);agentMark?.remove();agentMark=null;openedMark?.remove();openedMark=null;clearOpenedTitle();
     try{api?.runtime?.onMessage?.removeListener(onRuntimeMessage);api?.storage?.onChanged?.removeListener(onPreferencesChanged);}catch{}
   }
-  let subtitleCacheSupported=false,expandedLanguages=false,prefs={selectionButton:false,videoTarget:'zh-CN',videoMode:'both',videoSize:'medium',autoVideo:true,bufferPause:false,backgroundFill:false,captionTheme:'dark',autoSites:{}},selectionPoint=null,configuring=null,subtitleSegmentation=false,subtitleEditorial=false,locale=/^zh/i.test(globalThis.navigator?.language||'')?'zh-CN':'en',t=U.copy(locale),target='zh-CN',host,shadow,body,status,footer,cancelButton,selected='',selectedContext='',lastResult='',taskKey='',taskPayload='',generation=0,translated=false;
+  let localeKnown=false,subtitleCacheSupported=false,expandedLanguages=false,prefs={selectionButton:false,videoTarget:'zh-CN',videoMode:'both',videoSize:'medium',autoVideo:true,bufferPause:false,backgroundFill:false,captionTheme:'dark',autoSites:{}},selectionPoint=null,configuring=null,subtitleSegmentation=false,subtitleEditorial=false,locale=/^zh/i.test(globalThis.navigator?.language||'')?'zh-CN':'en',t=U.copy(locale),target='zh-CN',host,shadow,body,status,footer,cancelButton,selected='',selectedContext='',lastResult='',taskKey='',taskPayload='',generation=0,translated=false;
   let cueMedia,cueMediaSource='',video,cues=[],activeCue=-1,repeat=false,autoPause=false,previousCue=-1,videoHandler,videoSession,videoTimer;
   const progressHandlers=new Map(),requests=new Set(),translations=new Map();let observer,translateRunning=null;
   function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
@@ -39,7 +39,6 @@
   function report(e){if(disposed)return;const code=e?.message||e,message=code==='TIMEOUT'&&videoSession&&!cues.some(c=>c.translation)?U.subtitleStatusCopy(locale).emptyTimeout:U.error(code,locale,e?.reason),detail=U.errorDetail(code,e?.reason);videoSession?.overlay?.notify(message,true,detail);if(status){status.textContent=message;status.title=detail;status.className='status error';updateFooter();}}
   function note(text){if(disposed)return;const failed=videoSession?.chunks?.find(c=>c.error);videoSession?.overlay?.notify(failed?U.error(failed.error,locale):text,!!failed);if(!status)return;status.textContent=text;status.className='status';updateFooter();}
   function updateFooter(){if(!footer)return;cancelButton.hidden=!requests.size;footer.hidden=!requests.size&&!status.textContent;}
-  function pageTheme(){for(const node of [document.body,document.documentElement]){if(!node)continue;const c=getComputedStyle(node).backgroundColor.match(/[\d.]+/g)?.map(Number);if(c&&c.length>=3&&(c.length===3||c[3]>=0.5))return (c[0]*.2126+c[1]*.7152+c[2]*.0722)<128?'dark':'light';}return getComputedStyle(document.documentElement).colorScheme==='dark'?'dark':'light';}
   function isolateHost(node,layout){node.style.setProperty('all','initial','important');for(const [key,value]of Object.entries(layout))node.style.setProperty(key,value,'important');}
   // Cindy's silhouette with a caption bubble: whose subtitles these are, in any language. The bubble
   // turns Cindy red while Cindy subtitles are on.
@@ -53,32 +52,58 @@
   // X plays many videos under one page address, so a video is identified by its
   // media id (shared by reposts) or its post, never by the feed's URL.
   const xSite=/(^|\.)(x|twitter)\.com$/.test(location.hostname);
-  // Adapted players. anchor: the site's captions control, Cindy's button goes beside it.
+  // Adapted players. anchor: the site's captions control, Cindy's button goes beside it; barEnd: when that
+  // control is missing, the end of the control bar instead (see barEnd).
   // hide: the site's own caption layer. floating: no stable control bar, so the entry sits on the video.
   // multi: several players per page, each with its own entry. external: captions come from site-captions.js.
   const site=[
     {id:'youtube',host:/(^|\.)(youtube|youtube-nocookie)\.com$/,player:'#movie_player,.html5-video-player',bar:'.ytp-right-controls',hide:'.ytp-caption-window-container'},
-    {id:'x',host:/(^|\.)(x|twitter)\.com$/,player:'[data-testid="videoPlayer"]',anchor:'[data-testid="captions"]',multi:true},
+    {id:'x',host:/(^|\.)(x|twitter)\.com$/,player:'[data-testid="videoPlayer"]',anchor:'[data-testid="captions"]',barEnd:true,multi:true},
     {id:'vimeo',host:/(^|\.)vimeo\.com$/,player:'.player,#player',anchor:'button[data-cc-button]',hide:'.vp-captions'},
     {id:'ted',host:/(^|\.)ted\.com$/,player:'media-controller',anchor:'button[aria-label="Subtitles"]',hide:'div:has(> span > .whitespace-pre-line)'},
     {id:'bilibili',host:/(^|\.)bilibili\.com$/,player:'.bpx-player-container',anchor:'.bpx-player-ctrl-subtitle',hide:'.bpx-player-subtitle-wrap',external:true},
     {id:'tiktok',host:/(^|\.)tiktok\.com$/,player:'[class*="DivVideoPlayerContainer"]',hide:'[class*="DivCaptionContainer"]',floating:true,multi:true,external:true},
     {id:'dailymotion',host:/(^|\.)dailymotion\.com$/,player:'.player.video_player',hide:'.subtitles_placeholder',floating:true,external:true},
   ].find(entry=>entry.host.test(location.hostname))||{id:'generic',player:'#movie_player,.html5-video-player',bar:'.ytp-right-controls',hide:'.ytp-caption-window-container'};
-  const youtubeSite=site.id==='youtube',inFrame=!!window.parent&&window.parent!==window;
+  // Sites with one main player start subtitles on their own. X and TikTok are scrolling feeds: starting there
+  // would translate every video scrolled past, so they wait for the player button.
+  const youtubeSite=site.id==='youtube',autoVideoSite=['youtube','vimeo','ted','bilibili','dailymotion'].includes(site.id),inFrame=!!window.parent&&window.parent!==window;
   const playerSelector=site.player;
+  // Embeds that run this script in their own frame (see manifest) and so mount the in-player entry.
+  const framedPlayers='iframe[src*="youtube.com/embed/"],iframe[src*="youtube-nocookie.com/embed/"],iframe[src*="player.vimeo.com/video/"]';
   const embeddedPlayers='iframe[src*="youtube.com/embed/"],iframe[src*="youtube-nocookie.com/embed/"],iframe[src*="player.vimeo.com/video/"],iframe[src*="geo.dailymotion.com/player/"],iframe[src*="player.bilibili.com/player.html"]';
-  function xVideoId(media){
-    const id=media.poster?.match(/\/(?:amplify_video_thumb|ext_tw_video_thumb|tweet_video_thumb)\/(\d+)\//)?.[1]||(media.closest('[data-testid="tweet"]')?.querySelector('a[href*="/status/"] time')?.parentElement?.getAttribute('href')||location.pathname).match(/\/status\/(\d+)/)?.[1];
-    return id?'x:'+id:undefined;
+  // Both ids a player can be known by: its media (from the poster, the stream or the thumbnail the
+  // feed draws before playing) and the post holding it (its timestamp links to it). A player outside
+  // any post (the media viewer) takes the post from the address; one inside a post never does, or a
+  // reply's video would pass for the post the page is about.
+  function xVideoIds(media){
+    const thumb=/\/(?:amplify_video_thumb|ext_tw_video_thumb|tweet_video_thumb|amplify_video|ext_tw_video|tweet_video)\/(\d{1,25})\//;
+    const box=media.closest('[data-testid="videoPlayer"],[data-testid="videoComponent"]');
+    const sources=[media.poster,media.currentSrc,media.getAttribute('src'),...[...media.querySelectorAll('source')].map(s=>s.src),...(box?[...box.querySelectorAll('img')].map(i=>i.currentSrc||i.src):[])];
+    const mediaId=sources.map(s=>String(s||'').match(thumb)?.[1]).find(Boolean);
+    const post=media.closest('article,[data-testid="tweet"]');
+    const link=post?[...post.querySelectorAll('time')].map(t=>t.closest('a[href*="/status/"]')).find(Boolean)?.getAttribute('href'):location.pathname;
+    const postId=link?.match(/\/status\/(\d{1,25})/)?.[1];
+    return {media:mediaId&&'x:'+mediaId,post:postId&&'x:'+postId};
   }
+  const xVideoId=media=>{const ids=xVideoIds(media);return ids.media||ids.post;};
   // Where a Cindy button sits in the site's own control bar. X only renders its
   // bar while the pointer is over the player, so a missing slot is normal there.
   function controlSlot(player){
     const bar=site.bar&&player?.querySelector(site.bar);if(bar)return {parent:bar,before:bar.firstChild};
-    let node=site.anchor&&player?.querySelector(site.anchor);
+    let node=site.anchor&&player?.querySelector(site.anchor)||(site.barEnd?barEnd(player):null);
     while(node&&node.parentElement&&node.parentElement!==player&&node.parentElement.children.length===1)node=node.parentElement;
     return node?.parentElement?{parent:node.parentElement,before:node}:null;
+  }
+  // X leaves its captions button out of some players whose video still carries a caption track.
+  // The entry then sits before the bar's last button (fullscreen), in the row showing "0:08 / 0:40":
+  // no labels, so any interface language works, and still only where there are captions to read.
+  function barEnd(player){
+    const media=player?.querySelector('video'),buttons=player?.querySelectorAll('button');
+    if(!buttons?.length||![...(media?.textTracks||[])].some(x=>(x.kind==='subtitles'||x.kind==='captions')&&x.label!=='clone'))return null;
+    let node=buttons[buttons.length-1];
+    while(node.parentElement&&node.parentElement!==player&&node.parentElement.children.length===1)node=node.parentElement;
+    return node.parentElement!==player&&/\d:\d\d\s*\/\s*\d+:\d\d/.test(node.parentElement?.textContent||'')?node:null;
   }
   // Walks shadow roots too: BBC, Reddit and Archive.org keep their <video> inside web components.
   function allMedia(){
@@ -88,7 +113,12 @@
   }
   function pageVideoId(media){
     if(videoSession?.videoId)return videoSession.videoId;
-    if(xSite)return xVideoId(media);
+    if(site.multi){
+      // A session keeps the identity it first sent, so its passages stay in one task and cache.
+      // A feed's address names no video: an unrecognised player gets its own identity rather than sharing the page's.
+      const id=xSite?xVideoId(media):undefined;if(!videoSession||media!==video)return id;
+      videoSession.videoId=id||site.id+':s-'+L.uuid();return videoSession.videoId;
+    }
     if(youtubeSite&&inFrame){const id=location.pathname.match(/\/embed\/([\w-]{1,48})/)?.[1];return id?'youtube:'+id:undefined;}
     return undefined;
   }
@@ -102,13 +132,13 @@
   function speak(text,language){speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang=language||target;u.rate=0.9;speechSynthesis.speak(u);}
   async function configure(){
     if(configuring)return configuring;
-    configuring=(async()=>{const r=await request({op:'config'});subtitleSegmentation=r.features?.includes('subtitle-segmentation-v1')===true;subtitleEditorial=r.features?.includes('subtitle-editorial-v1')===true;subtitleCacheSupported=r.features?.includes('subtitle-cache-v1')===true;expandedLanguages=r.features?.includes('language-target-v1')===true;locale=r.locale||'en';t=U.copy(locale);
+    configuring=(async()=>{const r=await request({op:'config'});subtitleSegmentation=r.features?.includes('subtitle-segmentation-v1')===true;subtitleEditorial=r.features?.includes('subtitle-editorial-v1')===true;subtitleCacheSupported=r.features?.includes('subtitle-cache-v1')===true;expandedLanguages=r.features?.includes('language-target-v1')===true;locale=r.locale||'en';localeKnown=true;t=U.copy(locale);
       const selectionRevision=selectionPreferenceRevision;
       const stored=(await extensionCall(()=>api.storage.local.get('cindyReadingPreferences'))).cindyReadingPreferences||{};
       const legacy=stored.webTarget?{}:await request({op:'preferences'});
       const selectionButtonEnabled=selectionRevision===selectionPreferenceRevision?stored.selectionButton===true:prefs.selectionButton;
       target=L.validTarget(stored.webTarget)?stored.webTarget:L.validTarget(legacy.target)?legacy.target:'zh-CN';
-      prefs={selectionButton:selectionButtonEnabled,webTarget:target,videoTarget:L.validTarget(stored.videoTarget)?stored.videoTarget:target,videoMode:stored.videoMode==='original'?'off':['both','translation','off'].includes(stored.videoMode)?stored.videoMode:'both',lastVideoMode:stored.lastVideoMode==='translation'?'translation':'both',videoSize:['small','medium','large'].includes(stored.videoSize)?stored.videoSize:'medium',autoVideo:stored.autoVideo!==false,bufferPause:stored.bufferPause===true,backgroundFill:stored.backgroundFill===true,captionTheme:stored.captionTheme==='light'?'light':'dark',autoSites:stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{},theme:['light','dark'].includes(stored.theme)?stored.theme:null};
+      prefs={selectionButton:selectionButtonEnabled,webTarget:target,webMode:stored.webMode==='translation'?'translation':'both',videoTarget:L.validTarget(stored.videoTarget)?stored.videoTarget:target,videoMode:stored.videoMode==='original'?'off':['both','translation','off'].includes(stored.videoMode)?stored.videoMode:'both',lastVideoMode:stored.lastVideoMode==='translation'?'translation':'both',videoSize:['small','medium','large'].includes(stored.videoSize)?stored.videoSize:'medium',autoVideo:stored.autoVideo!==false,bufferPause:stored.bufferPause===true,backgroundFill:stored.backgroundFill===true,captionTheme:stored.captionTheme==='light'?'light':'dark',autoSites:stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{}};
     })();try{await configuring;}finally{configuring=null;}
   }
   let preferenceSave=Promise.resolve();
@@ -122,6 +152,8 @@
     });
     return preferenceSave;
   }
+  // Same-language automatic sessions leave the site's captions alone, regardless of display mode.
+  function captionsEnabled(){return prefs.videoMode!=='off'&&!videoSession?.sameLanguage;}
   function needsTranslation(){if(videoSession?.sameLanguage)return false;return prefs.videoMode==='both'||prefs.videoMode==='translation';}
   function field(label,control){const row=el('div',undefined,'field');row.append(el('span',label),control);return row;}
   function switchControl(label,value,change){const b=button('',()=>{const next=b.getAttribute('aria-checked')!=='true';b.setAttribute('aria-checked',String(next));return change(next);},'switch');b.setAttribute('role','switch');b.setAttribute('aria-label',label);b.setAttribute('aria-checked',String(value));return b;}
@@ -140,15 +172,21 @@
   function close(){panelEpoch++;rememberVideo(false);cancel();stopVideo();speechSynthesis.cancel();host?.remove();host=null;shadow=null;footer=null;status=null;ensureVideoEntry();}
   function hidePanel(){panelEpoch++;host?.style.setProperty('display','none','important');}
   function makePanel(){
-    if(host){host.style.setProperty('display','block','important');host.style.removeProperty('left');host.style.setProperty('right','16px','important');host.style.setProperty('top','16px','important');return;}
+    if(host){host.style.setProperty('display','block','important');host.style.removeProperty('left');host.style.setProperty('right','16px','important');host.style.setProperty('top','16px','important');host.style.removeProperty('bottom');host.style.removeProperty('--panel-max');return;}
     host=el('div');host.setAttribute('data-cindy-panel','');isolateHost(host,{position:'fixed',display:'block','z-index':'2147483646',top:'16px',right:'16px',width:'min(336px,calc(100vw - 32px))','max-height':'calc(100vh - 32px)'});
-    shadow=host.attachShadow({mode:'closed'});shadow.append(el('style',U.css+`.panel{display:flex;flex-direction:column;max-height:calc(100vh - 32px);background:var(--card);border:1px solid var(--board);border-radius:12px;overflow:hidden}header{padding:12px 16px;border-bottom:1px solid var(--board)}.heading{flex-wrap:nowrap}main{padding:20px;overflow:auto;min-height:0}footer{display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--board)}footer .status{flex:1;min-width:0}footer button{flex:none}.selection-source{font-size:12px;color:var(--muted);max-height:90px;overflow:auto}.result{font-size:16px;line-height:1.7}.result:empty{display:none}details{border-top:1px solid var(--board);padding-top:12px}summary{cursor:pointer;font-size:12px;color:var(--muted)}details .stack{margin-top:12px}`));
-    const panel=el('section',undefined,'panel cindy-root');panel.dataset.theme=prefs.theme||pageTheme();panel.setAttribute('aria-label','Cindy');const header=el('header',undefined,'row heading'),brand=el('img');brand.className='brand';brand.src=brandURL;brand.alt='';
-    header.append(brand,el('h1','Cindy','grow'),iconButton(t.settings,'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2',showSettings),iconButton(t.close,'M6 6l12 12M18 6 6 18',hidePanel));
+    shadow=host.attachShadow({mode:'closed'});shadow.append(el('style',U.css+`.selection-actions{gap:4px}.selection-actions button.active{background:var(--hover);font-weight:500}.panel{display:flex;flex-direction:column;max-height:var(--panel-max,calc(100vh - 32px));background:var(--card);border:1px solid var(--board);border-radius:12px;overflow:hidden}header{padding:12px 16px;border-bottom:1px solid var(--board)}.heading{flex-wrap:nowrap}main{padding:20px;overflow:auto;min-height:0}footer{display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--board)}footer .status{flex:1;min-width:0}footer button{flex:none}.selection-source{font-size:12px;color:var(--muted);max-height:90px;overflow:auto}.result{font-size:16px;line-height:1.7}.result:empty{display:none}details{border-top:1px solid var(--board);padding-top:12px}summary{cursor:pointer;font-size:12px;color:var(--muted)}details .stack{margin-top:12px}`));
+    const panel=el('section',undefined,'panel cindy-root');panel.setAttribute('aria-label','Cindy');const header=el('header',undefined,'row heading'),brand=el('img');brand.className='brand';brand.src=brandURL;brand.alt='';
+    header.append(brand,el('h1','Cindy','grow'),iconButton(t.settings,'M4 7h9M17 7h3M15 5v4M4 17h3M11 17h9M9 15v4',showSettings),iconButton(t.close,'M6 6l12 12M18 6 6 18',hidePanel));
     body=el('main',undefined,'stack');status=el('div','','status');status.setAttribute('role','status');footer=el('footer');cancelButton=button(t.cancel,()=>{if(videoSession){videoSession.paused=true;videoSession.retryButton.hidden=false;}cancel();videoSession?.playback?.update();stopPage();note(t.cancel);},'quiet');footer.append(status,cancelButton);panel.append(header,body,footer);shadow.append(panel);document.documentElement.append(host);updateFooter();
   }
   function clear(mode){if(mode!=='settings'){cancel();stopVideo();}body.onkeydown=null;body.replaceChildren();note('');}
-  function showPageHome(preserveWork=false){clear(preserveWork?'settings':'page');const media=allMedia()[0]||document.querySelector(embeddedPlayers);body.append(el('h2',t.readTitle),el('p',t.readHint,'muted'),field(t.target,languageControl()));if(media)body.append(button(t.video,()=>showVideo(),'primary full'));body.append(button(translated?t.restore:t.translatePage,()=>{const work=togglePage();if(host)showPageHome(true);return work;},'primary full'),el('small',translated?t.restoreHint:t.selectionHint),field(t.autoSite,switchControl(t.autoSite,prefs.autoSites[location.origin]===true,value=>{if(value)prefs.autoSites[location.origin]=true;else delete prefs.autoSites[location.origin];return savePreferences({autoSites:{[location.origin]:value?true:undefined}});})),button(t.modelSettings,showSettings,'text-link'),button(t.textFile,()=>sendMessage({type:'cindy-open-reader'}),'quiet'));}
+  // One primary action per page: translating it. Adapted sites and framed YouTube / Vimeo embeds put the
+  // subtitle entry in the player itself; the panel offers it only for players that have no entry of their own.
+  // The model lives in settings, behind the header button.
+  function showPageHome(preserveWork=false){clear(preserveWork?'settings':'page');const embedded=document.querySelector(embeddedPlayers),media=site.id==='generic'&&(allMedia()[0]||embedded&&!embedded.matches(framedPlayers));
+    body.append(field(t.target,languageControl()),button(translated?t.restore:t.translatePage,()=>{const work=togglePage();if(host)showPageHome(true);return work;},'primary full'),el('small',translated?t.restoreHint:t.readHint));
+    if(media)body.append(button(t.videoTranslate,()=>showVideo(),'full'));
+    body.append(field(t.autoSite,switchControl(t.autoSite,prefs.autoSites[location.origin]===true,value=>{if(value)prefs.autoSites[location.origin]=true;else delete prefs.autoSites[location.origin];return savePreferences({autoSites:{[location.origin]:value?true:undefined}});})));}
   // Connection problems get a guide with ways out, not a red sentence in an empty panel.
   const CONNECTION_CODES=new Set(['CINDY_DISCONNECTED','UPDATE_CINDY_CHROME','NATIVE_BINDING_UNAVAILABLE','PAIRING_REQUIRED','BRIDGE_REQUEST_FAILED','SESSION_CHANGED']);
   function isConnectionProblem(e){return CONNECTION_CODES.has(e?.message||e);}
@@ -163,17 +201,11 @@
     const download=el('a',t.downloadCindy,'text-link');download.href='https://cindy.app/download/';download.target='_blank';download.rel='noopener';
     body.append(el('h2',t.clientGuideTitle),intro,steps,actions,el('small',t.clientGuideNote),download);
   }
-  function selectionButtonCheckbox(){
-    const label=el('label',undefined,'row'),input=el('input');input.type='checkbox';input.checked=prefs.selectionButton===true;
-    input.className='selection-button-checkbox';input.style.cssText='width:18px;min-height:18px;flex:none';
-    input.addEventListener('change',()=>{prefs.selectionButton=input.checked;if(!input.checked){selectionButton?.remove();selectionButton=null;}savePreferences({selectionButton:input.checked}).catch(report);});
-    label.append(input,el('span',t.selectionButton));return label;
-  }
-  function showSettings(){clear('settings');body.append(button(t.back,()=>videoSession?videoSettings():showPageHome(),'quiet'),el('h2',t.settings),field(t.webLanguage,languageControl()));
-    body.append(selectionButtonCheckbox());
-    body.append(field(t.autoVideo,switchControl(t.autoVideo,prefs.autoVideo,v=>{prefs.autoVideo=v;return savePreferences({autoVideo:v});})));
-    const theme=el('select');theme.setAttribute('aria-label',t.appearance);for(const [value,label]of [['light',t.light],['dark',t.dark]]){const o=el('option',label);o.value=value;theme.append(o);}theme.value=prefs.theme||pageTheme();theme.onchange=()=>{prefs.theme=theme.value;shadow.querySelector('.cindy-root').dataset.theme=prefs.theme;videoSession?.overlay?.update();savePreferences({theme:prefs.theme}).catch(report);};body.append(field(t.appearance,theme),el('h2',t.modelSettings),el('p',t.modelHint,'muted'));
-    const link=el('a',t.open);link.href='cindy://focus';body.append(link);
+  // Settings live in the side panel; the page panel only opens them there (the click is the user
+  // gesture Chrome needs). If Chrome refuses, say where to find them.
+  async function showSettings(){
+    const r=await sendMessage({type:'cindy-open-sidepanel',view:'settings'}).catch(()=>null);
+    if(!r?.ok)note(String(localeKnown?locale:globalThis.navigator?.language||'').startsWith('zh')?'点浏览器工具栏上的 Cindy 图标，在侧边栏的设置里修改。':'Click the Cindy icon in the toolbar and change it in the side panel settings.');
   }
   function onPreferencesChanged(changes,area){
     const change=changes?.cindyReadingPreferences;
@@ -183,8 +215,15 @@
     const siteWasEnabled=previous.autoSites?.[location.origin]===true,siteIsEnabled=stored.autoSites?.[location.origin]===true;
     const nextVideoTarget=L.validTarget(stored.videoTarget)?stored.videoTarget:prefs.videoTarget;
     const videoTargetChanged=nextVideoTarget!==prefs.videoTarget;
+    const webTargetChanged=L.validTarget(stored.webTarget)&&stored.webTarget!==target;
     target=L.validTarget(stored.webTarget)?stored.webTarget:target;
+    const webMode=stored.webMode==='translation'?'translation':'both';
+    // Switching bilingual / translation only re-presents what is already translated, without new model calls.
+    if(webMode!==prefs.webMode){prefs.webMode=webMode;for(const [n,r] of translations)if(n.isConnected){unpresent(r);present(n,r);}}
     prefs.webTarget=target;
+    // A new language from settings (now in the side panel) re-translates a translated page, so it
+    // never mixes old-language blocks with new ones loaded while scrolling.
+    if(webTargetChanged&&translated){restorePage();togglePage().catch(report);}
     prefs.videoTarget=nextVideoTarget;
     prefs.videoMode=stored.videoMode==='original'?'off':['both','translation','off'].includes(stored.videoMode)?stored.videoMode:prefs.videoMode;
     if(['both','translation'].includes(stored.lastVideoMode))prefs.lastVideoMode=stored.lastVideoMode;
@@ -192,15 +231,14 @@
     selectionPreferenceRevision++;
     prefs.selectionButton=stored.selectionButton===true;
     if(!prefs.selectionButton){selectionButton?.remove();selectionButton=null;}
-    const checkbox=body?.querySelector('.selection-button-checkbox');if(checkbox)checkbox.checked=prefs.selectionButton;
     prefs.bufferPause=stored.bufferPause===true;
     prefs.backgroundFill=stored.backgroundFill===true;
-    prefs.theme=['light','dark'].includes(stored.theme)?stored.theme:null;
     prefs.autoVideo=stored.autoVideo!==false;
     prefs.autoSites=stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{};
     if(videoTargetChanged&&videoSession)reapplyVideoTarget(nextVideoTarget);
-    const youtube=youtubeSite;
-    const relevantEnable=youtube?!videoWasEnabled&&videoIsEnabled:!siteWasEnabled&&siteIsEnabled;
+    const youtube=autoVideoSite;
+    const relevantEnable=youtube&&!videoWasEnabled&&videoIsEnabled||!siteWasEnabled&&siteIsEnabled;
+    if(!siteWasEnabled&&siteIsEnabled)autoTranslatedURL='';
     if(relevantEnable){nextAutoAttempt=0;if(!videoSession)autoOpen();}
     else if(!videoIsEnabled)nextAutoAttempt=Date.now()+5000;
   }
@@ -226,8 +264,8 @@
     panelSetup=setup;return setup.promise;
   }
   async function open(action){
-    const epoch=panelEpoch;
-    if(action==='selection'&&window.getSelection()?.toString().trim())selection();
+    carried=resuming=null;const epoch=panelEpoch;
+    if((action==='selection'||action==='selection-explain')&&window.getSelection()?.toString().trim())selection();
     if(action==='settings'&&videoSession){showSettings();videoSession.overlay.openSettings(false);return;}
     // Choosing another player on the page moves the session there.
     if(action==='video'&&videoSession&&requestedMedia&&requestedMedia!==video)stopVideo();
@@ -237,14 +275,27 @@
     if(!await preparePanel(epoch)||epoch!==panelEpoch||!runtimeReady())return;
     if(action==='translate-page'){const work=togglePage();showPageHome(true);await work;return;}
     if(action==='settings'){showSettings();return;}
-    if(action==='video'||(youtubeSite&&action!=='selection')){await showVideo();if(action!=='auto')videoSession?.overlay?.openSettings();return;}
+    if(action==='selection-explain'&&selected){showSelection('explain');await analyze('explain');return;}
+    if(action==='video'||(youtubeSite&&action!=='selection'&&action!=='selection-explain')){await showVideo();if(action!=='auto')videoSession?.overlay?.openSettings();return;}
     if(action==='selection'&&selected){showSelection();await translateSelection();return;}
     showPageHome();
   }
-  function showSelection(){clear('selection');if(selectionPoint){host.style.setProperty('left',Math.max(12,Math.min(selectionPoint.x,innerWidth-348))+'px','important');host.style.setProperty('top',Math.max(12,Math.min(selectionPoint.y,innerHeight-300))+'px','important');host.style.removeProperty('right');}
-    body.append(el('p',selected,'selection-source'),el('p',lastResult,'result'));const actions=el('div',undefined,'row');actions.append(button(t.explain,()=>analyze('explain'),'text-link'),button(t.copyText,async()=>{await navigator.clipboard.writeText(lastResult);note(t.copied);},'quiet'));body.append(actions);
-    const more=el('details'),moreBody=el('div',undefined,'stack');more.append(el('summary',t.more),moreBody);const input=el('textarea');input.value=selected;input.setAttribute('aria-label',t.source);input.oninput=()=>{selected=input.value;lastResult='';};moreBody.append(input,button(t.translate,translateSelection),button(t.summary,()=>analyze('summary')),button(t.listen,()=>speak(lastResult||selected)));
-    const instruction=el('textarea');instruction.placeholder=t.taskInstruction;instruction.setAttribute('aria-label',t.taskInstruction);moreBody.append(instruction,button(t.handoff,async()=>{if(!selected.trim())return;const payload=JSON.stringify([selected,selectedContext,instruction.value,source().url]);if(payload!==taskPayload){taskKey=L.uuid();taskPayload=payload;}note(t.working);const r=await request({op:'task',id:taskKey,text:selected,context:selectedContext,instruction:instruction.value});note(t.taskSent+' '+r.title);}));body.append(more);
+  // Selection card: the result and three actions (translate, explain, copy). The card fits between
+  // its top and the bottom of the window; a long result scrolls inside it.
+  function selectionLabels(){return String(localeKnown?locale:globalThis.navigator?.language||'').startsWith('zh')?{translate:'翻译',explain:'解释',copy:'复制',copied:'已复制'}:{translate:'Translate',explain:'Explain',copy:'Copy',copied:'Copied'};}
+  function showSelection(mode='translate'){clear('selection');
+    if(selectionPoint){
+      // Below the selection when there is room, otherwise above it: the card never covers the selected line.
+      const below=innerHeight-selectionPoint.y-12,above=(selectionPoint.above??selectionPoint.y)-12,useBelow=below>=260||below>=above;
+      host.style.setProperty('left',Math.max(12,Math.min(selectionPoint.x,innerWidth-348))+'px','important');host.style.removeProperty('right');
+      if(useBelow){host.style.setProperty('top',Math.max(12,selectionPoint.y)+'px','important');host.style.removeProperty('bottom');}
+      else{host.style.setProperty('bottom',(innerHeight-above-12)+'px','important');host.style.removeProperty('top');}
+      host.style.setProperty('--panel-max',Math.max(160,useBelow?below:above)+'px');}
+    const labels=selectionLabels();
+    body.append(el('p',selected,'selection-source'),el('p',lastResult,'result'));const actions=el('div',undefined,'row selection-actions');
+    const pick=(label,next,run)=>{const b=button(label,()=>{if(mode!==next){mode=next;paint();}return run();},mode===next?'quiet active':'quiet');b.setAttribute('aria-pressed',String(mode===next));return b;};
+    const paint=()=>actions.replaceChildren(pick(labels.translate,'translate',translateSelection),pick(labels.explain,'explain',()=>analyze('explain')),button(labels.copy,async()=>{if(!lastResult)return;await navigator.clipboard.writeText(lastResult);note(labels.copied);},'quiet'));
+    paint();body.append(actions);
   }
   async function translateSelection(){if(!selected.trim())return;const g=++generation,result=body.querySelector('.result');note(t.working);
     try{const r=await request({op:'translate',text:selected});if(g!==generation||!result?.isConnected||body.querySelector('.result')!==result)return;lastResult=r.translations[0];result.textContent=lastResult;note('');}
@@ -254,9 +305,64 @@
     try{const r=await request({op,text:selected,context:selectedContext});if(g!==generation||!result?.isConnected||body.querySelector('.result')!==result)return;lastResult=r.text;result.textContent=lastResult;note('');}
     catch(e){if(g===generation&&result?.isConnected&&body.querySelector('.result')===result)throw e;}
   }
-  function restorePage(){cancel();translated=false;observer?.disconnect();observer=null;for(const [node,rec]of translations){rec.host.remove();}translations.clear();if(status)note(t.restore);}
+  function restorePage(){cancel();translated=false;observer?.disconnect();observer=null;for(const rec of translations.values())unpresent(rec);translations.clear();if(status)note(t.restore);}
+  // Bilingual: the translation is added under the original (as its next sibling, or inside a div-built
+  // block). Translation only: the block's visible text is replaced in place and put back on restore
+  // unless the page has rewritten it meanwhile. Hidden text is left alone (writing there would hide
+  // the translation), and a block with links or controls is shown bilingually instead, so their
+  // labels and click areas stay intact.
+  const interactive='a[href],button,input,select,textarea,summary,label,[role="button"],[role="link"],[contenteditable]';
+  const visibleText=tn=>{const e=tn.parentElement;return !!e&&(typeof e.checkVisibility==='function'?e.checkVisibility():typeof e.getClientRects!=='function'||e.getClientRects().length>0);};
+  function inPlace(node,translation){
+    if(node.querySelector?.(interactive))return null;
+    const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT),originals=[];let first=true,tn;
+    while((tn=walker.nextNode())){if(!tn.data.trim()||tn.parentElement?.closest('[data-cindy-translation]')||!visibleText(tn))continue;const next=first?translation:'';originals.push([tn,tn.data,next]);first=false;}
+    if(!originals.length)return null;
+    for(const [n,,next] of originals)n.data=next;return originals;
+  }
+  function present(node,rec){
+    rec.host=null;rec.originals=rec.translation!=null&&prefs.webMode==='translation'?inPlace(node,rec.translation):null;
+    if(!rec.originals&&rec.translation!=null){
+      const h=el('span');
+      // Named-slot content (e.g. Reddit post titles) has no visible default
+      // slot. Project the sibling into the same slot without editing the link.
+      if(node.hasAttribute('slot'))h.slot=node.slot;
+      h.setAttribute('data-cindy-translation','');
+      const root=h.attachShadow({mode:'closed'});root.append(el('style',':host{display:block;margin:'+(rec.inside?'2px 0 0':'6px 0 12px')+';font:inherit;color:inherit;opacity:.8}'),el('span',rec.translation));if(rec.inside)node.append(h);else node.after(h);rec.host=h;
+    }
+    rec.text=node.innerText;
+  }
+  function unpresent(rec){rec.host?.remove();for(const [n,data,set] of rec.originals||[])if(n.isConnected&&n.data===set)n.data=data;rec.host=null;rec.originals=null;}
+  const shown=rec=>!!(rec.host?.isConnected||rec.originals);
   const pageTextSelector='p,h1,h2,h3,li,blockquote,figcaption,[slot="title"]';
-  function candidates(){return [...(document.querySelector('article,main,[role=main]')||document.body).querySelectorAll(pageTextSelector)].filter(n=>!translations.has(n)&&!n.closest('pre,code,nav,footer,header,textarea,[contenteditable],script,style')&&n.getClientRects().length&&n.innerText?.trim().length>2&&n.innerText.length<=4000&&!n.querySelector(pageTextSelector)&&n.getBoundingClientRect().top<innerHeight*2&&n.getBoundingClientRect().bottom>0);}
+  const skipTranslation='pre,code,nav,footer,header,textarea,input,select,button,[contenteditable],script,style,svg,[aria-hidden="true"],[data-cindy-translation],[data-cindy-panel]';
+  const nearViewport=n=>{if(!n.getClientRects().length)return false;const r=n.getBoundingClientRect();return r.top<innerHeight*2&&r.bottom>0;};
+  const readable=n=>{const text=n.innerText?.trim()||'';return text.length>2&&text.length<=4000&&(text.match(/\p{L}/gu)||[]).length>=2;};
+  const inlineDisplay=d=>d==='inline'||d==='inline-block'||d==='inline-flex'||d==='contents'||d==='none'||d==='ruby';
+  // Paragraph tags keep their translation as the next sibling. Many sites (feeds, cards, hot lists)
+  // are built from divs instead: their innermost text block takes the translation inside, so a
+  // horizontal card or flex row keeps its layout.
+  function candidates(){
+    // The whole visible page: portals and feeds put hot lists and cards outside the first article.
+    const root=document.body,picked=[];
+    for(const n of root.querySelectorAll(pageTextSelector))
+      if(!translations.has(n)&&!n.closest(skipTranslation)&&readable(n)&&!n.querySelector(pageTextSelector)&&nearViewport(n))picked.push({node:n,inside:false});
+    const seen=new Set(picked.map(c=>c.node)),blocks=[];
+    for(const n of root.querySelectorAll('div,section,td,dd,dt,a,span,label'))
+      if(!seen.has(n)&&nearViewport(n)&&!inlineDisplay(getComputedStyle(n).display)&&!n.closest(skipTranslation)&&!n.closest(pageTextSelector)&&!n.querySelector(pageTextSelector)&&readable(n))blocks.push(n);
+    const outer=new Set();for(const n of blocks){let a=n.parentElement;while(a&&a!==root&&!outer.has(a)){outer.add(a);a=a.parentElement;}}
+    const leaves=blocks.filter(n=>!outer.has(n)&&!translations.has(n));if(!leaves.length)return picked;
+    // Top of the page first, whichever rule found the text.
+    return picked.concat(leaves.map(node=>({node,inside:true}))).sort((a,b)=>a.node.compareDocumentPosition(b.node)&Node.DOCUMENT_POSITION_FOLLOWING?-1:1);
+  }
+  // The side panel translates without opening the page panel, and shows the state on its own button.
+  let pageError=null;
+  async function pageCommand(action){
+    if(action==='state')return {ok:true,translated:translated||translations.size>0};
+    if(translated||translations.size){restorePage();return {ok:true,translated:false};}
+    await configure();pageError=null;await togglePage();
+    return pageError?{ok:false,error:pageError,translated:false}:{ok:true,translated};
+  }
   async function translateVisible(){
     const g=generation;
     if(!translated||translateRunning===g)return;
@@ -264,24 +370,21 @@
     translateRunning=g;
     try{
       const nodes=candidates().slice(0,12),texts=[];const accepted=[];
-      for(const n of nodes){if(texts.join('').length+n.innerText.length>18000)break;texts.push(n.innerText);accepted.push(n);}
+      for(const c of nodes){const n=c.node;if(texts.join('').length+n.innerText.length>18000)break;texts.push(n.innerText);accepted.push(c);}
       if(!accepted.length)return;
       const r=await request({op:'translate',texts});if(g!==generation||!translated)return;
-      accepted.forEach((node,i)=>{
+      accepted.forEach(({node,inside},i)=>{
         if(!node.isConnected||node.innerText!==texts[i])return;
-        const h=el('span');
-        // Named-slot content (e.g. Reddit post titles) has no visible default
-        // slot. Project the sibling into the same slot without editing the link.
-        if(node.hasAttribute('slot'))h.slot=node.slot;
-        h.setAttribute('data-cindy-translation','');
-        const root=h.attachShadow({mode:'closed'});root.append(el('style',':host{display:block;margin:6px 0 12px;font:inherit;color:inherit;opacity:.8}'),el('span',r.translations[i]));node.after(h);translations.set(node,{host:h,text:texts[i]});
+        // Text already in the reader's language needs no second copy.
+        const same=typeof r.translations[i]!=='string'||r.translations[i].trim()===texts[i].trim();
+        const rec={inside,translation:same?null:r.translations[i]};present(node,rec);translations.set(node,rec);
       });
-      if(status)note(`${t.progress} ${translations.size}`);
-    }catch(e){if(g===generation){translated=false;observer?.disconnect();report(e);}}
+      if(status)note(`${t.progress} ${[...translations.values()].filter(shown).length}`);
+    }catch(e){if(g===generation){translated=false;observer?.disconnect();pageError=e?.message||String(e);report(e);}}
     finally{if(translateRunning===g)translateRunning=null;if(translated&&g===generation&&candidates().length)queueTranslate();}
   }
   async function togglePage(){if(translated||translations.size){restorePage();return;}translated=true;note(t.working);
-    observer=new MutationObserver(()=>{for(const [n,r]of translations)if(!n.isConnected||n.innerText!==r.text){r.host.remove();translations.delete(n);}queueTranslate();});observer.observe(document.body,{subtree:true,childList:true,characterData:true});await translateVisible();}
+    observer=new MutationObserver(()=>{for(const [n,r]of translations)if(!n.isConnected||n.innerText!==r.text){unpresent(r);translations.delete(n);}queueTranslate();});observer.observe(document.body,{subtree:true,childList:true,characterData:true});await translateVisible();}
   let translateTimer;function queueTranslate(){clearTimeout(translateTimer);translateTimer=setTimeout(()=>translateVisible(),350);}
   window.addEventListener('scroll',()=>{if(translated)queueTranslate();},{passive:true,signal:lifecycle.signal});
   function stopVideo(){if(videoSession)rememberVideo(false);clearTimeout(videoTimer);if(video&&videoSession?.seekHandler)video.removeEventListener('seeked',videoSession.seekHandler);videoSession?.playback?.dispose();videoSession?.overlay?.destroy();videoSession=null;if(video&&videoHandler)video.removeEventListener('timeupdate',videoHandler);videoHandler=null;video=null;activeCue=-1;previousCue=-1;}
@@ -324,9 +427,10 @@
     const root=overlayHost.attachShadow({mode:'closed'});
     const css=U.css+`
       .captions-root{position:absolute;inset:0;pointer-events:none}
-      .caption-box{position:absolute;bottom:var(--caption-bottom,16px);transition:bottom .18s ease-out,left .18s ease-out;left:50%;transform:translateX(-50%);width:max-content;max-width:min(70%,900px);padding:6px 14px 8px;border-radius:8px;background:rgba(18,18,17,.55);color:#fff;text-align:center;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-weight:400;text-shadow:0 1px 2px rgba(0,0,0,.6);line-height:1.3;overflow-wrap:anywhere}.caption-box[data-caption-theme=light]{background:rgba(255,255,255,.8);color:#1a1a1a;text-shadow:none}.caption-box[data-provisional=true] .caption-translation{opacity:.82}.caption-hint{position:absolute;bottom:var(--caption-bottom,16px);left:50%;transform:translateX(-50%);max-width:88%;padding:6px 14px;border-radius:9999px;background:rgba(18,18,17,.6);color:#fff;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:13px;line-height:18px;text-align:center}
+      .caption-box{position:absolute;bottom:var(--caption-bottom,16px);transition:bottom .18s ease-out,left .18s ease-out;left:50%;transform:translateX(-50%);width:max-content;max-width:min(90%,1400px);padding:6px 14px 8px;border-radius:8px;background:rgba(18,18,17,.55);color:#fff;text-align:center;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-weight:400;text-shadow:0 1px 2px rgba(0,0,0,.6);line-height:1.3;overflow-wrap:anywhere}.caption-box[data-caption-theme=light]{background:rgba(255,255,255,.8);color:#1a1a1a;text-shadow:none}.caption-box[data-provisional=true] .caption-translation{opacity:.82}.caption-hint{position:absolute;bottom:var(--caption-bottom,16px);left:50%;transform:translateX(-50%);max-width:88%;padding:6px 14px;border-radius:9999px;background:rgba(18,18,17,.6);color:#fff;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:13px;line-height:18px;text-align:center}
       .caption-original{font-size:calc(var(--caption-size)*.78);font-weight:400;opacity:.86;white-space:pre-line}
       .caption-translation{font-size:var(--caption-size);margin-top:5px;white-space:pre-line}
+      .caption-box[data-measuring=true] .caption-original,.caption-box[data-measuring=true] .caption-translation{white-space:pre}
       @media(prefers-reduced-motion:reduce){.caption-box{transition:none}}
       .caption-bar{position:absolute;bottom:8px;right:70px;display:flex;gap:4px;align-items:center;padding:3px;border-radius:9999px;background:rgba(18,18,17,.55);pointer-events:auto;opacity:0;transition:opacity .15s}
       .captions-root[data-controls=true] .caption-bar,.caption-bar:hover,.caption-bar:focus-within{opacity:1}.caption-bar .label{font-size:12px;padding:0 8px}.caption-bar button{min-height:0;padding:2px 6px;background:transparent;border:0}.caption-bar button svg{width:24px;height:24px;display:block}
@@ -335,7 +439,7 @@
       .caption-notice{padding:12px;border-bottom:1px solid var(--board);background:var(--surface);color:var(--text);font-size:12px;line-height:18px;pointer-events:auto}.preparation-heading{display:flex;justify-content:space-between;gap:8px;font-weight:500}.preparation-track{height:4px;background:var(--board);border-radius:2px;overflow:hidden;margin:8px 0}.preparation-fill{height:100%;background:var(--text);width:0}.preparation-detail,.preparation-cache{color:var(--muted);margin-top:4px}.preparation-error{color:var(--danger);margin-top:6px;overflow-wrap:anywhere}.preparation-error:empty{display:none}.caption-notice button{margin-top:8px}
       .caption-notice[data-mode=compact]{display:none}.ready-dot{min-height:0;width:10px;height:10px;padding:0;border:0;border-radius:50%;background:var(--muted);flex:none;margin:0 auto 0 8px;opacity:.55}.ready-dot[data-state=ready]{background:#3aa65f;opacity:1}.ready-dot[data-state=problem]{background:var(--danger);opacity:1}.ready-dot[data-state=preparing]{animation:cindy-dot-pulse 1.6s ease-in-out infinite}@keyframes cindy-dot-pulse{0%,100%{opacity:.35}50%{opacity:.9}}@media(prefers-reduced-motion:reduce){.ready-dot[data-state=preparing]{animation:none;opacity:.6}}.ready-dot:hover{background:var(--text)}.ready-dot:focus-visible{outline:2px solid var(--focus);outline-offset:3px}.preparation-detail[role=button]{cursor:pointer}.preparation-detail[role=button]:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}.preparation-stage{color:var(--muted);margin-top:2px}.preparation-stage:empty{display:none}.caption-notice.error .preparation-heading{color:var(--danger)}.caption-notice .preparation-error{color:var(--text)}.preparation-cache.warning{color:var(--danger)}.detail-code{font-size:11px;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}.detail-code:empty{display:none}.caption-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.caption-actions:not(:has(button:not([hidden]))){display:none}.caption-notice button{margin-top:0}
     `;
-    root.append(el('style',css));const surface=el('div',undefined,'cindy-root captions-root');surface.dataset.theme=prefs.theme||pageTheme();
+    root.append(el('style',css));const surface=el('div',undefined,'cindy-root captions-root');
     const box=el('div',undefined,'caption-box');box.setAttribute('aria-label',t.bilingualSubtitles);box.hidden=true;
     const original=el('div','', 'caption-original'),translation=el('div','', 'caption-translation');box.append(original,translation);
     const settings=el('section',undefined,'caption-settings');settings.setAttribute('aria-label',t.subtitleSettings);settings.hidden=true;
@@ -395,6 +499,11 @@
       const key=[original.textContent,translation.textContent,original.hidden,translation.hidden,bounds.width,bounds.height,bottom,captionSize].join('|');
       if(key===fitKey)return;fitKey=key;
       let size=captionSize;surface.style.setProperty('--caption-size',size+'px');
+      // Keep each caption on one line when a slightly smaller font is enough; longer captions still wrap.
+      box.dataset.measuring='true';
+      const ratio=Math.min(1,...[original,translation].filter(n=>!n.hidden&&n.textContent).map(n=>n.clientWidth/n.scrollWidth));
+      delete box.dataset.measuring;
+      if(ratio<1&&ratio>=.8){size=Math.max(11,size*ratio*.98);surface.style.setProperty('--caption-size',size+'px');}
       const available=Math.max(24,bounds.height-bottom-12);
       for(let step=0;step<5&&box.getBoundingClientRect().height>available&&size>11;step++){
         size=Math.max(11,size*.87);surface.style.setProperty('--caption-size',size+'px');
@@ -443,18 +552,21 @@
       captionSize=Math.max(16,Math.min(40,r.width*.027))*({small:.85,medium:1,large:1.18}[prefs.videoSize]||1);fitCaption();
     };
     const resize=new ResizeObserver(position);resize.observe(media);resize.observe(player);position();
-    const observer=new MutationObserver(()=>{placeControl();syncControls();if(currentText&&prefs.videoMode!=='off')suppressNative();else{restoreNodes();if(prefs.videoMode==='off')restoreTracks();}});observer.observe(player,{childList:true,subtree:true});
+    const observer=new MutationObserver(()=>{placeControl();syncControls();if(currentText&&captionsEnabled())suppressNative();else{restoreNodes();if(!captionsEnabled())restoreTracks();}});observer.observe(player,{childList:true,subtree:true});
     let lastControlSync=0;const tick=time=>{if(time-lastFrame>=50){lastFrame=time;videoHandler?.();}if(site.anchor&&time-lastControlSync>=500){lastControlSync=time;syncControls();}if(!media.paused&&!media.ended)frame=requestAnimationFrame(tick);};
     const play=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(tick);},sync=()=>{if(overlayHost.parentElement!==frameOf())frameOf().append(overlayHost);position();videoHandler?.();};
     media.addEventListener('play',play);media.addEventListener('seeked',sync);media.addEventListener('loadedmetadata',sync);document.addEventListener('fullscreenchange',sync);window.addEventListener('scroll',position,{passive:true});window.addEventListener('resize',position);if(!media.paused)play();
-    let iconOn=null;const update=()=>{surface.dataset.theme=prefs.theme||pageTheme();box.dataset.captionTheme=prefs.captionTheme||'dark';if(iconOn!==(prefs.videoMode!=='off')){iconOn=prefs.videoMode!=='off';toggle.replaceChildren(captionIcon(iconOn));}toggle.title=t.video+' · '+(prefs.videoMode==='off'?t.off:prefs.videoMode==='original'?t.source:L.languageName(prefs.videoTarget));position();progress();};update();
+    let iconOn=null;const update=()=>{box.dataset.captionTheme=prefs.captionTheme||'dark';if(iconOn!==captionsEnabled()){iconOn=captionsEnabled();toggle.replaceChildren(captionIcon(iconOn));}toggle.title=t.video+' · '+(prefs.videoMode==='off'?t.off:prefs.videoMode==='original'?t.source:L.languageName(prefs.videoTarget));position();progress();};update();
+    // While the settings card is open it must sit above the player's own layers (YouTube's end-screen
+    // grid otherwise covers it); closed, captions return below the player's controls and menus.
+    new MutationObserver(()=>overlayHost.style.setProperty('z-index',settings.hidden?'60':'2147483000','important')).observe(settings,{attributes:true,attributeFilter:['hidden']});
     overlayHost.addEventListener('keydown',e=>{if(e.key==='Escape'){settings.hidden=true;toggle.setAttribute('aria-expanded','false');toggle.focus();}});
     const outside=e=>{if(!e.composedPath().includes(overlayHost)&&!e.composedPath().includes(controlHost)){settings.hidden=true;toggle.setAttribute('aria-expanded','false');}};document.addEventListener('pointerdown',outside);
     return {
       update,progress,openSettings(render=true){if(render)videoSettings();settings.hidden=false;toggle.setAttribute('aria-expanded','true');surface.dataset.controls='true';},closeSettings(){settings.hidden=true;toggle.setAttribute('aria-expanded','false');},
-      track(track){if(!nativeTracks.has(track))nativeTracks.set(track,track.mode);if(prefs.videoMode==='off'){restoreTracks();return;}if(track.mode!=='hidden')track.mode='hidden';},
-      render(cue){const text=cue?.text||'',translated=cue?.translation||'';box.dataset.provisional=String(!!cue?.provisional);currentText=text;box.hidden=!text||prefs.videoMode==='off';original.hidden=prefs.videoMode==='translation'&&!!translated;translation.hidden=!translated||prefs.videoMode==='original';if(original.textContent!==text)original.textContent=text;if(translation.textContent!==translated)translation.textContent=translated;// With Cindy subtitles off, YouTube's own captions show as usual.
-        if(text&&prefs.videoMode!=='off')suppressNative();else{restoreNodes();if(prefs.videoMode==='off')restoreTracks();}if(!needsTranslation())notice.hidden=true;fitCaption();},
+      track(track){if(!nativeTracks.has(track))nativeTracks.set(track,track.mode);if(!captionsEnabled()){restoreTracks();return;}if(track.mode!=='hidden')track.mode='hidden';},
+      render(cue){const text=cue?.text||'',translated=cue?.translation||'';box.dataset.provisional=String(!!cue?.provisional);currentText=text;box.hidden=!text||!captionsEnabled();original.hidden=prefs.videoMode==='translation'&&!!translated;translation.hidden=!translated||prefs.videoMode==='original';if(original.textContent!==text)original.textContent=text;if(translation.textContent!==translated)translation.textContent=translated;// Off and same-language sessions preserve the site's caption state.
+        if(text&&captionsEnabled())suppressNative();else{restoreNodes();if(!captionsEnabled())restoreTracks();}if(!needsTranslation())notice.hidden=true;fitCaption();},
       notify(text,error=false,detail=''){noticeError=error;noticeCode=error?detail:'';noticeText.textContent=error?text:'';codeText.textContent=error&&detail?t.errorDetails+' · '+detail:'';progress();},
       destroy(){clearInterval(progressTimer);document.removeEventListener('pointerdown',outside);controlHost.remove();clearTimeout(controlsTimer);player.removeEventListener('pointermove',showControls);cancelAnimationFrame(frame);resize.disconnect();observer.disconnect();controlsObserver.disconnect();media.removeEventListener('play',play);media.removeEventListener('seeked',sync);media.removeEventListener('loadedmetadata',sync);document.removeEventListener('fullscreenchange',sync);window.removeEventListener('scroll',position);window.removeEventListener('resize',position);restoreNodes();for(const [track,mode]of nativeTracks)if(track.mode==='hidden')track.mode=mode;originalParent.append(body,footer);overlayHost.remove();host?.style.setProperty('display','block','important');if(positioned&&player.style.position==='relative'){if(oldPosition)player.style.setProperty('position',oldPosition,oldPriority);else player.style.removeProperty('position');}}
     };
@@ -516,7 +628,8 @@
   // Only automatic sessions skip translation; a person who opened subtitles on purpose keeps the choice.
   function checkSameLanguage(session,language){if(session.languageChecked||!session.auto)return;session.languageChecked=true;session.language=language||null;if(language&&L.sameLanguage(language,prefs.videoTarget)){session.sameLanguage=true;cancel();videoSettings();session.overlay?.update();}}
   // Choosing another caption source takes the old source's timeline down at once: no stale subtitles, no translation of them.
-  function dropTimeline(session){session.transcript=undefined;session.originalCues=undefined;session.words=[];session.chunks=[];session.revision=(session.revision||0)+1;cancel();cues=[];cueList();videoHandler?.();}
+  // Its language judgment goes with it, so the new source is checked again on its first read.
+  function dropTimeline(session){session.languageChecked=false;session.sameLanguage=false;session.language=null;session.transcript=undefined;session.originalCues=undefined;session.words=[];session.chunks=[];session.revision=(session.revision||0)+1;cancel();cues=[];cueList();videoHandler?.();}
   function mergeCues(next){
     const session=videoSession;if(!session)return;
     const signature=JSON.stringify(next);if(signature===session.transcript)return;
@@ -530,7 +643,7 @@
     try {
       if(!video.isConnected||(video.currentSrc&&video.currentSrc!==session.src)){
         // X drops players scrolled far away. Picking another one would start paid translation nobody asked for.
-        if(site?.multi)close();else showVideo();
+        if(site?.multi){carryVideo();close();}else showVideo(session.auto);
         return;
       }
       const youtube=youtubeSite;
@@ -563,7 +676,7 @@
         if(!result?.ok)throw Object.assign(Error(result?.error||'SUBTITLE_UNAVAILABLE'),{reason:result?.reason});
         if(result.videoId)session.videoId=result.videoId;
         if(result.tracks?.length>1&&session.trackOptions?.length!==result.tracks.length){session.trackOptions=result.tracks.map(x=>({id:x.id,label:x.label||x.language||x.id}));session.trackId=result.chosen;session.chooseTrack=id=>{session.trackId=id;session.imported=false;session.fullTranscript=false;session.nextRead=0;dropTimeline(session);};videoSettings();}
-        if(result.cues?.length){session.fullTranscript=true;mergeCues(result.cues);}
+        if(result.cues?.length){session.fullTranscript=true;checkSameLanguage(session,result.language);mergeCues(result.cues);}
       }
       // A page without any caption track also deserves a clear answer instead of an endless wait.
       if(!youtube&&!site?.external&&!session.imported&&!session.words?.length)session.attempts++;
@@ -609,7 +722,36 @@
     cueList();
   }
   function importSubtitleFile(){const session=videoSession;if(!session)return;const file=el('input');file.type='file';file.accept='.srt,.vtt';file.hidden=true;file.onchange=async()=>{try{const f=file.files[0];if(!f)return;if(f.size>2000000)throw Error('SUBTITLE_TOO_LARGE');const next=L.parseSubtitles(await f.text());if(session!==videoSession)return;session.imported=true;session.failed=false;session.paused=false;session.noCaptions=false;session.sameLanguage=false;mergeCues(next);translateCues();session.overlay?.update();}catch(e){report(e);}finally{file.remove();}};body.append(file);file.click();}
-  let requestedMedia=null;
+  let requestedMedia=null,carried=null,resuming=null;
+  // X replaces the player when a post opens from the feed (or the feed comes back): the same video in
+  // another element. Subtitles someone turned on follow it there, keeping the session's identity so the
+  // finished passages come from the cache and the same task. Any explicit Cindy action drops the carry.
+  function carryVideo(){
+    // A session the person cancelled, or that failed, stays stopped: only a deliberate click starts paid work again.
+    // Without a session there is nothing new to say: a record the player-removal check saved a moment ago must survive the navigation check.
+    if(!xSite||!videoSession||!video)return;
+    if(videoSession.paused||videoSession.failed){carried=null;return;}
+    // A post can hold several videos: its own id only stands in when no media id was ever seen.
+    const now=xVideoIds(video),media=videoSession.ids?.media||now.media,id=media?{media}:{post:videoSession.ids?.post||now.post};
+    carried=id.media||id.post?{...id,videoId:videoSession.videoId,auto:videoSession.auto,until:Date.now()+10000}:null;
+  }
+  function resumeCarried(){
+    const carry=carried;if(!carry||videoSession||disposed)return;
+    // Like automatic subtitles, a carried session never takes over a page being translated.
+    if(translated||translations.size){carried=null;return;}
+    if(Date.now()>carry.until){carried=null;return;}
+    const found=[...document.querySelectorAll('video')].filter(m=>{const ids=xVideoIds(m);return carry.media?ids.media===carry.media:ids.post===carry.post;}),media=found.length===1?found[0]:null;if(!media)return;
+    // While the panel is prepared, a click on Cindy (open clears resuming) or a page translation that
+    // another automatic start began (it shares configure()) must win: showVideo would cancel that work.
+    carried=null;resuming=carry;const epoch=panelEpoch;
+    preparePanel(epoch).then(ok=>{
+      if(resuming!==carry)return;resuming=null;
+      if(!ok||epoch!==panelEpoch||!runtimeReady()||videoSession||translated||translations.size)return;
+      if(media.isConnected){requestedMedia=media;return showVideo(carry.auto,carry.videoId);}
+      // X swapped the player while the panel was being prepared: keep the record, and its original expiry, for the next match.
+      carried=carry;
+    }).catch(()=>{resuming=null;});
+  }
   // A feed holds many players; the one playing on screen is the one meant.
   function siteMediaId(media){
     if(site?.id==='tiktok')return (media.closest('[id^="xgwrapper-"]')?.id.match(/(\d+)$/)||location.pathname.match(/\/video\/(\d+)/))?.[1];
@@ -623,7 +765,8 @@
     const captioned=v=>site.multi||!v.textTracks?0:[...v.textTracks].some(x=>x.kind==='subtitles'||x.kind==='captions')?0:1;
     return shown.filter(v=>area(v)>0).sort((a,b)=>captioned(a)-captioned(b)||Number(a.paused)-Number(b.paused)||area(b)-area(a))[0]||shown[0]||all[0];
   }
-  async function showVideo(){
+  // auto marks a session the page started on its own; the first caption read already checks the language with it.
+  async function showVideo(auto=false,videoId){
     clear('video');video=requestedMedia?.isConnected?requestedMedia:pickMedia();requestedMedia=null;
     // The player lives in an embedded frame, which runs its own copy of this script.
     if(!video&&document.querySelector(embeddedPlayers)){
@@ -636,7 +779,7 @@
     if(!video){body.append(el('p',t.noVideo));videoTimer=setTimeout(showVideo,1200);return;}
     const media=video;
     if(cueMedia!==media||media.currentSrc!==cueMediaSource){cues=[];cueMedia=media;cueMediaSource=media.currentSrc;}
-    cues=[];const session=videoSession={src:media.currentSrc,running:false,paused:false,failed:false,imported:false,attempts:0,nextRead:0};
+    cues=[];const session=videoSession={src:media.currentSrc,auto,running:false,paused:false,failed:false,imported:false,attempts:0,nextRead:0,...(videoId?{videoId}:{}),...(xSite?{ids:xVideoIds(media)}:{})};
     session.retry=async()=>{if(!subtitleSegmentation||!subtitleEditorial)await configure();session.retryButton.hidden=true;for(const chunk of session.chunks||[]){delete chunk.error;delete chunk.recovery;delete chunk.retryAt;delete chunk.retries;}session.failed=false;session.paused=false;session.attempts=0;session.nextRead=0;session.readBlocked=false;clearTimeout(videoTimer);return readCues(session);};
     // A manually opened player session is restorable on every supported site,
     // including YouTube when automatic opening is disabled. An X feed is the
@@ -645,7 +788,7 @@
     session.retryButton=button(t.retrySubtitles,session.retry);session.retryButton.hidden=true;videoSettings();session.overlay=mountVideoCaptions(media);note(t.waitSubtitles);
     videoHandler=()=>{
       session.playback?.update();
-      if(prefs.videoMode!=='off'&&previousCue>=0&&cues[previousCue]&&media.currentTime>=cues[previousCue].end&&media.currentTime<cues[previousCue].end+1){if(repeat){media.currentTime=cues[previousCue].start;return;}if(autoPause){session.playback?.pauseByUser();previousCue=-1;}}
+      if(captionsEnabled()&&previousCue>=0&&cues[previousCue]&&media.currentTime>=cues[previousCue].end&&media.currentTime<cues[previousCue].end+1){if(repeat){media.currentTime=cues[previousCue].start;return;}if(autoPause){session.playback?.pauseByUser();previousCue=-1;}}
       const i=cues.findIndex(c=>media.currentTime>=c.start&&media.currentTime<c.end),changed=i!==activeCue;activeCue=i;if(i>=0)previousCue=i;
       const pending=session.chunks?.some(c=>!c.done&&media.currentTime>=c.words[0].start&&media.currentTime<c.words.at(-1).end);const raw=session.originalCues?.find(c=>media.currentTime>=c.start&&media.currentTime<c.end);let shown=prefs.videoMode==='original'?raw:cues[i]||((pending||session.failed)?raw:undefined);
       if(shown&&shown===raw&&needsTranslation()&&session.machineCues?.length&&session.machineTarget===prefs.videoTarget){const machine=session.machineCues.find(c=>media.currentTime>=c.start&&media.currentTime<c.end);if(machine?.text)shown={...raw,translation:machine.text,provisional:true};}
@@ -658,7 +801,7 @@
   let selectionButton, selectionStart, selectionDragged=false;
   const selectionStartupRevision=selectionPreferenceRevision;
   extensionCall(()=>api.storage.local.get('cindyReadingPreferences')).then(data=>{if(selectionStartupRevision===selectionPreferenceRevision)prefs.selectionButton=data.cindyReadingPreferences?.selectionButton===true;}).catch(()=>{});
-  const selectionEventIsOurs=e=>e.composedPath().includes(host)||e.composedPath().some(n=>n instanceof Element&&n.hasAttribute('data-cindy-captions'));
+  const selectionEventIsOurs=e=>e.composedPath().includes(host)||e.composedPath().some(n=>n instanceof Element&&(n.hasAttribute('data-cindy-captions')||n.hasAttribute('data-cindy-selection-entry')));
   document.addEventListener('mousedown',e=>{
     if(!e.isTrusted||e.button!==0||selectionEventIsOurs(e))return;
     selectionButton?.remove();selectionButton=null;
@@ -675,7 +818,23 @@
     // A click or double-click selects text on the page but is not an explicit
     // request for Cindy. Only a real drag may create the contextual entry.
     if(prefs.selectionButton!==true||!dragged||!window.getSelection()?.toString().trim()||!selected)return;
-    if(!runtimeReady())return;selectionPoint={x:e.clientX,y:e.clientY+12};const h=el('div');h.dataset.cindySelectionEntry='true';isolateHost(h,{position:'fixed',left:Math.min(e.clientX,innerWidth-90)+'px',top:Math.min(e.clientY+12,innerHeight-45)+'px','z-index':'2147483645'});const s=h.attachShadow({mode:'closed'}),root=el('div',undefined,'cindy-root');root.dataset.theme=pageTheme();root.append(button('Cindy',()=>{h.remove();return open('selection');},'primary'));s.append(el('style',U.css),root);document.documentElement.append(h);selectionButton=h;
+    if(!runtimeReady())return;
+    let rect;try{rect=window.getSelection().getRangeAt(0).getBoundingClientRect();}catch{}
+    if(!rect||!rect.width&&!rect.height)rect={left:e.clientX,right:e.clientX,top:e.clientY,bottom:e.clientY};
+    selectionPoint={x:rect.left,y:rect.bottom+8,above:rect.top-8};
+    // Before Cindy has told the page its interface language, follow the browser's.
+    const zh=String(localeKnown?locale:globalThis.navigator?.language||'').startsWith('zh'),labels=zh?{translate:'翻译',explain:'解释'}:{translate:'Translate',explain:'Explain'};
+    const h=el('div');h.dataset.cindySelectionEntry='true';
+    const above=rect.top>52,top=above?rect.top-44:Math.min(rect.bottom+8,innerHeight-44),left=Math.max(8,Math.min(rect.left,innerWidth-200));
+    isolateHost(h,{position:'fixed',left:left+'px',top:Math.max(8,top)+'px','z-index':'2147483645'});
+    const s=h.attachShadow({mode:'closed'}),bar=el('div',undefined,'bar');bar.setAttribute('role','toolbar');bar.setAttribute('aria-label','Cindy');
+    const mark=el('img');mark.src=brandURL;mark.alt='';mark.className='mark';bar.append(mark);
+    for(const [label,action] of [[labels.translate,'selection'],[labels.explain,'selection-explain']]){const b=el('button',label);b.type='button';b.onclick=()=>{h.remove();selectionButton=null;return open(action);};bar.append(b);}
+    s.append(el('style',`:host{all:initial}.bar{display:flex;align-items:center;gap:2px;height:36px;padding:0 4px 0 6px;border:1px solid #d7d7d4;border-radius:10px;background:#fff;box-shadow:0 4px 16px rgba(0,0,0,.15);font:13px/18px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",Inter,sans-serif;color:#262626;animation:in .12s ease-out}
+      .mark{width:18px;height:18px;border-radius:5px;margin-right:4px}button{all:unset;height:28px;padding:0 10px;border-radius:7px;cursor:pointer;color:inherit;white-space:nowrap}button:hover{background:#e5e5e5}button:focus-visible{box-shadow:0 0 0 2px rgba(65,124,221,.5)}
+      @keyframes in{from{opacity:0;transform:translateY(4px)}}@media(prefers-reduced-motion:reduce){.bar{animation:none}}
+      @media(prefers-color-scheme:dark){.bar{background:#2c2c2a;border-color:#3c3c3a;color:#d4d4d4;box-shadow:0 4px 16px rgba(0,0,0,.5)}button:hover{background:#3c3c3a}}`),bar);
+    document.documentElement.append(h);selectionButton=h;
   },{signal:lifecycle.signal});
   // While the agent works on this page: a thin Cindy-red glow around the viewport and a small label.
   // It never takes clicks, lives in a closed shadow root (so page reads do not see it) and fades a few
@@ -689,16 +848,31 @@
     return agentCopy;
   }
   // A page Browser Use opened says so until the user acts on it with real input (agent events are not trusted).
-  let openedMark;
+  let openedMark,openedTitleObserver,originalTitle,markedTitle,openedByCindy=false,userClaimed=false;
+  // The tab strip must identify Cindy's pages even without optional tabGroups permission.
+  // Observe the head only: page content changes must not turn this into a full-page observer.
+  function updateOpenedTitle(){
+    if(!openedByCindy||!runtimeReady()||document.title===markedTitle)return;
+    originalTitle=document.title;document.title='[Cindy] '+originalTitle;markedTitle=document.title;
+  }
+  function clearOpenedTitle(){
+    openedByCindy=false;openedTitleObserver?.disconnect();openedTitleObserver=null;
+    if(markedTitle!==undefined&&document.title===markedTitle)document.title=originalTitle;
+    originalTitle=markedTitle=undefined;
+  }
   function tookOver(e){
-    if(!e.isTrusted||!openedMark)return;
-    openedMark.remove();openedMark=null;
+    if(!e.isTrusted||!openedByCindy)return;
+    userClaimed=true;clearOpenedTitle();openedMark?.remove();openedMark=null;
     for(const type of ['pointerdown','keydown'])document.removeEventListener(type,tookOver,true);
     sendMessage({type:'cindy-user-took-over'}).catch(()=>{});
   }
   async function showOpenedMark(){
+    if(disposed||userClaimed)return;
+    openedByCindy=true;updateOpenedTitle();
+    if(!openedTitleObserver&&document.head){openedTitleObserver=new MutationObserver(updateOpenedTitle);openedTitleObserver.observe(document.head,{subtree:true,childList:true,characterData:true});}
+    for(const type of ['pointerdown','keydown'])document.addEventListener(type,tookOver,{capture:true,signal:lifecycle.signal});
     const copy=await agentStrings();
-    if(disposed||openedMark?.isConnected)return;
+    if(disposed||userClaimed||openedMark?.isConnected)return;
     openedMark=el('div');openedMark.setAttribute('data-cindy-agent-tab','');
     isolateHost(openedMark,{position:'fixed',right:'12px',bottom:'12px',display:'block','z-index':'2147483644','pointer-events':'none'});
     const root=openedMark.attachShadow({mode:'closed'});
@@ -706,9 +880,8 @@
 .pill img{width:15px;height:15px;border-radius:50%;background:#fff}.dot{width:6px;height:6px;border-radius:50%;background:#d93a3a}`));
     const pill=el('div',undefined,'pill');const icon=el('img');icon.src=brandURL;icon.alt='';pill.append(icon,el('span',copy.agentOpened),el('span',undefined,'dot'));
     root.append(pill);document.documentElement.append(openedMark);
-    for(const type of ['pointerdown','keydown'])document.addEventListener(type,tookOver,{capture:true,signal:lifecycle.signal});
   }
-  async function markAgent(hidden,clear,opened){
+  async function markAgent(hidden,clear,opened,ms){
     if(opened){await showOpenedMark();return;}
     if(clear){endAgentMark();return;}
     if(hidden){agentMark?.style.setProperty('display','none','important');openedMark?.style.setProperty('display','none','important');return;}
@@ -730,45 +903,52 @@
     }
     agentMark.style.setProperty('display','block','important');agentMark.classList.remove('leaving');
     clearTimeout(agentMarkTimer);
-    agentMarkTimer=setTimeout(endAgentMark,AGENT_MARK_MS);
+    // A mark re-sent after the page loaded only lasts for the time the worker has left.
+    agentMarkTimer=setTimeout(endAgentMark,Number.isFinite(ms)&&ms>0?Math.min(ms,AGENT_MARK_MS):AGENT_MARK_MS);
   }
-  function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-agent-mark'&&_sender.id===api.runtime.id){markAgent(m.hidden===true,m.clear===true,m.opened===true).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;}if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}if(m?.type!=='cindy-ui')return;if(inFrame?!m.frame||!allMedia().length:m.frame)return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
+  function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-agent-mark'&&_sender.id===api.runtime.id){markAgent(m.hidden===true,m.clear===true,m.opened===true,m.ms).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;}if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}// Side panel page commands use their own type: older page scripts open their panel for any unknown cindy-ui action.
+    if(m?.type==='cindy-page'&&_sender.id===api.runtime.id&&!inFrame&&['state','translate'].includes(m.action)){pageCommand(m.action).then(r=>{if(!disposed)reply(r);},e=>{if(!disposed)reply({ok:false,error:e?.message||String(e)});});return true;}
+    if(m?.type!=='cindy-ui')return;if(inFrame?!m.frame||!allMedia().length:m.frame)return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
   api.runtime.onMessage.addListener(onRuntimeMessage);
-  let autoOpening=false,nextAutoAttempt=0;
+  let autoOpening=false,nextAutoAttempt=0,autoTranslatedURL='';
   async function autoOpen(){
     if(!runtimeReady()||autoOpening||videoSession)return;
     if(document.querySelector('video,audio'))ensureVideoEntry();
     // An embedded player only starts when someone asks for it.
     if(inFrame)return;
-    const youtube=youtubeSite&&!!document.querySelector('video');
-    if(!youtube&&(translated||translations.size))return;
+    const youtube=autoVideoSite&&!!document.querySelector('video');
+    // Automatic subtitles never take over a page the reader is translating:
+    // starting them would cancel the page translation and move the panel.
+    if(translated||translations.size)return;
     let stored;
     try{stored=(await extensionCall(()=>api.storage.local.get('cindyReadingPreferences'))).cindyReadingPreferences||{};}catch{return;}
-    // YouTube subtitles are enabled on a fresh install. An explicit false is
-    // the only opt-out; site translation remains opt-in per origin.
-    const enabled=youtube?stored.autoVideo!==false:stored.autoSites?.[location.origin]===true;
-    if(!enabled){
+    // Video subtitles are enabled on a fresh install. An explicit false is
+    // the only opt-out; site translation remains opt-in per origin. The two
+    // settings are read separately, and the explicit per-site choice wins.
+    const siteEnabled=stored.autoSites?.[location.origin]===true,videoEnabled=youtube&&stored.autoVideo!==false;
+    if(!siteEnabled&&!videoEnabled){
       // Keep the one-second navigation timer from re-reading the stored opt-out
       // forever. An explicit settings change runs configure() and restores the
       // current persisted preference before the next automatic attempt.
       if(youtube)prefs.autoVideo=false;
-      else if(prefs.autoSites&&typeof prefs.autoSites==='object')prefs.autoSites[location.origin]=false;
+      if(prefs.autoSites&&typeof prefs.autoSites==='object')prefs.autoSites[location.origin]=false;
       nextAutoAttempt=Date.now()+5000;
       return;
     }
     autoOpening=true;nextAutoAttempt=Date.now()+5000;
-    try{await configure();if(youtube&&prefs.autoVideo){makePanel();await showVideo();if(videoSession)videoSession.auto=true;}else if(prefs.autoSites[location.origin]===true){await togglePage();}}catch{}finally{autoOpening=false;}
+    // Translate a page automatically once per address: restoring the original stays restored.
+    try{await configure();if(prefs.autoSites[location.origin]===true){nextAutoAttempt=Infinity;if(autoTranslatedURL!==location.href){autoTranslatedURL=location.href;await togglePage();}}else if(youtube&&prefs.autoVideo){makePanel();await showVideo(true);}}catch{}finally{autoOpening=false;}
   }
   if(!inFrame)sendMessage({type:'cindy-agent-tab'}).then(r=>{if(r?.opened)showOpenedMark();}).catch(()=>{});
   sendMessage({type:'cindy-video-resume'}).then(r=>{if(r?.enabled)open('video').catch(()=>{});else autoOpen();}).catch(()=>{});
   // The toolbar icon has a light and a dark version; the page knows the browser's appearance.
   {const scheme=globalThis.matchMedia?.('(prefers-color-scheme: dark)');const tell=()=>{if(runtimeReady())sendMessage({type:'cindy-color-scheme',dark:!!scheme.matches}).catch(()=>{});};if(scheme&&window===window.top){tell();scheme.addEventListener?.('change',tell,{signal:lifecycle.signal});}}
-  let lastURL=location.href;navigationTimer=setInterval(()=>{if(!runtimeReady())return;const youtube=youtubeSite;if(!videoSession||site?.multi)ensureVideoEntry();if(lastURL!==location.href){lastURL=location.href;restorePage();close();selectionButton?.remove();selected='';cues=[];autoOpen();}else if(!videoSession&&youtube&&prefs.autoVideo&&Date.now()>=nextAutoAttempt)autoOpen();},1000);
+  let lastURL=location.href;navigationTimer=setInterval(()=>{if(!runtimeReady())return;const youtube=autoVideoSite;if(!videoSession||site?.multi)ensureVideoEntry();if(lastURL!==location.href){lastURL=location.href;restorePage();carryVideo();close();selectionButton?.remove();selected='';cues=[];autoOpen();}else if(!videoSession&&youtube&&prefs.autoVideo&&Date.now()>=nextAutoAttempt)autoOpen();resumeCarried();},1000);
   document.addEventListener('yt-navigate-finish',()=>{ensureVideoEntry();autoOpen();},{signal:lifecycle.signal});
   // Several players render their control bar on hover; do not leave the entry to the one-second timer.
   if(site.id!=='generic'&&!youtubeSite){let entryTimer;document.addEventListener('pointerover',e=>{if(!e.target.closest?.(playerSelector))return;clearTimeout(entryTimer);entryTimer=setTimeout(()=>{if(runtimeReady())ensureVideoEntry();},120);},{capture:true,passive:true,signal:lifecycle.signal});}
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){videoSession?.overlay?.closeSettings();if(!videoSession)hidePanel();selectionButton?.remove();}},{signal:lifecycle.signal});
   // Learning shortcuts follow the video, not the panel: they are only skipped inside editable fields and Cindy's own surfaces.
-  function videoShortcut(e){if(!videoSession||!e.isTrusted||e.metaKey||e.ctrlKey||e.altKey||e.shiftKey||prefs.videoMode==='off')return;const path=e.composedPath(),target=path[0];if(target instanceof Element&&(/INPUT|TEXTAREA|SELECT/.test(target.tagName)||target.isContentEditable))return;if(path.some(n=>n instanceof Element&&(n.hasAttribute('data-cindy-panel')||n.hasAttribute('data-cindy-captions'))))return;const actions={a:()=>jump(Math.max(0,activeCue-1)),s:()=>jump(Math.max(0,activeCue)),d:()=>jump(Math.min(cues.length-1,activeCue+1)),q:()=>{autoPause=!autoPause;videoSettings();},r:()=>{repeat=!repeat;videoSettings();}};const run=actions[e.key];if(!run)return;e.preventDefault();e.stopPropagation();run();}
+  function videoShortcut(e){if(!videoSession||!e.isTrusted||e.metaKey||e.ctrlKey||e.altKey||e.shiftKey||!captionsEnabled())return;const path=e.composedPath(),target=path[0];if(target instanceof Element&&(/INPUT|TEXTAREA|SELECT/.test(target.tagName)||target.isContentEditable))return;if(path.some(n=>n instanceof Element&&(n.hasAttribute('data-cindy-panel')||n.hasAttribute('data-cindy-captions'))))return;const actions={a:()=>jump(Math.max(0,activeCue-1)),s:()=>jump(Math.max(0,activeCue)),d:()=>jump(Math.min(cues.length-1,activeCue+1)),q:()=>{autoPause=!autoPause;videoSettings();},r:()=>{repeat=!repeat;videoSettings();}};const run=actions[e.key];if(!run)return;e.preventDefault();e.stopPropagation();run();}
   document.addEventListener('keydown',videoShortcut,{capture:true,signal:lifecycle.signal});
 })();

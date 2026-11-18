@@ -2131,6 +2131,185 @@ import fs from "node:fs";
 import path from "node:path";
 var digest = (value) => createHash("sha256").update(value).digest("hex");
 var layoutDigest = (layout) => digest(JSON.stringify(layout));
+var responsiveLengths = [
+  "left",
+  "right",
+  "top",
+  "bottom",
+  "width",
+  "height",
+  "minWidth",
+  "maxWidth",
+  "minHeight",
+  "maxHeight",
+  "margin",
+  "marginLeft",
+  "marginRight",
+  "marginTop",
+  "marginBottom",
+  "padding",
+  "paddingLeft",
+  "paddingRight",
+  "paddingTop",
+  "paddingBottom",
+  "paddingHorizontal",
+  "paddingVertical",
+  "gap",
+  "flexBasis",
+  "fontSize",
+  "borderRadius",
+  "borderWidth"
+];
+var responsiveEnums = {
+  position: ["absolute", "relative"],
+  flexDirection: ["row", "column", "row-reverse", "column-reverse"],
+  justifyContent: [
+    "flex-start",
+    "center",
+    "flex-end",
+    "space-between",
+    "space-around",
+    "space-evenly"
+  ],
+  alignItems: ["flex-start", "center", "flex-end", "stretch", "baseline"],
+  alignSelf: ["auto", "flex-start", "center", "flex-end", "stretch", "baseline"],
+  flexWrap: ["nowrap", "wrap", "wrap-reverse"],
+  backgroundFit: ["fill", "contain", "cover", "sliced"],
+  overflow: ["visible", "hidden", "scroll"]
+};
+function adaptLayout(ui, layout) {
+  const config = layout.adaptation;
+  if (config === void 0) return null;
+  assert(config && ["screen", "component"].includes(config.mode), "Invalid adaptation mode");
+  const shortSide = Math.min(layout.design.width, layout.design.height);
+  const logicalShortSide = config.logicalShortSide ?? shortSide;
+  assert(Number.isFinite(logicalShortSide) && logicalShortSide > 0, "Invalid logicalShortSide");
+  for (const key of ["safeArea", "nativeMenuInset"])
+    assert(
+      config[key] === void 0 || typeof config[key] === "boolean",
+      "Invalid adaptation " + key
+    );
+  const factor = logicalShortSide / shortSide;
+  const reference = { width: layout.design.width * factor, height: layout.design.height * factor };
+  const nodes = /* @__PURE__ */ new Map();
+  const visit = (node) => {
+    nodes.set(node.id, node);
+    for (const key of responsiveLengths)
+      if (typeof node[key] === "number") node[key] = Math.round(node[key] * factor * 1e3) / 1e3;
+    node.children?.forEach(visit);
+  };
+  visit(ui);
+  const overrides = config.nodes ?? {};
+  assert(
+    overrides && typeof overrides === "object" && !Array.isArray(overrides),
+    "Invalid adaptation nodes"
+  );
+  for (const [id, props] of Object.entries(overrides)) {
+    assert(
+      nodes.has(id) && props && typeof props === "object" && !Array.isArray(props),
+      "Unknown adaptation node: " + id
+    );
+    for (const [key, value] of Object.entries(props)) {
+      const length = responsiveLengths.includes(key);
+      const numeric = ["aspectRatio", "flexGrow", "flexShrink"].includes(key);
+      const values = Object.hasOwn(responsiveEnums, key) ? responsiveEnums[key] : void 0;
+      assert(length || numeric || values, "Unsupported adaptation property: " + key);
+      if (value === null) continue;
+      assert(
+        length ? typeof value === "number" && Number.isFinite(value) || typeof value === "string" && /^(auto|-?\d+(?:\.\d+)?%)$/.test(value) : numeric ? Number.isFinite(value) && value >= (key === "aspectRatio" ? 1e-6 : 0) : values.includes(value),
+        "Invalid adaptation property: " + id + "." + key
+      );
+    }
+  }
+  const inferred = [];
+  const percent = (value, total) => Math.round(value / total * 1e6) / 1e4 + "%";
+  function proportionalChildren(node, width, height) {
+    for (const child of node.children || []) {
+      const childWidth = child.width, childHeight = child.height;
+      for (const key of ["left", "width"])
+        if (typeof child[key] === "number") child[key] = percent(child[key], width);
+      for (const key of ["top", "height"])
+        if (typeof child[key] === "number") child[key] = percent(child[key], height);
+      proportionalChildren(child, childWidth, childHeight);
+    }
+  }
+  function anchor(node, start, end, size, extent) {
+    const offset = node[start] || 0, length = node[size];
+    const centerOffset = offset + length / 2 - extent / 2;
+    if (Math.abs(centerOffset) <= extent * 0.1) {
+      node[start] = "50%";
+      node[start === "left" ? "marginLeft" : "marginTop"] = offset - extent / 2;
+    } else if (centerOffset > 0) {
+      node[end] = extent - offset - length;
+      delete node[start];
+    }
+  }
+  if (config.mode === "screen") {
+    ui.width = "100%";
+    ui.height = "100%";
+    const content = [], backgrounds = [];
+    for (const node of ui.children || []) {
+      if (node.id === "background" && node.backgroundImage) {
+        Object.assign(node, { left: 0, top: 0, right: 0, bottom: 0 });
+        delete node.width;
+        delete node.height;
+        backgrounds.push(node);
+        continue;
+      }
+      const explicit = overrides[node.id] || {};
+      const inferX = !["left", "right"].some((key) => Object.hasOwn(explicit, key));
+      const inferY = !["top", "bottom"].some((key) => Object.hasOwn(explicit, key));
+      if (inferX) anchor(node, "left", "right", "width", reference.width);
+      if (inferY) anchor(node, "top", "bottom", "height", reference.height);
+      if (overrides[node.id] && ["width", "height", "aspectRatio", "maxWidth", "maxHeight"].some(
+        (key) => Object.hasOwn(overrides[node.id], key)
+      ))
+        proportionalChildren(node, node.width, node.height);
+      if (inferX || inferY)
+        inferred.push(node.id);
+      content.push(node);
+    }
+    if (config.safeArea !== false) {
+      const uniqueId = (base) => {
+        let id = base, index = 1;
+        while (nodes.has(id)) id = base + "_" + index++;
+        nodes.set(id, null);
+        return id;
+      };
+      ui.children = [
+        ...backgrounds,
+        {
+          type: "SafeAreaView",
+          id: uniqueId("safe_area"),
+          position: "absolute",
+          left: 0,
+          top: 0,
+          right: 0,
+          bottom: 0,
+          nativeMenuInset: config.nativeMenuInset === true,
+          children: [
+            {
+              type: "Panel",
+              id: uniqueId("safe_content"),
+              flexGrow: 1,
+              minWidth: 0,
+              minHeight: 0,
+              children: content
+            }
+          ]
+        }
+      ];
+    }
+  }
+  for (const [id, props] of Object.entries(overrides)) {
+    const node = nodes.get(id);
+    for (const [key, value] of Object.entries(props)) {
+      if (value === null) delete node[key];
+      else node[key] = value;
+    }
+  }
+  return { mode: config.mode, reference, inferred, review: "pending" };
+}
 var geometryFields = [
   "id",
   "type",
@@ -2341,6 +2520,7 @@ function assemble(layout, correction = null) {
   }
   const ui = build(root, null, null, 0);
   assert.equal(visited.size, elements.size, "Disconnected or cyclic elements");
+  const adaptation = adaptLayout(ui, layout);
   return {
     ui,
     report: {
@@ -2353,7 +2533,8 @@ function assemble(layout, correction = null) {
         assetId,
         instances: instances.size
       })),
-      placements
+      placements,
+      ...adaptation ? { adaptation } : {}
     }
   };
 }
@@ -2504,6 +2685,7 @@ function layoutFromBbox(input) {
     coordinateSpace: "design-pixels",
     rectBasis: "asset-canvas",
     provenance: "recognition",
+    ...input.adaptation ? { adaptation: input.adaptation } : {},
     ...input.screen || bbox.screen ? { screen: input.screen || bbox.screen } : {},
     design: { ...bbox.design },
     assets: input.assets,

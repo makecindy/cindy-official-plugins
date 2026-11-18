@@ -15,8 +15,8 @@
      * @param {() => string} [opts.getOrientation]
      * @param {(clientX:number, clientY:number) => object} [opts.mapClientPoint]
      */
-    constructor(screen, { overlay, getOrientation, mapClientPoint } = {}) {
-      super(screen, { mapClientPoint });
+    constructor(screen, { overlay, getOrientation, mapClientPoint, mapScreenPoint } = {}) {
+      super(screen, { mapClientPoint, mapScreenPoint });
       this.overlay = overlay || null;
       this.getOrientation = getOrientation || (() => 'portrait');
     }
@@ -43,8 +43,8 @@
         return Array.from(touches).map((t) => ({
           // Chrome-pixel coords (visual rect → device-point scale)
           // so the wire envelope ships the same units as `tap`.
-          x: ((t.clientX - r.left) / r.width) * width,
-          y: ((t.clientY - r.top) / r.height) * height,
+          x: this._screenPoint(t.clientX,t.clientY).x,
+          y: this._screenPoint(t.clientX,t.clientY).y,
           // Pre-scaling raw pixels for the overlay HUD, which paints
           // host-local DOM dots in CSS pixels.
           vx: t.clientX - r.left, vy: t.clientY - r.top,
@@ -79,7 +79,7 @@
           // following (gesturechange's centroid-only positions are
           // too coarse to track each fingertip accurately).
           if (this.overlay) {
-            this.overlay.setFingers(all.slice(0, 2).map((f) => ({ x: f.vx, y: f.vy })));
+            this._showFingers(all.slice(0,2));
           }
           return;
         }
@@ -124,7 +124,7 @@
         // keep painting from e.touches without dispatching wire.
         if (state.mode === 'multi-deferred') {
           if (this.overlay && all.length >= 2) {
-            this.overlay.setFingers(all.slice(0, 2).map((f) => ({ x: f.vx, y: f.vy })));
+            this._showFingers(all.slice(0,2));
           }
           return;
         }
@@ -150,7 +150,7 @@
           this.screen.touchUp([{ x: all[0].x, y: all[0].y }]);
           state = { mode: 'multi-deferred' };
           if (this.overlay) {
-            this.overlay.setFingers(all.slice(0, 2).map((f) => ({ x: f.vx, y: f.vy })));
+            this._showFingers(all.slice(0,2));
           }
         }
       }, opts);
@@ -196,7 +196,7 @@
         if (e.type !== 'touchstart' && !contacts.length) return;
         const next = Array.from(e.touches).sort((a,b) => a.identifier-b.identifier)
           .map(t => ({ id:t.identifier, point:this._screenPoint(t.clientX,t.clientY), x:t.clientX,y:t.clientY }));
-        if (next.some(t => !t.point.inside)) { release(); return; }
+        if (!e.native && !contacts.length && next.some(t => !t.point.inside)) { release(); return; }
         const same = next.length === contacts.length && next.every((t,i) => t.id === contacts[i].id);
         if (!same) {
           // The simulator's wire format separates single- and two-contact
@@ -216,7 +216,7 @@
         }
         contacts = next;
         const r = this._el.getBoundingClientRect();
-        if (next.length === 2) this.overlay?.setFingers(next.map(t => ({x:t.x-r.left,y:t.y-r.top})));
+        if (next.length === 2) this._showFingers(next.map(t => t.point));
         else this.overlay?.clear();
       };
       for (const name of ['touchstart','touchmove','touchend','touchcancel']) this._on(this._el,name,update,{passive:false});
@@ -225,7 +225,7 @@
       this._on(this._el,'cindy-trackpad',e=>{
         const frame=e.detail;
         update({type:frame.phase==='cancel'?'touchcancel':frame.phase==='begin'?'touchstart':'touchmove',
-          touches:frame.touches.map(t=>({identifier:t.id,clientX:t.x,clientY:t.y})),preventDefault(){}});
+          native:true,touches:frame.touches.map(t=>({identifier:t.id,clientX:t.x,clientY:t.y})),preventDefault(){}});
       });
     }
   }

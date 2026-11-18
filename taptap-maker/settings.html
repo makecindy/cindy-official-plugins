@@ -47,6 +47,7 @@
   }
   .btn.primary:hover { opacity: 0.88; }
   .hint { margin-top: 6px; font-size: 11px; color: var(--text-tertiary, #8a8a86); }
+  #message.error { color: var(--error-fg, #b53333); }
   .section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .project-section {
     margin-top: 16px; padding-top: 14px;
@@ -105,7 +106,7 @@
     <p class="hint" data-i18n="patHint">"Get PAT" opens TapTap Maker in your default browser. The Runtime validates and stores the PAT; this page only shows a masked summary.</p>
   </form>
 
-  <p id="message" class="hint"></p>
+  <p id="message" class="hint" role="status" aria-live="polite"></p>
 
   <section class="option">
     <button id="open-console" class="btn" type="button" data-i18n="openConsole">Open Maker console</button>

@@ -1,13 +1,19 @@
 {
   "name": "GitHub",
-  "description": "Cindy で GitHub のリポジトリ、Issue、PR、Actions を管理します。github.com に対応。",
-  "whenToUse": "github.com のリポジトリとリンクにだけ使用します。GitLab インスタンスには GitLab を使用してください。issue や Pull Request の確認・変更、コードレビューの投稿・返信、Pull Request のマージ、リポジトリ・ブランチ・commit・ファイルの確認、GitHub Actions の実行・確認、release 管理、コード・リポジトリ・ユーザー検索、Actions の成果物やログのダウンロードができます。この端末の GitHub ログインを優先します。プラグイン詳細でアカウントを接続するか、予備トークンを設定してください。",
+  "description": "Cindy で GitHub のリポジトリ、Issue、PR、Actions を管理します。PR を作成するときはインタラクティブなカードで提出を手伝い、マージまで CI とレビューを自動でフォローします。この端末の GitHub ログインを使用。github.com に対応。",
+  "whenToUse": "github.com のリポジトリとリンクにだけ使用します（GitLab インスタンスは GitLab）。issue・PR の確認と変更、コードレビュー、PR のマージ、リポジトリ・ブランチ・commit・ファイルの確認、GitHub Actions、release、検索、成果物やログのダウンロードができます。PR を作成するか尋ねるとき、作成後に PR の状態を示すときは PR カードを使います。この端末の GitHub ログインを優先し、予備トークンも設定できます。",
   "tools": {
     "list_tools": {
       "description": "issues、pulls、repo、commits、actions、releases、search、users、orgs、events、notifications、gists、git_data、reactions、meta を含む 117 個の GitHub 操作を一覧表示します。category なしではカテゴリ名・件数・説明を返し、category を指定するとそのカテゴリの全操作と説明・パラメータを返します。"
     },
     "call_tool": {
       "description": "list_tools が返した GitHub 操作を、パラメータ schema に従う args で実行します。リポジトリ操作には owner と repo の明示指定が必要です。Git リポジトリ内では git remote get-url origin から推定できます。既定では html_url を除く API リンク項目を削除し、raw=true で元の JSON を返します。50KB を超える結果はセッション作業ディレクトリへ書き込み、ファイルパスだけを返します。out_file でパスを指定できます。Actions の成果物やログ ZIP のダウンロードでは、ghost_call 最上位の save_dir に保存先を指定します。"
+    },
+    "pr_card": {
+      "description": "Cindy の会話に PR カードを表示します（IM 対象外）。作成の確認には repo、head、base、必要に応じて commits/files を渡します。クリックまたは明確な依頼後に Agent がコミット・作成し、card_id と pr で同じカードを更新して todo を実行します。renamed/following は完了した操作だけを報告します。既存 PR の表示だけではフォローを開始しません。開始前に claim_follow=true を渡し、成功かつ follow_claimed=true の場合のみスケジュールを作成します。別タスクでフォロー中は existing_task を返し、状態・理由・タスク入口のみを表示します。対応端末は直接移動し、旧版はクリック後に返信でリンクを表示します。open-task は移動のみです。停止はスケジュール削除を確認してから following=false を報告し、その後は別タスクで開始できます。バックグラウンドでは card_id で更新し、通知時は to_latest で最新の返信へ移動します。"
+    },
+    "pr_follow_settings": {
+      "description": "PR カードと共通の自動改名・自動フォロー・フォロー用モデル設定を読み取ります。カード表示、タスク作成、フォロー開始は行いません。settings は稼働の証明ではありません。IM で PR を作成した後も読み取り、pr の手順でフォローを作成・検証します。読み取り失敗は無効ではなく不明です。"
     }
   }
 }

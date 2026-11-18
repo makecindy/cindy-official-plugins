@@ -20,14 +20,6 @@ output_file="${2:?usage: package-plugin.sh <plugin-directory> <output-file>}"
 # Opt-in only. Legacy plugins keep the original toolchain and archive bytes.
 if git cat-file -e "HEAD:${plugin_directory}/binary-dependencies.json" 2>/dev/null; then
   python3 "$(dirname "$0")/binary-dependencies.py" "${plugin_directory}" "${output_file}"
-  if [[ "$plugin_directory" == "my-browser" ]] && git cat-file -e "HEAD:my-browser/native-host/go.mod" 2>/dev/null; then
-    stage=$(mktemp -d)
-    trap 'rm -rf "$stage"' EXIT
-    git archive HEAD:my-browser/native-host | tar -x -C "$stage"
-    node scripts/build-browser-native.mjs "$stage" "$stage/package/native-host/bin"
-    absolute_output=$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$output_file")
-    (cd "$stage/package" && zip -qr "$absolute_output" native-host/bin)
-  fi
 else
 
 git -c core.autocrlf=false archive \
@@ -39,6 +31,27 @@ git -c core.autocrlf=false archive \
   --add-file=TRADEMARKS.zh-CN.md \
   "HEAD:${plugin_directory}"
 
+fi
+
+# Cindy Chrome's native connector is built from source for every package,
+# independent of binary-dependencies.json: ghost.json's nativeHost.binary
+# points at native-host/bin, and a package without it cannot connect.
+if [[ "$plugin_directory" == "my-browser" ]] && git cat-file -e "HEAD:my-browser/native-host/go.mod" 2>/dev/null; then
+  stage=$(mktemp -d)
+  trap 'rm -rf "$stage"' EXIT
+  git archive HEAD:my-browser/native-host | tar -x -C "$stage"
+  node scripts/build-browser-native.mjs "$stage" "$stage/package/native-host/bin"
+  absolute_output=$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$output_file")
+  (cd "$stage/package" && zip -qr "$absolute_output" native-host/bin)
+  native_entries="$(unzip -Z1 "${output_file}")"
+  for platform in darwin-x64 darwin-arm64 linux-x64 linux-arm64 win32-x64 win32-arm64; do
+    binary="cindy-browser-native"
+    [[ "$platform" == win32-* ]] && binary="${binary}.exe"
+    grep -qx "native-host/bin/${platform}/${binary}" <<<"${native_entries}" || {
+      echo "Package is missing native-host/bin/${platform}/${binary}: ${output_file}" >&2
+      exit 1
+    }
+  done
 fi
 
 # `git archive --format=zip` emits directory records. Remove them so local

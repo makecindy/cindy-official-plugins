@@ -1,7 +1,7 @@
 {
   "name": "Cindy Chrome",
-  "description": "Connects Cindy to the Chrome you use every day. With My browser selected in Settings, the agent reads pages and acts for you with your existing sign-ins. Also bilingual pages, in-player subtitles and PDF reading. Page text goes to your configured AI.",
-  "whenToUse": "Use Cindy Chrome for translation, in-player subtitles and PDF reading in the user's own browser. To read or operate that browser, use Cindy's browser tool (target user-browser) where offered; older Cindy versions use this plugin's browser tools. Safari is not installable here.",
+  "description": "Connects Cindy to the Chrome you use every day. With My browser selected in Settings, the agent reads pages and acts for you with your existing sign-ins. Also bilingual pages and in-player subtitles. Page text goes to your configured AI.",
+  "whenToUse": "Use Cindy Chrome for translation and in-player subtitles in the user's own browser. To read or operate that browser, use Cindy's browser tool (target user-browser) where offered; older Cindy versions use this plugin's browser tools. Safari is not installable here.",
   "tools": {
     "browser_status": {
       "description": "Check live browser profiles and installation readiness without reading pages. Multiple profiles require an explicit browser id; do not guess the account. Use plugin settings to install/connect. A store page opening is not installation success. Chrome uses the official Chrome Web Store route; Edge uses the developer fallback until a published store route exists."

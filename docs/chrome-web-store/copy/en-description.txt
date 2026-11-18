@@ -10,7 +10,7 @@ Read the web. Follow the video.
 • Read webpages with inline bilingual translation, keeping the original in context.
 • Watch YouTube with subtitles inside the player. Choose bilingual, original-only, or translation-only display and select your target language.
 • Prepare video translations in sections, with progress information and reusable translations.
-• Read PDF documents and import subtitle files.
+• Import SRT / VTT subtitle files.
 
 Enable more when you need it
 Cindy can upload files to webpages as part of a browser task. Exporting webpages as PDF and tasks that need debugging or network access use Cindy's dedicated browser. Optional tab grouping helps identify Cindy's pages.

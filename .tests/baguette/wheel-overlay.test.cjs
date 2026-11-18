@@ -80,3 +80,26 @@ test('wheel pan and pinch indicators match bounded contacts at every screen edge
     }
   }
 });
+
+// Regression: a 3D mapper clamps to the screen; pan travel must come from its
+// unclamped coordinates, so a pointer parked on the left edge can still reverse.
+test('wheel pan with a clamping 3D mapper still reverses next to an edge', () => {
+  let wheel, contacts;
+  const screen = { size: { width: 400, height: 800 }, touchDown() {}, touchUp() {}, touchMove(p) { contacts = JSON.parse(JSON.stringify(p)); } };
+  const context = { window: { addEventListener() {}, document: { addEventListener() {} } }, setTimeout() { return 1; }, clearTimeout() {} };
+  const dir = path.join(__dirname, '../../cindy-simulator/vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures');
+  for (const name of ['attachable-event-source', 'wheel-gesture-source']) vm.runInNewContext(fs.readFileSync(path.join(dir, name + '.js'), 'utf8'), context);
+  const mapClientPoint = (cx, cy) => {
+    const rawX = cx - 30, rawY = (cy - 70) * 2, x = Math.max(0, Math.min(400, rawX)), y = Math.max(0, Math.min(800, rawY));
+    return { x, y, rawX, rawY, xNorm: x / 400, yNorm: y / 800, inside: true };
+  };
+  new context.window.Baguette._WheelGestureSource(screen, { mapClientPoint }).attach({
+    getBoundingClientRect: () => ({ left: 30, top: 70, width: 400, height: 400 }),
+    addEventListener(name, cb) { if (name === 'wheel') wheel = cb; },
+  });
+  const send = (deltaX) => wheel({ clientX: 30, clientY: 270, deltaX, deltaY: 0, preventDefault() {} });
+  send(-60); // pointer on the left edge, fingers travel right
+  const right = contacts[0].x;
+  send(60);
+  assert.ok(contacts[0].x < right, 'reversal moves the fingers back immediately');
+});

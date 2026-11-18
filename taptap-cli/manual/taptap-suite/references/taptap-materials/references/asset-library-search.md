@@ -37,9 +37,31 @@ call_tool(name:"asset-library search-assets", args:{app_id:"<appId>", developer_
 
 1. 确认目标 scene 列表；不确定时先读 schema，不猜枚举。
 2. 一次调用 `search-assets`，`target_scenes` 传完整场景数组，不要拆成多个单场景请求。
-3. 逐场景读取 `results[]`：每个场景有 `recommended_asset_id`（推荐参考图）和 `list`（按场景打分排序的候选列表），以及 `recommended_reason` / `pending_asset_id` / `pending_reason` / `total`。
+3. 逐场景读取 `results[]`：每个场景有 `recommended_asset_id`（推荐参考图）和 `list`（按场景打分排序的候选列表），以及 `recommended_reason` / `pending_asset_id` / `pending_reason` / `total`。不同场景可能命中同一批素材，展示时按 `asset_id` 去重，并保留每个场景各自的推荐。
 4. 某场景无可用候选时出现在 `missing[]`（带 `reason`），建议用户上传适合该场景的图片。
 5. 推荐为空但候选全部处于处理中时，说明稍后重试，不把它解释成素材库为空。
+
+## 候选条目字段
+
+`list[]` 的每个候选都携带完整图片元数据，可直接拼成资料字段的值 `{"url": ..., "info": ...}`：
+
+| 字段 | 说明 |
+| --- | --- |
+| `asset_id` | 素材 ID |
+| `url` | 图片 HTTPS 地址 |
+| `width` / `height` / `size` / `format` | 回填 `info` 用 |
+| `color_model` | 通常为空（proto 已废弃） |
+| `image_ave.rgb` | 图片平均色，回填 `info` 用 |
+| `tagging_status` / `tags` | 打标状态与标签 |
+
+挑选候选后写入字段时，带上 `url` 与完整 `info`（含 `image_ave.rgb`）。`image_ave` 缺失说明该素材记录本身没有平均色（2026-10 之前的老素材），这类老素材**不能直接写入资料字段**（服务端要求五项齐全，缺平均色会被 400）：要么重新用 materials 手册的 `upload` 上传一遍拿到完整 info，要么换一张带平均色的候选。不要伪造颜色。
+
+## 场景推荐不等于尺寸合规（重要）
+
+- `target_scenes` 是服务端按场景打标的推荐口径，**不代表候选满足目标场景的硬性规格**；写入或交给用户前必须按候选自身的 `width` / `height` 再校验一次。
+- 图标（`icon`）的硬性要求：宽高比 1:1、宽和高均 ≥512 像素、JPG/PNG、不要预加圆角（见 [游戏物料要求](taptap-suite/references/material-requirements.md)）。
+- `icon` 场景里没有 1:1 候选时，明确说明「素材库暂无合适的方形图标参考」，转入上传或生图流程；**不得把 `header_banner` 或 1920×1080 之类的横版素材推荐为图标参考**。
+- 其他场景同理：推荐项只表示「素材库认为接近该场景」，最终以目标字段规格或官方物料要求为准。
 
 ## `tagging_status`
 

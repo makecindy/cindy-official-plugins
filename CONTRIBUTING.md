@@ -14,10 +14,12 @@ maintained in separate repositories and are outside the scope of this repository
 - Read [`README.md`](README.md) first. It is the source of truth for the
   repository layout, the plugin list, the review standards, and the publish
   flow; this guide does not duplicate them.
-- The plugin-authoring contract lives in this repository: `README.md`, this
-  guide, the pinned Manifest validator under `.tests/contracts/`, and the
-  packaging checks. It is independent of the Agent or harness used to create
+- The repository's source, validation, and publishing contract lives here:
+  `README.md`, this guide, the pinned Manifest validator under `.tests/contracts/`,
+  and the packaging checks. It is independent of the Agent or harness used to create
   the files. Cindy Forge commands are optional shortcuts only.
+  For Host API details, follow the target version's bundled reference through the
+  [version and capability map](docs/plugin-authoring.md#target-host-reference-and-capability-map).
 - Use the [authoring and migration reference](docs/plugin-authoring.md) for
   field mappings and concrete runtime calls. The implementing Agent handles
   adaptations from existing code; authors do not need to supply migration steps.
@@ -39,8 +41,9 @@ maintained in separate repositories and are outside the scope of this repository
 Start with the
 [harness-independent quick path in `README.md`](README.md#harness-independent-quick-path):
 
-1. Align the design and minimum capabilities, then create a new root-level
-   plugin directory using ordinary file operations.
+1. Align the design and minimum capabilities, verify the target Host version,
+   and choose a user-supplied icon or obtain consent before generating one.
+   Then create a new root-level plugin directory using ordinary file operations.
 2. Start from the documented Manifest-v3 and `main.js` examples. Do **not** copy
    an existing official plugin's `ghost.json`: unchanged official plugins may
    intentionally retain legacy v2 manifests. Existing source may be consulted
@@ -52,6 +55,9 @@ Start with the
 5. If the chosen harness exposes Cindy Forge commands, they may replace the
    manual scaffold/package steps, but they do not change the source format or
    the review contract. Installation still requires an explicit user request.
+   Do not retain a scaffold placeholder icon. Official repository changes are
+   published through PRs; client community submission and organization publishing
+   are separate paths, not substitutes for an official-plugin PR.
 6. Before opening an official-plugin PR, add the `provisioning.json` entry and
    complete exactly four locale resources: `zh-CN`, `en`, `ja`, and `ko`.
 

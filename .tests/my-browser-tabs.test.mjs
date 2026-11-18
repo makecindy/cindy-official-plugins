@@ -21,8 +21,8 @@ function harness(documentReason=()=>'NAVIGATION_UNOBSERVED') {
   const context={chrome,MyBrowserPolicy:P,MyBrowserNetwork:{create:()=>({assertSupported,isReady:async()=>state.domReady,document:async id=>{throw Object.assign(new Error('ADDRESS_UNVERIFIED'),{reason:documentReason(id)});}})},fetch:async()=>({ok:true,json:async()=>({policy:P.defaults()})}),navigator:{userAgent:'Chrome/140'},URL,crypto:globalThis.crypto,TextEncoder,btoa,AbortController,
     Date:class extends Date{static now(){return clock;}},setTimeout(fn,ms){clock+=ms;queueMicrotask(fn);return 0;},clearTimeout(){}};
   // Disable only the network bootstrap; execute the actual production tab manager, not a copied implementation.
-  vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,'')+'\nglobalThis.tabTest={ensureTab,owned,cleanup,handle,videoIdentity};',context);
-  return {list:args=>context.tabTest.handle({action:'tabs',payload:args},P.defaults(),{}),handle:url=>context.tabTest.handle({action:'text',payload:{url}},P.defaults(),{base:'http://fixture',session:'fixture'}),state,tabs,data,creates:()=>creates,videoIdentity:context.tabTest.videoIdentity,read:url=>context.tabTest.ensureTab(url,P.normalizePolicy({read:{block:[]},interact:{allow:[],block:[]}}), 'text'),focus:async id=>{activate({tabId:id});await Promise.resolve();await Promise.resolve();}};
+  vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,'')+'\nglobalThis.tabTest={ensureTab,owned,cleanup,handle,videoIdentity,setJob:value=>{pageJobActive=value;}};',context);
+  return {cleanup:context.tabTest.cleanup,renew:()=>{for(const rec of context.tabTest.owned.values())rec.used=clock;},setJob:context.tabTest.setJob,advance:ms=>{clock+=ms;},deferGet:()=>{const original=chrome.tabs.get;let release;chrome.tabs.get=async id=>{const tab=await original(id);await new Promise(r=>{release=r;});return tab;};return ()=>release();},list:args=>context.tabTest.handle({action:'tabs',payload:args},P.defaults(),{}),handle:url=>context.tabTest.handle({action:'text',payload:{url}},P.defaults(),{base:'http://fixture',session:'fixture'}),state,tabs,data,creates:()=>creates,videoIdentity:context.tabTest.videoIdentity,read:url=>context.tabTest.ensureTab(url,P.normalizePolicy({read:{block:[]},interact:{allow:[],block:[]}}), 'text'),focus:async id=>{activate({tabId:id});await Promise.resolve();await Promise.resolve();}};
 }
 test('redirected load timeout retains one tab across repeated reads and later readiness',async()=>{
   const h=harness();h.state.redirect=true;h.state.loading=true;
@@ -113,4 +113,13 @@ test('host searches exclude DNS-local tabs but retain allowed-site diagnostics',
   assert.equal(all.tabs[0].redacted,true);
   assert.equal(all.tabs[0].title,undefined);
   assert.equal(all.tabs[0].url,undefined);
+});
+
+for (const changed of ['job', 'renewed']) test('idle cleanup rechecks '+changed+' after a delayed Chrome response', async () => {
+  const h = harness(); await h.read('https://example.test/idle'); h.advance(600001);
+  const release = h.deferGet(), pending = h.cleanup();
+  for (let i=0;i<8;i++) await Promise.resolve();
+  if (changed === 'job') h.setJob(true); else h.renew();
+  release(); await pending;
+  assert.equal(h.tabs.size, 1, 'a tab used by a new job is not closed by stale cleanup');
 });

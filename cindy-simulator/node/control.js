@@ -14,7 +14,7 @@
   // Page state. `status` is the last successful status response; flags are page-local.
   const state = { status: null, lost: false, generation: null, zoom: { mode: 'fit' }, fitPct: 0, fullToolbar: false,
     recovering: false, stopping: false, switching: false, phase: null, lastTouch: 0, screenWidth: 0,
-    pose: null, viewport: null };
+    pose: null, viewport: null, view3D: null, panel3D: null };
   // Inside the management view the device list names the device; show a title instead of the switcher.
   const hub = params.get('embed') === 'hub';
   const store = { get(key) { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } },
@@ -101,6 +101,7 @@
 
   // ---- stage / iframe ----
   function load() {
+    stopFitMotion();
     state.generation = state.status?.generation ?? state.generation;
     // The capability travels in the frame URL: Cindy's panel is not an HTTP
     // origin, so this frame can hold no cookie.
@@ -108,9 +109,9 @@
     screen.src = !M.handheld(state.status?.device)
       ? `/platform-stage.html?udid=${encodeURIComponent(udid)}&lang=${lang}&platform=${M.platform(state.status?.device)}&cindyViewer=${encodeURIComponent(token || '')}`
       : `/simulators/${encodeURIComponent(udid)}?handheld=0${token ? `&cindyViewer=${encodeURIComponent(token)}` : ''}${location.hash}`;
-    state.viewport = null; state.fitPct = 0; state.pose = null;
+    state.viewport = null; state.fitPct = 0; state.pose = null; state.view3D = null; state.panel3D = null;
   }
-  function blank() { state.generation = null; screen.src = 'about:blank'; }
+  function blank() { stopFitMotion(); state.generation = null; screen.src = 'about:blank'; }
   // ---- zoom ----
   // The device page fits the device into its frame; zoom resizes that frame.
   // Percentages are of actual size (one device point per CSS pixel).
@@ -125,15 +126,89 @@
     const {insetX,insetY} = M.handheld(state.status?.device) ? {insetX:0,insetY:0} : framePadding();
     return {width: Math.max(0,bounds.width - insetX),height: Math.max(0,bounds.height - insetY),insetX,insetY};
   }
-  function applyZoom() {
+  function fit3DPct(view, width, height, padding) {
+    // Hardware buttons stay 32 CSS pixels wide. Reserve that footprint apart
+    // from the device/anchor bounds, which scale with the projected screen.
+    return Math.max(0, Math.min(
+      (width-padding.insetX-(view.fit ? 36 : view.insetX))/(view.fit?.width || view.width),
+      (height-padding.insetY-(view.fit ? 36 : view.insetY))/(view.fit?.height || view.height))) * 100;
+  }
+  // Resize changes client dimensions before ResizeObserver runs and may clamp
+  // scrollLeft/Top. Keep the last valid focus instead of combining new client
+  // dimensions with old offsets. User scrolling updates it only at that layout.
+  let scrollLayout = null, scrollFocus = {x:.5,y:.5};
+  function scrollBounds() {
+    return {width:scroll.clientWidth,height:scroll.clientHeight,
+      contentWidth:scroll.scrollWidth,contentHeight:scroll.scrollHeight};
+  }
+  function rememberScrollCenter() {
+    const bounds = scrollBounds();
+    if (!scrollLayout || Object.keys(bounds).some(key=>bounds[key] !== scrollLayout[key])) return;
+    scrollFocus = {
+      x:bounds.contentWidth > bounds.width ? (scroll.scrollLeft+bounds.width/2)/bounds.contentWidth : .5,
+      y:bounds.contentHeight > bounds.height ? (scroll.scrollTop+bounds.height/2)/bounds.contentHeight : .5,
+    };
+  }
+  scroll.addEventListener('scroll', rememberScrollCenter, {passive:true});
+  let fitMotion = null;
+  function stopFitMotion() {
+    if (fitMotion) cancelAnimationFrame(fitMotion.id);
+    fitMotion = null;
+  }
+  function center3DFit(motion, ease = 1) {
+    const projected = screen.contentWindow?.__cindyView?.()?.fit, padding = framePadding();
+    if (projected) {
+      const x = motion ? motion.anchorX*parseFloat(frame.style.width)*(1-ease)+projected.centerX*ease : projected.centerX;
+      const y = motion ? motion.anchorY*parseFloat(frame.style.height)*(1-ease)+projected.centerY*ease : projected.centerY;
+      scroll.scrollLeft = (frame.offsetLeft || 0) + x - (scroll.clientWidth-padding.insetX)/2;
+      scroll.scrollTop = (frame.offsetTop || 0) + y - (scroll.clientHeight-padding.insetY)/2;
+    }
+    scrollLayout = scrollBounds();
+    rememberScrollCenter();
+  }
+  function animate3DFit(width, height) {
+    if (fitMotion && Math.abs(fitMotion.width-width)<.1 && Math.abs(fitMotion.height-height)<.1) return;
+    stopFitMotion();
+    const fromWidth = parseFloat(frame.style.width), fromHeight = parseFloat(frame.style.height);
+    const padding = framePadding();
+    const motion = {width,height,id:0,start:performance.now(),
+      anchorX:(scroll.scrollLeft-(frame.offsetLeft||0)+(scroll.clientWidth-padding.insetX)/2)/fromWidth,
+      anchorY:(scroll.scrollTop-(frame.offsetTop||0)+(scroll.clientHeight-padding.insetY)/2)/fromHeight};
+    fitMotion = motion;
+    const tick = now => {
+      if (fitMotion !== motion) return;
+      const progress = Math.min(1,(now-motion.start)/180), ease = 1-(1-progress)**3;
+      frame.style.width = (fromWidth+(width-fromWidth)*ease)+'px';
+      frame.style.height = (fromHeight+(height-fromHeight)*ease)+'px';
+      center3DFit(motion,ease);
+      if (progress < 1) motion.id = requestAnimationFrame(tick);
+      else fitMotion = null;
+    };
+    motion.id = requestAnimationFrame(tick);
+  }
+  function applyZoom({animate=false}={}) {
     const { width, height, insetX, insetY } = stageSize();
     const factor = !M.handheld(state.status?.device) && state.zoom.mode === 'pct' && state.fitPct > 0
       ? state.zoom.pct / state.fitPct : M.zoomFactor(state.zoom, state.fitPct);
     // Keep the point at the centre of the view in place while the frame grows or shrinks.
-    const cx = scroll.scrollWidth > scroll.clientWidth ? (scroll.scrollLeft + scroll.clientWidth / 2) / scroll.scrollWidth : 0.5;
-    const cy = scroll.scrollHeight > scroll.clientHeight ? (scroll.scrollTop + scroll.clientHeight / 2) / scroll.scrollHeight : 0.5;
+    rememberScrollCenter();
+    const {x:cx,y:cy} = scrollFocus;
     const physical = state.status?.device?.kind === 'physical' && state.viewport;
-    if (physical && state.zoom.mode === 'pct') {
+    if (state.view3D) {
+      const view = state.view3D, padding = framePadding();
+      state.fitPct = fit3DPct(view, width, height, padding);
+      const scale = (state.zoom.mode === 'pct' ? state.zoom.pct : state.fitPct) / 100;
+      const targetWidth = view.width * scale + view.insetX + padding.insetX;
+      const targetHeight = view.height * scale + view.insetY + padding.insetY;
+      if (!screen.contentWindow?.__cindyTurnActive?.() && (animate || fitMotion) && state.zoom.mode === 'fit' && view.fit && stage.getAttribute('data-fit3d') !== null &&
+          typeof requestAnimationFrame === 'function' && !window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches &&
+          Number.isFinite(parseFloat(frame.style.width)) && Number.isFinite(parseFloat(frame.style.height))) {
+        animate3DFit(targetWidth,targetHeight);renderZoom();return;
+      }
+      stopFitMotion();
+      frame.style.width = targetWidth + 'px';
+      frame.style.height = targetHeight + 'px';
+    } else if (physical && state.zoom.mode === 'pct') {
       // Physical viewers fit a known body into a 12px inset. Percentage zoom
       // sizes that body directly, independent of earlier measurements/zoom.
       const padding = framePadding(), scale = state.zoom.pct / 100;
@@ -143,9 +218,19 @@
       frame.style.width = Math.round(width * factor + insetX) + 'px';
       frame.style.height = Math.round(height * factor + insetY) + 'px';
     }
+    if (!state.view3D) stopFitMotion();
     if (factor > 1.001) stage.setAttribute('data-zoomed', ''); else stage.removeAttribute('data-zoomed');
+    const fit3D = state.view3D?.fit && state.zoom.mode === 'fit';
+    if (fit3D) stage.setAttribute('data-fit3d', ''); else stage.removeAttribute('data-fit3d');
     scroll.scrollLeft = cx * scroll.scrollWidth - scroll.clientWidth / 2;
     scroll.scrollTop = cy * scroll.scrollHeight - scroll.clientHeight / 2;
+    if (fit3D) {
+      // The large iframe is a crop of the fixed-resolution 3D scene. Centre
+      // its actual device/controls in the area above the controller toolbar.
+      center3DFit();
+    }
+    scrollLayout = scrollBounds();
+    rememberScrollCenter();
     renderZoom();
   }
   async function viewport() {
@@ -163,10 +248,69 @@
     } catch {}
     return state.viewport;
   }
-  // What the fitted device measures, in percent of actual size. The 3D stage
-  // (foldables) has no fixed size, so its zoom is relative to fit.
-  async function measure() {
+  // All percentages use device points, including the lit screen inside 3D.
+  // Fit is derived separately from the available window size.
+  let pending3DViewport = null;
+  function accept3DViewport(request, size) {
+    const {selected,doc,panel}=request;
+    const current=screen.contentWindow?.__cindyView?.();
+    if (selected!==udid || screen.contentDocument!==doc || current?.panel!==panel ||
+        doc?.getElementById('simNativeView')?.getAttribute?.('data-render3d')!=='open' ||
+        !(size?.width>0 && size?.height>0)) return null;
+    state.viewport={width:size.width,height:size.height};state.panel3D=panel;
+    return current;
+  }
+  async function measure({animate=false}={}) {
     let doc; try { doc = screen.contentDocument; } catch { return; }
+    const is3D = doc?.getElementById('simNativeView')?.getAttribute?.('data-render3d') === 'open';
+    if (is3D) {
+      let view = screen.contentWindow?.__cindyView?.();
+      if (!view) return; // Wait for real frame metadata; never call fit "100%".
+      const panel = view.panel, selected = udid;
+      if (state.panel3D !== panel) {
+        let request;
+        try {
+          if (!pending3DViewport || pending3DViewport.doc !== doc || pending3DViewport.selected !== selected || pending3DViewport.panel !== panel) {
+            pending3DViewport = {doc, selected, panel, result:api('viewport')};
+          }
+          request = pending3DViewport;
+          if (state.zoom.mode==='fit' && state.viewport && state.view3D) {
+            // Fit is a ratio of projected bounds to window space: the logical
+            // point basis cancels out. Follow the pose now, calibrate points in
+            // the background for Actual Size/percentage labels.
+            if (!request.background) {
+              request.background=true;
+              request.result.then(size=>{
+                if (accept3DViewport(request,size)) measure({animate:true});
+              }).catch(()=>{}).finally(()=>{if(pending3DViewport===request)pending3DViewport=null;});
+            }
+          } else {
+            const size = await request.result;
+            view = accept3DViewport(request,size);
+            if (!view) return;
+          }
+        } catch { return; }
+        finally { if (!request?.background && pending3DViewport === request) pending3DViewport = null; }
+      }
+      const v = state.viewport;
+      if (!v) return;
+      const scale = Math.max(view.width,view.height) / Math.max(v.width,v.height);
+      state.view3D = {width:view.stageWidth/scale,height:view.stageHeight/scale,insetX:view.insetX,insetY:view.insetY};
+      if (view.fit?.width > 0 && view.fit?.height > 0) {
+        state.view3D.fit = {width:view.fit.width/scale,height:view.fit.height/scale};
+      }
+      const available = stageSize(), padding = framePadding(), natural = state.view3D;
+      state.fitPct = fit3DPct(natural, available.width, available.height, padding);
+      const targetScale = (state.zoom.mode === 'pct' ? state.zoom.pct : state.fitPct) / 100;
+      const targetWidth = natural.width*targetScale+natural.insetX+padding.insetX;
+      const targetHeight = natural.height*targetScale+natural.insetY+padding.insetY;
+      if (state.fitPct > 0 && ((state.zoom.mode === 'fit' && natural.fit) || Math.abs(parseFloat(frame.style.width)-targetWidth) > .1 ||
+          Math.abs(parseFloat(frame.style.height)-targetHeight) > .1)) applyZoom({animate});
+      else renderZoom();
+      if (state.fitPct > 0) screen.contentWindow?.__cindyLayoutReady?.();
+      return;
+    }
+    state.view3D = null; state.panel3D = null;
     const v = await viewport();
     if (state.status?.device?.kind === 'physical') {
       const {width,height} = stageSize(), padding = framePadding();
@@ -187,7 +331,7 @@
     }
     const device = doc?.getElementById('nativeDeviceFrame');
     const rect = device?.getBoundingClientRect();
-    if (!v || !rect?.width || doc.getElementById('simNativeView')?.getAttribute('data-render3d') === 'open') { state.fitPct = 0; renderZoom(); return; }
+    if (!v || !rect?.width) { state.fitPct = 0; renderZoom(); return; }
     const shown = Math.max(rect.width, rect.height) / Math.max(v.width, v.height) * 100;
     // Measure against the frame actually laid out, not a factor recalculated
     // from the previous measurement. Multiple resize/load callbacks otherwise
@@ -198,6 +342,7 @@
     renderZoom();
   }
   function setZoom(zoom) {
+    stopFitMotion();
     state.zoom = zoom; store.set(zoomKey(), zoom);
     applyZoom(); setTimeout(measure, 350);
   }
@@ -661,6 +806,8 @@
   // The glyphs turn with the device; the angle accumulates so each step takes the short way round.
   let glyphTurn = null;
   function renderPosture() {
+    // Reuse the existing posture tick for late first frames and panel changes.
+    try { if (screen.contentWindow?.__cindyView?.()) measure(); } catch {}
     let pose = null, roll = 0; try { pose = screen.contentWindow?.__cindyPose?.get?.() ?? null; roll = screen.contentWindow.__cindyPose.roll?.() || 0; } catch {}
     const show = live() && pose !== null;
     const appearing = show && $('posture').hidden;

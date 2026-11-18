@@ -2,9 +2,9 @@
    same vocabulary as the settings page. */
 :root { --c-surface: var(--panel-bg, var(--surface, #f8f8f6)); --c-card: var(--surface-elevated, #ffffff); --c-border: var(--border-default, #d7d7d4); --c-chip: var(--surface-chip, #e5e5e5); --c-hover: var(--surface-hover, #ededeb);
   --c-text: var(--text-primary, #262626); --c-text-2: var(--text-secondary, #737373); --c-text-3: var(--text-tertiary, #a3a3a3); --c-error: var(--error-fg, #D91F37); --c-ok: var(--status-success, #2AAE5B);
-  --c-cta-bg: var(--accent-cta-bg-pure, #000000); --c-cta-fg: var(--accent-pure-cta-fg, #ffffff); --c-focus: var(--focus-ring, #417CDD); }
+  --c-cta-bg: var(--accent-cta-bg, #000000); --c-cta-fg: var(--accent-pure-cta-fg, #ffffff); --c-focus: var(--focus-ring, #417CDD); }
 @media (prefers-color-scheme: dark) { :root { --c-surface: var(--panel-bg, var(--surface, #1f1f1e)); --c-card: var(--surface-elevated, #2c2c2a); --c-border: var(--border-default, #3c3c3a); --c-chip: var(--surface-chip, #3c3c3a); --c-hover: var(--surface-hover, #363634);
-  --c-text: var(--text-primary, #d4d4d4); --c-text-2: var(--text-secondary, #a3a3a3); --c-text-3: var(--text-tertiary, #737373); --c-cta-bg: var(--accent-cta-bg-pure, #ffffff); --c-cta-fg: var(--accent-pure-cta-fg, #000000); } }
+  --c-text: var(--text-primary, #d4d4d4); --c-text-2: var(--text-secondary, #a3a3a3); --c-text-3: var(--text-tertiary, #737373); --c-cta-bg: var(--accent-cta-bg, #ffffff); --c-cta-fg: var(--accent-pure-cta-fg, #000000); } }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; }
@@ -18,7 +18,7 @@ input { font: inherit; color: inherit; background: var(--c-card); border: 1px so
 .btn.sm { height: 28px; padding: 0 12px; font-size: 12px; }
 .btn.quiet { background: var(--c-card); border-color: var(--c-border); }
 .btn.cta { background: var(--c-cta-bg); color: var(--c-cta-fg); border-color: var(--c-cta-bg); }
-.btn.cta:hover:not(:disabled) { opacity: .88; }
+.btn.cta:hover:not(:disabled) { background: var(--c-cta-bg); opacity: .88; }
 .link { color: var(--c-text-2); font-size: 12px; text-decoration: underline; text-underline-offset: 2px; }
 .link:hover { color: var(--c-text); }
 .card { background: var(--c-card); border: 1px solid var(--c-border); border-radius: 12px; overflow: hidden; }

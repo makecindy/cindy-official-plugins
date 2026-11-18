@@ -1,11 +1,12 @@
 {
   "schemaVersion": 3,
-  "minCindyVersion": "0.1.64",
+  "minCindyVersion": "0.1.126",
   "id": "cindy-github",
   "name": "GitHub",
-  "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。支持 github.com。",
-  "whenToUse": "只管 github.com 域名的仓库/链接(GitLab 实例的找 GitLab)。需要查/建/改 GitHub issue 或 PR,提交/回复 code review,合并 PR,查仓库/分支/commit/文件内容,触发或查看 GitHub Actions,管理 release,搜索代码/仓库/用户,或下载 Actions 产物与日志时找我。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.3.0",
+  "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
+  "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
+  "version": "1.5.16",
+  "releaseNotes": "PR 自动跟进每轮遇到待用户确认的事项都会重新询问，并说明进展和阻塞原因，避免静默等待。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -18,7 +19,20 @@
   "settingsHtml": "settings.html",
   "notify": true,
   "fs": true,
+  "card": {
+    "externalLinks": true
+  },
+  "agent": {},
   "command": "cindy-github",
+  "skill": {
+    "items": [
+      {
+        "dir": "skills/pr",
+        "name": "pr",
+        "description": "Carry a GitHub pull request from start to merge in any Git repository - start the work on a fresh branch, open the PR only when the user asks for it, fix failing checks, merge conflicts and review feedback, follow it in the background, and clean up after merge. Use when the user invokes /pr or gives a PR link, starts a feature or fix that will become a pull request, or asks to open, fix or follow a PR."
+      }
+    ]
+  },
   "network": {
     "hosts": [
       "api.github.com",
@@ -83,6 +97,89 @@
           "name"
         ]
       }
+    },
+    {
+      "name": "pr_card",
+      "description": "在 Cindy 对话里展示 PR 卡片。询问是否发 PR 时传 repo、head、base，可附 commits、files；用户点击或明确要求后，Agent 才提交并创建 PR。创建后用 card_id 和 pr 更新原卡片，按 todo 执行发布后的改名／跟进设置；renamed、following 只报告已完成的操作。仅展示已有 PR 不会自动启动跟进。开始前传 claim_follow=true，仅成功且 follow_claimed=true 才能创建定时任务；其它任务正在跟进时返回 existing_task，卡片只显示状态、原因和任务入口；新版直接跳转，旧版点击后在回复中提供链接，open-task 仅为导航。停止需先删除并核实定时任务，再报告 following=false，随后用户可选择其它任务跟进。后台轮次用 card_id 刷新；需提醒时用 to_latest 移到最新回复。卡片不显示在 IM 渠道。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string",
+            "description": "github.com 仓库,owner/repo"
+          },
+          "head": {
+            "type": "string",
+            "description": "改动所在的分支(询问卡片必填)"
+          },
+          "base": {
+            "type": "string",
+            "description": "要合入的分支,如 main"
+          },
+          "commits": {
+            "type": "integer",
+            "description": "head 相对 base 的提交数"
+          },
+          "files": {
+            "type": "array",
+            "description": "改动文件(最多 50 个),卡片只显示文件数;看具体改动用宿主的审查面板",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "additions": {
+                  "type": "integer"
+                },
+                "deletions": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          },
+          "files_total": {
+            "type": "integer",
+            "description": "改动文件总数(files 被截断时传)"
+          },
+          "pr": {
+            "type": "string",
+            "description": "已创建的 PR 链接或编号"
+          },
+          "card_id": {
+            "type": "string",
+            "description": "要更新的卡片:之前 pr_card 返回的 card_id"
+          },
+          "renamed": {
+            "type": "boolean",
+            "description": "已把当前任务改名为 PR 号和标题"
+          },
+          "following": {
+            "type": "boolean",
+            "description": "后台跟进已开启(true)或已停止(false)"
+          },
+          "to_latest": {
+            "type": "boolean",
+            "description": "把卡片挪到这次调用的位置(本轮回复末尾)显示,原位置的卡片隐去(旧版 Cindy 留一行提示);只在要提醒用户看卡片时传(可以合并、等用户决定、已合并或关闭)"
+          },
+          "claim_follow": {
+            "type": "boolean",
+            "description": "开始跟进前先传 true 申请在当前任务跟进。只有成功且 follow_claimed=true 才能创建定时任务；existing_task 表示其它任务正在跟进。following 仅报告已完成的开启或停止。"
+          }
+        }
+      }
+    },
+    {
+      "name": "pr_follow_settings",
+      "description": "只读获取与 PR 卡片共用的自动改名、自动跟进和跟进模型偏好。不显示卡片、不创建任务、不启动跟进；返回 settings，不代表跟进已经开启。IM 发 PR 后也用此入口读取偏好，再按 pr 流程创建并核验跟进。读取失败时设置未知，不当作关闭。",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
     }
-  ]
+  ],
+  "sessionContext": true
 }

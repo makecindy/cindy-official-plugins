@@ -31,9 +31,9 @@ call_tool(name:"schema", args:{_positional:["qualification","save-qualification-
 
 - `qualification.qualification_type` 是联合类型的判别字段，必须传入；顶层**不接受** `qualification_type`，也没有 `kind` 字段。
 - 文件字段传对象 `{ "type": "img|pdf|video", "url": "<https-url>" }`；多文件字段传对象数组。
-- 只有图片型材料需要先取 HTTPS URL：由 `taptap-materials` 执行图片上传获取；PDF 或其他非图片材料不走图片上传，改用已有 HTTPS 文件 URL 或开发者后台页面。
+- 文件引用使用已确认且获准使用的 HTTPS 地址；不要求已有可用引用的材料重复上传。需要上传本地文件时，只有确认可公开展示的非敏感图片使用 `taptap-materials`；私密文件不得进入公开素材库。PDF/证明视频缺少合适上传能力时由用户在开发者后台上传，再由 CLI 查询保存结果。DOC/DOCX 不在文件类型枚举中，不能伪装成 PDF。
 - 不使用页面表单别名，如 `privacyPolicyUrl`、`policyLink`。
-- ICP 的 `icp_entity_type`、`icp_entity_name`、`icp_entity_license_no` 由 schema 声明为 CLI 输入，但属于敏感主体信息：不在命令、日志或对话里回显，用户不愿在 CLI 填写时转开发者后台资质页面。
+- ICP 的 `icp_entity_type`、`icp_entity_name`、`icp_entity_license_no` 由 schema 声明为 CLI 输入，但属于敏感主体信息：接口具备这些字段不等于本手册会收集它们。本手册将敏感主体信息交由用户在开发者后台填写，不放入 CLI 请求、日志或对话；CLI 查询保存和审核状态，并接续允许的非敏感操作。
 - 不在命令、日志或对话里暴露身份证号、营业执照号、联系人等敏感信息；工具要求人工填写时转页面。
 
 ## 常见示例
@@ -50,19 +50,7 @@ call_tool(name:"schema", args:{_positional:["qualification","save-qualification-
 }
 ```
 
-APK ICP：
-
-```json
-{
-  "qualification": {
-    "qualification_type": "icp-filing",
-    "icp_number": "<备案号>",
-    "icp_file": { "type": "pdf", "url": "<https-url>" }
-  }
-}
-```
-
-小游戏 ICP 包含主体敏感信息时，不在 CLI payload 中补齐；让 `qualification save-qualification-draft` 返回人工填写分支，再使用当前开发者后台资质页面入口完成。
+APK ICP 需要完整主体字段，单独 icp_number + icp_file 不代表可提审。本手册不收集或回显主体证件/联系人；请用户在同一环境的开发者后台填写并保存主体资料。完成后，CLI 查询 `get-qualification-assessment`，核对材料是否保存，再根据 `write_domain` 与 `submit_blockers` 确认能否继续提审；这些字段用于执行判断，不要求用户填写。小游戏 ICP 属于独立域，不用应用资质接口代办。
 
 隐私合规：
 
@@ -76,6 +64,8 @@ APK ICP：
   }
 }
 ```
+
+AI 接入声明的最小输入（不提供 AIGC 服务、无证明文件时）：`qualification_type=ai-declaration`、`aigc_qualification.provide_aigc_service=false`、`aigc_qualification.package_types=["<包体>"]`；不需要 `proof_file`/`proof_files`。如用户已明确「游戏不含 AI 生成内容」这一事实，可同时用 `app_features.has_ai_content=false` 一并保存（未确认时不要默认填 false）。
 
 AI 内容声明：
 
@@ -155,3 +145,15 @@ IP 授权书：
 | `anti_addiction_video_file` | 防沉迷说明视频 |
 
 “接入防沉迷”= 接入未成年人防沉迷服务（TapTap SDK / 其他 / 新规）；未接入时走包体侧 `apk_anti_addiction_status=not-integrated` + 授权 TapPlay 免安装上架。
+
+## 材料编辑规则
+
+按 schema 构造材料输入。隐私托管模式 `use_general_privacy_policy:true` 的链接由服务端生成；环境配置不可用时，说明错误并引导用户前往对应环境的开发者后台。小游戏常规隐私配置在开发者后台办理。
+
+AI 的 `proof_files` 会替换完整证明列表，每项格式为 `{ "package_type":"apk", "file":{"type":"pdf","url":"<https-url>"} }`。不同包体可以使用不同文件。删除某个包体的证明时，提交其余包体的完整列表；传 `[]` 表示全部清空，省略该字段表示保留。
+
+AI 接入声明（`ai-declaration`）**即使不传任何证明文件，也必须在 `aigc_qualification.package_types` 声明适用包体**（如 `["apk"]`）。只传 `provide_aigc_service` 时服务端可能返回成功，但读回仍是 `pending_upload`、`has_saved_material=false`——保存后必须回读 `has_saved_material` / `status` 确认已落库；没有落库就补 `package_types` 重试。
+
+`proof_file` 与 `package_types` 用于向指定包体添加同一份证明，不删除其他包体的文件；不能与 `proof_files` 同时传入。用户确认不提供 AI 服务时，设置 `provide_aigc_service=false`，并同样在 `aigc_qualification.package_types` 声明适用包体；是否删除已保存的证明须另行确认。
+
+数组字段在 schema 允许时用 `[]` 清空；省略或 `null` 不猜删除。其他可选标量或禁止清空字段在没有明确删除契约时转开发者后台，不以空字符串冒充删除。版号/软著文本与扫描件成对补齐，AI 服务证明、防沉迷条件项按服务端完整性校验。

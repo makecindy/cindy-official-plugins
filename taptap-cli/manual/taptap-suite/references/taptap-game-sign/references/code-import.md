@@ -41,4 +41,4 @@ call_tool(name:"task", args:{_positional:["+resume","<taskId>"], dry_run:true})
 
 核对原 scope、目标、文件摘要与恢复阶段；同一已授权意图可继续 `task +resume <taskId>` 并加 `yes:true`。上传准备/上传失败可重试；确认已提交的任务只查询，原文件删除也能回读。请求发出后响应丢失、或进程在记录受理结果前退出时，任务进入结果未知，必须核实原提交和库存，禁止自动再提交或换 key 重导。旧 V2 任务也需要核实，不能自动迁移。停止本地跟踪不会撤销已提交的导入。
 
-不要记录兑换码明文或上传凭证。`PROCESSING`/`NOT_UPLOADED` 表示尚未获得完成状态；`FAILED` 要核实失败范围，不能整份自动重传。成功核实后用 `get-game-sign-config` 回读对应 `award_id`/`card_id`，再 `check-game-sign-readiness`。导码只推进 readiness，不自动提审、公告上线或推送。
+不要记录兑换码明文或上传凭证。`PROCESSING`/`NOT_UPLOADED` 表示尚未获得完成状态；`FAILED` 要核实失败范围，不能整份自动重传。成功核实后用 `get-config` 回读对应 `award_id`/`card_id`，再 `check-readiness`。导码只推进 readiness，不自动提审、公告上线或推送。

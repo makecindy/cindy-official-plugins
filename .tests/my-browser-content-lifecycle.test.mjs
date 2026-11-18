@@ -4,7 +4,8 @@ import vm from 'node:vm';
 import fs from 'node:fs/promises';
 const source=await fs.readFile(new URL('../my-browser/extension/content.js',import.meta.url),'utf8');
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
-function fixture(send=async()=>({enabled:false}),preferences={}){
+function fixture(send=async()=>({enabled:false}),preferences={},page={}){
+  const hostname=page.hostname||'example.test';
   const timers=new Map(),sent=[],listeners=new Set(),nodes=[],storageListeners=new Set(),documentHandlers={};let sequence=0,stored={...preferences};
   class Node extends EventTarget {
     constructor(){super();nodes.push(this);this.handlers={};this.attrs={};this.children=[];this.className='';this.isConnected=true;this.style={props:Object.create(null),setProperty(k,v){this.props[k]=v;},getPropertyValue(k){return this.props[k]||'';},removeProperty(k){delete this.props[k];}};}
@@ -26,14 +27,14 @@ function fixture(send=async()=>({enabled:false}),preferences={}){
     closest(){return null;} getClientRects(){return [];}
     getBoundingClientRect(){return {top:0,bottom:0,left:0,right:0,width:0,height:0};}
   }
-  const document=new EventTarget();document.querySelector=()=>null;document.title='Fixture';
+  const document=new EventTarget();let video=null;document.querySelector=sel=>page.video&&/(^|,)\s*video\b/.test(sel)?(video||=new Node()):null;document.title='Fixture';
   const addDocumentListener=document.addEventListener.bind(document);
   document.addEventListener=(name,fn,options)=>{documentHandlers[name]=fn;addDocumentListener(name,fn,options);};
   document.querySelectorAll=()=>[];
   document.createElement=document.createElementNS=()=>new Node();document.documentElement=new Node();document.body=new Node();
   function setPreferences(value){const oldValue=stored;stored={...value};for(const fn of storageListeners)fn({cindyReadingPreferences:{oldValue,newValue:stored}},'local');}
   const chrome={runtime:{id:'fixture',getURL:p=>'chrome-extension://fixture/'+p,sendMessage:m=>{sent.push(m);return send(m);},onMessage:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn)}},storage:{local:{get:async()=>({cindyReadingPreferences:{...stored}}),set:async data=>setPreferences(data.cindyReadingPreferences)},onChanged:{addListener:fn=>storageListeners.add(fn),removeListener:fn=>storageListeners.delete(fn)}}};
-  const context={chrome,document,Event,window:new EventTarget(),location:{href:'https://example.test/start',hostname:'example.test',origin:'https://example.test'},AbortController,getComputedStyle:()=>({backgroundColor:'rgb(255,255,255)'}),CindyLearning:{uuid:()=> 'fixture-request-'+(++sequence),validTarget:()=>false,languageName:v=>v},CindyUI:{copy:()=>({close:"Close"}),css:'',languagePicker:()=>new Node(),error:()=>'err'},speechSynthesis:{cancel(){}},MutationObserver:class{observe(){} disconnect(){}},setInterval:fn=>{timers.set(++sequence,fn);return sequence;},clearInterval:id=>timers.delete(id),clearTimeout(){},setTimeout};
+  const context={chrome,document,Event,window:new EventTarget(),location:{href:'https://'+hostname+'/start',hostname,origin:'https://'+hostname},AbortController,getComputedStyle:()=>({backgroundColor:'rgb(255,255,255)'}),CindyLearning:{uuid:()=> 'fixture-request-'+(++sequence),validTarget:()=>false,languageName:v=>v},CindyUI:{copy:()=>({close:"Close"}),css:'',languagePicker:()=>new Node(),error:()=>'err'},speechSynthesis:{cancel(){}},MutationObserver:class{observe(){} disconnect(){}},setInterval:fn=>{timers.set(++sequence,fn);return sequence;},clearInterval:id=>timers.delete(id),clearTimeout(){},setTimeout};
   vm.runInNewContext(source,context);
   return {chrome,context,timers,sent,listeners,nodes,documentHandlers,setPreferences,preferences:()=>stored};
 }
@@ -65,19 +66,6 @@ test('selection preference changes hide a visible popup and apply to later drags
   assert.equal(visibleSelectionButtons(f).length,1);
 });
 
-test('selection checkbox persists its value and preserves unrelated preferences',async()=>{
-  const f=fixture(async()=>({ok:true,enabled:false}),{autoVideo:false});await settle();
-  const replies=[];[...f.listeners][0]({type:'cindy-ui',action:'settings'},{id:'fixture'},r=>replies.push(r));
-  await settle();await settle();
-  assert.equal(replies[0]?.ok,true);
-  const checkbox=f.nodes.find(n=>n.type==='checkbox');assert.ok(checkbox);assert.equal(checkbox.checked,false);
-  checkbox.checked=true;checkbox.handlers.change();await settle();await settle();
-  assert.equal(f.preferences().selectionButton,true);assert.equal(f.preferences().autoVideo,false);
-  const reopened=fixture(undefined,f.preferences());await settle();dragSelection(reopened);
-  assert.equal(visibleSelectionButtons(reopened).length,1);
-  f.setPreferences({...f.preferences(),selectionButton:false});assert.equal(checkbox.checked,false);
-});
-
 test('a late startup preference read cannot undo a newer storage change',async()=>{
   let resolveRead;const f=fixture();
   f.chrome.storage.local.get=()=>new Promise(resolve=>{resolveRead=resolve;});await settle();
@@ -90,35 +78,21 @@ test('configure keeps a newer selection setting while legacy preferences are pen
   let resolveLegacy;
   const f=fixture(m=>m.request?.op==='preferences'?new Promise(resolve=>{resolveLegacy=resolve;}):Promise.resolve({ok:true,enabled:false}),{selectionButton:true});
   await settle();const replies=[];
-  [...f.listeners][0]({type:'cindy-ui',action:'settings'},{id:'fixture'},r=>replies.push(r));
+  [...f.listeners][0]({type:'cindy-ui',action:'open'},{id:'fixture'},r=>replies.push(r));
   await settle();assert.equal(typeof resolveLegacy,'function');
   f.setPreferences({selectionButton:false});
   resolveLegacy({ok:true,target:'zh-CN'});await settle();await settle();
   assert.equal(replies[0]?.ok,true);
-  assert.equal(f.nodes.findLast(n=>n.type==='checkbox').checked,false);
   dragSelection(f);assert.equal(visibleSelectionButtons(f).length,0);
 });
 
 test('configure preserves a saved selection setting when no update intervenes',async()=>{
   const f=fixture(async()=>({ok:true,enabled:false}),{selectionButton:true});await settle();
-  [...f.listeners][0]({type:'cindy-ui',action:'settings'},{id:'fixture'},()=>{});
+  [...f.listeners][0]({type:'cindy-ui',action:'open'},{id:'fixture'},()=>{});
   await settle();await settle();
-  assert.equal(f.nodes.findLast(n=>n.type==='checkbox').checked,true);
   dragSelection(f);assert.equal(visibleSelectionButtons(f).length,1);
 });
 
-test('selection checkbox synchronizes after its settings body moves into the player shadow root',async()=>{
-  const f=fixture(async()=>({ok:true,enabled:false}),{selectionButton:false});await settle();
-  [...f.listeners][0]({type:'cindy-ui',action:'settings'},{id:'fixture'},()=>{});
-  await settle();await settle();
-  const checkbox=f.nodes.findLast(n=>n.type==='checkbox'),settingsBody=checkbox.parentNode.parentNode;
-  const originalParent=settingsBody.parentNode;
-  const playerRoot=f.context.document.createElement('div').attachShadow({mode:'closed'});
-  playerRoot.append(settingsBody);
-  assert.equal(originalParent.querySelector('.selection-button-checkbox'),null);
-  f.setPreferences({selectionButton:true});assert.equal(checkbox.checked,true);
-  f.setPreferences({selectionButton:false});assert.equal(checkbox.checked,false);
-});
 test('a reloaded extension leaves no URL polling or page listeners after runtime disappears',async()=>{
   const f=fixture();await settle();const tick=[...f.timers.values()][0];
   f.chrome.runtime=undefined;f.context.location.href+='?photo=1';
@@ -154,9 +128,25 @@ test('a late startup reply after invalidation cannot reopen UI or restart pollin
   f.chrome.runtime=undefined;[...f.timers.values()][0]();resolve({enabled:true});await settle();assert.equal(f.timers.size,0);
 });
 
+// Automatic subtitles on single-player sites must not override page translation.
+function watchPage(f){const counts={observe:0,disconnect:0};f.context.MutationObserver=class{observe(){counts.observe++;}disconnect(){counts.disconnect++;}};return counts;}
+test('an enabled per-site translation wins over default-on subtitles on a video site',{timeout:5000},async()=>{
+  const f=fixture(async m=>m.request?.op==='translate'?{ok:true,translations:[]}:{ok:true,enabled:false},{autoSites:{'https://vimeo.com':true}},{hostname:'vimeo.com',video:true});
+  const page=watchPage(f);await settle();await settle();await settle();
+  assert.equal(page.observe,1,'the page is translated');assert.equal(page.disconnect,0,'subtitles did not replace it');
+});
+test('turning automatic subtitles on does not interrupt a page translation in progress',{timeout:5000},async()=>{
+  const f=fixture(async m=>m.request?.op==='translate'?new Promise(()=>{}):{ok:true,enabled:false},{autoVideo:false},{hostname:'vimeo.com',video:true});
+  const page=watchPage(f);await settle();
+  [...f.listeners][0]({type:'cindy-ui',action:'translate-page'},{id:'fixture'},()=>{});await settle();await settle();
+  assert.equal(page.observe,1);
+  f.setPreferences({...f.preferences(),autoVideo:true});await settle();await settle();await settle();
+  assert.equal(page.disconnect,0,'the reader keeps the page translation');
+});
+
 test('native cues share safe markup cleanup and disabled YouTube auto-open stops retry polling',()=>{
   assert.match(source,/text:L\.cleanSubtitleText\(c\.text\)\.slice\(0,4000\)/);
-  assert.match(source,/if\(!enabled\)\{[\s\S]*?if\(youtube\)prefs\.autoVideo=false;[\s\S]*?nextAutoAttempt=Date\.now\(\)\+5000;[\s\S]*?return;/);
+  assert.match(source,/if\(!siteEnabled&&!videoEnabled\)\{[\s\S]*?if\(youtube\)prefs\.autoVideo=false;[\s\S]*?nextAutoAttempt=Date\.now\(\)\+5000;[\s\S]*?return;/);
 });
 
 test('an interrupted panel open cannot recreate removed UI when its config reply arrives',async()=>{
@@ -346,4 +336,58 @@ test('the brand icon is inlined and no extension resource is web-accessible',asy
   const icon=await fs.readFile(new URL('../my-browser/extension/brand-icon.js',import.meta.url),'utf8');
   assert.match(icon,/globalThis\.CindyBrandIcon='data:image\/png;base64,[A-Za-z0-9+\/=]+'/);
   assert.match(source,/globalThis\.CindyBrandIcon\|\|api\.runtime\.getURL/);
+});
+
+// Regression: ownership used to be invisible in the tab strip unless the user found and granted
+// tabGroups. Exercise the real content-script message entry and DOM in Chromium, without that API.
+test('tab titles mark ownership by default and restore on takeover or extension disposal',{
+  skip:!process.env.PLAYWRIGHT_CORE,timeout:30000,
+},async t=>{
+  const {createRequire}=await import('node:module');
+  const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_CORE);
+  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH});
+  t.after(()=>browser.close());
+  for(const colorScheme of ['light','dark']){
+    const page=await browser.newPage({colorScheme});
+    await page.route('https://example.test/**',route=>route.fulfill({contentType:'text/html',body:'<title>Original</title><button id="takeover">Take over</button>'}));
+    await page.goto('https://example.test/');
+    await page.evaluate(()=>{
+      globalThis.sent=[];
+      globalThis.browser={runtime:{id:'fixture',getURL:()=>'',onMessage:{addListener(fn){globalThis.command=fn;},removeListener(){}},
+        async sendMessage(m){sent.push(m);return m.type==='cindy-learning'?{ok:true,locale:'zh-CN',features:[]}:{ok:true,opened:false};}},
+        storage:{local:{async get(){return {cindyReadingPreferences:{autoVideo:false}};}},onChanged:{addListener(){},removeListener(){}}}};
+    });
+    for(const name of ['brand-icon','learning-core','subtitle-playback','ui','reading-ui','content'])
+      await page.addScriptTag({path:new URL('../my-browser/extension/'+name+'.js',import.meta.url).pathname});
+    const mark=()=>page.evaluate(()=>new Promise(resolve=>command({type:'cindy-agent-mark',opened:true},{id:'fixture'},resolve)));
+    assert.equal(await page.title(),'Original','user tabs stay unchanged');
+    await mark();assert.equal(await page.title(),'[Cindy] Original');
+    await mark();assert.equal(await page.title(),'[Cindy] Original','repeated messages do not stack prefixes');
+    await page.evaluate(()=>{document.title='Updated';});
+    await page.waitForFunction(()=>document.title==='[Cindy] Updated');
+    await page.evaluate(()=>document.querySelector('title').remove());
+    await page.waitForFunction(()=>document.title==='[Cindy]');
+    await page.evaluate(()=>{document.title='Latest';document.getElementById('takeover').click();});
+    await page.waitForFunction(()=>document.title==='[Cindy] Latest');
+    await page.locator('#takeover').click();
+    assert.equal(await page.title(),'Latest','real user input restores the latest site title');
+    await mark();assert.equal(await page.title(),'Latest','late ownership messages cannot undo takeover');
+    await page.evaluate(()=>{document.title='User title';});
+    assert.equal(await page.title(),'User title');
+    assert.equal(await page.evaluate(()=>sent.filter(m=>m.type==='cindy-user-took-over').length),1);
+    await page.evaluate(()=>new Promise(resolve=>command({type:'cindy-ui',action:'settings'},{id:'fixture'},resolve)));
+    // Settings live in the side panel now; the page only asks the extension to open it there.
+    await page.waitForFunction(()=>sent.some(m=>m.type==='cindy-open-sidepanel'&&m.view==='settings'));
+    // A fresh document obtains ownership again through the normal message path.
+    await page.reload();
+    await page.evaluate(()=>{
+      globalThis.browser={runtime:{id:'fixture',getURL:()=>'',onMessage:{addListener(fn){globalThis.command=fn;},removeListener(){}},async sendMessage(m){return m.type==='cindy-agent-tab'?{opened:true}:{ok:true,locale:'en'};}},storage:{local:{async get(){return {};}},onChanged:{addListener(){},removeListener(){}}}};
+    });
+    for(const name of ['brand-icon','learning-core','subtitle-playback','ui','reading-ui','content'])
+      await page.addScriptTag({path:new URL('../my-browser/extension/'+name+'.js',import.meta.url).pathname});
+    await page.waitForFunction(()=>document.title==='[Cindy] Original');
+    await page.evaluate(()=>{browser.runtime.id=undefined;document.dispatchEvent(new Event('cindy-content-script-start'));});
+    assert.equal(await page.title(),'Original','extension disposal removes its own title prefix');
+    await page.close();
+  }
 });

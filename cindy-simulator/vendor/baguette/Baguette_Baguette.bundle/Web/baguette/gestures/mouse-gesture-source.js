@@ -40,9 +40,9 @@
      * @param {(active:boolean) => void} [opts.onDragChange]
      */
     constructor(screen, {
-      overlay, getOrientation, log, mapClientPoint, onDragChange,
+      overlay, getOrientation, log, mapClientPoint, mapScreenPoint, onDragChange,
     } = {}) {
-      super(screen, { mapClientPoint });
+      super(screen, { mapClientPoint, mapScreenPoint });
       this.overlay = overlay || null;
       this.getOrientation = getOrientation || (() => 'portrait');
       this.log = log || (() => {});
@@ -64,26 +64,6 @@
         left:${clientX}px;top:${clientY}px;animation:baguetteRipple 0.5s ease-out forwards;z-index:10000;`;
       document.body.appendChild(r);
       setTimeout(() => r.remove(), 500);
-    }
-
-    _previewPinch(vx, vy, r) {
-      if (!this.overlay) return;
-      const pV = { x: r.width / 2, y: r.height / 2 };
-      this.overlay.setFingers([
-        { x: vx, y: vy },
-        { x: 2 * pV.x - vx, y: 2 * pV.y - vy },
-      ]);
-    }
-
-    _previewPan(r, shiftPxX, shiftPxY) {
-      if (!this.overlay) return;
-      const pV = { x: r.width / 2, y: r.height / 2 };
-      const { width } = this.screen.size;
-      const dxPx = (BASE_SPREAD_PT / width) * r.width;
-      this.overlay.setFingers([
-        { x: pV.x + dxPx + shiftPxX, y: pV.y + shiftPxY },
-        { x: pV.x - dxPx + shiftPxX, y: pV.y + shiftPxY },
-      ]);
     }
 
     _bind() {
@@ -145,16 +125,16 @@
           const f2 = { x: 2 * pivot.x - f1.x, y: 2 * pivot.y - f1.y };
           state = { mode, f1, f2 };
           sendTouch2('down', f1, f2);
-          this._previewPinch(vx, vy, r);
+          this._showFingers([state.f1,state.f2]);
           this.log('pinch begin');
         } else if (mode === 'pan') {
           const pivot = this._screenCentrePt();
           const f1 = { x: pivot.x + BASE_SPREAD_PT, y: pivot.y };
           const f2 = { x: pivot.x - BASE_SPREAD_PT, y: pivot.y };
           state = { mode, startVx: vx, startVy: vy, startW: r.width, startH: r.height,
-                    pivotX: pivot.x, pivotY: pivot.y, f1, f2 };
+                    pivotX: pivot.x, pivotY: pivot.y, startPoint:point, f1, f2 };
           sendTouch2('down', f1, f2);
-          this._previewPan(r, /* shiftPxX */ 0, /* shiftPxY */ 0);
+          this._showFingers([state.f1,state.f2]);
           this.log('pan begin');
         } else {
           // Deferred: motion past DRAG_THRESHOLD_PX promotes to a drag
@@ -214,18 +194,18 @@
           state.f1 = this._screenPoint(e.clientX, e.clientY);
           state.f2 = { x: 2 * pivot.x - state.f1.x, y: 2 * pivot.y - state.f1.y };
           sendTouch2('move', state.f1, state.f2);
-          this._previewPinch(vx, vy, r);
+          this._showFingers([state.f1,state.f2]);
           return;
         }
 
         if (state.mode === 'pan') {
           const { width, height } = this.screen.size;
-          const shiftX = ((vx - state.startVx) / state.startW) * width;
-          const shiftY = ((vy - state.startVy) / state.startH) * height;
+          const shiftX = lastPoint.x - state.startPoint.x;
+          const shiftY = lastPoint.y - state.startPoint.y;
           state.f1 = { x: state.pivotX + BASE_SPREAD_PT + shiftX, y: state.pivotY + shiftY };
           state.f2 = { x: state.pivotX - BASE_SPREAD_PT + shiftX, y: state.pivotY + shiftY };
           sendTouch2('move', state.f1, state.f2);
-          this._previewPan(r, vx - state.startVx, vy - state.startVy);
+          this._showFingers([state.f1,state.f2]);
           return;
         }
 

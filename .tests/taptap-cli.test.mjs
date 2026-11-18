@@ -961,12 +961,12 @@ test('the 2026.10.20 recovery guidance stays on the plugin path', () => {
     'a permission denial must not be repeated for the same resource',
   );
 
-  // Precheck: HTTP success and a failed content preaudit are separate facts,
-  // and the preaudit alone does not forbid submission.
-  assert.match(appEdit, /预检 HTTP 200 \/ 顶层成功不等于内容预审通过/);
-  assert.match(appEdit, /预审不通过本身不禁止提审/);
+  // Precheck is advisory: an HTTP 200 does not prove the business preconditions,
+  // and a missing preaudit is not a client-side veto.
+  assert.match(appEdit, /预检 HTTP 200 不等于业务前置条件通过/);
+  assert.match(appEdit, /用户明确要求跳过预检或继续提交时允许 `app submit-app-review`/);
   assert.match(audit, /且本次 `blockers` 明确为空时/);
-  assert.match(rules, /预审不通过本身不禁止提审/);
+  assert.match(rules, /用户明确要求跳过预检并提交时可 `app submit-app-review`/);
   assert.match(rules, /完成判据按用户目标和同一资源核对/);
 
   // Version detail returns logs; a field snapshot is not part of the contract.
@@ -991,6 +991,263 @@ test('the 2026.10.20 recovery guidance stays on the plugin path', () => {
   ].join('\n');
   assert.doesNotMatch(appEditManual, /字段 `required`/, 'field requiredness must use state="required"');
   assert.doesNotMatch(appEditManual, /`visible` \/ `required`/, 'visibility and requiredness must both use state');
+});
+
+test('the 2026.11.2 sync keeps the new recovery contracts on the plugin path', async () => {
+  // CLI v2026.11.2 makes review prechecks advisory, requires a fresh package
+  // snapshot after creating a draft, validates expected snapshots locally, and
+  // stops the agent from replaying a write whose outcome is unknown. Each of
+  // those changes what the agent does next, so the bundled manual has to carry
+  // them instead of leaving the agent on the CLI's old wording.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const shared = read('taptap-suite/references/shared-execution.md');
+  const top = read('taptap-suite/MANUAL.md');
+  const feedback = read('taptap-suite/references/feedback.md');
+  const appEdit = read('taptap-suite/references/taptap-app-edit/MANUAL.md');
+  const fields = read('taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md');
+  const audit = read('taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md');
+  const materials = read('taptap-suite/references/taptap-materials/MANUAL.md');
+  const miniApp = read('taptap-suite/references/taptap-materials/references/mini-app-handoff.md');
+  const packages = read('taptap-suite/references/taptap-package-management/MANUAL.md');
+  const diagnostics = read('taptap-suite/references/taptap-package-management/references/package-management-diagnostics.md');
+  const post = read('taptap-suite/references/taptap-community-management/references/publish-post.md');
+  const patterns = read('taptap-suite/references/cli-command-patterns.md');
+
+  // Feedback nudge: a repeated failure now carries `_notice.feedback`, so the
+  // trigger list must name it instead of counting two failures on its own.
+  assert.match(shared, /_notice\.feedback/, 'the shared rules must explain the repeat-failure notice');
+  assert.match(feedback, /错误信封带了 `_notice\.feedback`/);
+  assert.match(feedback, /`agent-request`/, 'a capability gap is a reportable trigger');
+  assert.match(top, /三种触发/);
+  assert.match(workerSource, /错误信封带 `_notice\.feedback` 或同一 error\.subtype 连续失败/,
+    'the rule handed out by list_tools must agree with the manual');
+  const [listing] = await callWorker([listTools('', { cli_path: fakeCli })]);
+  assert.ok(
+    listing.result.data.rules.some((rule) => rule.includes('_notice.feedback')),
+    'list_tools has to hand the agent the feedback rule, not just keep it in source',
+  );
+
+  // Package binding: confirm or create a draft first, then discard every older
+  // snapshot and read again — a new draft can inherit the previous bindings.
+  assert.match(appEdit, /确认可编辑草稿 → 必要时 `app create-draft` → 重新 `app list-packages`/);
+  assert.match(fields, /创建草稿后必须重读/);
+  assert.match(fields, /即使先前返回 `expected=\{"kind":"none"\}` 也不能沿用/);
+  assert.match(fields, /禁止原样重试、换幂等键连发或加 `force: true` 绕过/);
+  assert.match(fields, /Windows 快照必须原样保留 `kind:"windows"`/);
+  assert.match(fields, /不能把空分支列表推断成 none/);
+
+  // Submission: an unknown outcome is read back, never replayed.
+  assert.match(audit, /### 提审失败与重复调用防护/);
+  assert.match(audit, /结果未知时，先用 `list-app-versions` \/ `get-app-version` 读回状态/);
+  assert.match(shared, /用已经返回的资源句柄只读核对/);
+  assert.doesNotMatch(audit, /预审结果后仍需最终确认才进入 `submit-app-review`/,
+    'the old always-confirm wording must be gone');
+
+  // A mini-game upload already completes and parses; a second complete is a bug.
+  assert.match(materials, /不得再次 complete/);
+  assert.match(miniApp, /不得再调用 `complete-mini-app-package-upload`/);
+  assert.match(miniApp, /`packageRecordStatus=artifact_only` 只表示尚未创建包体记录/);
+  assert.match(packages, /不能用重复 complete 代替查询/);
+  assert.doesNotMatch(packages, /不要调用 `package-management upload-mini-app-package`/,
+    'the upload shortcut exists, so the manual must not forbid it');
+
+  // One QR call fetches the target and renders the PNG; the dynamic lookup is
+  // only for a raw URI, and an output clash is not an excuse to force-write.
+  assert.match(diagnostics, /该命令一次完成获取 URI 和生成 PNG/);
+  assert.match(diagnostics, /只有明确需要原始 URI 时才单独使用动态命令/);
+  assert.match(diagnostics, /禁止原样重试或自动 `force: true`/);
+
+  // Post bodies: list items live under a list, start at level 1, and an unknown
+  // publish outcome is read back through the draft handle.
+  assert.match(post, /`list-item` 只放在 `list\.children`/);
+  assert.match(post, /不能用 0/);
+  assert.match(post, /不能改 key 再建草稿/);
+
+  // An idempotency key and a `@file` payload have one accepted encoding each; a
+  // rejection is an input problem the agent fixes, not a server fault to retry.
+  assert.match(shared, /key 只用可打印 ASCII/);
+  assert.match(patterns, /UTF-8 无 BOM/);
+});
+
+test('the 2026.11.4 sync keeps H5 creation, level upgrade and qualification boundaries', () => {
+  // CLI v2026.11.4 separates the package type from the level attribute, adds the
+  // workshop upgrade flow, and routes small-game privacy/ICP/filing material to
+  // the developer site. Each change decides whether a write may happen at all,
+  // so the bundled manual has to state the boundary instead of letting the agent
+  // infer a type from a file name or the previous conversation.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const top = read('taptap-suite/MANUAL.md');
+  const shared = read('taptap-suite/references/shared-execution.md');
+  const boundary = read('taptap-suite/references/package-type-boundary.md');
+  const appEdit = read('taptap-suite/references/taptap-app-edit/MANUAL.md');
+  const creation = read('taptap-suite/references/taptap-app-edit/references/publish-game-creation.md');
+  const upgrade = read('taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md');
+  const fields = read('taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md');
+  const qualification = read('taptap-suite/references/taptap-qualification/MANUAL.md');
+  const qualDraft = read('taptap-suite/references/taptap-qualification/references/qualification-draft.md');
+  const qualAnalysis = read('taptap-suite/references/taptap-qualification/references/qualification-analysis.md');
+  const materials = read('taptap-suite/references/taptap-materials/MANUAL.md');
+  const diagnostics = read('taptap-suite/references/taptap-package-management/references/package-management-diagnostics.md');
+  const uploadImage = read('taptap-suite/references/taptap-community-management/references/upload-image.md');
+  const qualLifecycle = read('taptap-suite/references/taptap-qualification/references/qualification-lifecycle.md');
+  const execRules = read('taptap-suite/references/taptap-app-edit/references/app-edit-execution-rules.md');
+  const levelUpgrade = read('taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md');
+  const fieldMap = read('taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md');
+
+  // The fixed type boundary is a shared document with one rule set, reachable
+  // from the routes that decide whether an upload may proceed.
+  assert.match(top, /taptap-suite\/references\/package-type-boundary\.md/);
+  assert.match(boundary, /`declared_package_types`/);
+  assert.match(boundary, /`package_type_saved:false` 表示游戏已创建、类型尚未保存/);
+  assert.match(boundary, /不能借附加用途混入其它类型/);
+  assert.match(fields, /固定包体类型边界/);
+  assert.match(materials, /固定包体类型边界/);
+
+  // H5 creation: is_level is explicit, independent from package_type, and the
+  // saved declaration is verified before the first upload.
+  assert.match(creation, /`is_level` 省略或显式 `false` 创建非关卡游戏/);
+  assert.match(creation, /非关卡 H5 游戏在预览和创建时都显式传 `is_level:false`/);
+  assert.match(creation, /如果接口不支持明确指定游戏身份，停止创建/);
+  assert.match(creation, /H5 \+ APK、H5 \+ Windows、H5 \+ Tap 小游戏均拦截创建/);
+  assert.match(creation, /package_type:"h5", is_level:false/);
+  assert.match(creation, /`package_type_saved:false` 表示类型尚未保存/);
+  assert.match(creation, /核对 `declared_package_types` 与创建选择一致/);
+  assert.doesNotMatch(creation, /主要在个人主页曝光/, 'H5 exposure wording is no longer the creation boundary');
+
+  // Workshop upgrade: an irreversible submit and a privacy declaration are two
+  // separate confirmations and must not be chained automatically.
+  assert.match(appEdit, /\| 创意工坊升级 \|/);
+  assert.match(appEdit, /app-edit-level-upgrade\.md/);
+  assert.match(upgrade, /get-level-upgrade-privacy/);
+  assert.match(upgrade, /confirm_no_processing:true, confirm_submit:true/);
+  assert.match(upgrade, /隐私声明确认不授权升级，不能自动串联两次提交/);
+  assert.match(upgrade, /升级为独立游戏后无法转回关卡/);
+
+  // Qualification: the unavailable warning is not an all-clear, must-level is
+  // derived from the saved identity, and small-game material is not filed here.
+  assert.match(qualification, /H5、Spark、Tap 小游戏的隐私与 ICP/);
+  assert.match(qualification, /不能用 `qualification save-qualification-draft` 代替/);
+  assert.match(qualDraft, /## 小游戏域材料边界/);
+  assert.match(qualDraft, /## 创建类型声明与恢复/);
+
+  // H5 uploads stay on the H5 slot; a readback failure is retried as a read.
+  assert.match(materials, /H5 只用 H5 主包，禁止上传或绑定 Windows 包体/);
+  assert.match(materials, /`readbackErrors` 时保留版本句柄，仅重查失败阶段/);
+  assert.match(diagnostics, /### H5 上传后的诊断/);
+  assert.match(diagnostics, /只有已确认原类型及附加用途允许 Tap 小游戏/);
+
+  // Internal vocabulary stays out of user-facing replies.
+
+  // 2026.11.5: qualification reads one assessment document, writes carry the
+  // snapshot they were built from, and the level-upgrade flow routes routine
+  // privacy configuration to the developer site instead of the limited
+  // "no personal data" declaration.
+  assert.match(qualification, /qualification get-qualification-assessment/);
+  assert.match(qualification, /read_state=partial\/unknown/);
+  assert.match(qualification, /`effective_approved`/);
+  assert.match(qualification, /expected_snapshot/);
+  assert.match(qualification, /save-age-grade-qualification/);
+  assert.match(qualAnalysis, /effective_approved=true/);
+  assert.match(qualLifecycle, /expected_snapshot.*snapshot/);
+  assert.match(qualLifecycle, /已撤回审核，材料已保留/);
+  assert.match(levelUpgrade, /KIND_SELF_ICP/);
+  assert.match(levelUpgrade, /常规隐私设置，以及隐私查询明确返回不支持的声明/);
+  assert.match(levelUpgrade, /升级为独立游戏后无法转回关卡游戏/);
+  assert.match(levelUpgrade, /qualification get-qualification-assessment/);
+  assert.match(shared, /缺少该字段时，明确说明机审结论无法确认/);
+  assert.match(fieldMap, /按 qualification 手册的适龄流程/);
+  // Eligibility is decided by the assessment and the real submission, not by a
+  // plugin-side hard gate that would refuse a user-approved submit.
+  assert.match(appEdit, /不自行新增客户端硬门禁/);
+  assert.doesNotMatch(appEdit, /未认证时按服务端 blocker 停止提审/);
+  assert.match(execRules, /不自行新增客户端硬门禁/);
+  assert.doesNotMatch(execRules, /未认证时按服务端 blocker 停止提审/);
+
+  assert.match(shared, /## 面向用户的用语/);
+  assert.match(shared, /默认使用中文业务表达/);
+  assert.match(shared, /不得夹带字段名、状态码/);
+  assert.doesNotMatch(uploadImage, /DC「权限管理/);
+});
+
+test('the 2026.11.6 sync keeps material handoff, empty-matrix and draft idempotency contracts', () => {
+  // CLI v2026.11.6 makes the qualification handoff resumable (a small-game
+  // privacy or filing draft typed in the developer site can be picked back up
+  // through dedicated commands), routes an empty package-type matrix by
+  // `empty_reason` instead of a retry loop, returns an H5 parse handle, and
+  // requires an explicit idempotency key for draft create/reset. Each change
+  // decides what the agent does next, so the bundled manual has to carry it.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const shared = read('taptap-suite/references/shared-execution.md');
+  const audit = read('taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md');
+  const levelUpgrade = read('taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md');
+  const qualification = read('taptap-suite/references/taptap-qualification/MANUAL.md');
+  const qualAnalysis = read('taptap-suite/references/taptap-qualification/references/qualification-analysis.md');
+  const qualDraft = read('taptap-suite/references/taptap-qualification/references/qualification-draft.md');
+  const qualLifecycle = read('taptap-suite/references/taptap-qualification/references/qualification-lifecycle.md');
+  const qualMaterials = read('taptap-suite/references/taptap-qualification/references/qualification-materials.md');
+  const handoff = read('taptap-suite/references/taptap-qualification/references/material-handoff-resume.md');
+  const packages = read('taptap-suite/references/taptap-package-management/MANUAL.md');
+  const diagnostics = read('taptap-suite/references/taptap-package-management/references/package-management-diagnostics.md');
+  const materials = read('taptap-suite/references/taptap-materials/MANUAL.md');
+
+  // A draft create/reset carries an explicit intent key from preview through
+  // retry; an idempotency conflict is read back, never re-keyed.
+  assert.match(shared, /`create-draft` \/ `reset-draft` 强制显式提供非空 `--idempotency-key`/, 'the shared rules must require an explicit draft key');
+  assert.match(shared, /不得自动换 key 重做/, 'an idempotency conflict is read back, not re-keyed');
+  assert.match(audit, /幂等与失败恢复/, 'reset-draft recovery must start from the key contract');
+  assert.match(audit, /已有草稿时不得换 key 再次重置/, 'an existing draft blocks a second reset under a new key');
+  assert.match(audit, /后续发布后再次开版是新意图/, 'a new draft after publishing is a new intent');
+
+  // A completed level upgrade is not a material submission or a release; the
+  // follow-up checks are separate steps with their own evidence.
+  assert.match(levelUpgrade, /## 升级后的资料与资质检查/, 'the upgrade manual must keep the post-upgrade checklist');
+  assert.match(levelUpgrade, /升级结果不代表资料已提审、审核通过或游戏已上线/);
+  assert.match(levelUpgrade, /升级成功、材料齐全或审核受理都不能代替上线证据/);
+  assert.match(qualAnalysis, /app-edit-level-upgrade\.md#升级后的资料与资质检查/, 'qualification analysis must reach the same checklist');
+
+  // Small-game privacy and filing: the developer-site draft is resumable
+  // through dedicated commands, and the returned facts decide the next step.
+  assert.match(qualification, /material-handoff-resume\.md/, 'the domain manual must link the handoff reference');
+  assert.match(handoff, /^# 全类型资料交接与接续/);
+  assert.match(handoff, /get-mini-app-privacy-progress/);
+  assert.match(handoff, /get-mini-app-filing-progress/);
+  assert.match(handoff, /saved_editable_draft_required/);
+  assert.match(handoff, /ICP_RECORD_UPDATE_UNSUPPORTED/);
+  assert.match(handoff, /FILING_AUTHENTICATED_ENTITY_INCOMPLETE/);
+  assert.doesNotMatch(handoff, /taptap-cli [a-z]/, 'the handoff must stay on the call_tool path');
+  assert.match(qualDraft, /已确认可公开展示的非敏感图片材料/, 'private material never uses the public asset upload');
+  assert.match(qualMaterials, /私密文件不得进入公开素材库/);
+  assert.match(qualMaterials, /DOC\/DOCX 不在文件类型枚举中/);
+  assert.match(qualLifecycle, /## 小游戏隐私与备案/);
+  assert.match(qualLifecycle, /独立隐私快照、备案快照和 assessment 快照互不替换/);
+  assert.match(qualification, /完成后 CLI 查询确认/, 'a developer-site age-grade action is confirmed by a read');
+
+  // An empty package-type matrix has a cause; the agent reads it instead of
+  // retrying the same command, and never widens upload or binding from it.
+  assert.match(packages, /按 `empty_reason` 分流/);
+  for (const reason of ['package_type_undeclared', 'declared_not_applicable', 'form_has_no_upload_target', 'launcher_only']) {
+    assert.match(diagnostics, new RegExp(reason), `the empty-matrix branch ${reason} must be documented`);
+  }
+  assert.match(diagnostics, /不得据此放宽上传或绑定/);
+  // The recovery is itself a write: the plugin rejects a call with neither
+  // `dry_run` nor `yes` (CONFIRM_REQUIRED), so the example has to carry the
+  // preview gate and the confirmed write on the same intent key.
+  const saveTypeExample = diagnostics.split('\n').find((line) => line.includes('save-qualification-draft"'));
+  assert.ok(saveTypeExample, 'the empty-matrix branch must show the package-type save call');
+  assert.ok(saveTypeExample.includes('dry_run:true'), 'the package-type save example must preview before writing');
+  assert.ok(saveTypeExample.includes('yes:true'), 'the package-type save example must show the confirmed write');
+  assert.match(diagnostics, /「A\. 查包体库状态」第 2 步/, 'the self-test step must point at the explicit branch');
+  assert.doesNotMatch(diagnostics, /只说明当前应用没有可用的包体库入口/, 'the old one-line answer is gone');
+
+  // An H5 upload returns a parse handle; the status query takes that handle and
+  // nothing else, and a missing handle is looked up, not guessed.
+  assert.match(materials, /`data\.artifactId`\(解析查询句柄\)/);
+  assert.match(materials, /get-h5-package-upload-status/);
+  assert.match(materials, /不要传 `h5PackageId` 或 `h5VersionId`/);
+  assert.match(materials, /external\.artifactId/);
 });
 
 test('the 2026.10.28 sync keeps the new community write path on the plugin path', () => {
@@ -1189,13 +1446,14 @@ test('the image handoff always carries the upload info on field writes', () => {
   ]) {
     assert.match(text, /data\.info/, `${label} must hand over the upload info`);
   }
-  assert.match(appEdit, /"info": <图片元数据>/, 'app-edit must state the value shape');
+  assert.match(appEdit, /五项缺任何一项/, 'app-edit must state that all five info fields are required');
+  assert.match(appEdit, /image_ave/, 'app-edit must carry the average colour into the value');
   assert.match(appEdit, /value:\{url:.*info:\{width:/, 'app-edit must show an info-bearing example');
   assert.match(appEdit, /remove.*不需要 `info`/, 'remove selectors stay bare URLs');
   assert.match(appEdit, /value: null/, 'clearing an iOS override keeps its null value');
-  assert.match(materials, /不带 info 会回落 16:9/, 'materials must state the fallback');
+  assert.match(materials, /info 五项/, 'materials must say the five info fields are mandatory');
   assert.match(materials, /资质草稿/, 'materials must scope the object shape to app save-changes');
-  assert.match(ingest, /不带 info 不会报错/, 'ingest must state the tolerated-but-worse path');
+  assert.match(ingest, /缺任何一项/, 'ingest must state which info fields the server rejects');
 
   // Rollback: `changes[].from` is a bare URL for image fields; writing it back
   // works, but an image without info still falls back to the 16:9 crop, so the
@@ -1764,7 +2022,7 @@ test('the 2026.10.31 interaction operations manuals are routed and carry their s
   assert.match(push, /不能默认全部/, 'the push scope must not default to all followers');
 
   const sign = read('taptap-suite/references/taptap-game-sign/MANUAL.md');
-  assert.match(sign, /check-game-sign-readiness/, 'sign review must be gated on readiness');
+  assert.match(sign, /check-readiness/, 'sign review must be gated on readiness');
   assert.match(sign, /award_id/, 'daily awards must be addressed by award_id');
   assert.match(sign, /card_id/, 'cards must be addressed by card_id');
 
@@ -1773,3 +2031,78 @@ test('the 2026.10.31 interaction operations manuals are routed and carry their s
   assert.match(codes, /task_id/, 'code import must resume the same task');
   assert.match(codes, /禁止自动再提交或换 key 重导/, 'unknown submissions are not free retries');
 });
+
+test('the 2026.11.16 sync keeps recovery, image metadata and card plans on the plugin path', () => {
+  // Upstream main after the 2026.11.6 sync changed what the agent must do when
+  // the server refuses on business state, made complete image metadata
+  // mandatory, and split card collection out of the game-sign runbook. Each of
+  // those is a decision the agent can only make from the bundled manual.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const suite = read('taptap-suite/MANUAL.md');
+  const shared = read('taptap-suite/references/shared-execution.md');
+  const prerequisite = read('taptap-suite/references/prerequisite-recovery.md');
+  const packages = read('taptap-suite/references/taptap-package-management/MANUAL.md');
+  const diagnostics = read('taptap-suite/references/taptap-package-management/references/package-management-diagnostics.md');
+  const boundary = read('taptap-suite/references/package-type-boundary.md');
+  const identity = read('taptap-suite/references/taptap-identity/MANUAL.md');
+  const fieldMap = read('taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md');
+  const appEdit = read('taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md');
+  const materials = read('taptap-suite/references/taptap-materials/MANUAL.md');
+  const search = read('taptap-suite/references/taptap-materials/references/asset-library-search.md');
+  const sign = read('taptap-suite/references/taptap-game-sign/MANUAL.md');
+  const runbook = read('taptap-suite/references/taptap-game-sign/references/game-sign-runbook.md');
+  const cards = read('taptap-suite/references/taptap-game-sign/references/card-collection.md');
+  const examples = read('taptap-suite/references/taptap-game-sign/references/game-sign-examples.md');
+  const qualification = read('taptap-suite/references/taptap-qualification/references/qualification-materials.md');
+  const handoff = read('taptap-suite/references/taptap-qualification/references/material-handoff-resume.md');
+  const push = read('taptap-suite/references/taptap-official-message-push/references/push-runbook.md');
+
+  // State-class failures get one routing page instead of ad-hoc retries.
+  assert.match(suite, /prerequisite-recovery\.md/, 'the suite entry must route to the recovery page');
+  assert.match(identity, /prerequisite-recovery\.md/, 'identity must reach the recovery page');
+  for (const key of ['api/failed_precondition', 'QUALIFICATION_DOMAIN_UNSUPPORTED', '发布额度不足', '国内隐私维护资格']) {
+    assert.match(prerequisite, new RegExp(key), `the recovery matrix must cover ${key}`);
+  }
+  assert.doesNotMatch(prerequisite, /taptap-cli [a-z]/, 'the recovery page must stay on the call_tool path');
+
+  // Package type conflicts become a diagnosed, evidence-bound recovery.
+  assert.match(boundary, /apk_mini_game_play/, 'the APK mini-game slot exception must be documented');
+  assert.match(diagnostics, /diagnose-package-type/, 'the conflict branch must query the diagnosis');
+  assert.match(diagnostics, /recover-package-type-declaration/, 'the recovery must name the controlled command');
+  assert.match(diagnostics, /additive_declaration/, 'a normal additive declaration is not a conflict');
+  assert.match(diagnostics, /list-mini-app-packages/, 'mini-app capability is read from the package list');
+  assert.match(packages, /明确报「小游戏功能尚未开通」才判为未开通/, 'the manual must not infer capability from the type matrix');
+
+  // Image values now carry five info fields, and expected matches the real shape.
+  assert.match(shared, /允许子目录/, 'the @file rule must allow subdirectories inside the working directory');
+  assert.match(fieldMap, /`expected` 传 `null`/, 'a first write uses null, not []');
+  assert.match(shared, /允许子目录/);
+  assert.match(fieldMap, /图片字段的 `current_value` 是对象/, 'image current_value is an object');
+  assert.match(appEdit, /image_ave/, 'image writes need the average colour');
+  assert.match(materials, /image_ave\.rgb/, 'the upload handle must keep the average colour');
+  assert.match(search, /场景推荐不等于尺寸合规/, 'scene recommendations are not size compliance');
+  assert.match(search, /按 `asset_id` 去重/, 'cross-scene duplicates are deduplicated');
+
+  // Card collection is a 3+1 / 3+2 plan with its own recovery and preview rules.
+  assert.match(sign, /card-collection\.md/, 'the game-sign manual must route to card collection');
+  assert.match(sign, /game-sign-examples\.md/, 'the game-sign manual must route to the user guide');
+  assert.match(cards, /3\+1/, 'the 3+1 plan must be documented');
+  assert.match(cards, /3\+2/, 'the 3+2 plan must be documented');
+  assert.match(cards, /## 删除预览/, 'deleting a card needs a visible preview');
+  assert.match(cards, /## 回读与结果说明/, 'card reads must distinguish saved from verified');
+  assert.match(cards, /待提交／审核拒绝/, 'stock top-up is limited to editable states');
+  assert.match(examples, /## 发送前检查/, 'the user guide keeps the pre-send check');
+  assert.match(runbook, /export-physical-prize-recipients/, 'the export uses the short command name');
+  assert.match(runbook, /save-card/, 'card operations use the short command names');
+  assert.match(runbook, /不能靠补封面或反复新增奖品卡修复/, 'card_incomplete has the explicit branch');
+  assert.match(push, /历史长名/, 'the push runbook records that old names remain aliases');
+
+  // Qualification hides internal keys and needs explicit package types for AI.
+  const analysis = read('taptap-suite/references/taptap-qualification/references/qualification-analysis.md');
+  assert.match(analysis, /## 缺口输出格式/, 'gap output maps subjects to Chinese names');
+  assert.match(analysis, /privacy-compliance/, 'the subject map must cover privacy');
+  assert.match(qualification, /也必须在 `aigc_qualification.package_types` 声明适用包体/, 'AI declaration needs package types');
+  assert.match(handoff, /回执里的 `h5VersionId`/, 'the privacy version id source is named');
+});
+

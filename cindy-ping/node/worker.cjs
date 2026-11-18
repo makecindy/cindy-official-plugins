@@ -136,7 +136,8 @@ function requireCurrent(id) {
 function readSnapshot({ id }) {
   requireCurrent(id);
   const snapshot = scheduler.snapshot;
-  if (!snapshot || (!snapshot.jpeg && !snapshot.text)) throw new Error('NO_CONTENT');
+  // A ready snapshot may lack optional window material while the instruction is valid.
+  if (!snapshot) throw new Error('NO_CONTENT');
   return { jpeg: snapshot.jpeg, text: snapshot.text, source: snapshot.source,
     capturedAt: snapshot.capturedAt, issues: snapshot.issues };
 }

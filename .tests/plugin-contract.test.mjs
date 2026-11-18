@@ -21,7 +21,6 @@ const MAX_MANUAL_MD_BYTES = 64 * 1024;
 const ROOT_PACKAGE_FILES = ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'TRADEMARKS.zh-CN.md'];
 const RESERVED_CLIENT_FILES = new Set(['.disabled', '.cindy-trust.json']);
 const RESERVED_RECORD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-const PUBLIC_SKILL_EXEMPTIONS = new Set(['ios-simulator', 'x-manager']);
 
 const pluginDirs = pluginRootsAt('HEAD');
 const provisioning = readJson(path.join(root, 'provisioning.json'));
@@ -900,9 +899,6 @@ test('all official plugins satisfy the repository publish contract', () => {
     }
     const usesOidcToken = (manifest.network?.secrets ?? []).some((secret) => secret.source === 'oidc-token');
     assert.equal(usesOidcToken, false, `${pluginDir}: public releases cannot declare oidc-token`);
-    if ((manifest.skill?.items.length ?? 0) > 0) {
-      assert.ok(PUBLIC_SKILL_EXEMPTIONS.has(manifest.id), `${pluginDir}: public Skill bundles are not accepted by Server`);
-    }
     if (manifest.manual) {
       assert.ok(manifest.minCindyVersion, `${pluginDir}: Manual requires minCindyVersion`);
     }

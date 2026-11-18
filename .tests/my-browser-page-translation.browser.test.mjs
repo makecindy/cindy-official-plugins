@@ -154,6 +154,7 @@ test('pending setup closes permanently and pending model never blocks restore or
       onMessage:{addListener(fn){globalThis.command=fn;},removeListener(){}},
       async sendMessage(m){
         if(m.type==='cindy-cancel'){cancels.push(m.id);return {ok:true};}
+        if(m.type==='cindy-open-sidepanel'){globalThis.openedPanel=m;return {ok:true};}
         if(m.type!=='cindy-learning')return {enabled:false};
         if(m.request.op==='config')return pendingConfig?new Promise(r=>{globalThis.resolveConfig=r;}):{ok:true,locale:'en'};
         if(m.request.op==='translate'){modelCalls++;return new Promise(r=>{globalThis.resolveModel=r;});}
@@ -179,7 +180,8 @@ test('pending setup closes permanently and pending model never blocks restore or
   await page.evaluate(()=>resolveModel({ok:true,translations:['Late translation must not appear']}));
   await page.waitForFunction(()=>replies.some(r=>r.label==='model'));
   assert.equal(await page.locator('[data-cindy-translation]').count(),0);
-  assert.ok(await page.evaluate(()=>roots.some(r=>r.textContent.includes('Model settings'))));
+  // Settings live in the side panel now; the page panel's settings opens them there.
+  assert.deepEqual(await page.evaluate(()=>globalThis.openedPanel),{type:'cindy-open-sidepanel',view:'settings'});
   if(process.env.CINDY_SCREENSHOTS){await fs.mkdir(process.env.CINDY_SCREENSHOTS,{recursive:true});await page.screenshot({path:path.join(process.env.CINDY_SCREENSHOTS,'pending-model-settings.png')});}
 });
 
@@ -241,4 +243,143 @@ test('translation restart and mode switches discard stale work without blocking 
     await page.evaluate(n=>models[n+1].resolve({ok:true,translations:['Current page translation']}),start);
     await page.waitForFunction(()=>document.querySelectorAll('[data-cindy-translation]').length===1);
   });
+});
+
+// 2026-11-17 manual tests on a div-built feed (xueqiu.com): only the single <p> was translated
+// ("Translated 1"); hot lists and cards built from divs, and everything outside the first
+// <article>, were skipped.
+test('div-built feeds translate their text blocks inside each block without breaking rows',{
+  skip:!process.env.PLAYWRIGHT_CORE,timeout:30000,
+},async t=>{
+  const {chromium}=require(process.env.PLAYWRIGHT_CORE);
+  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH});t.after(()=>browser.close());
+  const page=await browser.newPage({viewport:{width:1000,height:800}});
+  await page.route('https://feed.test/**',r=>r.fulfill({contentType:'text/html; charset=utf-8',body:`
+    <style>body{font:16px/1.5 sans-serif}.row{display:flex;gap:12px}.card{width:200px}</style>
+    <article><p id="post">A feed post written by someone you follow.</p></article>
+    <p id="linked">Read <a id="doc" href="/docs">the documentation</a> before you start.</p>
+    <p id="hint"><span hidden>Tip</span>Visible article text for readers.</p>
+    <aside id="hot"><div class="row"><span class="rank">1</span><a id="topic" style="display:block" href="/t">Index opens above 3600 points</a></div></aside>
+    <div class="row"><div class="card"><div id="value">3584.58</div><div id="name">Shanghai composite</div></div>
+      <div class="card"><div id="same">已经是中文的标题</div></div></div>`}));
+  await page.goto('https://feed.test/');
+  await page.evaluate(()=>{
+    globalThis.sentTexts=[];
+    globalThis.browser={runtime:{id:'fixture',getURL:()=> 'data:image/png;base64,',onMessage:{addListener(fn){globalThis.command=fn;},removeListener(){}},
+      async sendMessage(m){
+        if(m.type!=='cindy-learning')return {ok:true};
+        if(m.request.op==='config')return {ok:true,locale:'zh-CN'};
+        if(m.request.op==='translate'){sentTexts.push(...m.request.texts);globalThis.lastTarget=m.request.target;return {ok:true,translations:m.request.texts.map(text=>/[一-鿿]/.test(text)?text:(m.request.target==='ja'?'訳：':'译文：')+text)};}
+        throw Error('Unexpected request '+m.request.op);
+      }},storage:{local:{async get(){return {cindyReadingPreferences:{webTarget:'zh-CN',autoVideo:false}};}},onChanged:{addListener(fn){globalThis.prefsChanged=fn;},removeListener(){}}}};
+  });
+  for(const file of ['brand-icon.js','learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])await page.addScriptTag({path:path.join(extension,file)});
+  const command=action=>page.evaluate(action=>new Promise(resolve=>command({type:'cindy-ui',action},{id:'fixture'},resolve)),action);
+  const rowTop=await page.locator('#topic').evaluate(n=>n.parentElement.getBoundingClientRect().height);
+  await command('translate-page');
+  await page.waitForFunction(()=>document.querySelectorAll('[data-cindy-translation]').length>=2);
+  const sent=await page.evaluate(()=>sentTexts);
+  // Feed items are <article>s; the hot list and cards outside the first one are translated too.
+  assert.ok(sent.includes('A feed post written by someone you follow.'));
+  assert.ok(sent.includes('Index opens above 3600 points')&&sent.includes('Shanghai composite'));
+  assert.ok(!sent.includes('3584.58'),'numbers alone are not sent');
+  // Translations sit inside the text block; the flex row keeps one line of columns.
+  assert.equal(await page.locator('#topic [data-cindy-translation]').count(),1);
+  assert.equal(await page.locator('#name [data-cindy-translation]').count(),1);
+  assert.equal(await page.locator('.row > [data-cindy-translation]').count(),0);
+  assert.ok((await page.locator('#topic').evaluate(n=>n.parentElement.getBoundingClientRect().height))>rowTop);
+  assert.equal(await page.locator('#same [data-cindy-translation]').count(),0,'same-language text is not duplicated');
+  if(process.env.CINDY_SCREENSHOTS){await fs.mkdir(process.env.CINDY_SCREENSHOTS,{recursive:true});await page.screenshot({path:path.join(process.env.CINDY_SCREENSHOTS,'div-feed-translation.png')});}
+  // Translation only replaces the text in place (links kept) from the translations already made.
+  const requests=await page.evaluate(()=>sentTexts.length);
+  const setMode=webMode=>page.evaluate(webMode=>prefsChanged({cindyReadingPreferences:{newValue:{webTarget:'zh-CN',webMode},oldValue:{webTarget:'zh-CN'}}},'local'),webMode);
+  await setMode('translation');
+  assert.equal(await page.locator('#topic').innerText(),'译文：Index opens above 3600 points');
+  assert.equal(await page.locator('#topic').getAttribute('href'),'/t');
+  assert.equal(await page.locator('#name').innerText(),'译文：Shanghai composite');
+  // 2026-11-17 review: in-place replacement emptied inline links and wrote into hidden text.
+  // A block with a link stays bilingual so the link keeps its label; hidden text is skipped.
+  assert.equal(await page.locator('#doc').innerText(),'the documentation');
+  assert.equal(await page.locator('#linked + [data-cindy-translation]').count(),1);
+  assert.equal(await page.locator('#hint').innerText(),'译文：Visible article text for readers.');
+  assert.equal(await page.locator('#hint span').textContent(),'Tip');
+  assert.equal(await page.locator('[data-cindy-translation]').count(),1,'only the linked block stays bilingual');
+  await page.waitForTimeout(450);
+  assert.equal(await page.evaluate(()=>sentTexts.length),requests,'switching the display makes no new model requests');
+  await setMode('both');
+  assert.equal(await page.locator('#topic [data-cindy-translation]').count(),1);
+  await setMode('translation');
+  await command('translate-page');
+  assert.equal(await page.locator('[data-cindy-translation]').count(),0,'restore removes every injected translation');
+  assert.equal(await page.locator('#name').innerText(),'Shanghai composite','restore puts the original text back');
+  assert.equal(await page.locator('#topic').innerText(),'Index opens above 3600 points');
+  assert.equal(await page.locator('#hint').innerText(),'Visible article text for readers.');
+  // From the side panel the page translates in place without opening the page panel.
+  const panelCommand=action=>page.evaluate(action=>new Promise(resolve=>command({type:'cindy-page',action},{id:'fixture'},resolve)),action);
+  const panelsBefore=await page.locator('[data-cindy-panel]:visible').count();
+  assert.deepEqual(await panelCommand('translate'),{ok:true,translated:true});
+  assert.ok(await page.locator('[data-cindy-translation]').count()>=2);
+  assert.equal(await page.locator('[data-cindy-panel]:visible').count(),panelsBefore);
+  assert.deepEqual(await panelCommand('state'),{ok:true,translated:true});
+  // 2026-11-17 review: changing the language in side panel settings re-translates the page
+  // instead of leaving old-language blocks next to new ones.
+  await page.evaluate(()=>prefsChanged({cindyReadingPreferences:{newValue:{webTarget:'ja',webMode:'both'},oldValue:{webTarget:'zh-CN',webMode:'both'}}},'local'));
+  await page.waitForFunction(()=>globalThis.lastTarget==='ja'&&document.querySelectorAll('[data-cindy-translation]').length>=2);
+  assert.equal(await page.locator('#name [data-cindy-translation]').count(),1);
+  assert.deepEqual(await panelCommand('state'),{ok:true,translated:true});
+  assert.deepEqual(await panelCommand('translate'),{ok:true,translated:false});
+  assert.equal(await page.locator('[data-cindy-translation]').count(),0);
+});
+
+// 2026-11-17 manual test: pressing the selection button removed it on mousedown (it was not
+// recognised as Cindy's own UI), so the click never landed and nothing was translated.
+test('selection toolbar translates and explains with real mouse presses',{
+  skip:!process.env.PLAYWRIGHT_CORE,timeout:30000,
+},async t=>{
+  const {chromium}=require(process.env.PLAYWRIGHT_CORE);
+  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH});t.after(()=>browser.close());
+  const page=await browser.newPage({viewport:{width:1000,height:700}});
+  await page.route('https://select.test/**',r=>r.fulfill({contentType:'text/html; charset=utf-8',body:'<p id="p" style="margin:420px 20px 0;font:20px sans-serif">Markets still hope the founder will come back to lead the company.</p>'}));
+  await page.goto('https://select.test/');
+  await page.evaluate(()=>{
+    const attach=Element.prototype.attachShadow;globalThis.roots=[];
+    Element.prototype.attachShadow=function(o){const r=attach.call(this,o);roots.push(r);return r;};
+    globalThis.ops=[];
+    globalThis.browser={runtime:{id:'fixture',getURL:()=> 'data:image/png;base64,',onMessage:{addListener(fn){globalThis.command=fn;},removeListener(){}},
+      async sendMessage(m){if(m.type!=='cindy-learning')return {ok:true};ops.push(m.request.op);
+        if(m.request.op==='config')return {ok:true,locale:'zh-CN'};
+        if(m.request.op==='translate')return {ok:true,translations:['市场仍希望创始人回来领导公司。']};
+        if(m.request.op==='explain')return {ok:true,text:'这句话是说……\n'+'很长的解释。'.repeat(120)+'\n最后一行'};
+        throw Error('Unexpected request '+m.request.op);}},
+      storage:{local:{async get(){return {cindyReadingPreferences:{webTarget:'zh-CN',autoVideo:false,selectionButton:true}};}},onChanged:{addListener(){},removeListener(){}}}};
+  });
+  for(const file of ['brand-icon.js','learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])await page.addScriptTag({path:path.join(extension,file)});
+  await page.waitForTimeout(200);
+  const select=async()=>{await page.mouse.click(900,650);const b=await page.locator('#p').boundingBox();await page.mouse.move(b.x+4,b.y+b.height/2);await page.mouse.down();await page.mouse.move(b.x+400,b.y+b.height/2,{steps:6});await page.mouse.up();
+    await page.waitForFunction(()=>document.querySelector('[data-cindy-selection-entry]'));};
+  const press=async label=>{const point=await page.evaluate(label=>{const button=roots.flatMap(r=>[...r.querySelectorAll('button')]).find(b=>b.isConnected&&b.textContent===label);const r=button.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};},label);await page.mouse.click(point.x,point.y);};
+  const result=()=>page.evaluate(()=>roots.map(r=>r.querySelector('.result')?.textContent).find(Boolean));
+  await select();
+  // The toolbar sits above the selection so it does not cover the selected line.
+  const [bar,line]=await Promise.all([page.locator('[data-cindy-selection-entry]').boundingBox(),page.locator('#p').boundingBox()]);
+  assert.ok(bar.y+bar.height<=line.y+2);
+  // Before Cindy reports its language the toolbar follows the browser (English here); afterwards Cindy's (zh-CN).
+  await press('Translate');
+  await page.waitForFunction(()=>ops.includes('translate'));
+  await page.waitForFunction(()=>roots.some(r=>r.querySelector('.result')?.textContent));
+  assert.equal(await result(),'市场仍希望创始人回来领导公司。');
+  await select();await press('解释');
+  await page.waitForFunction(()=>ops.includes('explain'));
+  await page.waitForFunction(()=>roots.some(r=>r.querySelector('.result')?.textContent.endsWith('最后一行')));
+  // A long result stays inside the window and scrolls to its last line; the card has no "more" section.
+  const card=await page.evaluate(()=>{const root=roots.find(r=>r.querySelector('.result')?.textContent);const main=root.querySelector('main'),panel=root.querySelector('.panel');
+    main.scrollTop=main.scrollHeight;const last=root.querySelector('.selection-actions').getBoundingClientRect(),box=panel.getBoundingClientRect();
+    return {bottom:box.bottom,height:innerHeight,scrolls:main.scrollHeight>main.clientHeight,actionsVisible:last.bottom<=box.bottom,details:root.querySelectorAll('details').length,actions:[...root.querySelectorAll('.selection-actions button')].map(b=>b.textContent)};});
+  assert.ok(card.bottom<=card.height,'card stays inside the window');
+  assert.ok(card.scrolls&&card.actionsVisible,'the end of a long result can be scrolled to');
+  assert.equal(card.details,0);
+  assert.deepEqual(card.actions,['翻译','解释','复制']);
+  const [panel,selectedLine]=await Promise.all([page.locator('[data-cindy-panel]').boundingBox(),page.locator('#p').boundingBox()]);
+  assert.ok(panel.y+panel.height<=selectedLine.y+1||panel.y>=selectedLine.y+selectedLine.height-1,'the card does not cover the selected line');
+  if(process.env.CINDY_SCREENSHOTS){await fs.mkdir(process.env.CINDY_SCREENSHOTS,{recursive:true});await page.screenshot({path:path.join(process.env.CINDY_SCREENSHOTS,'selection-explain.png')});}
 });

@@ -8,12 +8,16 @@ function normalize(row){
   const h=row.properties?.hardware||row.hardwareProperties||{},s=row.properties?.state||row.deviceProperties||{};
   const c=row.properties?.connection||row.connectionProperties||{},software=row.properties?.software||row.deviceProperties||{};
   if(h.reality!=='physical'||!['iPhone','iPad'].includes(h.deviceType)||!UUID.test(row.identifier)||typeof h.udid!=='string'||! /^[a-f0-9-]{20,40}$/i.test(h.udid))return null;
-  const connected=(c.state||c.tunnelState)==='connected',version=software.osVersionNumber?.stringValue||software.osVersionNumber||'';
+  // CoreDevice opens the tunnel on demand: `disconnected` with a transport is a
+  // reachable paired phone whose tunnel is idle; `unavailable` is not reachable.
+  const tunnel=c.state||c.tunnelState,connected=tunnel==='connected',idle=tunnel==='disconnected'&&!!c.transportType;
+  const version=software.osVersionNumber?.stringValue||software.osVersionNumber||'';
   const developerMode=s.developerModeStatus==='enabled'||!!s.developerModeStatus?.enabled;
   // Use CoreDevice's stable UUID throughout the shared task/selection model.
   return {udid:row.identifier.toUpperCase(),hardwareUdid:h.udid,name:s.name||h.marketingName||h.deviceType,
     platform:'ios',kind:'physical',runtime:`iOS ${version}`,deviceType:h.deviceType,model:h.productType,
-    state:connected?'Booted':'Disconnected',isAvailable:connected,connection:c.transportType||'unknown',developerMode,
+    state:connected||idle?'Booted':'Disconnected',isAvailable:connected||idle,tunnel:connected?'connected':idle?'idle':'unavailable',
+    connection:c.transportType||'unknown',developerMode,
     tunnelAddress:c.tunnelIPAddressString||c.tunnelIPAddress||null};
 }
 function activeDisplay(result){
@@ -45,11 +49,33 @@ function createDevices({root,run,host=process.platform}){
     }finally{await fs.rm(file,{force:true}).catch(()=>{});}
   }
   async function list(p={}){if(host!=='darwin')return [];return ((await command(['list','devices'],{...p,_deadline:Math.min(p._deadline||Infinity,Date.now()+10000)})).devices||[]).map(normalize).filter(Boolean);}
+  const waking=new Map();
+  // Any devicectl request to the phone brings up its tunnel. Concurrent callers share only this
+  // one attempt, which has its own budget; each caller waits within its own deadline.
+  function wake(d){
+    let pending=waking.get(d.udid);
+    if(!pending){
+      pending=command(['device','info','details','--device',d.udid],{_deadline:Date.now()+20000})
+        .catch(()=>{}).finally(()=>waking.delete(d.udid));
+      waking.set(d.udid,pending);
+    }
+    return pending;
+  }
+  async function woken(d,p){
+    const remaining=Math.floor((p._deadline??Infinity)-Date.now());
+    if(remaining<=0)commandBudget(1,p._deadline);
+    let timer;
+    const pending=wake(d);
+    if(Number.isFinite(remaining))await Promise.race([pending,new Promise(r=>{timer=setTimeout(r,remaining);})]);else await pending;
+    clearTimeout(timer);
+    return (await list(p)).find(x=>x.udid===d.udid);
+  }
   async function target(p,connected=true){
     if(!UUID.test(p.udid||''))throw fail('INVALID_DEVICE','请使用 devices 返回的精确设备 ID。');
-    const d=(await list(p)).find(d=>d.udid===p.udid.toUpperCase());
+    let d=(await list(p)).find(d=>d.udid===p.udid.toUpperCase());
     if(!d)throw fail('DEVICE_NOT_FOUND','未找到这台已配对的 iPhone / iPad，请刷新设备列表。');
-    if(connected&&!d.isAvailable)throw fail('DEVICE_DISCONNECTED','手机未连接。请连接 USB 或已配对的网络，解锁并信任这台 Mac。');
+    if(connected&&d.tunnel==='idle')d=await woken(d,p)||d;
+    if(connected&&d.tunnel!=='connected')throw fail('DEVICE_DISCONNECTED','手机未连接。请连接 USB 或已配对的网络，解锁并信任这台 Mac。');
     return d;
   }
   function endpoint(d,port){

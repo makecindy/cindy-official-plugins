@@ -6,7 +6,7 @@
 
 已知 `developerId` 和 `appId` 后，按问题所需读取以下证据；用户问“还差什么 / 能不能提审 / 帮我检查资料”时读取完整集合：
 
-0. 先调用 `analyze-app-status` 做总体体检：一次拿到 `blockers`（必填缺失 / 包体缺失 / 字段约束 / 防沉迷联动 / SCE 协议 / READ_ONLY）、`warnings`（资质缺口 `QUALIFICATION_INCOMPLETE`、审核结论、默认图标）和 `suggestions`（建议补充字段）。这比逐个读模块更全局，优先用于回答「还差什么 / 能不能提交」；具体字段为什么缺、怎么补，再用下面第 1 步的 `get-app-module` 读字段级详情。资质维度**只看 `QUALIFICATION_INCOMPLETE`**：它是按游戏事实算出的必须资质缺口，message 里列出的才是必须补的资质；没有它 = 资质不阻断，不要再去列 8 类资质客观状态。
+0. 先调用 `analyze-app-status` 做总体体检：一次拿到 `blockers`（必填缺失 / 包体缺失 / 字段约束 / 防沉迷联动 / SCE 协议 / READ_ONLY）、`warnings`（资质缺口 `QUALIFICATION_INCOMPLETE`、审核结论、默认图标）和 `suggestions`（建议补充字段）。这比逐个读模块更全局，优先用于回答「还差什么 / 能不能提交」；具体字段为什么缺、怎么补，再用下面第 1 步的 `get-app-module` 读字段级详情。资质维度先检查 `QUALIFICATION_FACTS_UNCONFIRMED` / `QUALIFICATION_STATUS_UNAVAILABLE`，出现时标记未知并重查，不能当作无缺口。分析成功且无状态不可用警告时，`QUALIFICATION_INCOMPLETE` 的 message 才是按游戏事实算出的必须资质缺口；不要将 8 类客观空槽全列为必须。
 1. 对 9 个模块分别调用 `get-app-module`：
    - `basic-info`
    - `assets-upload`
@@ -19,7 +19,7 @@
    - `other-settings`
 2. 调用 `list-packages`，读取候选摘要、`current_bindings`、总数，以及当前 schema 声明时的 `package_slots`；包体写入只使用同次 `package_slots.<slot>.available` 与 `expected`，schema 未声明时停止绑定（契约见 [fields and packages](taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md)）。
 3. 调用 `list-app-versions`，读取当前声明的 `version_id`、`version`、`status`、`release_time`、`last_event`；需要审核日志时，将目标 item 的 `version` 传给 `get-app-version`，读取该版本实际返回的 `logs`。列表项的 `version_id` 当前只是 `version` 的兼容别名。
-4. 资质只报告 `QUALIFICATION_INCOMPLETE` message 里列出的必须资质，转 qualification 手册看这几个的具体状态和补材料；不要因为 `get-qualification-status` 有 8 类资质（客观登记表）就把 8 个都列给用户。开发者认证转 identity 手册。
+4. 按 qualification 手册检查资质材料、适龄、开发者认证或豁免、包体冲突及提交条件。根据结果列出已完成、待补充和无法确认的事项，并说明下一步；没有警告不能作为资质齐全的依据。主体认证需要在开发者后台办理，按资质流程提供页面指引。
 5. 资料填写提示或提审准备度检查按 [review risk checklist](taptap-suite/references/taptap-app-edit/references/review-risk-checklist.md) 将官方规则、当前事实、历史审核、测试证据和 Agent 判断分层。官方规则只从 [`official-review-rules-v4.md`](taptap-suite/references/official-review-rules-v4.md) 选择与当前字段直接相关的章节。
 
 读取失败的维度必须标记为“无法确认”，不能把未知当作通过。只回答单个字段或素材规格时，读取目标模块即可，不为形式完整而调用全部模块。

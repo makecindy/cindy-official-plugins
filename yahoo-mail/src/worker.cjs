@@ -4,6 +4,7 @@ const readline = require('node:readline');
 const { ImapFlow } = require('imapflow');
 const nodemailer = require('nodemailer');
 const { simpleParser } = require('mailparser');
+const { createMailCompose } = require('./mail-compose.cjs');
 
 const YAHOO = Object.freeze({
   imapHost: 'imap.mail.yahoo.com',
@@ -125,6 +126,7 @@ function summaryFromMessage(message, folder) {
     from: addressText(envelope.from),
     to: addressText(envelope.to),
     subject: envelope.subject || '',
+    message_id: envelope.messageId || '',
     date: (envelope.date || message.internalDate || null)
       ? new Date(envelope.date || message.internalDate).toISOString()
       : null,
@@ -547,7 +549,31 @@ async function testAccount(credentials, deps) {
   };
 }
 
-async function performAction(credentials, action, deps) {
+// Common mail-card operations return structured receipts and never throw.
+// Drafts may carry up to 25 MiB of new attachments, beyond the read limit.
+const COMPOSE_MAX_SOURCE_BYTES = 48 * 1024 * 1024;
+const COMPOSE_ACTIONS = Object.freeze({
+  compose_create: 'createDraft', compose_read: 'readDraft', compose_write: 'writeDraft',
+  compose_update: 'updateDraft', compose_delete: 'deleteDraft',
+});
+function composeFor(credentials, deps) {
+  return createMailCompose({
+    email: credentials.email,
+    maxSourceBytes: COMPOSE_MAX_SOURCE_BYTES,
+    withImap: (operation) => withImap(credentials, deps, operation),
+    withMailbox,
+    findDraftFolder,
+    createSmtp: () => deps.createSmtp(credentials),
+    createComposer: () => deps.createComposer(),
+    parseMessage: (source) => deps.parseMessage(source),
+    describeError: (error) => humanizeError(error),
+  });
+}
+
+async function performAction(credentials, action, deps, locale) {
+  if (Object.hasOwn(COMPOSE_ACTIONS, action.action)) {
+    return composeFor(credentials, deps)[COMPOSE_ACTIONS[action.action]](action, locale);
+  }
   switch (action.action) {
     case 'list_folders':
       return listFolders(credentials, deps);
@@ -668,7 +694,7 @@ async function handleRequest(request, deps = createRuntimeDeps()) {
     if (method === 'mail/action') {
       credentials = consumeRequestCredentials(boundRequest);
       const action = params.action && typeof params.action === 'object' ? params.action : {};
-      return await performAction(credentials, action, deps);
+      return await performAction(credentials, action, deps, params.locale);
     }
     throw new Error('METHOD_NOT_FOUND');
   } catch (error) {
