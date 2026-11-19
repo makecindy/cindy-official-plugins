@@ -163,6 +163,10 @@ let selectedTarget = null;
 // 每次读取带一个序号：晚到的旧结果不能盖掉用户已经选中的另一个 pane。
 let readToken = 0;
 
+// 面板请求要等得起后端最慢的路径：快照最长 30 秒，tmux_state 是三连调用
+// （每个 8 秒上限），所以留 45 秒，否则长操作会被误报成「插件未响应」。
+const PANEL_REQUEST_TIMEOUT_MS = 45000;
+
 function request(action, payload) {
   return new Promise(function (resolve, reject) {
     const reqId = 'p' + Date.now() + Math.random().toString(16).slice(2);
@@ -176,7 +180,7 @@ function request(action, payload) {
       settled = true;
       cleanup();
       reject(new Error('插件未响应'));
-    }, 15000);
+    }, PANEL_REQUEST_TIMEOUT_MS);
     function onMessage(event) {
       const message = event.data;
       if (!message || message.type !== 'panel-response' || message.reqId !== reqId) return;
@@ -460,18 +464,27 @@ async function refreshHerdr() {
   renderHerdr();
 }
 
-async function openPane(pane) {
-  selectedPane = pane;
-  readToken += 1;
-  const token = readToken;
-  renderHerdr();
-  $('#detail').hidden = false;
+// 详情头部：状态、标题、目录和发送目标。刷新后按 pane_id 重绑时也走这里，
+// 否则列表显示新状态、详情卡还停在旧值。
+function renderHerdrDetail(pane) {
   $('#detail-title').textContent = pane.title || dirName(pane.cwd) || paneDisplayName(pane);
   $('#detail-sub').textContent = [pane.agent, pane.cwd]
     .filter(Boolean).join(' · ');
   setDetailState(paneDotClass(pane), statusLabel(pane.agent_status));
   // 原始 pane id 只在真正能操作它的地方出现：发送目标行。
   setComposerTarget([paneDisplayName(pane), pane.pane_id].filter(Boolean).join(' · '));
+}
+
+async function openPane(pane) {
+  // 换目标就丢掉草稿：A 里没发出去的命令不能在回车时打到 B 上。
+  const changed = !selectedPane || selectedPane.pane_id !== pane.pane_id;
+  selectedPane = pane;
+  if (changed) $('#term-input').value = '';
+  readToken += 1;
+  const token = readToken;
+  renderHerdr();
+  $('#detail').hidden = false;
+  renderHerdrDetail(pane);
   renderOutput('');
   $('#detail-body').textContent = T.loading;
   try {
@@ -541,7 +554,6 @@ function renderTmux() {
     for (const pane of sessionPanes) {
       chips.appendChild(makeChip({
         name: pane.target,
-        meta: [pane.window_name, pane.command].filter(Boolean).join(' · '),
         icon: null,
         dotClass: tmuxDotClass(pane),
         meta: statusLabelForTmux(pane) || [pane.window_name, pane.command].filter(Boolean).join(' · '),
@@ -573,17 +585,24 @@ async function refreshTmux() {
   renderTmux();
 }
 
-async function openTmuxPane(pane) {
-  selectedTarget = pane.target;
-  readToken += 1;
-  const token = readToken;
-  renderTmux();
-  $('#detail').hidden = false;
+function renderTmuxDetail(pane) {
   $('#detail-title').textContent = pane.target;
   $('#detail-sub').textContent = [pane.window_name, pane.command, pane.path]
     .filter(Boolean).join(' · ');
   setDetailState(tmuxDotClass(pane), statusLabelForTmux(pane));
   setComposerTarget(pane.target);
+}
+
+async function openTmuxPane(pane) {
+  // 换目标就丢掉草稿：A 里没发出去的命令不能在回车时打到 B 上。
+  const changed = selectedTarget !== pane.target;
+  selectedTarget = pane.target;
+  if (changed) $('#term-input').value = '';
+  readToken += 1;
+  const token = readToken;
+  renderTmux();
+  $('#detail').hidden = false;
+  renderTmuxDetail(pane);
   $('#term-input').focus();
   renderOutput('');
   $('#detail-body').textContent = T.loading;
@@ -612,8 +631,24 @@ async function refresh() {
     if (view === 'tmux') await refreshTmux();
     else await refreshHerdr();
     if (stale()) return;
-    // 详情卡开着的时候，顺带把选中分屏的正文也读一遍，
-    // 否则终端会一直停在第一次打开时的快照。
+    // 详情卡开着的时候，先按 id 把选中对象换成最新的一份并刷新头部，
+    // 再重读正文：否则列表显示新状态、详情卡还是旧值。
+    if (view === 'tmux') {
+      if (selectedTarget) {
+        const fresh = ((tmux && tmux.panes) || []).find(function (pane) {
+          return pane.target === selectedTarget;
+        });
+        if (fresh) renderTmuxDetail(fresh);
+      }
+    } else if (selectedPane) {
+      const fresh = (state.panes || []).find(function (pane) {
+        return pane.pane_id === selectedPane.pane_id;
+      });
+      if (fresh) {
+        selectedPane = fresh;
+        renderHerdrDetail(fresh);
+      }
+    }
     const hasOpenDetail = view === 'tmux' ? selectedTarget : selectedPane;
     if (hasOpenDetail) await refreshTerminal();
     if (stale()) return;

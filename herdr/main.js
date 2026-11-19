@@ -201,14 +201,12 @@ function isOurAutomation(item, name, args) {
   if (item.manual !== true) return false;                // 不能复用会按时间自己跑的
   const prompt = String(item.prompt || '');
   if (prompt.indexOf(AUTOMATION_MARK) < 0) return false; // 不是本插件创建的
-  if (args.targetSessionId !== undefined && args.targetSessionId !== null
-      && args.targetSessionId !== '') {
-    // 用户点名了会话：绑定必须一模一样，没有绑定的也不能顶替。
-    if (item.targetSessionId !== args.targetSessionId) return false;
-  }
-  if (!args.targetSessionId && item.targetSessionId) return false; // 没点名会话时，不接受已绑定别的会话的
+  // 会话差异不在这里否决：归属、manual、标记、active 都对得上，
+  // 就认这条是我们的，再由调用处用 schedule_update 把绑定改成本次要求的。
   if (item.status && item.status !== 'active') return false;       // 非 active 复用不了
-  if (args.prompt && prompt.indexOf(String(args.prompt)) !== 0) return false;
+  // 精确匹配：把唯一的 marker 去掉后必须整串相等。
+  // 前缀匹配会把「处理」当成「处理所有 pane」的改写而复用旧指令。
+  if (args.prompt && prompt !== String(args.prompt) + '\n\n' + AUTOMATION_MARK) return false;
   if (args.agentKind && item.agentKind !== args.agentKind) return false;
   return true;
 }
@@ -225,10 +223,13 @@ async function ensureAutomationSchedule(name, args) {
       const info = JSON.parse(fetched.content[0].text);
       const item = info && info.data;
       if (isOurAutomation(item, name, args)) {
-        if (args.targetSessionId && item.targetSessionId !== args.targetSessionId) {
+        const wantSession = args.targetSessionId || null;
+        // 只在本次点名了会话且与现绑定不同才更新；没点名时保留原绑定
+        // （那是上次显式请求的结果），也不尝试用 null 解绑。
+        if (wantSession && wantSession !== (item.targetSessionId || null)) {
           const updated = await cindy.host.call('cindy_scheduler', 'schedule_update', {
             id: storedId,
-            targetSessionId: args.targetSessionId
+            targetSessionId: wantSession || null
           });
           if (updated.isError) {
             const detail = updated.content && updated.content[0] && updated.content[0].text;

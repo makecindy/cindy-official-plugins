@@ -168,3 +168,49 @@ test('every shared-library function used by the panel is bound', () => {
     if (referenced) assert.ok(defined, `${name} is used in panel.js but never defined or bound`);
   }
 });
+
+
+test('switching panes drops the unsent draft instead of sending it to the new target', async () => {
+  const { sandbox, nodes } = loadPanel();
+  await sandbox.loadLocale();
+  const input = nodes.get('#term-input');
+
+  vm.runInContext(
+    'state = { workspaces: [{ workspace_id: "w1", label: "w" }], tabs: [], panes: ['
+    + ' { pane_id: "w1:p1", workspace_id: "w1", label: "a", agent: "claude", agent_status: "working", cwd: "/a" },'
+    + ' { pane_id: "w1:p2", workspace_id: "w1", label: "b", agent: "claude", agent_status: "idle", cwd: "/b" } ] };'
+    + ' renderHerdr();',
+    sandbox
+  );
+  // state 是顶层 let，不在 window 上：在同一 context 里取。
+  const paneA = vm.runInContext('state.panes[0]', sandbox);
+  const paneB = vm.runInContext('state.panes[1]', sandbox);
+
+  void sandbox.openPane(paneA);
+  input.value = 'ls --color';
+  void sandbox.openPane(paneB);
+
+  // 换目标必须丢草稿：否则回车会把 A 的命令打进 B。
+  assert.equal(input.value, '', 'draft must be dropped when the target changes');
+});
+
+test('the detail header follows the pane state after a rebind', async () => {
+  const { sandbox, nodes } = loadPanel();
+  await sandbox.loadLocale();
+  sandbox.renderHerdrDetail({ pane_id: 'w1:p1', agent: 'claude', agent_status: 'working', cwd: '/home/michael/codes/cindy', title: 'feat' });
+  const title = nodes.get('#detail-title');
+  const state = nodes.get('#detail-state-text');
+  assert.equal(title.textContent, 'feat');
+  assert.equal(state.textContent, '进行中');
+
+  sandbox.renderHerdrDetail({ pane_id: 'w1:p1', agent: 'claude', agent_status: 'blocked', cwd: '/home/michael/codes/cindy', title: 'feat' });
+  assert.equal(state.textContent, '待处理', 'detail state must follow the fresh pane object');
+});
+
+test('the panel waits longer than the slowest backend operation', () => {
+  const source = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  const match = /const PANEL_REQUEST_TIMEOUT_MS = (\d+);/.exec(source);
+  assert.ok(match, 'panel request budget must be a constant');
+  // 后端最慢：session.snapshot 30s，tmux_state 是三连 8+8+8s。
+  assert.ok(Number(match[1]) >= 30000, `panel budget ${match[1]}ms is shorter than the backend`);
+});

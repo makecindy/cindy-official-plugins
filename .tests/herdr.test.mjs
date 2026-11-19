@@ -158,11 +158,18 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'writeKv must check the PUT response and throw on failure'
   );
 
-  // 复用只允许本插件建的、manual 的，且不能把事件丢进调用方没点名的会话。
+  // 复用只允许本插件建的、manual、active，且 prompt 必须整串相等。
   assert.match(
     mainSource,
-    /function isOurAutomation[\s\S]*?item\.manual !== true[\s\S]*?AUTOMATION_MARK[\s\S]*?!args\.targetSessionId && item\.targetSessionId/,
-    'reuse must verify ownership, manual-only trigger and the target session'
+    /function isOurAutomation[\s\S]*?item\.manual !== true[\s\S]*?AUTOMATION_MARK[\s\S]*?item\.status !== 'active'[\s\S]*?prompt !== String\(args\.prompt\) \+ '\\n\\n' \+ AUTOMATION_MARK/,
+    'reuse must verify ownership, manual-only trigger, active state and an exact prompt'
+  );
+
+  // 会话不一致要能走到 schedule_update 修复分支，而不是先被归属校验挡掉。
+  assert.match(
+    mainSource,
+    /if \(wantSession && wantSession !== \(item\.targetSessionId \|\| null\)\)[\s\S]*?schedule_update/,
+    'a session mismatch must reach the schedule_update repair path'
   );
 
   // 复用不再按名称搜索全部自动化：只认 KV 记录的那一条。
