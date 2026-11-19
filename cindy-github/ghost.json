@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.24",
-  "releaseNotes": "宿主 GitHub 账号切换后，受影响的关注在列表里标记为已暂停，需要移除后重新添加。关注列表的状态与问题取值在四种语言的工具说明中完整定义。",
+  "version": "1.5.25",
+  "releaseNotes": "宿主 GitHub 账号切换后，受影响的关注在列表里标记为已暂停，账号切回后自动恢复。关注列表的状态与问题取值在四种语言的工具说明中完整定义，并区分自动恢复与需要重新添加的情况。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -190,7 +190,7 @@
     },
     {
       "name": "status_watch",
-      "description": "管理本机 GitHub 状态关注。仅在用户明确要求时 add。指定 owner/repo、pr / issue / run 和 PR 号、Issue 号或 Actions run ID。remove 停止关注，list 查看。最多 5 个对象，每 5 分钟轮询；仅提示状态变化。list 每项返回 kind、repo、id、status、problem。pr 与 issue 的 status 为 `状态:草稿:评论数`：状态取 open/closed/merged（PR 合并后为 merged），草稿取 draft/ready，末段是评论数。run 的 status 为 `状态:结果:第几次`：状态取 queued/requested/waiting/pending/in_progress/completed，未完成时结果为 none，完成后取 success/failure/cancelled/neutral/skipped/timed_out/action_required/stale/startup_failure/unknown，末段是第几次运行。problem 为 null 表示正常；target_changed 表示对象身份已变，unavailable 表示读取失败或权限不足（下轮自动重试），account_changed 表示宿主 GitHub 账号已切换、此关注已暂停；三者都要先 remove 再重新 add。",
+      "description": "管理本机 GitHub 状态关注。仅在用户明确要求时 add。指定 owner/repo、pr / issue / run 和 PR 号、Issue 号或 Actions run ID。remove 停止关注，list 查看。最多 5 个对象，每 5 分钟轮询；仅提示状态变化。list 每项返回 kind、repo、id、status、problem。pr 与 issue 的 status 为 `状态:草稿:评论数`：状态取 open/closed/merged（PR 合并后为 merged），草稿取 draft/ready，末段是评论数。run 的 status 为 `状态:结果:第几次`：状态取 queued/requested/waiting/pending/in_progress/completed，未完成时结果为 none，完成后取 success/failure/cancelled/neutral/skipped/timed_out/action_required/stale/startup_failure/unknown，末段是第几次运行。problem 为 null 表示正常；unavailable 表示读取失败或权限不足，下轮读取成功后自动清除，期间继续轮询；account_changed 表示宿主 GitHub 账号已切换、此关注已暂停，切回原账号后自动恢复，要在新账号下关注须先 remove 再 add；target_changed 表示对象身份已变，不会自动恢复，必须先 remove 再 add。",
       "parameters": {
         "type": "object",
         "properties": {
