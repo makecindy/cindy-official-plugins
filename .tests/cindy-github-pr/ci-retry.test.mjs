@@ -92,7 +92,7 @@ function fixture(t) {
   fs.writeFileSync(diagnosis, JSON.stringify(failure));
   const args = (flags, target = url) => [target, '--state-dir', stateDir, '--json', ...(flags.includes('--ci-retry-status') || flags.includes('--reserve-ci-retry') ? ['--ci-retry-id', prNodeId, '--ci-retry-failure', diagnosis] : []), ...flags];
   return {
-    root, stateDir, retryDir, diagnosis,
+    root, stateDir, retryDir, diagnosis, env,
     sentinel: ciRetryFilePath(retryDir, prNodeId, failure),
     async run(flags, target) {
       let stdout = '', stderr = '';
@@ -218,7 +218,7 @@ test('legacy history beyond two fails closed and another PR has its own total', 
 test('missing, invalid and legacy diagnosis evidence cannot start a new retry', async t => {
   const fx = fixture(t);
   let error = '';
-  assert.equal(await runGate([url, '--ci-retry-id', prNodeId, '--reserve-ci-retry', oldHead], { out() {}, err: text => { error += text; } }), 1);
+  assert.equal(await runGate([url, '--state-dir', fx.stateDir, '--ci-retry-id', prNodeId, '--reserve-ci-retry', oldHead], { env: fx.env, out() {}, err: text => { error += text; } }), 1);
   assert.match(error, /requires --ci-retry-failure/);
   for (const value of [{ ...failure, runId: 123 }, { ...failure, cause: '' }, { ...failure, step: null }, []]) {
     fs.writeFileSync(fx.diagnosis, JSON.stringify(value));
@@ -266,7 +266,7 @@ test('CI quota cannot fall back to a mutable URL when the verified PR identity i
   const fx = fixture(t);
   for (const option of [['--ci-retry-status'], ['--reserve-ci-retry', oldHead]]) {
     let error = '';
-    const code = await runGate([url, '--state-dir', fx.stateDir, ...option], { out() {}, err: text => { error += text; } });
+    const code = await runGate([url, '--state-dir', fx.stateDir, ...option], { env: fx.env, out() {}, err: text => { error += text; } });
     assert.equal(code, 1);
     assert.match(error, /requires --ci-retry-id/);
   }
@@ -331,6 +331,55 @@ test('legacy evidence survives invalid current diagnoses, cache cleanup and proc
         assert.equal(fs.readdirSync(fx.retryDir).filter(name => name.endsWith('.slot')).length, known ? 1 : 0);
       });
     }
+  }
+});
+
+test('legacy evidence survives rejected budget arguments before cache cleanup and restart', async t => {
+  for (const mode of ['status', 'reserve']) {
+    const command = mode === 'status' ? ['--ci-retry-status'] : ['--reserve-ci-retry', oldHead];
+    const cases = [
+      ['omitted failure', (fx) => [...command, '--ci-retry-id', prNodeId]],
+      ['empty failure at end', (fx) => [...command, '--ci-retry-id', prNodeId, '--ci-retry-failure']],
+      ['empty failure before directory', (fx) => [...command, '--ci-retry-id', prNodeId, '--ci-retry-failure', '--state-dir', fx.stateDir]],
+      ['missing identity', (fx) => [...command, '--ci-retry-failure', fx.diagnosis]],
+      ['invalid identity', (fx) => [...command, '--ci-retry-id', '../invalid', '--ci-retry-failure', fx.diagnosis]],
+      ['conflicting finish', (fx) => [...command, '--ci-retry-id', prNodeId, '--ci-retry-failure', fx.diagnosis, '--ack']],
+      ['conflicting query', (fx) => [...command, '--ci-retry-id', prNodeId, '--ci-retry-failure', fx.diagnosis, '--last-result']],
+      ...(mode === 'reserve' ? [
+        ['missing source SHA', (fx) => ['--reserve-ci-retry', '--ci-retry-id', prNodeId, '--ci-retry-failure', fx.diagnosis]],
+        ['invalid source SHA', (fx) => ['--reserve-ci-retry', 'invalid', '--ci-retry-id', prNodeId, '--ci-retry-failure', fx.diagnosis]],
+      ] : []),
+    ];
+    for (const [kind, flags] of cases) for (const known of [true, false]) await t.test(`${mode} / ${kind} / ${known ? 'known' : 'unknown'}`, async t => {
+      const fx = fixture(t);
+      fs.mkdirSync(fx.stateDir);
+      const cached = known ? ciRetryFilePath(fx.stateDir, prNodeId, failure) : stateFilePath(fx.stateDir, 'example/repo', 42) + '.ci-retry';
+      const bytes = JSON.stringify({ ...(known ? { prNodeId, failure } : {}), sourceHead: oldHead, reservedAt: 123 });
+      fs.writeFileSync(cached, bytes);
+      // Put the directory after the malformed options as well: use the completed parse.
+      const argv = kind === 'empty failure at end'
+        ? [url, '--state-dir', fx.stateDir, '--json', ...flags(fx)]
+        : [url, ...flags(fx), '--state-dir', fx.stateDir, '--json'];
+      const rejected = spawnSync(process.execPath, [gate, ...argv], { env: fx.env, encoding: 'utf8' });
+      assert.equal(rejected.status, 1, rejected.stderr);
+      assert.equal(fs.readFileSync(path.join(fx.retryDir, path.basename(cached)), 'utf8'), bytes,
+        'persist raw legacy evidence before rejecting this invocation arguments');
+      assert.equal(fs.readFileSync(cached, 'utf8'), bytes);
+      assert.deepEqual(fs.readdirSync(fx.stateDir), [path.basename(cached)], 'do not write follow-up state or traces for a rejected budget request');
+      assert.equal(fs.readdirSync(fx.retryDir).some(name => name.endsWith('.slot')), false, 'bad arguments cannot allocate a slot');
+      assert.equal(path.relative(fx.root, path.resolve(fx.stateDir)), 'state');
+      fs.rmSync(fx.stateDir, { recursive: true });
+      const restarted = await fx.process(['--ci-retry-status']);
+      if (known) {
+        assert.equal(restarted.code, 0, restarted.stderr);
+        const status = JSON.parse(restarted.stdout);
+        assert.equal(status.available, false);
+        assert.equal(status.pr_consumed, 1);
+        assert.equal(status.reservation.sourceHead, oldHead);
+      } else assert.equal(restarted.code, 1, 'unknown history still blocks');
+      assert.equal((await fx.process(['--reserve-ci-retry', newHead])).code, 1);
+      assert.equal(fs.readdirSync(fx.retryDir).filter(name => name.endsWith('.slot')).length, known ? 1 : 0);
+    });
   }
 });
 

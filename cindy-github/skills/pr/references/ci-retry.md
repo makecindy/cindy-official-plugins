@@ -220,8 +220,15 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    All matching old per-failure receipts in durable data and the current cache
    count toward the two slots, even when querying another diagnosis. Migration
    retains the originals and never overwrites durable evidence. It preserves old
-   evidence before reading this invocation's diagnosis, so a missing, damaged or
-   invalid diagnosis cannot leave old outcomes vulnerable to cache cleanup.
+   evidence before validating this parsed budget request or reading its diagnosis.
+   A missing diagnosis option/value, missing/invalid ID or source SHA, conflicting
+   budget mode, or missing/damaged/invalid diagnosis cannot leave old outcomes
+   vulnerable to cache cleanup. The existing entry point uses one completed
+   parse to select the effective observation directory, preserves raw receipts,
+   then validates the request before adoption, traces or quota allocation.
+   Missing CI option values do not consume the following option, so a later
+   `--state-dir` is still read. Help and unparseable CLI syntax/targets are not
+   budget requests and do not promise automatic migration.
    Such an invocation cannot create a new reservation; adopting a verified older
    attempt only retains its existing consumption. More than two
    older attempts, unreadable receipts or unknown prior identity/outcome stop

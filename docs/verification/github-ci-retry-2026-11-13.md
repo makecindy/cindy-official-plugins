@@ -637,6 +637,50 @@ recovery and current UI/read-ordering prerequisites remain unmet. No real
 preference, credential, permission or quota change, CI-only rewrite, PR merge
 or publication was performed.
 
+## Preserve receipts before budget argument rejection — source 1.5.34 (2026-11-19)
+
+Round 23 addresses [the omitted diagnosis option](https://github.com/makecindy/cindy-official-plugins/pull/332#discussion_r4624322101)
+as another path of the earlier evidence-preservation family. **Invariant:** once
+a budget request and its effective directory are parsed, rejecting its CI
+options must not leave older receipts solely in disposable cache. The existing
+`runGate` entry point owns the ordering: one completed parse → existing exclusive
+raw copy → shared argument validation → existing adoption/diagnosis/allocation.
+`gateMain` consumes the same parsed object, removing its second parse. The copy
+loop and fixed-slot allocator remain the only writers; no new marker, storage,
+lock, queue or retry was added.
+
+| Parsed request / event | Result |
+| --- | --- |
+| Status or reserve omits/empties the diagnosis option | Preserve raw old files, then reject; no new slot/trace/state |
+| CI value absent before a later `--state-dir` | Do not consume the next option; use the completed directory selection |
+| Identity or reserve SHA missing/invalid; budget modes conflict | Same preserve-before-validation path; no URL identity fallback |
+| Known older attempt, then cache cleanup/restart | Adopt exactly that previous consumption; same diagnosis cannot reserve again |
+| Unknown URL-only evidence, then cleanup/restart | Durable raw evidence remains fail-closed; no invented identity/diagnosis |
+| Current diagnosis file missing/damaged/invalid | Existing preservation and adoption precede diagnosis-file reading |
+| Help or unparseable CLI grammar/target | Existing early rejection/help; automatic migration is not promised |
+
+The 32-case CLI matrix first failed on cc54f36, covering status/reserve, seven
+argument failures plus two reserve-SHA failures, and known/unknown old receipts.
+After the fix the CI recovery suite passed 69 tests in 20.2 seconds. Each matrix
+case verifies byte-exact copies and originals, no new slot or observation trace,
+cache deletion and a fresh process: known consumption survives and unknown
+history still blocks. Existing malformed-file, custom-directory, exact-SHA push,
+signing, concurrency and total-cap tests also passed. These are isolated local
+CLI/Git fixtures, not real Cindy/GitHub denied-rerun acceptance.
+
+The four required repository suites plus plugin tests passed: 381 pass, 19
+Windows platform skips, 0 failures in 117.6 seconds. Manifest validation passed.
+In-memory package/content checks used staged tree
+`333253a78f48a6f971b483c48be303342aad7a0e`: 31 files, 225175 compressed bytes,
+622830 expanded bytes, all files match their Git blobs; no new package retained.
+Source 1.5.34 exceeds main's 1.5.19 at 01b42db.
+
+Source 1.5.34 was not installed; main.js, settings and locales are unchanged from
+cc54f36. The last actual local runtime remains 97d540e / 1.5.19. Genuine recovery
+and current UI/read-ordering evidence remain prerequisites. No real preference,
+credential, permission or quota change, CI-only rewrite, PR merge or publication
+was performed.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected

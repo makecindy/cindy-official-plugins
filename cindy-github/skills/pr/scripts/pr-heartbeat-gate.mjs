@@ -371,18 +371,15 @@ export function parseArgs(argv, env = process.env) {
       continue;
     }
     if (arg === '--ci-retry-id') {
-      ciRetryId = argv[++i];
-      if (!validCiRetryId(ciRetryId)) throw new Error('--ci-retry-id expects the immutable node_id read from the current GitHub PR');
+      ciRetryId = argv[i + 1]?.startsWith('--') ? '' : (argv[++i] ?? '');
       continue;
     }
     if (arg === '--reserve-ci-retry') {
-      reserveCiRetry = argv[++i];
-      if (!/^[a-f0-9]{40}$/.test(reserveCiRetry ?? '')) throw new Error('--reserve-ci-retry expects the verified 40-character remote head SHA');
+      reserveCiRetry = argv[i + 1]?.startsWith('--') ? '' : (argv[++i] ?? '');
       continue;
     }
     if (arg === '--ci-retry-failure') {
-      ciRetryFailure = argv[++i];
-      if (!ciRetryFailure || ciRetryFailure.startsWith('--')) throw new Error('--ci-retry-failure expects a diagnosis JSON file');
+      ciRetryFailure = argv[i + 1]?.startsWith('--') ? '' : (argv[++i] ?? '');
       continue;
     }
     if (arg === '--repo') {
@@ -462,13 +459,58 @@ export function parseArgs(argv, env = process.env) {
   }
 
   if (!spec) throw new Error('missing PR url or number');
-  if (Boolean(ciRetryStatus || reserveCiRetry) !== Boolean(ciRetryId)) {
+  const target = parseTarget(spec, repo);
+  return {
+    help: false,
+    spec,
+    repo: target.repo,
+    number: target.number,
+    deferMinutes,
+    waitFile,
+    resumeReason,
+    ack,
+    suggest,
+    lastResult,
+    ciRetryRequested: ciRetryStatus || reserveCiRetry !== undefined,
+    ciRetryStatus,
+    reserveCiRetry,
+    ciRetryId,
+    ciRetryFailure,
+    ciRetryDir: ciRetryDataDir(env),
+    snapshot,
+    stateDir: stateDir || path.join(os.homedir(), '.cache', 'cindy-pr'),
+    maxSnapshotFailures,
+    maxPassAttempts,
+    retryBackoffMs: Math.round(retryBackoffMinutes * 60_000),
+    minPassSpacingMs: Math.round(minPassSpacingMinutes * 60_000),
+    maxSilenceMs: Math.round(maxSilenceHours * 3_600_000),
+    json,
+    triggered,
+    pacing,
+  };
+}
+
+// Validate the completed request only after raw legacy evidence is preserved.
+// Rejected parsed budget requests cannot allocate slots or write follow-up state.
+function validateArgs(args) {
+  const { ciRetryRequested, ciRetryStatus, reserveCiRetry, ciRetryId, ciRetryFailure,
+    ack, suggest, lastResult, waitFile, resumeReason, deferMinutes } = args;
+  if (ciRetryId !== undefined && !validCiRetryId(ciRetryId)) {
+    throw new Error('--ci-retry-id expects the immutable node_id read from the current GitHub PR');
+  }
+  if (reserveCiRetry !== undefined && !/^[a-f0-9]{40}$/.test(reserveCiRetry)) {
+    throw new Error('--reserve-ci-retry expects the verified 40-character remote head SHA');
+  }
+  if (ciRetryFailure !== undefined && (!ciRetryFailure || ciRetryFailure.startsWith('--'))) {
+    throw new Error('--ci-retry-failure expects a diagnosis JSON file');
+  }
+  if (Boolean(ciRetryRequested) !== Boolean(ciRetryId)) {
     throw new Error('CI retry status/reservation requires --ci-retry-id from the verified GitHub PR; do not derive it from owner/repo or number');
   }
-  if (Boolean(ciRetryStatus || reserveCiRetry) !== Boolean(ciRetryFailure)) {
+  if (Boolean(ciRetryRequested) !== Boolean(ciRetryFailure)) {
     throw new Error('CI retry status/reservation requires --ci-retry-failure with the stable verified diagnosis');
   }
-  if ((ciRetryStatus || reserveCiRetry) && ((ciRetryStatus && reserveCiRetry) || ack || suggest || lastResult || waitFile || resumeReason || deferMinutes !== undefined)) {
+  if (ciRetryRequested && ((ciRetryStatus && reserveCiRetry !== undefined) || ack || suggest || lastResult || waitFile || resumeReason || deferMinutes !== undefined)) {
     throw new Error('CI retry status/reservation must be a separate command');
   }
   // --suggest / --last-result 是互斥的只读查询,--ack / --defer 要写状态。混用会让
@@ -488,34 +530,6 @@ export function parseArgs(argv, env = process.env) {
   if (resumeReason && (ack || waitFile || deferMinutes !== undefined || suggest || lastResult)) {
     throw new Error('--resume is a separate finish decision; do not combine it with --ack, --wait, --defer or read-only queries');
   }
-  const target = parseTarget(spec, repo);
-  return {
-    help: false,
-    spec,
-    repo: target.repo,
-    number: target.number,
-    deferMinutes,
-    waitFile,
-    resumeReason,
-    ack,
-    suggest,
-    lastResult,
-    ciRetryStatus,
-    reserveCiRetry,
-    ciRetryId,
-    ciRetryFailure,
-    ciRetryDir: ciRetryDataDir(env),
-    snapshot,
-    stateDir: stateDir || path.join(os.homedir(), '.cache', 'cindy-pr'),
-    maxSnapshotFailures,
-    maxPassAttempts,
-    retryBackoffMs: Math.round(retryBackoffMinutes * 60_000),
-    minPassSpacingMs: Math.round(minPassSpacingMinutes * 60_000),
-    maxSilenceMs: Math.round(maxSilenceHours * 3_600_000),
-    json,
-    triggered,
-    pacing,
-  };
 }
 
 /**
@@ -670,7 +684,7 @@ function legacyCiRetryEvidence(dir, prNodeId) {
   });
 }
 
-function adoptCiRetryEvidence(stateDir, retryDir, prNodeId) {
+function preserveCiRetryEvidence(stateDir, retryDir) {
   // Preserve raw earlier evidence before decoding or rejecting it. Otherwise
   // a cache cleanup can erase an unknown outcome and restore fresh slots.
   for (const file of legacyCiRetryFiles(stateDir)) {
@@ -679,6 +693,9 @@ function adoptCiRetryEvidence(stateDir, retryDir, prNodeId) {
     try { fs.copyFileSync(file, target, fs.constants.COPYFILE_EXCL); }
     catch (error) { if (error.code !== 'EEXIST') throw error; }
   }
+}
+
+function adoptCiRetryEvidence(retryDir, prNodeId) {
   // Existing durable evidence wins over a stale cache copy. Migration uses the
   // same exclusive slots as new reservations, and never overwrites or deletes.
   for (const { value } of legacyCiRetryEvidence(retryDir, prNodeId)) claimCiRetrySlot(retryDir, value);
@@ -1533,9 +1550,8 @@ export function snapshotFailurePlan(run, previous, now, threshold = DEFAULT_MAX_
   return { failures, fingerprint, rateLimited, block, until, reports: Object.fromEntries(Object.entries(reports).slice(-8)) };
 }
 
-async function gateMain(argv, ctx) {
+async function gateMain(args, ctx) {
   const { env, out, err } = ctx;
-  const args = parseArgs(argv, env);
   if (args.help) {
     usage(err);
     return EXIT_PASS;
@@ -1552,11 +1568,11 @@ async function gateMain(argv, ctx) {
   // observation/trace state: an interrupted push may already have reached GitHub.
   // This is a budget receipt only; the agent must read live plugin preferences and
   // establish every safety condition in references/ci-retry.md before any Git write.
-  if (args.ciRetryStatus || args.reserveCiRetry) {
+  if (args.ciRetryRequested) {
     // A PR node_id survives repository renames/transfers and URL aliases.
     // The agent obtains it from the live PR, not from the mutable repository name.
     // Preserve previous outcomes even when this invocation's diagnosis is invalid.
-    adoptCiRetryEvidence(args.stateDir, args.ciRetryDir, args.ciRetryId);
+    adoptCiRetryEvidence(args.ciRetryDir, args.ciRetryId);
     const failure = readCiRetryFailure(args.ciRetryFailure);
     if (args.reserveCiRetry) {
       const claim = claimCiRetrySlot(args.ciRetryDir, { prNodeId: args.ciRetryId, failure, sourceHead: args.reserveCiRetry, reservedAt: now });
@@ -2015,8 +2031,15 @@ export async function runGate(argv, {
   const at = now();
   try {
     args = parseArgs(argv, env);
+    if (!args.help) {
+      // The effective directory comes from the completed parse, even if a CI
+      // value is missing before --state-dir. Preserve raw bytes before any
+      // semantic rejection; validation/adoption cannot create fresh budget yet.
+      if (args.ciRetryRequested) preserveCiRetryEvidence(args.stateDir, args.ciRetryDir);
+      validateArgs(args);
+    }
     try {
-    if (!args.help && !args.lastResult && !args.suggest && !args.ciRetryStatus && !args.reserveCiRetry && env.CINDY_PR_TRACE !== '0') {
+    if (!args.help && !args.lastResult && !args.suggest && !args.ciRetryRequested && env.CINDY_PR_TRACE !== '0') {
       const file = stateFilePath(args.stateDir, args.repo, args.number);
       traceFile = file + '.trace.jsonl';
       record = { schema: 1, at, replayable: true, repo: args.repo, number: args.number,
@@ -2039,7 +2062,7 @@ export async function runGate(argv, {
       runProbe: async (...a) => { const value = await probeRunner(...a); if (record) { try { record.probe = value.code === 0 ? JSON.parse(value.stdout) : null; } catch { record.probe = null; } } return value; },
       readTrigger: async (...a) => { const value = await readTrigger(...a); if (record) record.trigger = value ? {kind:value.kind} : null; return value; },
     };
-    code = await gateMain(argv, ctx);
+    code = await gateMain(args, ctx);
   } catch (error) {
     err(`[pr-heartbeat-gate] ${error.message}\n`);
     code = EXIT_BLOCK;
