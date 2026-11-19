@@ -4037,7 +4037,8 @@ bc.onmessage = function (ev) {
 var WATCH_INTERVAL = 5 * 60 * 1000;
 var WATCH_LIMIT = 5;
 var watchRevision = 0;
-var watchTimer;
+var watchTimerAt;
+var watchTimerToken;
 var WATCH_PATH = { pr: 'pulls', issue: 'issues', run: 'actions/runs' };
 var WATCH_RUN_STATES = ['queued', 'requested', 'waiting', 'pending', 'in_progress', 'completed'];
 var WATCH_CONCLUSIONS = ['success', 'failure', 'cancelled', 'neutral', 'skipped', 'timed_out',
@@ -4108,9 +4109,18 @@ async function watchSnapshot(target, callId) {
   return { snapshot: snapshot, objectId: data.id };
 }
 
-function armWatchTimer(delay) {
-  if (watchTimer !== undefined) return;
-  watchTimer = setTimeout(async function () {
+function armWatchTimer(delay, replaceLater) {
+  var at = Date.now() + delay;
+  if (watchTimerToken !== undefined) {
+    // Keep an earlier deadline; only a successful add supersedes a later backoff.
+    if (watchTimerAt === undefined || watchTimerAt <= at) return;
+    if (!replaceLater) return;
+  }
+  var token = {};
+  watchTimerToken = token;
+  watchTimerAt = at;
+  setTimeout(async function () {
+    if (watchTimerToken !== token) return;
     var next = WATCH_INTERVAL;
     try {
       next = await pollWatches();
@@ -4118,17 +4128,42 @@ function armWatchTimer(delay) {
       // Failed store, credential or transport reads must never replace the baseline.
       next = WATCH_INTERVAL * 3;
     } finally {
-      watchTimer = undefined;
-      if (next) armWatchTimer(next);
+      if (watchTimerToken === token) {
+        watchTimerToken = undefined;
+        watchTimerAt = undefined;
+        if (next) armWatchTimer(next);
+      }
     }
   }, delay);
+}
+
+async function markPollingStalled(revision) {
+  await enqueuePr(async function () {
+    if (watchRevision !== revision) return;
+    var kv = await readKv(true);
+    var current = readWatches(kv);
+    var changed = false;
+    for (var row of current) {
+      if (row.problem) continue;
+      row.problem = 'unavailable';
+      changed = true;
+    }
+    if (changed) await saveWatches(kv, current);
+  });
 }
 
 async function pollWatches() {
   var revision = watchRevision;
   var watches = readWatches(await readKv(true));
   if (!watches.length) return revision === watchRevision ? 0 : WATCH_INTERVAL;
-  var account = await watchAccount();
+  var account;
+  try {
+    account = await watchAccount();
+  } catch (_) {
+    // No target was read this round: surface the stall instead of claiming healthy polling.
+    await markPollingStalled(revision);
+    return WATCH_INTERVAL * 3;
+  }
   var updates = [];
   var failures = [];
   var rateLimited = false;
@@ -4151,12 +4186,25 @@ async function pollWatches() {
       if (error.rateLimited) { rateLimited = true; break; }
     }
   }
-  if (rateLimited) return WATCH_INTERVAL * 3;
   var hasPendingNotice = watches.some(function (watch) {
     return watch.account === account && watch.noticePending === true;
   });
-  if (!updates.length && !failures.length && !hasPendingNotice) return WATCH_INTERVAL;
-  if (await watchAccount() !== account) return WATCH_INTERVAL * 3;
+  var hasWork = updates.length > 0 || failures.length > 0 || hasPendingNotice;
+  if (!hasWork && !rateLimited) return WATCH_INTERVAL;
+  if (hasWork) {
+    if (!rateLimited) {
+      try {
+        if (await watchAccount() !== account) return WATCH_INTERVAL * 3;
+      } catch (_) {
+        // The confirmation probe failed: persist this round's observations before backing off.
+      }
+    }
+    await applyWatchRound(revision, account, updates, failures);
+  }
+  return rateLimited ? WATCH_INTERVAL * 3 : WATCH_INTERVAL;
+}
+
+async function applyWatchRound(revision, account, updates, failures) {
   await enqueuePr(async function () {
     if (watchRevision !== revision) return;
     var kv = await readKv(true);
@@ -4187,7 +4235,6 @@ async function pollWatches() {
     for (var delivered of pending) delete delivered.noticePending;
     await saveWatches(kv, current);
   });
-  return WATCH_INTERVAL;
 }
 
 async function watchTool(args, callId) {
@@ -4217,7 +4264,7 @@ async function watchTool(args, callId) {
       if (index >= 0) watches.splice(index, 1);
     } else {
       if (index >= 0 && watches[index].account === account && watches[index].objectId === baseline.objectId) {
-        armWatchTimer(WATCH_INTERVAL);
+        armWatchTimer(WATCH_INTERVAL, true);
         return { ok: true, result: { mode: 'polling', target: target } };
       }
       if (index >= 0) return fail(t('watchRebind'));
@@ -4226,7 +4273,7 @@ async function watchTool(args, callId) {
     }
     await saveWatches(kv, watches);
     watchRevision++;
-    if (watches.length) armWatchTimer(WATCH_INTERVAL);
+    if (watches.length) armWatchTimer(WATCH_INTERVAL, action === 'add');
     return { ok: true, result: { mode: 'polling', target: target } };
   });
 }

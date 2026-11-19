@@ -86,7 +86,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.25');
+  assert.equal(manifest.version, '1.5.26');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -1895,6 +1895,8 @@ test('paused follow-up refreshes, retains its reservation and shows terminal PR 
 
 function statusWatchFixture(initial = {}, options = {}) {
   let failRead = options.failBoot;
+  let accountFails = false;
+  let limitedPath = null;
   let kv = structuredClone(initial);
   let account = 17;
   let rateLimited = false;
@@ -1925,15 +1927,20 @@ function statusWatchFixture(initial = {}, options = {}) {
       assert.equal(url.origin, 'https://api.github.com');
       assert.equal(request.method, 'GET');
       paths.push(url.pathname);
-      if (url.pathname === '/user') return jsonResponse({ id: account });
-      if (rateLimited) return jsonResponse({ message: 'API rate limit exceeded' }, 403);
-      const object = response[url.pathname.replace('/repos/example/widget', '')];
+      if (url.pathname === '/user') {
+        if (accountFails) return jsonResponse({ message: 'bad credentials' }, 401);
+        return jsonResponse({ id: account });
+      }
+      const key = url.pathname.replace('/repos/example/widget', '');
+      if (rateLimited || key === limitedPath) return jsonResponse({ message: 'API rate limit exceeded' }, 403);
+      const object = response[key];
       return object ? jsonResponse(object) : jsonResponse({ message: 'forbidden' }, 403);
     },
   });
   const tool = (action, kind, id) => runtime.tool('status_watch', { action, kind, id, repo: 'Example/Widget' });
   return { ...runtime, tool, timers, paths, response, saved: () => kv,
-    useAccount: id => { account = id; }, limitRequests: () => { rateLimited = true; } };
+    useAccount: id => { account = id; }, failAccount: (value = true) => { accountFails = value; },
+    limitPath: p => { limitedPath = p; }, limitRequests: () => { rateLimited = true; } };
 }
 
 test('status watches are opt-in, track three exact states and write before notifying', async () => {
@@ -1996,6 +2003,58 @@ test('status watches resume locally, skip changed GitHub accounts, report permis
   await f.timers.shift().fn();
   assert.equal(f.timers[0].delay, 900_000);
   assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
+});
+
+test('an account probe failure marks healthy watches unavailable until reads recover', async () => {
+  const a = statusWatchFixture();
+  assert.equal((await a.tool('add', 'issue', 2)).ok, true);
+  const f = statusWatchFixture(a.saved());
+  await flushAsync();
+  assert.equal(f.timers.length, 1);
+  f.failAccount();
+  await f.timers.shift().fn();
+  assert.deepEqual(f.paths, ['/user']);
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'unavailable');
+  assert.equal(f.timers[0].delay, 900_000);
+  assert.equal((await f.tool('list', 'issue', 2)).result.watches[0].problem, 'unavailable');
+  f.failAccount(false);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
+});
+
+test('a rate-limited round persists changes already read before backing off', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  assert.equal((await f.tool('add', 'pr', 1)).ok, true);
+  f.response['/issues/2'].comments = 5;
+  f.limitPath('/pulls/1');
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:5');
+  assert.equal(f.saved().githubStatusWatches[0].noticePending, undefined);
+  assert.equal(f.saved().githubStatusWatches[1].problem, 'unavailable');
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
+  assert.equal(f.timers[0].delay, 900_000);
+});
+
+test('a successful add supersedes a later backoff timer', async () => {
+  const a = statusWatchFixture();
+  assert.equal((await a.tool('add', 'issue', 2)).ok, true);
+  const f = statusWatchFixture(a.saved(), { failBoot: true });
+  await flushAsync();
+  assert.equal(f.timers.length, 1);
+  assert.equal(f.timers[0].delay, 900_000);
+  assert.equal((await f.tool('add', 'pr', 1)).ok, true);
+  assert.equal(f.timers.length, 2);
+  const stale = f.timers.shift();
+  assert.equal(stale.delay, 900_000);
+  const before = f.paths.length;
+  await stale.fn();
+  assert.equal(f.paths.length, before);
+  assert.equal(f.timers[0].delay, 300_000);
+  const beforePoll = f.paths.length;
+  await f.timers.shift().fn();
+  assert.equal(f.paths.length, beforePoll + 3);
 });
 
 test('status watches cap stored targets and reject a replaced object without advancing its state', async () => {
