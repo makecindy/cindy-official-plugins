@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/allocator.js at 1bd01814e1f950628ebf44b3de0679218ec7bffb (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/allocator.js at ef542848af95d2b3278c4ca43a81cf0e0673c5d7 (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * AgentCompass allocator for the Magpie gateway: the port of `allocator.py` (`plan`) onto a gateway's inputs.

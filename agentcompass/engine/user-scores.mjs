@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/user-scores.js at 1bd01814e1f950628ebf44b3de0679218ec7bffb (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/user-scores.js at ef542848af95d2b3278c4ca43a81cf0e0673c5d7 (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Manual capability scores (`user_scores.py`, schema 4): a maintainer layer (`MAINTAINER_SCORES`, from AgentCompass's
@@ -18,7 +18,7 @@
  * Pure ES2022 module with zero external or Node-only dependencies (Bun and Magpie's `moejs`).
  */
 
-import { pyRound } from "./catalog.mjs";
+import { makerDefault, pyRound } from "./catalog.mjs";
 import { LEVEL3_CONVERSIONS } from "./reference-data.mjs";
 import { v070Row } from "./released-names.mjs";
 
@@ -580,33 +580,58 @@ function applyOneLayer(fiveState, entries, targets, fixedEffort = null, effortSt
 }
 
 /**
- * Apply `publicScores` (kind `maintainer`) then `localScores` (kind `user`) onto `models[m].five_axis`, in place. `aliases` maps
- * other spellings to a row; `effortSteps` is `five-axis-scores.json` `effort_steps` (`manualByEffort`). An entry whose name resolves
- * to no row is ignored, never made a row. Facets derived from a larger row then follow a score on that row
- * (`followEffectiveSources`).
+ * The row a score keyed `model` lands on (`user_scores.resolve_model_key`), or `model` itself when it names none. A score names a
+ * model, not a provider's offer: no provider's declaration is read. A name its maker moved to a newer dated snapshot means what the
+ * name means now: the maker's `provider_names` `defaults` declaration is read first (`makerDefault`), so a score keyed by the moved
+ * name lands on the snapshot's row. Else the name as a row, an alias, its last `/` segment as a row, that segment as an alias.
+ */
+export function resolveModelKey(model, models, aliases = {}) {
+  const raw = String(model ?? "").trim();
+  if (!raw) throw new Error("Model id must not be empty.");
+  const isModel = (name) => Object.prototype.hasOwnProperty.call(models, name) && isRow(models[name]);
+  const aliasOf = (name) => (Object.prototype.hasOwnProperty.call(aliases || {}, name) && isModel(aliases[name]) ? aliases[name] : null);
+  const declared = makerDefault(raw);
+  if (declared) {
+    if (!isModel(declared.model)) throw new Error(`provider_names defaults names row ${JSON.stringify(declared.model ?? null)} for ${JSON.stringify(raw)}, which the catalogue does not have`);
+    return declared.model;
+  }
+  if (isModel(raw)) return raw;
+  if (aliasOf(raw)) return aliasOf(raw);
+  const leaf = raw.split("/").pop();
+  if (isModel(leaf)) return leaf;
+  return aliasOf(leaf) || raw;
+}
+
+/**
+ * `[[row, { target: entry }]]` of one user-scores layer (`user_scores.score_layer`), each key read by `resolveModelKey`. Keys
+ * landing on one row merge by target; a key that is the row's own id (`deepseek-v4-pro-0813`) wins over another spelling or a moved
+ * name (`deepseek-v4-pro`) for each target both hold, and other spellings apply in name order, so the result never depends on the
+ * order of the keys in the file. A key that lands on no row keeps its own name.
+ */
+export function scoreLayer(layer, models, aliases = {}) {
+  const keyed = Object.entries(layer || {})
+    .filter(([, entries]) => isRow(entries) && Object.keys(entries).length > 0)
+    .map(([key, entries]) => [resolveModelKey(key, models, aliases), key, entries]);
+  const own = ([row, key]) => (row === key ? 1 : 0);
+  keyed.sort((a, b) => own(a) - own(b) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
+  const grouped = new Map();
+  for (const [row, , entries] of keyed) grouped.set(row, { ...(grouped.get(row) || {}), ...entries });
+  return grouped;
+}
+
+/**
+ * Apply `publicScores` (kind `maintainer`) then `localScores` (kind `user`) onto `models[m].five_axis`, in place. Each key lands on
+ * its row as `resolveModelKey` reads it (`scoreLayer`, `aliases` mapping other spellings to a row); `effortSteps` is
+ * `five-axis-scores.json` `effort_steps` (`manualByEffort`). An entry whose name resolves to no row is ignored, never made a row.
+ * Facets derived from a larger row then follow a score on that row (`followEffectiveSources`).
  */
 export function applyOverlay(models, targets, { publicScores = null, localScores = null, aliases = {}, effortSteps = null } = {}) {
   const pub = publicScores || {};
   const loc = localScores || {};
   if (Object.keys(pub).length === 0 && Object.keys(loc).length === 0) return;
-  const toCanonical = new Map();
-  for (const name of Object.keys(models)) if (isRow(models[name])) toCanonical.set(name, name);
-  for (const [al, target] of Object.entries(aliases || {})) if (typeof target === "string" && target in models) toCanonical.set(String(al), target);
-  const canonical = (raw) => {
-    const name = String(raw ?? "").trim();
-    if (toCanonical.has(name)) return toCanonical.get(name);
-    const leaf = name.split("/").pop();
-    return toCanonical.has(leaf) ? toCanonical.get(leaf) : name;
-  };
   const shipped = Object.fromEntries(Object.entries(models).filter(([, info]) => isRow(info)).map(([name, info]) => [name, facetCurves(info)]));
   for (const layer of [pub, loc]) {
-    const grouped = new Map();
-    for (const [raw, entries] of Object.entries(layer)) {
-      if (!isRow(entries) || Object.keys(entries).length === 0) continue;
-      const canon = canonical(raw);
-      grouped.set(canon, { ...(grouped.get(canon) || {}), ...entries });
-    }
-    for (const [canon, entries] of grouped) {
+    for (const [canon, entries] of scoreLayer(layer, models, aliases)) {
       const info = models[canon];
       if (!isRow(info)) continue;
       info.five_axis ||= {
