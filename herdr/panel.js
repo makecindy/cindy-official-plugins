@@ -24,6 +24,8 @@ const strings = {
     noPanes: '这个 session 下没有可列的 pane',
     tmuxMissing: '这台电脑上没有 tmux',
     tmuxMissingHint: '装上 tmux 后这里会列出 session 与 pane。',
+    tmuxBroken: 'tmux 无法使用',
+    tmuxBrokenHint: 'tmux 装了但没能运行，下面给出了具体原因。',
     windows: '个窗口',
     attached: '已连接',
     exited: '已退出',
@@ -59,6 +61,8 @@ const strings = {
     noPanes: 'No pane listed in this session',
     tmuxMissing: 'tmux is not installed on this computer',
     tmuxMissingHint: 'Install tmux to list sessions and panes here.',
+    tmuxBroken: 'tmux could not be used',
+    tmuxBrokenHint: 'tmux is installed but did not run; the reason is below.',
     windows: 'window(s)',
     attached: 'attached',
     exited: 'exited',
@@ -94,6 +98,8 @@ const strings = {
     noPanes: 'このセッションに pane は表示できません',
     tmuxMissing: 'このコンピューターに tmux がありません',
     tmuxMissingHint: 'tmux を入れるとセッションと pane が表示されます。',
+    tmuxBroken: 'tmux を使えません',
+    tmuxBrokenHint: 'tmux はありますが実行できませんでした。理由は下にあります。',
     windows: 'ウィンドウ',
     attached: '接続済み',
     exited: '終了',
@@ -129,6 +135,8 @@ const strings = {
     noPanes: '이 세션에 표시할 창이 없습니다',
     tmuxMissing: '이 컴퓨터에 tmux가 없습니다',
     tmuxMissingHint: 'tmux를 설치하면 세션과 창이 표시됩니다.',
+    tmuxBroken: 'tmux를 사용할 수 없습니다',
+    tmuxBrokenHint: 'tmux는 설치되어 있지만 실행되지 않았습니다. 아래에 원인이 있습니다.',
     windows: '개 창',
     attached: '연결됨',
     exited: '종료됨',
@@ -525,14 +533,16 @@ function renderTmux() {
   const panes = (tmux && tmux.panes) || [];
 
   if (!tmux.available) {
+    // available:false 不只是「没装」：权限、超时、-V 执行失败也会走到这里。
+    // 没装 → 四语言的安装提示；其它情况 → 故障标题 + 具体原因（worker 返回的 message）。
+    const notInstalled = tmux.reason === 'not-installed';
     const empty = document.createElement('div');
     empty.className = 'empty';
-    // 面板用自己四语言的文案，不依赖工具返回的 hint（那条只有中英两版）。
-    empty.textContent = T.tmuxMissing;
+    empty.textContent = notInstalled ? T.tmuxMissing : T.tmuxBroken;
     list.appendChild(empty);
     const note = document.createElement('div');
     note.className = 'empty';
-    note.textContent = T.tmuxMissingHint;
+    note.textContent = notInstalled ? T.tmuxMissingHint : (tmux.message || T.tmuxBrokenHint);
     list.appendChild(note);
     return;
   }

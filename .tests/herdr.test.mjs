@@ -347,8 +347,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
 
   // 面板用自己四语言的 tmux 缺失文案。
   const panelSource2 = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
-  assert.match(panelSource2, /textContent = T\.tmuxMissing;/,
-    'the panel must use its own localized text for a missing tmux');
+  assert.match(panelSource2, /notInstalled \? T\.tmuxMissing : T\.tmuxBroken/,
+    'the panel must tell a missing tmux apart from a broken one');
+  assert.match(panelSource2, /tmux\.reason === 'not-installed'/,
+    'the branch must key off the worker reason, not just available:false');
   assert.doesNotMatch(panelSource2, /tmux\.hint \|\|/,
     'the panel must not prefer the tool hint over its localized text');
 
