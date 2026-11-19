@@ -50,7 +50,11 @@ test('special keys are forwarded, editing keys stay in the draft', () => {
   // 终端行为键转发，按键名按后端方言。
   assert.equal(specialKey('herdr', key({ key: 'ArrowUp' })), 'up');
   assert.equal(specialKey('tmux', key({ key: 'ArrowUp' })), 'Up');
-  assert.equal(specialKey('tmux', key({ key: 'PageUp' })), 'PageUp');
+  // tmux 用它自己的键名（PPage/NPage），否则会被 validateTmuxKeys 拒绝；
+  // Herdr 文档没确认翻页键名，不转发。
+  assert.equal(specialKey('tmux', key({ key: 'PageUp' })), 'PPage');
+  assert.equal(specialKey('tmux', key({ key: 'PageDown' })), 'NPage');
+  assert.equal(specialKey('herdr', key({ key: 'PageUp' })), null);
   assert.equal(specialKey('herdr', key({ key: 'Tab' })), 'tab');
   assert.equal(specialKey('herdr', key({ key: 'Escape' })), 'esc');
 

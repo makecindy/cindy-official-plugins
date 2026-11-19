@@ -11,12 +11,14 @@
 
   const HERDR_KEYS = {
     ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
-    PageUp: 'pageup', PageDown: 'pagedown', Home: 'home', End: 'end',
-    Tab: 'tab', Escape: 'esc', Backspace: 'backspace', Delete: 'delete'
+    // Herdr 文档只确认了 enter/esc/ctrl+h/f1 这类名字，没列翻页键；
+    // 没确认的键不转发，否则可能被当成字面文本打进终端。
+    Home: 'home', End: 'end', Tab: 'tab', Escape: 'esc',
+    Backspace: 'backspace', Delete: 'delete'
   };
   const TMUX_KEYS = {
     ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
-    PageUp: 'PageUp', PageDown: 'PageDown', Home: 'Home', End: 'End',
+    PageUp: 'PPage', PageDown: 'NPage', Home: 'Home', End: 'End',
     Tab: 'Tab', Escape: 'Escape', Backspace: 'BSpace', Delete: 'DC'
   };
   // 只有「终端行为」键才转发；退格/删除/左右/Home/End 只编辑还没提交的草稿。
