@@ -4036,7 +4036,6 @@ bc.onmessage = function (ev) {
 /* ── Explicit, local GitHub status watches ─────────────────────────── */
 var WATCH_INTERVAL = 5 * 60 * 1000;
 var WATCH_LIMIT = 5;
-var watchRevision = 0;
 var watchTimerAt;
 var watchTimerToken;
 var watchTimerSoonerAt;
@@ -4162,16 +4161,14 @@ function armWatchTimer(delay, replaceLater) {
           if (delay === undefined || remaining < delay) delay = remaining;
         }
         // An empty round stops itself, but never drops a concurrent add's request.
-        // An empty round stops itself, but never drops a concurrent add's request.
         if (delay !== undefined) armWatchTimer(delay);
       }
     }
   }, delay);
 }
 
-async function markWatchProblems(revision, problem, eligible) {
+async function markWatchProblems(problem, eligible) {
   await enqueuePr(async function () {
-    if (watchRevision !== revision) return;
     var kv = await readKv(true);
     var current = readWatches(kv);
     var changed = false;
@@ -4187,22 +4184,26 @@ async function markWatchProblems(revision, problem, eligible) {
 }
 
 async function pollWatches() {
-  var revision = watchRevision;
   var watches = readWatches(await readKv(true));
-  if (!watches.length) return revision === watchRevision ? 0 : WATCH_INTERVAL;
+  if (!watches.length) return 0;
+  // Rows created after this snapshot keep their fresh baseline and are never marked here.
+  var existedAtStart = function (row) {
+    return watches.some(function (item) {
+      return sameWatch(row, item) && item.account === row.account && item.objectId === row.objectId;
+    });
+  };
   var account;
   try {
     account = await watchAccount();
   } catch (error) {
     // No target was read this round: surface the stall instead of claiming healthy polling.
-    await markWatchProblems(revision, watchProblemOf(error), null);
+    await markWatchProblems(watchProblemOf(error), existedAtStart);
     return WATCH_INTERVAL * 3;
   }
   var updates = [];
   var failures = [];
   var rateLimited = false;
   for (var watch of watches) {
-    if (watchRevision !== revision) return WATCH_INTERVAL;
     if (watch.account !== account) {
       // Keep the saved target but stop reading it under the new account until it matches again.
       if (watch.problem !== 'account_changed') failures.push({ watch: watch, problem: 'account_changed' });
@@ -4218,7 +4219,17 @@ async function pollWatches() {
     } catch (error) {
       var problem = watchProblemOf(error);
       if (watch.problem !== problem) failures.push({ watch: watch, problem: problem });
-      if (error.rateLimited) { rateLimited = true; break; }
+      if (error.rateLimited) {
+        rateLimited = true;
+        // Targets after this one are not read this round; keep their existing states,
+        // but never leave a healthy-looking row behind a rate-limit break.
+        for (var rest = watches.indexOf(watch) + 1; rest < watches.length; rest++) {
+          var skipped = watches[rest];
+          if (skipped.problem) continue;
+          failures.push({ watch: skipped, problem: skipped.account === account ? 'unavailable' : 'account_changed' });
+        }
+        break;
+      }
     }
   }
   var hasPendingNotice = watches.some(function (watch) {
@@ -4239,24 +4250,28 @@ async function pollWatches() {
       if (confirmed !== undefined && confirmed !== account) {
         // The login switched mid-round: pause the old account's watches instead of
         // leaving list to claim healthy polling through the backoff.
-        await markWatchProblems(revision, 'account_changed', function (row) { return row.account !== confirmed; });
+        await markWatchProblems('account_changed', function (row) { return row.account !== confirmed; });
         return WATCH_INTERVAL * 3;
       }
     }
-    await applyWatchRound(revision, account, updates, failures);
-    if (confirmProblem) await markWatchProblems(revision, confirmProblem, null);
+    await applyWatchRound(account, updates, failures);
+    if (confirmProblem) await markWatchProblems(confirmProblem, existedAtStart);
   }
   return rateLimited || confirmProblem ? WATCH_INTERVAL * 3 : WATCH_INTERVAL;
 }
 
-async function applyWatchRound(revision, account, updates, failures) {
+async function applyWatchRound(account, updates, failures) {
   await enqueuePr(async function () {
-    if (watchRevision !== revision) return;
     var kv = await readKv(true);
     var current = readWatches(kv);
+    // Merge only rows whose identity still matches the observation: a concurrent
+    // add/remove of any target must not discard work for the rows that survived.
+    var sameIdentity = function (row, observed) {
+      return sameWatch(row, observed) && row.account === observed.account && row.objectId === observed.objectId;
+    };
     for (var row of current) {
-      var update = updates.find(function (item) { return sameWatch(row, item.watch); });
-      var failure = failures.find(function (item) { return sameWatch(row, item.watch); });
+      var update = updates.find(function (item) { return sameIdentity(row, item.watch); });
+      var failure = failures.find(function (item) { return sameIdentity(row, item.watch); });
       if (update) {
         if (row.snapshot !== update.snapshot) row.noticePending = true;
         row.snapshot = update.snapshot;
@@ -4318,7 +4333,6 @@ async function watchTool(args, callId) {
       watches.push(Object.assign({}, target, baseline, { account: account }));
     }
     await saveWatches(kv, watches);
-    watchRevision++;
     if (watches.length) armWatchTimer(WATCH_INTERVAL, action === 'add');
     return { ok: true, result: { mode: 'polling', target: target } };
   });

@@ -86,7 +86,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.31');
+  assert.equal(manifest.version, '1.5.32');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -1900,6 +1900,8 @@ function statusWatchFixture(initial = {}, options = {}) {
   let accountLimited = null;
   let accountSwitchAt = null;
   let accountSwitchTo = null;
+  let userHoldAt = null;
+  let userHoldGate = null;
   let userCalls = 0;
   let limitedPath = null;
   let deniedPath = null;
@@ -1948,6 +1950,7 @@ function statusWatchFixture(initial = {}, options = {}) {
       paths.push(url.pathname);
       if (url.pathname === '/user') {
         userCalls++;
+        if (userHoldGate && userCalls === userHoldAt) await userHoldGate.promise;
         if (accountStatus && userCalls >= accountStatusFrom) return jsonResponse({ message: 'credentials rejected' }, accountStatus);
         if (accountLimited !== null && userCalls >= accountLimited) return jsonResponse({ message: 'API rate limit exceeded' }, 403);
         if (accountSwitchAt !== null && userCalls >= accountSwitchAt) return jsonResponse({ id: accountSwitchTo });
@@ -1973,6 +1976,8 @@ function statusWatchFixture(initial = {}, options = {}) {
     useAccount: id => { account = id; },
     failAccount: (value = 401, from = 1) => { accountStatus = value === false ? null : value; accountStatusFrom = from; },
     switchAccountAt: (n, id) => { accountSwitchAt = n; accountSwitchTo = id; },
+    holdUserAt: n => { userHoldAt = n; userHoldGate = makeGate(); },
+    releaseUser: () => { assert.ok(userHoldGate, 'no held user read'); const gate = userHoldGate; userHoldAt = null; userHoldGate = null; gate.release(); },
     limitPath: p => { limitedPath = p; }, denyPath: p => { deniedPath = p; },
     missingPath: p => { missingPath = p; },
     limitAccountFrom: n => { accountLimited = n; }, limitRequests: () => { rateLimited = true; },
@@ -2158,6 +2163,52 @@ test('read failures map to the documented problem classes and clear on recovery'
     await f.timers.shift().fn();
     assert.equal(f.saved().githubStatusWatches[0].problem, undefined, `recovery ${status}`);
   }
+});
+
+test('targets after a rate-limit break cannot claim healthy polling', async () => {
+  const f = statusWatchFixture({ githubStatusWatches: [
+    { kind: 'pr', repo: 'example/widget', id: 1, account: 17, objectId: 21, snapshot: 'open:ready:0' },
+    { kind: 'issue', repo: 'example/widget', id: 2, account: 17, objectId: 22, snapshot: 'open:ready:1' },
+    { kind: 'run', repo: 'example/widget', id: 3, account: 17, objectId: 3, snapshot: 'queued:none:1', problem: 'gone' },
+  ] });
+  await flushAsync();
+  f.limitPath('/pulls/1');
+  await f.timers.shift().fn();
+  const [pr, issue, run] = f.saved().githubStatusWatches;
+  assert.equal(pr.problem, 'unavailable');
+  assert.equal(issue.problem, 'unavailable');
+  assert.equal(run.problem, 'gone');
+  assert.equal(f.timers[0].delay, 900_000);
+});
+
+test('a concurrent modification does not discard an observed change', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  assert.equal((await f.tool('add', 'pr', 1)).ok, true);
+  f.response['/issues/2'].comments = 5;
+  f.holdUserAt(6);
+  const round = f.timers.shift().fn();
+  await flushAsync();
+  assert.equal((await f.tool('remove', 'run', 99)).ok, true);
+  f.releaseUser();
+  await round;
+  assert.equal(f.saved().githubStatusWatches.find(w => w.kind === 'issue').snapshot, 'open:ready:5');
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
+});
+
+test('a concurrent modification during the reads does not abort the round', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  assert.equal((await f.tool('add', 'pr', 1)).ok, true);
+  f.response['/issues/2'].comments = 5;
+  f.holdPath('/issues/2');
+  const round = f.timers.shift().fn();
+  await flushAsync();
+  assert.equal((await f.tool('remove', 'run', 99)).ok, true);
+  f.releasePath();
+  await round;
+  assert.equal(f.saved().githubStatusWatches.find(w => w.kind === 'issue').snapshot, 'open:ready:5');
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
 });
 
 test('a later remove wins over an add still reading its baseline', async () => {
