@@ -14,6 +14,9 @@
     },
     "pr_follow_settings": {
       "description": "Read the same auto-rename, auto-follow and follow-model preferences used by PR cards. Returns settings without showing a card, creating a task or starting follow-up; preferences are not proof that following is active. Use after opening a PR in IM too, then create and verify follow-up with the pr workflow. A read failure means unknown, not disabled."
+    },
+    "status_watch": {
+      "description": "Manage local GitHub status watches. Use add only when the user explicitly asks. Specify owner/repo, pr / issue / run, and the PR number, issue number or Actions run ID. Use remove to stop or list to inspect. Polls up to five targets every five minutes and only notifies on changes."
     }
   }
 }

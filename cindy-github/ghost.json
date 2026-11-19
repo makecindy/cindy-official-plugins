@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.20",
-  "releaseNotes": "PR 卡片可直接启动后台跟进，沿用所选模型和现有检查脚本。新增本机 Node 和自动化管理权限。",
+  "version": "1.5.22",
+  "releaseNotes": "支持在本机明确关注 PR、Issue 和 Actions 运行。每五分钟有界轮询并提示观察到的状态变化。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -187,6 +187,41 @@
         "type": "object",
         "properties": {}
       }
+    },
+    {
+      "name": "status_watch",
+      "description": "管理本机 GitHub 状态关注。仅在用户明确要求时 add。指定 owner/repo、pr / issue / run 和 PR 号、Issue 号或 Actions run ID。remove 停止关注，list 查看。最多 5 个对象，每 5 分钟轮询；仅提示状态变化。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "add",
+              "remove"
+            ]
+          },
+          "repo": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "pr",
+              "issue",
+              "run"
+            ]
+          },
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
     }
   ],
   "sessionContext": true,
@@ -194,5 +229,6 @@
     "entry": "node/follow.cjs",
     "protocol": "json-rpc-stdio",
     "lifecycle": "on-demand"
-  }
+  },
+  "launch": "resident"
 }

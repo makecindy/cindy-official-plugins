@@ -81,7 +81,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.20');
+  assert.equal(manifest.version, '1.5.22');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -181,7 +181,7 @@ function createRuntime(options = {}) {
   const context = createContext({
     cindy,
     BroadcastChannel: FakeBroadcastChannel,
-    fetch: async (url) => { throw new Error(`unexpected fetch: ${url}`); },
+    fetch: options.localFetch ?? (async (url) => { throw new Error(`unexpected fetch: ${url}`); }),
     setTimeout: options.setTimeout ?? setTimeout,
     clearTimeout,
     URL,
@@ -1883,4 +1883,112 @@ test('paused follow-up refreshes, retains its reservation and shows terminal PR 
   rt.setGithub(prGraphql({ merged: true }));
   const merged = await rt.tool({ card_id: opened.callId });
   assert.equal(merged.reply.result.stage, 'merged');
+});
+
+function statusWatchFixture(initial = {}) {
+  let kv = structuredClone(initial);
+  let account = 17;
+  let rateLimited = false;
+  const timers = [];
+  const paths = [];
+  const response = {
+    '/pulls/1': { id: 21, number: 1, state: 'open', comments: 0, body: 'untrusted text' },
+    '/issues/2': { id: 22, number: 2, state: 'open', comments: 1 },
+    '/actions/runs/3': { id: 3, status: 'queued', run_attempt: 1 },
+  };
+  const runtime = createRuntime({
+    setTimeout(fn, delay) {
+      if (delay >= 300_000) timers.push({ fn, delay });
+      return timers.length;
+    },
+    async localFetch(url, init) {
+      assert.equal(url, '/kv');
+      if (init?.method === 'PUT') kv = JSON.parse(init.body);
+      return { ok: true, json: async () => structuredClone(kv) };
+    },
+    github(request) {
+      const url = new URL(request.url);
+      assert.equal(url.origin, 'https://api.github.com');
+      assert.equal(request.method, 'GET');
+      paths.push(url.pathname);
+      if (url.pathname === '/user') return jsonResponse({ id: account });
+      if (rateLimited) return jsonResponse({ message: 'API rate limit exceeded' }, 403);
+      const object = response[url.pathname.replace('/repos/example/widget', '')];
+      return object ? jsonResponse(object) : jsonResponse({ message: 'forbidden' }, 403);
+    },
+  });
+  const tool = (action, kind, id) => runtime.tool('status_watch', { action, kind, id, repo: 'Example/Widget' });
+  return { ...runtime, tool, timers, paths, response, saved: () => kv,
+    useAccount: id => { account = id; }, limitRequests: () => { rateLimited = true; } };
+}
+
+test('status watches are opt-in, track three exact states and write before notifying', async () => {
+  const f = statusWatchFixture({ prCard: { autoFollow: true } });
+  await flushAsync();
+  assert.deepEqual(f.paths, []);
+  assert.equal(f.timers.length, 0);
+  for (const [kind, id] of [['pr', 1], ['issue', 2], ['run', 3]]) {
+    assert.equal((await f.tool('add', kind, id)).ok, true);
+  }
+  assert.equal(f.timers.length, 1);
+  assert.equal(f.timers[0].delay, 300_000);
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
+  assert.equal(f.saved().prCard.autoFollow, true);
+  assert.doesNotMatch(JSON.stringify(f.saved()), /untrusted text/);
+  f.response['/pulls/1'].merged = true;
+  f.response['/pulls/1'].state = 'closed';
+  f.response['/issues/2'].comments++;
+  Object.assign(f.response['/actions/runs/3'], { status: 'completed', conclusion: 'success' });
+  await f.timers.shift().fn();
+  assert.deepEqual(f.saved().githubStatusWatches.map(x => x.snapshot),
+    ['merged:ready:0', 'open:ready:2', 'completed:success:1']);
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
+  await f.timers.shift().fn();
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
+  for (const [kind, id] of [['pr', 1], ['issue', 2], ['run', 3]]) {
+    assert.equal((await f.tool('remove', kind, id)).ok, true);
+  }
+  const before = f.paths.length;
+  await f.timers.shift().fn();
+  assert.equal(f.paths.length, before);
+  assert.equal(f.timers.length, 0);
+});
+
+test('status watches resume locally, skip changed GitHub accounts, report permission failures and back off', async () => {
+  const a = statusWatchFixture();
+  assert.equal((await a.tool('add', 'issue', 2)).ok, true);
+  assert.equal((await a.tool('add', 'run', 99)).ok, false);
+  assert.equal(a.saved().githubStatusWatches.length, 1);
+  const f = statusWatchFixture(a.saved());
+  await flushAsync();
+  assert.equal(f.timers.length, 1);
+  f.useAccount(88);
+  await f.timers.shift().fn();
+  assert.deepEqual(f.paths, ['/user']);
+  f.useAccount(17);
+  delete f.response['/issues/2'];
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'unavailable');
+  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:1');
+  f.limitRequests();
+  await f.timers.shift().fn();
+  assert.equal(f.timers[0].delay, 900_000);
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
+});
+
+test('status watches cap stored targets and reject a replaced object without advancing its state', async () => {
+  const f = statusWatchFixture();
+  for (let id = 10; id < 16; id++) {
+    f.response['/issues/' + id] = { id: 100 + id, number: id, state: 'open', comments: 0 };
+    assert.equal((await f.tool('add', 'issue', id)).ok, id < 15);
+  }
+  assert.equal(f.saved().githubStatusWatches.length, 5);
+  f.response['/issues/10'] = { id: 200, number: 10, state: 'closed', comments: 1 };
+  const before = f.paths.length;
+  await f.timers.shift().fn();
+  assert.ok(f.paths.length - before <= 7);
+  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:0');
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'target_changed');
+  assert.equal((await f.tool('add', 'issue', 10)).ok, false);
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
 });

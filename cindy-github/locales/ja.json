@@ -14,6 +14,9 @@
     },
     "pr_follow_settings": {
       "description": "PR カードと共通の自動改名・自動フォロー・フォロー用モデル設定を読み取ります。カード表示、タスク作成、フォロー開始は行いません。settings は稼働の証明ではありません。IM で PR を作成した後も読み取り、pr の手順でフォローを作成・検証します。読み取り失敗は無効ではなく不明です。"
+    },
+    "status_watch": {
+      "description": "端末の GitHub 状態監視を管理します。ユーザーが明示的に希望した場合のみ add を使います。owner/repo、pr / issue / run、PR または Issue 番号か Actions 実行 ID を指定します。remove で解除、list で確認。最大 5 件を 5 分ごとに確認し、変化のみ通知します。"
     }
   }
 }
