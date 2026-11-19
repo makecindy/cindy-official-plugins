@@ -52,8 +52,17 @@ const statusArgs = [gatePath, prUrl, '--state-dir', observationStateDir, '--ci-r
   '--ci-retry-id', prNodeId, '--ci-retry-failure', diagnosisPath, '--json'];
 const verifyArgs = ['verify-commit', newSha];
 const pushArgs = ['push', '--force-with-lease=' + exactRef + ':' + originalRemoteSha,
-  '--', verifiedRemote, 'HEAD:' + exactRef];
+  '--', verifiedRemote, newSha + ':' + exactRef];
 ```
+
+Bind `newSha` once to the full commit SHA whose tree, parents, author, message
+and required signature were verified after amend. Both signed and unsigned
+paths use that same value as the push source. Never substitute `HEAD`, a local
+branch or a fresh symbolic-ref lookup: the lease only protects the remote.
+If local movement is observed before launch, stop and leave that work intact.
+If HEAD advances after the final checks, the bound refspec still sends only
+the verified object. If that object is unavailable, stop on Git's failure;
+do not fall back to a symbolic source or replay the push.
 
 ## Eligibility
 
@@ -242,7 +251,8 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    Push exactly once:
 
    Use `git` with `pushArgs` above: the lease is one complete argument, the remote
-   is one argument after `--`, and the destination refspec is one argument.
+   is one argument after `--`, and the complete refspec is one argument with
+   the already verified `newSha` as its source and `exactRef` as its destination.
 
    Never use bare `--force`, implicit lease expectations, or multiple push URLs.
    A lease failure ends recovery. Do not refresh the expected SHA and push again.

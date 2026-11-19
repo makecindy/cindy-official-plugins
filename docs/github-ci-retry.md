@@ -57,6 +57,11 @@ missing/invalid/unknown signatures remain unpushed. The explicit push uses
 remote commit ends the attempt; the Agent must not update the lease and blindly
 push again. It checks the new SHA on the original PR and whether CI actually
 started; triggering is not passing.
+The push source is the full new commit SHA already checked for tree, parents,
+author, message and required signature, shared by signed and unsigned paths.
+It never re-resolves `HEAD` or a local branch at push time. Observed local
+movement stops recovery; a later unobserved HEAD advance cannot change the
+bound source. An unavailable object fails without a symbolic-source fallback.
 
 Dynamic refs, remotes, URLs, IDs and paths stay separate argument data, including
 the complete lease option and refspec. The existing Agent uses a no-shell argv

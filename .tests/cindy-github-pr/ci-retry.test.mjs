@@ -43,7 +43,7 @@ test('recovery guide passes dynamic refs, remotes and paths as literal argument 
       reserveArgs: [values.gatePath, values.prUrl, '--state-dir', values.observationStateDir, '--reserve-ci-retry', oldHead, '--ci-retry-id', values.prNodeId, '--ci-retry-failure', values.diagnosisPath, '--json'],
       statusArgs: [values.gatePath, values.prUrl, '--state-dir', values.observationStateDir, '--ci-retry-status', '--ci-retry-id', values.prNodeId, '--ci-retry-failure', values.diagnosisPath, '--json'],
       verifyArgs: ['verify-commit', newHead],
-      pushArgs: ['push', '--force-with-lease=' + exactRef + ':' + oldHead, '--', values.verifiedRemote, 'HEAD:' + exactRef],
+      pushArgs: ['push', '--force-with-lease=' + exactRef + ':' + oldHead, '--', values.verifiedRemote, values.newSha + ':' + exactRef],
     };
     // Git accepts these refs; its format check cannot make a shell interpolation safe.
     execFileSync('git', plan.checkRefArgs, { stdio: 'pipe' });
@@ -377,12 +377,12 @@ test('invalid, damaged and unwritable CI evidence fails closed without consuming
 // Real local Git transport; not a simulated GitHub/Cindy end-to-end follow-up.
 // Exercise the documented amend/tree/DCO and explicit lease mechanics without
 // touching a real user's PR, branch, credentials or persisted plugin preference.
-test('isolated Git fixture preserves tree/author/DCO and an exact lease refuses an intervening commit', async t => {
+test('isolated Git fixture pins the verified source despite HEAD movement and refuses a stale lease', async t => {
   const fx = fixture(t);
   const remote = path.join(fx.root, "remote dir's $(id);&.git"), work = path.join(fx.root, 'work'), other = path.join(fx.root, 'other');
   const branch = "ci$(id);'&", ref = 'refs/heads/' + branch;
-  const plan = originalRemoteSha => guideArguments({
-    verifiedBranch: branch, verifiedRemote: 'origin', originalRemoteSha, newSha: newHead,
+  const plan = (originalRemoteSha, newSha) => guideArguments({
+    verifiedBranch: branch, verifiedRemote: 'origin', originalRemoteSha, newSha,
     gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir,
   });
   const git = (cwd, argv, env = {}) => execFileSync('git', argv, {
@@ -399,7 +399,7 @@ test('isolated Git fixture preserves tree/author/DCO and an exact lease refuses 
   const before = git(work, ['rev-parse', 'HEAD']);
   const tree = git(work, ['rev-parse', 'HEAD^{tree}']);
   const authorAndMessage = git(work, ['show', '-s', '--format=%an%n%ae%n%aI%n%P%n%B', 'HEAD']);
-  assert.equal(git(work, plan(before).remoteArgs).split(/\s/)[0], before);
+  assert.equal(git(work, plan(before, before).remoteArgs).split(/\s/)[0], before);
   assert.equal((await fx.run(['--reserve-ci-retry', before])).code, 0);
   git(work, ['commit', '--amend', '--no-edit'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:01Z' });
   const after = git(work, ['rev-parse', 'HEAD']);
@@ -407,8 +407,20 @@ test('isolated Git fixture preserves tree/author/DCO and an exact lease refuses 
   assert.equal(git(work, ['rev-parse', 'HEAD^{tree}']), tree);
   assert.equal(git(work, ['show', '-s', '--format=%an%n%ae%n%aI%n%P%n%B', 'HEAD']), authorAndMessage);
   assert.match(authorAndMessage, /Signed-off-by: Ada Example <ada@example\.test>/);
-  git(work, plan(before).pushArgs);
-  assert.equal(git(work, plan(before).remoteArgs).split(/\s/)[0], after);
+  const pushArgs = plan(before, after).pushArgs;
+  // Model an unobserved local edit after the final checks/argv binding, before Git starts.
+  fs.writeFileSync(path.join(work, 'code.txt'), 'unverified later tree\n');
+  git(work, ['add', 'code.txt']);
+  git(work, ['commit', '-s', '-m', 'later local work']);
+  const later = git(work, ['rev-parse', 'HEAD']);
+  assert.notEqual(later, after);
+  assert.notEqual(git(work, ['rev-parse', 'HEAD^{tree}']), tree);
+  git(work, pushArgs);
+  assert.equal(git(work, plan(before, after).remoteArgs).split(/\s/)[0], after, 'push exactly the verified new SHA');
+  assert.equal(git(remote, ['rev-parse', ref + '^{tree}']), tree, 'do not send the later unverified tree');
+  assert.equal(git(work, ['rev-parse', 'HEAD']), later, 'leave concurrent local work intact');
+  assert.throws(() => git(work, plan(after, 'f'.repeat(40)).pushArgs), /src refspec|bad object|not a valid object/);
+  assert.equal(git(work, plan(after, after).remoteArgs).split(/\s/)[0], after, 'missing source never falls back to HEAD');
   assert.equal((await fx.run(['--reserve-ci-retry', after])).code, 1);
 
   // A collaborator advances the ref; reusing the original verified SHA must fail.
@@ -419,8 +431,8 @@ test('isolated Git fixture preserves tree/author/DCO and an exact lease refuses 
   git(other, ['commit', '-s', '-m', 'intervening work']);
   git(other, ['push', '--', 'origin', 'HEAD:' + ref]);
   const intervening = git(other, ['rev-parse', 'HEAD']);
-  assert.throws(() => git(work, plan(after).pushArgs), /stale info|rejected/);
-  assert.equal(git(work, plan(after).remoteArgs).split(/\s/)[0], intervening);
+  assert.throws(() => git(work, plan(after, after).pushArgs), /stale info|rejected/);
+  assert.equal(git(work, plan(after, after).remoteArgs).split(/\s/)[0], intervening);
 });
 
 test('signed Git fixture verifies one-off signing, configured amend and unavailable-key failure', async t => {

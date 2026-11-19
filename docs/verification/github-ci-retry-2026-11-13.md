@@ -597,6 +597,46 @@ bytes and 620598 expanded bytes. Archive inspected in memory; no new package
 file retained. No installation, real preference/credential/permission/quota
 change, CI-only rewrite, PR merge or publication was performed.
 
+## Bind the verified push source — source 1.5.33 (2026-11-19)
+
+Round 22 addresses [the late HEAD lookup](https://github.com/makecindy/cindy-official-plugins/pull/332#discussion_r4624198913).
+**Invariant:** the pushed object is exactly the commit checked for tree, parents,
+author, message and required signature. The existing Agent workflow owns the
+verified full `newSha`; the existing executor receives that value in the
+refspec, without resolving HEAD or a local branch again. Signed and unsigned
+paths share this source and the original exact remote-SHA lease. No executor,
+lock, queue, storage or retry was added.
+
+| Event | Result |
+| --- | --- |
+| Local movement observed before launch | Stop; preserve the concurrent local work |
+| HEAD advances after final checks/argument binding | Send only the verified `newSha`; leave local HEAD intact |
+| Remote advances | Original exact lease rejects; no refreshed lease or replay |
+| Verified source object unavailable | Git fails; no fallback to HEAD or another commit |
+| Required signature missing/invalid/unknown | Existing guard stops before push |
+| Crash or ambiguous network result | Existing remote/original-PR read-back; no push replay or fresh quota |
+
+Both regressions first failed against the 8c910e1 guide: its argv still used
+HEAD, and the real isolated bare-Git fixture pushed a later, different tree.
+After the fix, both focused tests passed in 6.2 seconds. The fixture freezes
+the documented argv, commits later local work, and verifies the remote receives
+only the checked SHA/tree while local HEAD stays advanced. It also verifies a
+missing source cannot fall back to HEAD and an intervening remote commit rejects
+the stale lease. This is local Git transport evidence, not real Cindy/GitHub
+permission-denied recovery acceptance.
+
+The four required repository suites plus plugin tests passed: 348 pass, 19
+Windows platform skips, 0 failures in 118.4 seconds. Manifest validation passed.
+In-memory packaging/content checks used staged tree
+`752593a45b9beea7f3579fbfc09977ff19f10fbc`: 31 files, 224665 compressed bytes,
+621313 expanded bytes; every file matches its Git blob and no package file was
+retained. Source 1.5.33 exceeds main's 1.5.19; main.js, settings, locales and
+recovery scripts are unchanged from 8c910e1. Source 1.5.33 was not installed;
+the last actual local runtime remains 97d540e / 1.5.19. Genuine denied-rerun
+recovery and current UI/read-ordering prerequisites remain unmet. No real
+preference, credential, permission or quota change, CI-only rewrite, PR merge
+or publication was performed.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected
