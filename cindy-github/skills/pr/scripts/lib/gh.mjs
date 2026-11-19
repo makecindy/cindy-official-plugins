@@ -61,7 +61,7 @@ export async function ensureAuth() {
   try {
     await exec('gh', ['auth', 'status'], { encoding: 'utf8' });
   } catch (e) {
-    process.stderr.write(`[gh] not authenticated: ${(e.stderr || e.message).slice(0, 500)}\n`);
+    process.stderr.write(`[gh] auth status failed: ${e.stderr || e.message}\n`);
     process.exit(1);
   }
 }

@@ -721,6 +721,28 @@ test('快照失败先容忍瞬时抖动,连续到阈值才 fail-closed —— �
   assert.equal(fx.readState().consecutiveSnapshotFailures, 0);
 });
 
+test('blocked snapshot reports its underlying cause and scheduled probe', async (t) => {
+  for (const [stderr, kind] of [
+    ['- To re-authenticate, run: gh auth refresh -h github.com\n- Error: Get "https://api.github.com/": dial tcp: lookup api.github.com: no such host', 'dns'],
+    ['HTTP 401: Bad credentials', 'auth'],
+    ['HTTP 429', 'rate-limit'],
+    ['dial tcp: i/o timeout', 'timeout'],
+    ['unexpected response\n- To re-authenticate, run: gh auth refresh', 'unknown'],
+  ]) {
+    const fx = createFixture(t);
+    const result = await fx.run(['--max-snapshot-failures', '1'], { FAKE_SNAPSHOT_EXIT: '1', FAKE_SNAPSHOT_STDERR: stderr });
+    assert.equal(result.code, 1);
+    const marker = result.stdout.split('\n').find(line => line.startsWith('CINDY_PR_CHECK_DIAGNOSIS '));
+    const diagnosis = JSON.parse(marker.slice('CINDY_PR_CHECK_DIAGNOSIS '.length));
+    assert.equal(diagnosis.kind, kind);
+    assert.equal(diagnosis.retryAt, fx.readState().snapshotFailureBackoffUntil);
+    assert.equal(diagnosis.failures, 1);
+    if (kind === 'dns') assert.equal(diagnosis.host, 'api.github.com');
+    assert.ok(!result.stderr.split('\n')[0].includes('gh auth refresh'));
+    assert.ok(result.stderr.includes(stderr));
+  }
+});
+
 test('rate limits respect reset, deduplicate the episode, and remind after one day', () => {
   const now = 10_000_000;
   const run = { code: 1, stderr: `[gh-rate-limit] retryAt=${now + 600_000}\nAPI rate limit already exceeded` };
