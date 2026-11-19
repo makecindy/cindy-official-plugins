@@ -185,15 +185,21 @@ async function waitForAgentState(target, until, deadline, callId) {
   }
 }
 
-// 判断一条已有自动化是不是本插件建的、且和本次要求一致。
+// 判断一条已有自动化是不是本插件建的，并且和本次要求完全对得上。
+// 任何一项不匹配都不复用——复用错任务会让事件跑错内容、或把用户自己的
+// 定时任务当成事件桥。
 function isOurAutomation(item, name, args) {
   if (!item || item.name !== name) return false;
-  if (item.manual !== true) return false;              // 不能复用会按时间自己跑的
+  if (item.manual !== true) return false;                // 不能复用会按时间自己跑的
   const prompt = String(item.prompt || '');
   if (prompt.indexOf(AUTOMATION_MARK) < 0) return false; // 不是本插件创建的
-  if (args.targetSessionId && item.targetSessionId && item.targetSessionId !== args.targetSessionId) {
-    return false;                                       // 绑定的会话不是用户要的那个
+  if (args.targetSessionId !== undefined && args.targetSessionId !== null
+      && args.targetSessionId !== '') {
+    // 用户点名了会话：绑定必须一模一样，没有绑定的也不能顶替。
+    if (item.targetSessionId !== args.targetSessionId) return false;
   }
+  if (args.prompt && prompt.indexOf(String(args.prompt)) !== 0) return false;
+  if (args.agentKind && item.agentKind !== args.agentKind) return false;
   return true;
 }
 

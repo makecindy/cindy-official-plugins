@@ -1,0 +1,170 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import { fileURLToPath } from 'node:url';
+
+import lib from '../herdr/panel-lib.js';
+
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const panelSource = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+
+// 最小 DOM 桩：够跑一遍真实渲染路径，能抓到 ReferenceError 这类
+// “只有真跑才炸”的问题（上一轮把 dirName 抽走后没绑定就是这么漏掉的）。
+function makeElement(tag) {
+  const children = [];
+  const attrs = {};
+  return {
+    tagName: String(tag).toUpperCase(),
+    children,
+    attrs,
+    className: '',
+    textContent: '',
+    innerHTML: '',
+    title: '',
+    value: '',
+    placeholder: '',
+    hidden: false,
+    type: '',
+    style: {},
+    dataset: {},
+    classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
+    appendChild(child) { children.push(child); return child; },
+    setAttribute(name, value) { attrs[name] = String(value); },
+    getAttribute(name) { return attrs[name] ?? null; },
+    addEventListener() {},
+    removeEventListener() {},
+    focus() {}
+  };
+}
+
+function loadPanel() {
+  const nodes = new Map();
+  const document = {
+    querySelector(selector) {
+      if (!nodes.has(selector)) nodes.set(selector, makeElement('div'));
+      return nodes.get(selector);
+    },
+    querySelectorAll() { return []; },
+    createElement(tag) { return makeElement(tag); },
+    createTextNode(text) { return { nodeValue: String(text), children: [] }; },
+    createDocumentFragment() { return makeElement('#fragment'); },
+    documentElement: makeElement('html'),
+    body: makeElement('body')
+  };
+  const sandbox = {
+    console,
+    document,
+    BroadcastChannel: class {
+      constructor() {}
+      addEventListener() {}
+      removeEventListener() {}
+      postMessage() {}
+    },
+    // 面板只认宿主语言，所以这里直接给 zh-CN。
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ ok: true, context: { region: 'cn', locale: 'zh-CN', uiLocale: 'zh-CN' } })
+    }),
+    setTimeout: () => 0,
+    clearTimeout() {},
+    setInterval: () => 0,
+    clearInterval() {},
+    Date,
+    Math,
+    JSON,
+    Object,
+    Array,
+    String,
+    Number,
+    Boolean,
+    Error,
+    Promise,
+    RegExp,
+    Intl
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  sandbox.HerdrPanelLib = lib;
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(panelSource, sandbox, { filename: 'panel.js' });
+  return { sandbox, nodes };
+}
+
+function collectText(node, out = []) {
+  if (node && typeof node.textContent === 'string' && node.textContent) out.push(node.textContent);
+  for (const child of (node && node.children) || []) collectText(child, out);
+  return out;
+}
+
+function collectByClassName(node, className, out = []) {
+  if (node && String(node.className || '').split(/\s+/).includes(className)) out.push(node);
+  for (const child of (node && node.children) || []) collectByClassName(child, className, out);
+  return out;
+}
+
+test('the panel renders the Herdr pane list without throwing', async () => {
+  const { sandbox, nodes } = loadPanel();
+  await sandbox.loadLocale();
+  const fixture = {
+    workspaces: [
+      { workspace_id: 'w1', label: 'vibecoding', focused: true },
+      { workspace_id: 'wM', label: 'magpie', focused: false }
+    ],
+    tabs: [],
+    panes: [
+      { pane_id: 'w1:p1', workspace_id: 'w1', label: 'cindy', agent: 'claude', agent_status: 'working', cwd: '/home/michael/codes/cindy', title: 'feat' },
+      { pane_id: 'w1:p2', workspace_id: 'w1', label: 'shell', agent: null, agent_status: 'idle', cwd: '/home/michael', title: 'zsh' },
+      { pane_id: 'wM:p1', workspace_id: 'wM', agent: 'codex', agent_status: 'blocked', cwd: '/home/michael/codes/magpie', title: 'blocked work' }
+    ]
+  };
+
+  // state 是顶层 let，直接挂在 window 上不生效：在同一 context 里注入并渲染。
+  vm.runInContext('state = ' + JSON.stringify(fixture) + '; renderHerdr();', sandbox);
+
+  const list = nodes.get('#list');
+  assert.ok(list.children.length > 0, 'renderHerdr produced no nodes');
+  const titles = collectText(list);
+
+  assert.ok(titles.includes('vibecoding'), `missing group title: ${titles.join(' | ')}`);
+  assert.ok(titles.includes('magpie'), 'second workspace should render');
+  assert.ok(titles.includes('cindy'), 'agent chip should show the directory name');
+  assert.ok(titles.includes('shell'), 'plain pane chip should keep its label');
+
+  // 状态不能只靠颜色：agent chip 要有本地化状态文字。
+  assert.ok(titles.includes('进行中'), `missing status text: ${titles.join(' | ')}`);
+  assert.ok(titles.includes('待处理'), 'blocked state must be readable text');
+
+  // 原始 pane id 不该出现在列表里。
+  assert.ok(!titles.some((text) => /^w\d+:p\d+$/.test(text)), `raw pane id leaked: ${titles.join(' | ')}`);
+
+  // 每个 chip 都要给读屏软件一份完整 aria-label。
+  const chips = collectByClassName(list, 'chip');
+  assert.ok(chips.length >= 3, `expected at least 3 chips, got ${chips.length}`);
+  for (const chip of chips) {
+    assert.ok(chip.attrs['aria-label'], `chip without aria-label: ${chip.title}`);
+  }
+  const shellChip = chips.find((chip) => (chip.attrs['aria-label'] || '').includes('shell'));
+  assert.ok(shellChip, 'plain pane chip should exist');
+  assert.match(shellChip.attrs['aria-label'], /idle|空闲/, 'aria-label must carry the state');
+});
+
+test('the empty workspace list renders an empty state instead of throwing', async () => {
+  const { sandbox } = loadPanel();
+  await sandbox.loadLocale();
+  vm.runInContext(
+    'state = { workspaces: [], tabs: [], panes: [] }; renderHerdr();',
+    sandbox
+  );
+});
+
+test('every shared-library function used by the panel is bound', () => {
+  const used = ['dirName', 'graphemes', 'isWideGrapheme', 'specialKey', 'WIDE_CHAR'];
+  for (const name of used) {
+    const defined = new RegExp(`(const|function|let|var)\\s+${name}\\b`).test(panelSource);
+    const referenced = new RegExp(`(?<![.\\w])${name}\\b`).test(panelSource);
+    if (referenced) assert.ok(defined, `${name} is used in panel.js but never defined or bound`);
+  }
+});

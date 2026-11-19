@@ -1,7 +1,12 @@
 'use strict';
 
 const channel = new BroadcastChannel('cindy-plugin-herdr');
-const lib = window.HerdrPanelLib;
+const lib = window.HerdrPanelLib || {};
+// 从共享库取纯函数；直接绑名，调用处保持可读。
+const dirName = lib.dirName || function (value) { return value ? String(value) : ''; };
+const graphemes = lib.graphemes || function (text) { return [String(text || '')]; };
+const isWideGrapheme = lib.isWideGrapheme || function () { return false; };
+const WIDE_CHAR = lib.WIDE_CHAR || /$^/;
 const $ = function (selector) { return document.querySelector(selector); };
 
 // 面板文案跟随宿主语言：只读 /app-context 的 uiLocale ?? locale，插件没有的语言回退英文。
@@ -347,7 +352,7 @@ async function loadLocale() {
 // 特殊键直接发给终端：上下（历史）、翻页、Tab、Esc，以及 Ctrl/Meta 组合。
 // 退格、删除、左右、Home/End 属于文本编辑，只作用于还没提交的草稿。
 function specialKey(event) {
-  return lib.specialKey(view, event);
+  return lib.specialKey ? lib.specialKey(view, event) : null;
 }
 
 async function forwardKey(event) {
@@ -432,13 +437,15 @@ function renderHerdr() {
     const chips = document.createElement('div');
     chips.className = 'chips';
     for (const pane of panes) {
+      const name = pane.agent ? (dirName(pane.cwd) || paneDisplayName(pane)) : paneDisplayName(pane);
       chips.appendChild(makeChip({
         icon: pane.agent ? pane.agent : null,
-        name: pane.agent ? (dirName(pane.cwd) || paneDisplayName(pane)) : paneDisplayName(pane),
+        name: name,
         meta: pane.agent ? statusLabel(pane.agent_status) : (pane.cwd ? dirName(pane.cwd) : pane.title || ''),
         dotClass: paneDotClass(pane),
         title: [pane.agent, pane.title, pane.cwd, pane.pane_id].filter(Boolean).join(' · '),
-        ariaLabel: [pane.agent, dirName(pane.cwd), statusLabel(pane.agent_status), pane.title, pane.pane_id]
+        // 无障碍名以可见名称开头，再补 agent、状态、标题和 pane id。
+        ariaLabel: [name, pane.agent, statusLabel(pane.agent_status), pane.title, pane.pane_id]
           .filter(Boolean).join(' · '),
         on: Boolean(selectedPane && selectedPane.pane_id === pane.pane_id),
         onSelect: function () { openPane(pane); }
@@ -537,6 +544,7 @@ function renderTmux() {
         meta: [pane.window_name, pane.command].filter(Boolean).join(' · '),
         icon: null,
         dotClass: tmuxDotClass(pane),
+        meta: statusLabelForTmux(pane) || [pane.window_name, pane.command].filter(Boolean).join(' · '),
         title: [pane.path, pane.target].filter(Boolean).join(' · '),
         ariaLabel: [pane.target, statusLabelForTmux(pane), pane.command, pane.path]
           .filter(Boolean).join(' · '),
@@ -613,7 +621,7 @@ function renderOutput(text) {
   body.textContent = '';
   if (!text) return;
   const source = String(text);
-  if (!lib.WIDE_CHAR.test(source)) {
+  if (!WIDE_CHAR.test(source)) {
     // 没有宽字符：整段按纯文本渲染，一个节点都不建。
     body.appendChild(document.createTextNode(source));
     return;
@@ -626,8 +634,8 @@ function renderOutput(text) {
     fragment.appendChild(document.createTextNode(plain));
     plain = '';
   };
-  for (const unit of lib.graphemes(source)) {
-    if (budget > 0 && lib.isWideGrapheme(unit)) {
+  for (const unit of graphemes(source)) {
+    if (budget > 0 && isWideGrapheme(unit)) {
       flush();
       budget -= 1;
       const cell = document.createElement('span');
