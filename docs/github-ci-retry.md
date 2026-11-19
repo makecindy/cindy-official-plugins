@@ -117,9 +117,16 @@ for platform data paths; never change data-root variables to restore a budget.
 The plugin sandbox does not run Git itself or mechanically diagnose logs and
 branch ownership. Those checks and the Git operation remain in the existing
 task Agent workflow and task authorization; the gate enforces the retry budget,
-not those factual judgments. No platform scopes, credentials, Host runtime or
-service changes are added. No empty commits, bare force pushes, merge, auto-merge,
+not those factual judgments. CI recovery itself adds no platform scopes,
+credentials, Host runtime or service changes. No empty commits, bare force pushes, merge, auto-merge,
 queue changes, direct main pushes or permission changes are authorized.
+
+The synchronized [upstream #352](https://github.com/makecindy/cindy-official-plugins/pull/352)
+separately adds native PR-card follow-up through local Node and the Host scheduler.
+Those declarations match main, with its existing update-consent requirement;
+they do not enable CI repush. The Node entry only locates the approved Skill,
+not a Git executor. This task has not installed that runtime or exercised its
+native scheduling flow. Its existing source-checkout follower remains unchanged.
 
 See the [runtime evidence and remaining gaps](verification/github-ci-retry-2026-11-13.md),
 including cropped actual screenshots and separately labeled generated previews.

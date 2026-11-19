@@ -82,8 +82,13 @@ Skill 引用，不得通过更换数据根环境变量恢复次数。
 
 插件沙箱不直接运行 Git，也不能机械判定日志故障及分支归属。这些事实核验和 Git
 操作仍由既有任务 Agent 工作流及任务授权承担；gate 确定性限制的是次数，不是这些
-事实判断。不新增平台 scope、凭证、宿主 runtime 或服务端改动。开关不授权空提交、
+事实判断。CI 恢复本身不新增平台 scope、凭证、宿主 runtime 或服务端改动。开关不授权空提交、
 裸 force、合并、auto-merge、队列操作、主干直推或改权限。
+
+同步引入的[主干 #352](https://github.com/makecindy/cindy-official-plugins/pull/352)
+另行通过本机 Node 和宿主调度器提供卡片原生跟进。声明与 main 一致，保留上游
+更新时的权限确认要求，不开启 CI 重推；Node 入口只定位已批准的 Skill，不执行
+Git。本任务未安装该运行包或实测原生调度，现有源码 checkout 跟进保持不变。
 
 参见[运行证据与剩余缺口](verification/github-ci-retry-2026-11-13.zh-CN.md)，
 其中区分真实裁剪截图与生成预览。

@@ -681,6 +681,40 @@ and current UI/read-ordering evidence remain prerequisites. No real preference,
 credential, permission or quota change, CI-only rewrite, PR merge or publication
 was performed.
 
+## Synchronize main #352 — source 1.5.34 (2026-11-19)
+
+Round 24 merges main `1b26689b7b069e778c7621327607ec51d124a20d` (#352) into
+this same feature branch. Resolved manifest, version-assertion and four-language
+tool-description conflicts by retaining upstream native-follow semantics and
+this PR's default-off CI-retry contract. Source/package stays 1.5.34, above
+main's 1.5.20, as the maintainer explicitly allowed in
+[comment 7001964297](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-7001964297).
+History is merged, not rebased or rewritten.
+
+The imported main changes let PR cards manage follow-up through Host scheduling
+and `node/follow.cjs`, which only locates this installation's approved Skill.
+Node, `agent.hostTools: ["scheduler"]`, network declarations and minimum Cindy
+version match main exactly. [Upstream #352](https://github.com/makecindy/cindy-official-plugins/pull/352)
+explicitly disclosed the local Node/automation grant and update consent; GitHub
+identifies zqchris as its merger. Its author reported a development-build,
+isolated real-scheduler create/read/delete check, while installed-plugin/online-PR
+verification remained missing. That is upstream-reported evidence, not a new
+runtime observation by this task. No installed support or permission consent is
+inferred from main or its tests. No extra grant beyond main is introduced here.
+
+The recovery scripts are byte-identical to cd3cf48: full-SHA push binding,
+preserve-before-argument-validation, fixed two-slot budget and approval/queue
+guards remain. The existing preference queue, reference-card height and unknown
+panel are retained. Inherited card/native scheduling has no new live acceptance
+here. The existing source-checkout follower and schedule were not replaced or
+duplicated, and this source hook is not an installed agent-skills entry.
+
+No plugin was installed, no real preference/credential/permission/quota was
+changed, and no CI-only rewrite, PR merge or publication was performed. The last
+actual tested local runtime remains 97d540e / 1.5.19. Genuine denied-rerun recovery,
+current UI/read-ordering and inherited native-follow runtime gaps remain; green
+CI or resolved threads do not waive them.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected
