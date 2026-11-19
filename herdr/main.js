@@ -6,6 +6,61 @@
 const CHANNEL = 'cindy-plugin-herdr';
 const WEBHOOK_KEY = 'herdrWebhookUrl';
 
+// 宿主给随包 Node 进程的单次请求上限是 120 秒，超时就断。长等待因此拆成一段段
+// 的短请求：每段最多 WAIT_CHUNK_MS，段内超时（Herdr 返回 timeout）就接着等下一段，
+// 直到用户给的等待上限。主机这一层的等待要比 Herdr 那一段略长，否则先断的是主机。
+const HOST_REQUEST_TIMEOUT_MAX_MS = 120000;
+const WAIT_CHUNK_MS = 45000;
+const WAIT_CHUNK_MARGIN_MS = 10000;
+
+// 运行时文案跟随宿主语言：只读 /app-context 的 uiLocale ?? locale，
+// 插件没提供的语言回退英文。不读 navigator.language。
+const runtimeStrings = {
+  'zh-CN': {
+    notifyBlocked: '需要处理',
+    notifyDone: '已完成',
+    badgeBlocked: '待处理',
+    badgeDone: '已完成',
+    agentFallback: 'agent',
+    automationFailed: '创建自动化失败：',
+    automationUnknown: '未知错误',
+    automationNoAddress: '自动化已创建，但读取不到 Webhook 接收地址，请在自动化详情里查看',
+    waitTimeout: '等待超时',
+    nodeFailed: 'Node 工作进程调用失败',
+    missingTarget: '缺少 target（session、window 或 pane 的名字）',
+    missingTextOrKeys: '缺少 text 或 keys',
+    unknownPanelAction: '未知的面板动作：'
+  },
+  en: {
+    notifyBlocked: 'needs attention',
+    notifyDone: 'finished',
+    badgeBlocked: 'needs attention',
+    badgeDone: 'finished',
+    agentFallback: 'agent',
+    automationFailed: 'Could not create the automation: ',
+    automationUnknown: 'unknown error',
+    automationNoAddress: 'The automation was created but its webhook address is unavailable; check the automation details',
+    waitTimeout: 'Timed out',
+    nodeFailed: 'The bundled Node worker call failed',
+    missingTarget: 'target is required (session, window, or pane name)',
+    missingTextOrKeys: 'text or keys is required',
+    unknownPanelAction: 'Unknown panel action: '
+  }
+};
+
+let runtime = runtimeStrings.en;
+
+async function loadRuntimeLocale() {
+  try {
+    const response = await cindy.request({ kind: 'app-context' });
+    const context = (response && response.context) || {};
+    const locale = context.uiLocale || context.locale;
+    runtime = runtimeStrings[locale] || runtimeStrings.en;
+  } catch (error) {
+    runtime = runtimeStrings.en;
+  }
+}
+
 const channel = new BroadcastChannel(CHANNEL);
 
 let pendingPanelRequests = new Map();
@@ -28,20 +83,40 @@ function replyTool(callId, ok, payload) {
   });
 }
 
-async function nodeRequest(method, params, callId) {
+async function nodeRequest(method, params, callId, timeoutMs) {
   const request = { method: method, params: params || {} };
   if (callId) request.callId = callId;
+  if (typeof timeoutMs === 'number' && timeoutMs > 0) {
+    request.timeoutMs = Math.min(Math.round(timeoutMs), HOST_REQUEST_TIMEOUT_MAX_MS);
+  }
   const response = await cindy.node.request(request);
   if (!response.ok) {
-    const error = new Error(response.message || 'Node 工作进程调用失败');
+    const error = new Error(response.message || runtime.nodeFailed);
     error.code = response.errorCode;
     throw error;
   }
   return response.result;
 }
 
-async function herdrCall(method, params, callId) {
-  return nodeRequest('herdr/request', { method: method, params: params || {} }, callId);
+// Herdr 的超时写在 worker 请求的外层参数里；host 这一层要多留一点余量。
+async function herdrCall(method, params, callId, timeoutMs) {
+  const request = { method: method, params: params || {} };
+  if (typeof timeoutMs === 'number' && timeoutMs > 0) {
+    request.timeout_ms = Math.min(Math.round(timeoutMs), HOST_REQUEST_TIMEOUT_MAX_MS);
+  }
+  return nodeRequest(
+    'herdr/request',
+    request,
+    callId,
+    timeoutMs ? timeoutMs + WAIT_CHUNK_MARGIN_MS : undefined
+  );
+}
+
+// Herdr 等待超时时返回 code=timeout；这属于「还没等到」，可以接着等下一段。
+// 其他错误（例如 agent_blocked）要原样抛出去。
+function isTimeoutError(error) {
+  const text = String((error && error.message) || '');
+  return /(^|[\s:])timeout([\s:]|$)/i.test(text) || /timed out/i.test(text);
 }
 
 async function readKv() {
@@ -74,13 +149,34 @@ function textOf(value) {
   return JSON.stringify(value);
 }
 
+// 一段一段地等 agent 状态：每段最多 WAIT_CHUNK_MS，段内超时（Herdr 返回
+// timeout）就接着等下一段，直到到达目标状态或用完等待上限。
+async function waitForAgentState(target, until, deadline, callId) {
+  while (true) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new Error('等待 agent 状态超时（' + until.join('/') + '）');
+    }
+    const chunk = Math.min(remaining, WAIT_CHUNK_MS);
+    try {
+      return await herdrCall('agent.wait', {
+        target: target,
+        until: until,
+        timeout_ms: chunk
+      }, callId, chunk);
+    } catch (error) {
+      if (!isTimeoutError(error)) throw error;
+    }
+  }
+}
+
 // --- Tool implementations ------------------------------------------------
 
 const tools = {
   async herdr_state(args) {
     const params = {};
     if (args.workspace_id) params.workspace_id = args.workspace_id;
-    const raw = await herdrCall('session.snapshot', params);
+    const raw = await herdrCall('session.snapshot', params, args.__callId);
     const snapshot = unwrapSnapshot(raw);
     const workspaces = (snapshot && snapshot.workspaces) || [];
     const tabs = (snapshot && snapshot.tabs) || [];
@@ -145,10 +241,10 @@ const tools = {
     let result;
     if (args.pane_id && !args.target) {
       params.pane_id = args.pane_id;
-      result = await herdrCall('pane.read', params);
+      result = await herdrCall('pane.read', params, args.__callId);
     } else {
       params.target = args.target || args.pane_id;
-      result = await herdrCall('agent.read', params);
+      result = await herdrCall('agent.read', params, args.__callId);
     }
     const read = (result && (result.read || result.output)) || result || {};
     return {
@@ -160,14 +256,37 @@ const tools = {
   },
 
   async herdr_prompt(args) {
-    const params = { target: args.target, text: args.text };
-    if (args.wait_until && args.wait_until.length) {
-      params.wait = {
-        until: args.wait_until,
-        timeout_ms: args.timeout_ms === undefined ? 120000 : args.timeout_ms
+    const until = args.wait_until && args.wait_until.length ? args.wait_until : null;
+    const timeoutMs = args.timeout_ms === undefined ? 120000 : Number(args.timeout_ms);
+    if (!until) {
+      const result = await herdrCall('agent.prompt', { target: args.target, text: args.text }, args.__callId);
+      return {
+        target: args.target,
+        agent_status: result && result.agent_status ? result.agent_status : null,
+        completion: result ? result.completion || null : null,
+        result: result || null
       };
     }
-    const result = await herdrCall('agent.prompt', params);
+    const deadline = Date.now() + timeoutMs;
+    // 先发提示并等一段；这一段没等到目标状态（Herdr 返回 timeout）不算失败，
+    // 接着用 agent.wait 一段段等下去，直到到达目标状态或用完等待上限。
+    const firstChunk = Math.min(Math.max(timeoutMs, 1), WAIT_CHUNK_MS);
+    try {
+      const result = await herdrCall('agent.prompt', {
+        target: args.target,
+        text: args.text,
+        wait: { until: until, timeout_ms: firstChunk }
+      }, args.__callId, firstChunk);
+      return {
+        target: args.target,
+        agent_status: result && result.agent_status ? result.agent_status : null,
+        completion: result ? result.completion || null : null,
+        result: result || null
+      };
+    } catch (error) {
+      if (!isTimeoutError(error)) throw error;
+    }
+    const result = await waitForAgentState(args.target, until, deadline, args.__callId);
     return {
       target: args.target,
       agent_status: result && result.agent_status ? result.agent_status : null,
@@ -181,40 +300,51 @@ const tools = {
       const result = await herdrCall('pane.send_keys', {
         pane_id: args.pane_id,
         keys: args.keys
-      });
+      }, args.__callId);
       return { pane_id: args.pane_id, mode: 'keys', result: result || null };
     }
     if (args.pane_id && args.text !== undefined) {
       const result = await herdrCall('pane.send_text', {
         pane_id: args.pane_id,
         text: args.text
-      });
+      }, args.__callId);
       return { pane_id: args.pane_id, mode: 'text', result: result || null };
     }
     const result = await herdrCall('pane.send_input', {
       pane_id: args.pane_id,
       text: args.text || '',
       keys: args.keys || []
-    });
+    }, args.__callId);
     return { pane_id: args.pane_id, mode: 'input', result: result || null };
   },
 
   async herdr_wait(args) {
+    const timeoutMs = args.timeout_ms === undefined ? 300000 : Number(args.timeout_ms);
+    const deadline = Date.now() + timeoutMs;
     if (args.pane_id && args.match) {
-      const result = await herdrCall('pane.wait_for_output', {
-        pane_id: args.pane_id,
-        source: args.source || 'visible',
-        match: args.match,
-        lines: args.lines === undefined ? undefined : args.lines,
-        timeout_ms: args.timeout_ms === undefined ? 120000 : args.timeout_ms
-      });
-      return { pane_id: args.pane_id, result: result || null };
+      const match = typeof args.match === 'string'
+        ? { type: 'substring', value: args.match }
+        : args.match;
+      while (true) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw new Error('等待输出超时（' + timeoutMs + 'ms）');
+        const chunk = Math.min(remaining, WAIT_CHUNK_MS);
+        try {
+          const result = await herdrCall('pane.wait_for_output', {
+            pane_id: args.pane_id,
+            source: args.source || 'visible',
+            match: match,
+            lines: args.lines === undefined ? undefined : args.lines,
+            timeout_ms: chunk
+          }, args.__callId, chunk);
+          return { pane_id: args.pane_id, result: result || null };
+        } catch (error) {
+          if (!isTimeoutError(error)) throw error;
+        }
+      }
     }
-    const result = await herdrCall('agent.wait', {
-      target: args.target,
-      until: args.until && args.until.length ? args.until : undefined,
-      timeout_ms: args.timeout_ms === undefined ? 300000 : args.timeout_ms
-    });
+    const until = args.until && args.until.length ? args.until : ['done'];
+    const result = await waitForAgentState(args.target, until, deadline, args.__callId);
     return { target: args.target, result: result || null };
   },
 
@@ -237,7 +367,7 @@ const tools = {
     if (args.path) params.path = args.path;
     if (args.target_pane_id) params.target_pane_id = args.target_pane_id;
     const method = area + '.' + action;
-    const result = await herdrCall(method, params);
+    const result = await herdrCall(method, params, args.__callId);
     return { method: method, result: result || null };
   },
 
@@ -246,7 +376,7 @@ const tools = {
     if (args.body) params.body = args.body;
     if (args.sound) params.sound = args.sound;
     if (args.position) params.position = args.position;
-    const result = await herdrCall('notification.show', params);
+    const result = await herdrCall('notification.show', params, args.__callId);
     return result || null;
   },
 
@@ -263,11 +393,26 @@ const tools = {
       return nodeRequest('herdr/unsubscribe', {}, args.__callId);
     }
     if (mode === 'wait') {
-      const result = await herdrCall('events.wait', {
-        match_event: args.match_event,
-        timeout_ms: args.timeout_ms === undefined ? 60000 : args.timeout_ms
-      });
-      return result || null;
+      const timeoutMs = args.timeout_ms === undefined ? 60000 : Number(args.timeout_ms);
+      const deadline = Date.now() + timeoutMs;
+      const wanted = args.match_event || {};
+      const eventName = typeof wanted === 'string' ? wanted : wanted.event || '';
+      const paneId = typeof wanted === 'string' ? null : wanted.pane_id || null;
+      while (true) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw new Error('等待事件超时（' + timeoutMs + 'ms）');
+        const chunk = Math.min(remaining, WAIT_CHUNK_MS);
+        try {
+          const result = await nodeRequest('herdr/wait-event', {
+            event: eventName,
+            pane_id: paneId,
+            timeout_ms: chunk
+          }, args.__callId, chunk + WAIT_CHUNK_MARGIN_MS);
+          return result || null;
+        } catch (error) {
+          if (!isTimeoutError(error)) throw error;
+        }
+      }
     }
     return nodeRequest('herdr/status', {}, args.__callId);
   },
@@ -311,7 +456,7 @@ const tools = {
     });
     if (created.isError) {
       const detail = created.content && created.content[0] && created.content[0].text;
-      throw new Error('创建自动化失败：' + (detail || '未知错误'));
+      throw new Error(runtime.automationFailed + (detail || runtime.automationUnknown));
     }
     const body = JSON.parse(created.content[0].text);
     const scheduleId = body.data && body.data.id;
@@ -333,7 +478,7 @@ const tools = {
       }
     }
     if (!address) {
-      throw new Error('自动化已创建，但读取不到 Webhook 接收地址，请在自动化详情里查看');
+      throw new Error(runtime.automationNoAddress);
     }
     await writeKv({ [WEBHOOK_KEY]: address });
     await nodeRequest('herdr/configure', { webhookUrl: address });
@@ -377,7 +522,7 @@ const tools = {
   },
 
   async tmux_read(args) {
-    if (!args.target) throw new Error('缺少 target（session、window 或 pane 的名字）');
+    if (!args.target) throw new Error(runtime.missingTarget);
     return nodeRequest('tmux/capture', {
       target: String(args.target),
       lines: args.lines === undefined ? undefined : args.lines
@@ -385,14 +530,14 @@ const tools = {
   },
 
   async tmux_send(args) {
-    if (!args.target) throw new Error('缺少 target（session、window 或 pane 的名字）');
+    if (!args.target) throw new Error(runtime.missingTarget);
     const params = { target: String(args.target) };
     if (args.keys && args.keys.length) {
       params.keys = args.keys;
     } else if (args.text !== undefined && args.text !== null) {
       params.text = args.text;
     } else {
-      throw new Error('缺少 text 或 keys');
+      throw new Error(runtime.missingTextOrKeys);
     }
     return nodeRequest('tmux/send', params, args.__callId);
   }
@@ -472,7 +617,7 @@ async function handlePanelRequest(request) {
   if (action === 'tmux_send') {
     return tools.tmux_send({ target: request.target, text: request.text, keys: request.keys });
   }
-  throw new Error('未知的面板动作：' + action);
+  throw new Error(runtime.unknownPanelAction + action);
 }
 
 channel.addEventListener('message', async function (event) {
@@ -520,12 +665,13 @@ cindy.onHostMessage(async function (msg) {
     const statusEvent = payload.event === 'pane_agent_status_changed'
       || payload.event === 'pane.agent_status_changed';
     if (statusEvent && (status === 'blocked' || status === 'done')) {
-      const label = data.agent || data.pane_id || 'agent';
+      const label = data.agent || data.pane_id || runtime.agentFallback;
       try {
         await cindy.send({
           type: 'notify',
           tone: status === 'blocked' ? 'warning' : 'success',
-          text: 'Herdr · ' + label + ' ' + (status === 'blocked' ? '需要处理' : '已完成')
+          text: 'Herdr · ' + label + ' '
+            + (status === 'blocked' ? runtime.notifyBlocked : runtime.notifyDone)
             + (data.title ? '：' + data.title : '')
         });
       } catch (error) {
@@ -535,12 +681,19 @@ cindy.onHostMessage(async function (msg) {
         await cindy.send({
           type: 'badge',
           unread: true,
-          summary: label + ' ' + (status === 'blocked' ? '待处理' : '已完成')
+          summary: label + ' '
+            + (status === 'blocked' ? runtime.badgeBlocked : runtime.badgeDone)
         });
       } catch (error) {
         void error;
       }
     }
+  }
+
+  // 宿主语言变了：换掉运行时文案，并通知面板重新读取 /app-context。
+  if (msg.type === 'host-context-changed') {
+    await loadRuntimeLocale();
+    channel.postMessage({ type: 'host-context-changed' });
   }
 });
 
@@ -558,4 +711,5 @@ cindy.onHostMessage(function (msg) {
   if (msg.type === 'event' && msg.name === 'wake') ensureSubscription();
 });
 
+loadRuntimeLocale();
 ensureSubscription();

@@ -1,26 +1,49 @@
 <!doctype html>
+<html lang="zh-CN">
+<head>
 <meta charset="utf-8">
+<link rel="stylesheet" href="/panel.css">
+</head>
 <body>
 <div class="wrap">
-  <div class="toolbar">
-    <div class="views" role="tablist" aria-label="数据源">
+  <header class="bar">
+    <div class="seg" role="tablist" aria-label="数据源">
       <button type="button" data-view="herdr" class="on" role="tab" aria-selected="true">Herdr</button>
       <button type="button" data-view="tmux" role="tab" aria-selected="false">tmux</button>
     </div>
-    <button id="refresh" type="button">刷新</button>
-    <span id="status" class="status">连接中…</span>
-  </div>
-  <div id="list" class="list"></div>
-  <div id="detail" class="detail" hidden>
+    <span id="status" class="status" role="status"></span>
+    <button id="refresh" type="button" class="icon" aria-label="刷新">
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="M13.5 8a5.5 5.5 0 1 1-1.9-4.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M13.4 1.8v3.1h-3.1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </header>
+
+  <div id="list" class="list" role="list"></div>
+
+  <section id="detail" class="detail" hidden>
     <div class="detail-head">
-      <span id="detail-title"></span>
-      <button id="detail-close" type="button" class="link">收起</button>
+      <div class="detail-id">
+        <span id="detail-title" class="detail-title"></span>
+        <span id="detail-sub" class="detail-sub"></span>
+      </div>
+      <button id="detail-close" type="button" class="icon" aria-label="收起">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
     </div>
-    <pre id="detail-body" class="pane-body"></pre>
+    <pre id="detail-body" class="output"></pre>
     <div class="composer">
-      <textarea id="composer-text" rows="2" placeholder="输入内容发送给选中的 pane，回车发送"></textarea>
-      <button id="composer-send" type="button">发送</button>
+      <textarea id="composer-text" rows="2" placeholder="输入内容发送给选中的 pane"></textarea>
+      <div class="composer-actions">
+        <button id="composer-send" type="button" class="ghost"></button>
+        <button id="composer-submit" type="button" class="primary"></button>
+      </div>
     </div>
-  </div>
+  </section>
 </div>
 <script src="/panel.js"></script>
+</body>
+</html>

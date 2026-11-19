@@ -10,13 +10,13 @@
       "description": "ペインやエージェントの端末出力を読み取ります。現在の画面は visible、直近の行は recent、折り返しを除いた行は recent_unwrapped を指定します。"
     },
     "herdr_prompt": {
-      "description": "Herdr エージェントにプロンプトを送り、必要に応じて指定の状態を待ちます。対象が blocked の場合は送信しません。"
+      "description": "Herdr の agent にプロンプトを送ります。wait_until を指定するとその状態（idle/working/blocked/done/unknown）になるまで待ちます（timeout_ms の枠内、既定 120000）。対象が既に blocked なら何も送られず、そのまま返します。"
     },
     "herdr_send": {
       "description": "Herdr のペインにテキストやキーを送ります。キーには enter、ctrl+h、shift+tab などを指定します。"
     },
     "herdr_wait": {
-      "description": "エージェントが指定の状態になるか、ペインの出力が指定の文字列に一致するまで待ちます。"
+      "description": "agent が指定の状態になるまで、または pane の出力が指定テキストと一致するまで待ちます（match は {type:\"substring\"|\"regex\", value:\"テキスト\"} の形式）。長い待ち timeout_ms の枠内で小分けに実行され（既定 300000）、枠を使い切るとエラーになります。"
     },
     "herdr_control": {
       "description": "Herdr のワークスペース、タブ、ペイン、Git worktree を管理します。閉じる操作はユーザーが明示的に要求した場合に実行します。"
@@ -25,7 +25,7 @@
       "description": "Herdr の端末画面に通知を表示します。"
     },
     "herdr_events": {
-      "description": "Herdr イベントの購読状態を確認し、購読を開始・停止するか、イベントを待ちます。"
+      "description": "Herdr のイベント購読を管理します：mode=status は現在の購読状態、subscribe は購読を開始（agent の状態変化、出力一致、pane の生成・破棄など）、unsubscribe は停止、wait は現在の購読上でイベントが 1 つ届くまで待ちます（match_event は {event:\"pane.agent_status_changed\", pane_id:\"w1:p1\"} の形式、pane_id は省略可）。"
     },
     "herdr_automation_setup": {
       "description": "blocked または done イベントで起動する Cindy の自動化を作成し、必要に応じて既存のセッションに接続します。自動化 ID と Webhook アドレスを返します。"
@@ -40,7 +40,7 @@
       "description": "tmux のペインに表示されている画面か、スクロールバックを含む直近 N 行を読み取ります。"
     },
     "tmux_send": {
-      "description": "指定した tmux ペインに文字どおりのテキストまたは名前付きキーを送ります。"
+      "description": "tmux の session / window / pane にテキストまたはキーを送ります。テキストはリテラル（-l）で送られるため、C-b や Enter を含む内容もキー名として解釈されません。keys には \"Enter\" や \"C-c\" のようなキー名のみ指定でき、区切り文字や - で始まる値は拒否されます。"
     }
   }
 }

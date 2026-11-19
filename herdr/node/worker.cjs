@@ -80,7 +80,10 @@ function callOnce(method, params, timeoutMs) {
         }
         if (message.id && message.id !== id) continue;
         if (message.error) {
-          finish(reject, new Error(message.error.code + ': ' + message.error.message));
+          // 保留 Herdr 的错误码（例如 timeout）：上层据此判断「继续等」还是「失败」。
+          const error = new Error(message.error.code + ': ' + message.error.message);
+          error.code = message.error.code;
+          finish(reject, error);
           return;
         }
         if (message.result !== undefined) {
@@ -99,12 +102,34 @@ function callOnce(method, params, timeoutMs) {
 
 // --- Event subscription -------------------------------------------------
 
+// 订阅要守住三件事：① 同一时刻只有一条订阅连接（并发订阅会重复投递同一个事件，
+// 让自动化跑两遍）；② 连接断开后自己回来（Herdr 重启不能让通知永久停摆）；
+// ③ 分屏增减后重新订阅（状态事件按 pane_id 订阅，新分屏不在旧列表里；而且引用
+// 已经消失的分屏会让整条订阅请求被 Herdr 拒绝）。
 const subscription = {
   socket: null,
   paneIds: [],
   webhookUrl: null,
-  running: false
+  running: false,
+  desired: false,
+  attempts: 0,
+  retryTimer: null,
+  refreshTimer: null
 };
+
+const SUBSCRIPTION_RETRY_MIN_MS = 2000;
+const SUBSCRIPTION_RETRY_MAX_MS = 30000;
+const PANE_REFRESH_DEBOUNCE_MS = 300;
+
+// 订阅的建立与替换串行执行：两个请求同时进来时，后一个不能覆盖前一个的连接，
+// 否则前一条连接还在收事件，同一个 blocked/done 会触发两次自动化。
+let subscriptionLock = Promise.resolve();
+
+function withSubscriptionLock(task) {
+  const result = subscriptionLock.then(task, task);
+  subscriptionLock = result.then(function () {}, function () {});
+  return result;
+}
 
 async function listPaneIds() {
   const result = await callOnce('pane.list', {}, 15000);
@@ -137,9 +162,49 @@ function isStatusEvent(event) {
   return event === 'pane_agent_status_changed' || event === 'pane.agent_status_changed';
 }
 
+// 订阅时用点号命名，推送出来是下划线，两种写法都要认。
+function isPaneLifecycleEvent(event) {
+  return ['pane.created', 'pane.closed', 'pane.exited'].some(function (name) {
+    return event === name || event === name.replace(/\./g, '_');
+  });
+}
+
+// 事件等待：在已有的订阅流上等一个事件名（点号与下划线两种写法都认），
+// 可选按 pane_id 过滤。不用 events.wait：那个接口要求完整的内部标签结构，
+// 调用方很难拼对，而在订阅流上等语义更直接。
+const eventWaiters = [];
+
+function matchesEvent(waiter, event, data) {
+  const wanted = String(waiter.event || '');
+  if (wanted) {
+    const normalized = wanted.replace(/\./g, '_');
+    const actual = String(event || '');
+    if (actual !== wanted
+      && actual.replace(/\./g, '_') !== normalized
+      && actual !== normalized) {
+      return false;
+    }
+  }
+  if (waiter.pane_id && data && data.pane_id && data.pane_id !== waiter.pane_id) {
+    return false;
+  }
+  return true;
+}
+
+function notifyEventWaiters(event, data) {
+  for (let index = eventWaiters.length - 1; index >= 0; index -= 1) {
+    const waiter = eventWaiters[index];
+    if (!matchesEvent(waiter, event, data)) continue;
+    eventWaiters.splice(index, 1);
+    clearTimeout(waiter.timer);
+    waiter.resolve({ event: event, data: data });
+  }
+}
+
 function handleEvent(message) {
   const data = message.data || {};
   notify('herdr/event', { event: message.event, data: data });
+  notifyEventWaiters(message.event, data);
   const status = data.agent_status;
   if (isStatusEvent(message.event)
       && (status === 'blocked' || status === 'done')
@@ -153,6 +218,9 @@ function handleEvent(message) {
       title: data.title || null
     }).catch(function () {});
   }
+  // 分屏变了就重新订阅：新分屏的状态事件否则收不到，已关闭的分屏还会让整条
+  // 订阅请求被 Herdr 拒绝。
+  if (isPaneLifecycleEvent(message.event)) schedulePaneRefresh();
 }
 
 async function postWebhook(payload) {
@@ -189,8 +257,16 @@ async function postWebhook(payload) {
   });
 }
 
-async function startSubscription(webhookUrl) {
-  await stopSubscription();
+async function openSubscription(webhookUrl) {
+  const previous = subscription.socket;
+  subscription.socket = null;
+  subscription.running = false;
+  if (previous) {
+    // 主动关掉的旧连接不该触发重连，也不该清空新连接的状态。
+    previous.herdrIntentionalClose = true;
+    try { previous.destroy(); } catch (error) { void error; }
+  }
+
   subscription.webhookUrl = webhookUrl || null;
   const paneIds = await listPaneIds();
   subscription.paneIds = paneIds;
@@ -198,11 +274,19 @@ async function startSubscription(webhookUrl) {
   const id = nextId();
   const socket = net.createConnection(socketPath());
   subscription.socket = socket;
-  subscription.running = true;
 
   await new Promise(function (resolve, reject) {
     let buffer = '';
-    const timer = setTimeout(function () { reject(new Error('订阅连接超时')); }, 15000);
+    let settled = false;
+    const timer = setTimeout(function () { finish(reject, new Error('订阅连接超时')); }, 15000);
+
+    function finish(fn, value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    }
+
     socket.on('connect', function () {
       sendLine(socket, {
         id: id,
@@ -224,11 +308,10 @@ async function startSubscription(webhookUrl) {
           continue;
         }
         if (message.id === id) {
-          clearTimeout(timer);
           if (message.error) {
-            reject(new Error(message.error.code + ': ' + message.error.message));
+            finish(reject, new Error(message.error.code + ': ' + message.error.message));
           } else {
-            resolve();
+            finish(resolve);
           }
           continue;
         }
@@ -236,38 +319,71 @@ async function startSubscription(webhookUrl) {
       }
     });
     socket.on('error', function (error) {
-      clearTimeout(timer);
-      reject(error);
+      finish(reject, error);
     });
     socket.on('close', function () {
-      subscription.running = false;
-      subscription.socket = null;
+      if (socket.herdrIntentionalClose) return;
+      // 只清理属于自己的状态：旧连接的 close 不能抹掉新连接。
+      if (subscription.socket === socket) {
+        subscription.socket = null;
+        subscription.running = false;
+      }
+      if (!settled) finish(reject, new Error('订阅连接在确认前关闭'));
+      scheduleReconnect();
     });
   });
+  subscription.running = true;
+  subscription.attempts = 0;
 }
 
-async function stopSubscription() {
+async function closeSubscription() {
   const socket = subscription.socket;
   subscription.socket = null;
   subscription.running = false;
   if (socket) {
+    socket.herdrIntentionalClose = true;
     try { socket.destroy(); } catch (error) { void error; }
   }
 }
 
-async function refreshPaneSubscriptions() {
-  if (!subscription.running) return;
-  let paneIds;
-  try {
-    paneIds = await listPaneIds();
-  } catch (error) {
-    return;
-  }
-  const changed = paneIds.length !== subscription.paneIds.length
-    || paneIds.some(function (id, index) { return id !== subscription.paneIds[index]; });
-  if (!changed) return;
-  const webhookUrl = subscription.webhookUrl;
-  await startSubscription(webhookUrl).catch(function () {});
+// 断线后自己回来（间隔重试，封顶 30 秒）。只有用户主动退订时才不再重连。
+function scheduleReconnect() {
+  if (!subscription.desired) return;
+  if (subscription.retryTimer) return;
+  subscription.attempts += 1;
+  const delay = Math.min(
+    SUBSCRIPTION_RETRY_MAX_MS,
+    SUBSCRIPTION_RETRY_MIN_MS * subscription.attempts
+  );
+  subscription.retryTimer = setTimeout(function () {
+    subscription.retryTimer = null;
+    withSubscriptionLock(async function () {
+      if (!subscription.desired) return;
+      try {
+        await openSubscription(subscription.webhookUrl);
+      } catch (error) {
+        scheduleReconnect();
+      }
+    });
+  }, delay);
+  if (subscription.retryTimer.unref) subscription.retryTimer.unref();
+}
+
+// 分屏增减后重建订阅（去抖，避免连续事件触发多次重连）。
+function schedulePaneRefresh() {
+  if (subscription.refreshTimer) return;
+  subscription.refreshTimer = setTimeout(function () {
+    subscription.refreshTimer = null;
+    withSubscriptionLock(async function () {
+      if (!subscription.desired) return;
+      try {
+        await openSubscription(subscription.webhookUrl);
+      } catch (error) {
+        scheduleReconnect();
+      }
+    });
+  }, PANE_REFRESH_DEBOUNCE_MS);
+  if (subscription.refreshTimer.unref) subscription.refreshTimer.unref();
 }
 
 // --- tmux backend --------------------------------------------------------
@@ -423,8 +539,9 @@ async function tmuxSessions() {
 }
 
 async function tmuxPanes(session) {
+  // -s 让 list-panes 列出整个 session 的所有窗口，而不是只看目标窗口。
   const args = session
-    ? ['list-panes', '-t', String(session), '-F', TMUX_PANE_FORMAT]
+    ? ['list-panes', '-s', '-t', String(session), '-F', TMUX_PANE_FORMAT]
     : ['list-panes', '-a', '-F', TMUX_PANE_FORMAT];
   let output;
   try {
@@ -496,14 +613,32 @@ async function tmuxCapture(target, lines) {
   };
 }
 
+// tmux 自己的命令行解析就是一层注入面：spawn 不经 shell，但 tmux 仍会把独立的
+// `;` 当命令分隔符，把以 `-` 开头的值当选项。所以按键只允许「键名」形态，
+// 并且用 `--` 结束选项解析。
+const TMUX_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_+.-]{0,31}$/;
+
+function validateTmuxKeys(keys) {
+  return keys.map(function (key) {
+    const value = String(key);
+    if (!TMUX_KEY_PATTERN.test(value)) {
+      throw tmuxError(
+        '不支持的按键：' + value + '（只允许字母、数字和 C-/M- 形式的组合键）',
+        'TMUX_BAD_KEY'
+      );
+    }
+    return value;
+  });
+}
+
 async function tmuxSend(target, params) {
   const dest = String(target || '');
   if (!dest) throw tmuxError('缺少 target', 'TMUX_BAD_TARGET');
   const keys = Array.isArray(params.keys) && params.keys.length
-    ? params.keys.map(String)
+    ? validateTmuxKeys(params.keys)
     : null;
   if (keys) {
-    await runTmux(['send-keys', '-t', dest].concat(keys));
+    await runTmux(['send-keys', '-t', dest, '--'].concat(keys));
     return { target: dest, mode: 'keys', keys: keys };
   }
   if (params.text === undefined || params.text === null) {
@@ -524,7 +659,8 @@ const handlers = {
   async 'herdr/request'(params) {
     const method = String(params.method || '');
     if (!method) throw new Error('缺少 method');
-    const timeout = Number(params.timeout_ms || 0);
+    const requested = Number(params.timeout_ms || 0);
+    const timeout = requested > 0 ? Math.min(requested, 120000) : 0;
     return callOnce(method, params.params || {}, timeout || undefined);
   },
 
@@ -533,14 +669,57 @@ const handlers = {
   },
 
   async 'herdr/subscribe'(params) {
-    await startSubscription(params.webhookUrl || null);
+    subscription.desired = true;
+    const webhookUrl = params.webhookUrl || null;
+    try {
+      await withSubscriptionLock(async function () {
+        await openSubscription(webhookUrl);
+      });
+    } catch (error) {
+      scheduleReconnect();
+      throw error;
+    }
     return { subscribed: true, panes: subscription.paneIds.length };
   },
 
   async 'herdr/configure'(params) {
+    subscription.desired = true;
     subscription.webhookUrl = params.webhookUrl || null;
-    await refreshPaneSubscriptions();
+    try {
+      await withSubscriptionLock(async function () {
+        await openSubscription(subscription.webhookUrl);
+      });
+    } catch (error) {
+      scheduleReconnect();
+      throw error;
+    }
     return { ok: true };
+  },
+
+  async 'herdr/wait-event'(params) {
+    const requested = Number(params.timeout_ms || 0);
+    const timeoutMs = requested > 0 ? Math.min(requested, 60000) : 60000;
+    if (!subscription.running) {
+      await withSubscriptionLock(async function () {
+        await openSubscription(subscription.webhookUrl);
+      });
+    }
+    return new Promise(function (resolve, reject) {
+      const waiter = {
+        event: params.event || '',
+        pane_id: params.pane_id || null,
+        resolve: resolve,
+        reject: reject,
+        timer: null
+      };
+      waiter.timer = setTimeout(function () {
+        const index = eventWaiters.indexOf(waiter);
+        if (index >= 0) eventWaiters.splice(index, 1);
+        // 消息里带 timeout 前缀，上层据此判断「接着等下一段」而不是当失败。
+        reject(new Error('timeout: 等待事件超时：' + (waiter.event || '任意事件')));
+      }, timeoutMs);
+      eventWaiters.push(waiter);
+    });
   },
 
   async 'herdr/status'() {
@@ -553,7 +732,19 @@ const handlers = {
   },
 
   async 'herdr/unsubscribe'() {
-    await stopSubscription();
+    subscription.desired = false;
+    subscription.attempts = 0;
+    if (subscription.retryTimer) {
+      clearTimeout(subscription.retryTimer);
+      subscription.retryTimer = null;
+    }
+    if (subscription.refreshTimer) {
+      clearTimeout(subscription.refreshTimer);
+      subscription.refreshTimer = null;
+    }
+    await withSubscriptionLock(async function () {
+      await closeSubscription();
+    });
     return { subscribed: false };
   },
 

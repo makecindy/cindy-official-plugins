@@ -19,7 +19,17 @@ a second backend, so one plugin is enough for both terminal managers.
   switcher in the toolbar shows tmux sessions and panes the same way.
 - **Event bridge** — subscribes to Herdr events; blocked/done transitions raise a
   Cindy toast and an unread badge, and can wake a Cindy automation through a
-  webhook so Cindy stops polling.
+  webhook so Cindy stops polling. The subscription is rebuilt when panes are
+  created or closed and reconnects on its own after Herdr restarts.
+
+## Limits
+
+- Long waits (`herdr_wait`, `herdr_prompt` with `wait_until`) run in bounded
+  segments under one `timeout_ms` budget and fail when that budget runs out.
+- `tmux_send` with `keys` accepts key names only (`"Enter"`, `"C-c"`); values
+  containing separators or starting with `-` are rejected, so a key press can
+  never turn into another tmux command.
+- The panel follows the Cindy host language and falls back to English.
 
 ## Requirements
 
