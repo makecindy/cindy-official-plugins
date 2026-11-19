@@ -275,6 +275,15 @@ body {
   display: block;
 }
 
+/* 官方标识按原样显示：只缩放，不改色、不重绘。 */
+.chip-logo {
+  width: 13px;
+  height: 13px;
+  display: block;
+  object-fit: contain;
+  border-radius: 2px;
+}
+
 .chip.on .chip-icon {
   color: var(--pc-accent);
 }

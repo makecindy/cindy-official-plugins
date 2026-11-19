@@ -228,20 +228,31 @@ function statusLabelForTmux(pane) {
 
 // agent pane 用 chip 呈现：一颗 chip 就是「一个正在跑的东西」，
 // 名称、状态点都在里面，扫一眼就知道谁在忙。
-// 每种 agent 一个小图标：都是通用几何形，不冒充任何品牌 Logo。
+// agent 图标：认识的 agent 用它的官方标识（原样使用，不改色、不拉伸）；
+// 不认识的退回通用图形。文件都在插件的 assets/agents/ 下。
+const AGENT_MARKS = {
+  claude: 'assets/agents/claude.svg',
+  codex: 'assets/agents/codex.svg',
+  cursor: 'assets/agents/cursor.png'
+};
+
 function agentIcon(kind) {
   const icon = document.createElement('span');
   icon.className = 'chip-icon';
-  const shape = kind === 'codex'
-    ? '<path d="M5.5 4L2 8l3.5 4" fill="none" stroke="currentColor" stroke-width="1.6"'
-      + ' stroke-linecap="round" stroke-linejoin="round"/>'
-      + '<path d="M10.5 4L14 8l-3.5 4" fill="none" stroke="currentColor" stroke-width="1.6"'
-      + ' stroke-linecap="round" stroke-linejoin="round"/>'
-    : '<path d="M8 1.6l1.7 3.9 3.9 1.7-3.9 1.7L8 12.8 6.3 8.9 2.4 7.2l3.9-1.7z"'
-      + ' fill="currentColor"/>';
-  icon.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
-    + shape + '</svg>';
   icon.title = kind || 'agent';
+  const mark = AGENT_MARKS[String(kind || '').toLowerCase()];
+  if (mark) {
+    const image = document.createElement('img');
+    image.className = 'chip-logo';
+    image.src = mark;
+    image.alt = '';
+    image.draggable = false;
+    icon.appendChild(image);
+    return icon;
+  }
+  icon.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
+    + '<path d="M8 1.6l1.7 3.9 3.9 1.7-3.9 1.7L8 12.8 6.3 8.9 2.4 7.2l3.9-1.7z"'
+    + ' fill="currentColor"/></svg>';
   return icon;
 }
 
