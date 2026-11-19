@@ -4293,15 +4293,16 @@ async function watchTool(args, callId) {
   }
   var target = watchTarget(args);
   if (!target || !['add', 'remove'].includes(action)) return fail(t('watchInvalid'));
-  // Capture baseline with the same host-managed credentials as subsequent reads.
-  var account;
-  var baseline;
-  if (action === 'add') {
-    account = await watchAccount(callId);
-    baseline = await watchSnapshot(target, callId);
-    if (await watchAccount(callId) !== account) return fail(t('watchUnavailable'));
-  }
+  // Enter the queue before the baseline reads so add/remove run in call arrival
+  // order; a later remove must overwrite an add still reading its baseline.
   return enqueuePr(async function () {
+    var account;
+    var baseline;
+    if (action === 'add') {
+      account = await watchAccount(callId);
+      baseline = await watchSnapshot(target, callId);
+      if (await watchAccount(callId) !== account) return fail(t('watchUnavailable'));
+    }
     var kv = await readKv(true);
     var watches = readWatches(kv);
     var index = watches.findIndex(function (item) { return sameWatch(item, target); });

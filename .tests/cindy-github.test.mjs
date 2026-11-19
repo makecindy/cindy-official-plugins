@@ -86,7 +86,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.30');
+  assert.equal(manifest.version, '1.5.31');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -2158,6 +2158,19 @@ test('read failures map to the documented problem classes and clear on recovery'
     await f.timers.shift().fn();
     assert.equal(f.saved().githubStatusWatches[0].problem, undefined, `recovery ${status}`);
   }
+});
+
+test('a later remove wins over an add still reading its baseline', async () => {
+  const f = statusWatchFixture();
+  f.holdPath('/issues/2');
+  const adding = f.tool('add', 'issue', 2);
+  await flushAsync();
+  const removing = f.tool('remove', 'issue', 2);
+  await flushAsync();
+  f.releasePath();
+  assert.equal((await removing).ok, true);
+  assert.equal((await adding).ok, true);
+  assert.equal(f.saved().githubStatusWatches.length, 0);
 });
 
 test('an account switch at the final check persists account_changed', async () => {
