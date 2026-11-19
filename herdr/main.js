@@ -290,11 +290,16 @@ function hostBody(call) {
   if (detail) {
     try { body = JSON.parse(detail); parsed = true; } catch (error) { body = null; }
   }
-  if (call && call.isError) return { ok: false, body: body, detail: detail };
-  // 只认「解析成功且 ok === true」的回包：空正文或不是 JSON 都按失败处理，
-  // 否则会把未知结果当成成功去新建/删除自动化。
-  if (!parsed || !body || body.ok !== true) return { ok: false, body: body, detail: detail };
-  return { ok: true, body: body, detail: detail };
+  if (call && call.isError) return { ok: false, parsed: parsed, body: body, detail: detail, explicit: true };
+  // 明确的业务拒绝（解析出来 ok:false）才算失败；解析不了/没有正文属于
+  // 「结果未知」——写操作可能已经生效，不能报成明确的业务失败。
+  if (parsed && body && body.ok === false) {
+    return { ok: false, parsed: parsed, body: body, detail: detail, explicit: true };
+  }
+  if (!parsed || !body || body.ok !== true) {
+    return { ok: false, parsed: parsed, body: body, detail: detail, explicit: false };
+  }
+  return { ok: true, parsed: parsed, body: body, detail: detail, explicit: true };
 }
 
 // 用户可能已经把那条自动化删了：NOT_FOUND 属于「没有了，可以重建」，
@@ -341,10 +346,24 @@ function schedulePayload(name, args) {
   };
 }
 
+// 整段「读 KV → 核对 → 创建/复用 → 写 KV」加互斥：两个会话并行 setup 时，
+// 都读到「没有 id」会各建一条，后写的 id 还会覆盖先建的。
+let setupLock = Promise.resolve();
+
+function withSetupLock(task) {
+  const result = setupLock.then(task, task);
+  setupLock = result.then(function () {}, function () {});
+  return result;
+}
+
 // 复用只认本插件自己记录的那一条：拿 KV 里的 id 去 schedule_get 取回来逐项核实，
 // 不再按名称从全部自动化里挑——按名称挑会把用户的同名定时任务接到事件桥上。
 // 认下来但会话不一致时，用 schedule_update 把绑定改成这次要求的，不新建重复任务。
 async function ensureAutomationSchedule(name, args) {
+  return withSetupLock(function () { return ensureAutomationScheduleUnlocked(name, args); });
+}
+
+async function ensureAutomationScheduleUnlocked(name, args) {
   // 读不到就抛：不能把「存储不可读」当成「没配过」再去新建一条。
   const kv = await readKv();
   const storedId = kv[SCHEDULE_ID_KEY];
@@ -381,8 +400,7 @@ async function ensureAutomationSchedule(name, args) {
           silentWhenIdle: Boolean(args.silentWhenIdle)
         }));
       }
-      const refreshed = await writeKv({ [SCHEDULE_ID_KEY]: storedId });
-      if (refreshed[SCHEDULE_ID_KEY] !== storedId) throw new Error(runtime.automationSaveFailed);
+      await persistScheduleId(storedId);
       cachedScheduleId = storedId;
       return storedId;
     }
@@ -395,18 +413,30 @@ async function ensureAutomationSchedule(name, args) {
   const body = createdOutcome.body;
   const scheduleId = body.data && body.data.id;
   if (!scheduleId) throw new Error(runtime.automationNoId);
-  // 先记缓存：即使接下来 KV 写失败，本会话的事件唤醒也用得上这条新的。
+  // 先记缓存：即使接下来 KV 失败，本会话的事件唤醒也用得上这条新的。
   cachedScheduleId = scheduleId;
-  const saved = await writeKv({ [SCHEDULE_ID_KEY]: scheduleId });
-  // 自动化已经确定创建了：不能报「请重试」（重试会再建一条），
-  // 要带着 id 报「已创建但没存上，先核对」。
+  await persistScheduleId(scheduleId);
+  return scheduleId;
+}
+
+// 自动化已经确定创建了：KV 读或写失败都不能报「请重试」（重试会再建一条），
+// 要带着已知 id 报「已创建但没存上，先核对」。
+async function persistScheduleId(scheduleId) {
+  let saved;
+  try {
+    saved = await writeKv({ [SCHEDULE_ID_KEY]: scheduleId });
+  } catch (error) {
+    throw new Error(
+      'HERDR_OUTCOME_UNKNOWN: 自动化已创建（id=' + scheduleId + '），但 id 没保存成功。'
+      + '请先核对自动化列表，不要直接重试重复创建。'
+    );
+  }
   if (saved[SCHEDULE_ID_KEY] !== scheduleId) {
     throw new Error(
       'HERDR_OUTCOME_UNKNOWN: 自动化已创建（id=' + scheduleId + '），但 id 没保存成功。'
       + '请先核对自动化列表，不要直接重试重复创建。'
     );
   }
-  return scheduleId;
 }
 
 // 旧任务已绑到别的会话、而这次要求不绑：宿主的 schedule_update 不接受
@@ -452,11 +482,12 @@ async function hostWrite(call) {
   }
   const outcome = hostBody(result);
   if (!outcome.ok) {
-    // 明确失败（isError / ok:false / 解析不了）：原样报业务错误。
-    if (result && result.isError) {
+    // 明确拒绝（外层 isError、正文 ok:false）→ 报业务错误；
+    // 回执解析不了 → 结果未知（写可能已经生效），提示先核对。
+    if (outcome.explicit) {
       throw new Error(runtime.automationFailed + (outcome.detail || runtime.automationUnknown));
     }
-    throw new Error(runtime.automationFailed + (outcome.detail || runtime.automationUnknown));
+    throw hostWriteFailure(outcome);
   }
   return outcome;
 }
@@ -801,7 +832,8 @@ const tools = {
         message: available.message || null,
         sessions: [],
         panes: [],
-        hint: runtime.tmuxMissingHint
+        // 只有真的没装才给安装提示；权限/超时/执行失败保留具体原因。
+        hint: available.reason === 'not-installed' ? runtime.tmuxMissingHint : null
       };
     }
     const sessions = await nodeRequest('tmux/sessions', {}, args.__callId);

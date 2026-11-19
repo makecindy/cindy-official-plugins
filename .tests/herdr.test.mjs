@@ -191,11 +191,16 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'readKv must fail loudly instead of returning an empty config'
   );
 
-  // 宿主回执要同时看外层 isError 和正文：只有解析成功且 ok===true 才算成功。
+  // 宿主回执：外层 isError 与正文 ok:false 是明确失败；解析不了是结果未知。
   assert.match(
     mainSource,
-    /function hostBody[\s\S]*?!parsed \|\| !body \|\| body\.ok !== true/,
-    'host results must be checked at both levels'
+    /function hostBody[\s\S]*?parsed && body && body\.ok === false[\s\S]*?explicit: true/,
+    'an explicit rejection must be recognised'
+  );
+  assert.match(
+    mainSource,
+    /function hostBody[\s\S]*?return \{ ok: false, parsed: parsed, body: body, detail: detail, explicit: false \}/,
+    'an unparseable receipt must not be treated as an explicit rejection'
   );
 
   // 普通调用也要带明确预算，让 worker 先于宿主到点、报出可核对的结果。
@@ -259,13 +264,6 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     mainSource,
     /mode === 'unsubscribe'[\s\S]*?subscriptionPreference = false/,
     'unsubscribe must record the preference'
-  );
-
-  // 回包必须解析成功且 ok===true，否则按失败处理（不能拿未知结果去新建/删除）。
-  assert.match(
-    mainSource,
-    /if \(!parsed \|\| !body \|\| body\.ok !== true\) return \{ ok: false/,
-    'unparseable host payloads must be treated as failures'
   );
 
   // 新建自动化的 silentWhenIdle 要跟工具契约一致（默认静默）。
@@ -353,6 +351,23 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the branch must key off the worker reason, not just available:false');
   assert.doesNotMatch(panelSource2, /tmux\.hint \|\|/,
     'the panel must not prefer the tool hint over its localized text');
+
+  // KV 失败（读或写）在拿到 id 之后也要带 id 报结果未知。
+  assert.match(mainSource, /async function persistScheduleId[\s\S]*?自动化已创建（id=/,
+    'a KV failure after a create must carry the created id');
+
+  // 写回执解析不了 = 结果未知；明确 ok:false / isError 才是业务失败。
+  assert.match(mainSource, /if \(outcome\.explicit\)[\s\S]*?hostWriteFailure\(outcome\)/,
+    'an unparseable write receipt must be outcome-unknown');
+
+  // 整段查找+创建要互斥，避免并行 setup 各建一条。
+  assert.match(mainSource, /return withSetupLock\(function \(\) \{ return ensureAutomationScheduleUnlocked/,
+    'the find-and-create flow must be serialized');
+
+  // 面板刷新按钮不能把 MouseEvent 当 force。
+  const panelSource3 = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSource3, /'#refresh'\)\.addEventListener\('click', function \(\) \{ refresh\(\); \}\)/,
+    'the refresh click handler must not pass the event as force');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(

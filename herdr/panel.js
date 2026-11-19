@@ -783,7 +783,9 @@ function setView(next) {
   refresh(true);
 }
 
-$('#refresh').addEventListener('click', refresh);
+// 不能直接把 refresh 当 handler：浏览器会把 MouseEvent 当 force 传进去，
+// 点击就会绕过「有刷新在跑就跳过」的合并保护。
+$('#refresh').addEventListener('click', function () { refresh(); });
 $('#detail-close').addEventListener('click', closeDetail);
 $('#detail-wrap').addEventListener('click', function () {
   outputWrap = !outputWrap;
