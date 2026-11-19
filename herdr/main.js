@@ -9,7 +9,13 @@ const CHANNEL = 'cindy-plugin-herdr';
 const SCHEDULE_ID_KEY = 'herdrScheduleId';
 // 同一个 agent 连续进入 blocked/done 时不要反复唤醒自动化。
 const TRIGGER_THROTTLE_MS = 30000;
+// 本插件创建的自动化，prompt 末尾都带这个标记；只有带标记、且 manual 的才复用，
+// 避免把用户已有的同名定时任务误当成自己的事件桥。
+const AUTOMATION_MARK = '[cindy-plugin:herdr]';
+const AUTOMATION_PROMPT_DEFAULT = 'Herdr 报告终端里的 agent 状态发生变化。请用 Herdr 插件的工具读取最新画面，'
+  + '判断发生了什么，只在需要用户决策或值得提醒时汇报。';
 let lastTriggerAt = 0;
+let triggerTimer = null;
 
 // 宿主给随包 Node 进程的单次请求上限是 120 秒，超时就断。长等待因此拆成一段段
 // 的短请求：每段最多 WAIT_CHUNK_MS，段内超时（Herdr 返回 timeout）就接着等下一段，
@@ -179,7 +185,19 @@ async function waitForAgentState(target, until, deadline, callId) {
   }
 }
 
-// 找一条同名自动化；没有就建一条「只由事件唤醒」的：
+// 判断一条已有自动化是不是本插件建的、且和本次要求一致。
+function isOurAutomation(item, name, args) {
+  if (!item || item.name !== name) return false;
+  if (item.manual !== true) return false;              // 不能复用会按时间自己跑的
+  const prompt = String(item.prompt || '');
+  if (prompt.indexOf(AUTOMATION_MARK) < 0) return false; // 不是本插件创建的
+  if (args.targetSessionId && item.targetSessionId && item.targetSessionId !== args.targetSessionId) {
+    return false;                                       // 绑定的会话不是用户要的那个
+  }
+  return true;
+}
+
+// 找本插件建过的同名自动化；没有就建一条「只由事件唤醒」的：
 // manual=true 表示不按时间自动触发（nextFireAt 为空），需要时由插件调用
 // schedule_run_now 唤醒，不会自己按小时跑。
 async function ensureAutomationSchedule(name, args) {
@@ -187,17 +205,17 @@ async function ensureAutomationSchedule(name, args) {
   if (!listed.isError) {
     const info = JSON.parse(listed.content[0].text);
     const schedules = (info.data && (info.data.schedules || info.data)) || [];
-    const existing = Array.isArray(schedules)
-      ? schedules.find(function (item) { return item && item.name === name; })
-      : null;
-    if (existing && existing.id) {
-      await writeKv({ [SCHEDULE_ID_KEY]: existing.id });
-      return existing.id;
+    if (Array.isArray(schedules)) {
+      const existing = schedules.find(function (item) { return isOurAutomation(item, name, args); });
+      if (existing && existing.id) {
+        await writeKv({ [SCHEDULE_ID_KEY]: existing.id });
+        return existing.id;
+      }
     }
   }
   const created = await cindy.host.call('cindy_scheduler', 'schedule_create', {
     name: name,
-    prompt: args.prompt || 'Herdr 报告终端里的 agent 状态发生变化。请用 Herdr 插件的工具读取最新画面，判断发生了什么，只在需要用户决策或值得提醒时汇报。',
+    prompt: (args.prompt || AUTOMATION_PROMPT_DEFAULT) + '\n\n' + AUTOMATION_MARK,
     // cronExpr / timezone 是 schema 必填项；manual=true 时它不会真的按时间跑，
     // 只是留着，用户以后想恢复定时触发时不用重填。
     cronExpr: '0 9 * * *',
@@ -222,18 +240,31 @@ async function ensureAutomationSchedule(name, args) {
 
 // Herdr 报告 agent 进入 blocked/done 时，让宿主调度器跑一次那条自动化。
 // 由宿主负责投递，插件不持有也不外发任何地址。
+// 限流窗口内到达的新事件不丢弃：合并成一次延后执行，否则后一个分屏的
+// blocked/done 会一直没人处理。
 async function triggerAutomation() {
+  let scheduleId;
   try {
     const kv = await readKv();
-    const scheduleId = kv[SCHEDULE_ID_KEY];
-    if (!scheduleId) return;
-    const now = Date.now();
-    if (now - lastTriggerAt < TRIGGER_THROTTLE_MS) return;
+    scheduleId = kv[SCHEDULE_ID_KEY];
+  } catch (error) {
+    return;
+  }
+  if (!scheduleId) return;
+  const now = Date.now();
+  if (triggerTimer) return;                       // 已经排了延后执行
+  if (now - lastTriggerAt >= TRIGGER_THROTTLE_MS) {
     lastTriggerAt = now;
     await cindy.host.call('cindy_scheduler', 'schedule_run_now', { id: scheduleId });
-  } catch (error) {
-    void error;
+    return;
   }
+  const wait = TRIGGER_THROTTLE_MS - (now - lastTriggerAt);
+  triggerTimer = setTimeout(async function () {
+    triggerTimer = null;
+    lastTriggerAt = Date.now();
+    await cindy.host.call('cindy_scheduler', 'schedule_run_now', { id: scheduleId });
+  }, wait);
+  if (triggerTimer.unref) triggerTimer.unref();
 }
 
 

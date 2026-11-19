@@ -236,6 +236,7 @@ body {
   align-items: center;
   gap: 6px;
   max-width: 100%;
+  min-width: 0;
   padding: 4px 9px;
   border: 1px solid var(--pc-line);
   border-radius: 999px;
@@ -290,16 +291,20 @@ body {
 
 .chip-name {
   font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .chip-meta {
   color: var(--pc-faint);
   font-size: 11px;
+  min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 12ch;
 }
 
 .chip-state {

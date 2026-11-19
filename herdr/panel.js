@@ -1,6 +1,7 @@
 'use strict';
 
 const channel = new BroadcastChannel('cindy-plugin-herdr');
+const lib = window.HerdrPanelLib;
 const $ = function (selector) { return document.querySelector(selector); };
 
 // 面板文案跟随宿主语言：只读 /app-context 的 uiLocale ?? locale，插件没有的语言回退英文。
@@ -256,14 +257,6 @@ function agentIcon(kind) {
   return icon;
 }
 
-// agent pane 上显示目录名（去掉路径，只留最后一段），放不下时 hover 看完整信息。
-function dirName(path) {
-  const text = String(path || '').replace(/\/+$/, '');
-  if (!text) return '';
-  const parts = text.split('/');
-  return parts[parts.length - 1] || text;
-}
-
 function makeChip(options) {
   const chip = document.createElement('button');
   chip.type = 'button';
@@ -283,6 +276,9 @@ function makeChip(options) {
     meta.textContent = options.meta;
     chip.appendChild(meta);
   }
+  // 颜色之外再给一份可读的状态文字：颜色分辨不出时也能判断，
+  // 读屏软件也能直接读到完整信息。
+  if (options.ariaLabel) chip.setAttribute('aria-label', options.ariaLabel);
   if (options.onSelect) chip.addEventListener('click', options.onSelect);
   return chip;
 }
@@ -348,27 +344,10 @@ async function loadLocale() {
   localize();
 }
 
-// 特殊键直接发给终端：方向键、翻页、Home/End、Tab、Esc 和 Ctrl 组合。
-const HERDR_KEYS = {
-  ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
-  PageUp: 'pageup', PageDown: 'pagedown', Home: 'home', End: 'end',
-  Tab: 'tab', Escape: 'esc', Backspace: 'backspace', Delete: 'delete'
-};
-const TMUX_KEYS = {
-  ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
-  PageUp: 'PageUp', PageDown: 'PageDown', Home: 'Home', End: 'End',
-  Tab: 'Tab', Escape: 'Escape', Backspace: 'BSpace', Delete: 'DC'
-};
-
+// 特殊键直接发给终端：上下（历史）、翻页、Tab、Esc，以及 Ctrl/Meta 组合。
+// 退格、删除、左右、Home/End 属于文本编辑，只作用于还没提交的草稿。
 function specialKey(event) {
-  const table = view === 'tmux' ? TMUX_KEYS : HERDR_KEYS;
-  let name = table[event.key];
-  if (!name) return null;
-  if (event.ctrlKey || event.metaKey) {
-    if (event.key.length !== 1) return null;
-    name = (view === 'tmux' ? 'C-' : 'ctrl+') + event.key.toLowerCase();
-  }
-  return name;
+  return lib.specialKey(view, event);
 }
 
 async function forwardKey(event) {
@@ -379,11 +358,11 @@ async function forwardKey(event) {
     if (view === 'tmux') {
       if (!selectedTarget) return true;
       await request('tmux_send', { target: selectedTarget, keys: [key] });
-      await openTmuxPane({ target: selectedTarget });
+      await refreshTerminal();
     } else {
       if (!selectedPane) return true;
       await request('send', { pane_id: selectedPane.pane_id, keys: [key] });
-      await openPane(selectedPane);
+      await refreshTerminal();
     }
   } catch (error) {
     renderOutput(error.message || T.sendFailed);
@@ -403,14 +382,30 @@ async function submitLine() {
       if (!selectedTarget) return;
       await request('tmux_send', { target: selectedTarget, text: text });
       await request('tmux_send', { target: selectedTarget, keys: ['Enter'] });
-      await openTmuxPane({ target: selectedTarget });
+      await refreshTerminal();
     } else {
       if (!selectedPane) return;
       await request('send', { pane_id: selectedPane.pane_id, text: text });
-      await openPane(selectedPane);
+      await refreshTerminal();
     }
   } catch (error) {
     renderOutput(error.message || T.sendFailed);
+  }
+}
+
+// 重读当前 pane 的画面；不清空输入框——发送返回前用户可能已经开始打下一条。
+async function refreshTerminal() {
+  const token = readToken + 1;
+  readToken = token;
+  try {
+    const result = view === 'tmux'
+      ? await request('tmux_read', { target: selectedTarget })
+      : await request('read', { pane_id: selectedPane.pane_id, source: 'visible', lines: 80 });
+    if (token !== readToken) return;
+    renderOutput(result.text || T.noOutput);
+  } catch (error) {
+    if (token !== readToken) return;
+    renderOutput(error.message || T.readFailed);
   }
 }
 
@@ -440,9 +435,11 @@ function renderHerdr() {
       chips.appendChild(makeChip({
         icon: pane.agent ? pane.agent : null,
         name: pane.agent ? (dirName(pane.cwd) || paneDisplayName(pane)) : paneDisplayName(pane),
-        meta: pane.agent ? '' : (pane.cwd ? dirName(pane.cwd) : pane.title || ''),
+        meta: pane.agent ? statusLabel(pane.agent_status) : (pane.cwd ? dirName(pane.cwd) : pane.title || ''),
         dotClass: paneDotClass(pane),
         title: [pane.agent, pane.title, pane.cwd, pane.pane_id].filter(Boolean).join(' · '),
+        ariaLabel: [pane.agent, dirName(pane.cwd), statusLabel(pane.agent_status), pane.title, pane.pane_id]
+          .filter(Boolean).join(' · '),
         on: Boolean(selectedPane && selectedPane.pane_id === pane.pane_id),
         onSelect: function () { openPane(pane); }
       }));
@@ -541,6 +538,8 @@ function renderTmux() {
         icon: null,
         dotClass: tmuxDotClass(pane),
         title: [pane.path, pane.target].filter(Boolean).join(' · '),
+        ariaLabel: [pane.target, statusLabelForTmux(pane), pane.command, pane.path]
+          .filter(Boolean).join(' · '),
         on: selectedTarget === pane.target,
         onSelect: function () { openTmuxPane(pane); }
       }));
@@ -577,7 +576,6 @@ async function openTmuxPane(pane) {
     .filter(Boolean).join(' · ');
   setDetailState(tmuxDotClass(pane), statusLabelForTmux(pane));
   setComposerTarget(pane.target);
-  $('#term-input').value = '';
   $('#term-input').focus();
   renderOutput('');
   $('#detail-body').textContent = T.loading;
@@ -606,37 +604,38 @@ async function refresh() {
 }
 
 
-// 中日韩字符在多数系统上会掉到比例字体，终端的列就会歪。把宽字符单独包一层、
-// 固定占 2 个等宽单元格（和真实终端的口径一致），其余字符保持普通文本，
-// 这样换行和性能都不受影响。内容很大或没有宽字符时直接走纯文本。
-const WIDE_CHAR = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE6F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F300}-\u{1FAFF}\u{20000}-\u{2FA1F}]/u;
-const CELL_CAP = 20000;
+// 宽字符单独占 2 个等宽单元格（和真实终端的口径一致），按完整显示字符分组，
+// 组合 emoji 不会被拆开；内容大也不裁剪，只是宽字符节点有预算。
+const WIDE_CELL_BUDGET = 20000;
 
 function renderOutput(text) {
   const body = $('#detail-body');
   body.textContent = '';
   if (!text) return;
-  const source = text.length > CELL_CAP ? text.slice(text.length - CELL_CAP) : text;
-  if (!WIDE_CHAR.test(source)) {
+  const source = String(text);
+  if (!lib.WIDE_CHAR.test(source)) {
+    // 没有宽字符：整段按纯文本渲染，一个节点都不建。
     body.appendChild(document.createTextNode(source));
     return;
   }
   const fragment = document.createDocumentFragment();
   let plain = '';
+  let budget = WIDE_CELL_BUDGET;
   const flush = function () {
     if (!plain) return;
     fragment.appendChild(document.createTextNode(plain));
     plain = '';
   };
-  for (const char of source) {
-    if (WIDE_CHAR.test(char)) {
+  for (const unit of lib.graphemes(source)) {
+    if (budget > 0 && lib.isWideGrapheme(unit)) {
       flush();
+      budget -= 1;
       const cell = document.createElement('span');
       cell.className = 'wide';
-      cell.textContent = char;
+      cell.textContent = unit;
       fragment.appendChild(cell);
     } else {
-      plain += char;
+      plain += unit;
     }
   }
   flush();
