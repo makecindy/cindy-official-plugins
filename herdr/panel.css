@@ -20,6 +20,10 @@
   --pc-blocked: #d93a3a;
   --pc-done: #12a150;
   --pc-accent: #2fa85a;
+  /* 终端输出等宽栈：有 CJK 等宽字体的机器上中文也能对齐。 */
+  --pc-mono: "FiraCode Nerd Font Mono", "JetBrains Mono", "Cascadia Code",
+    "Noto Sans Mono CJK SC", "Sarasa Mono SC", "Source Han Sans Mono",
+    "DejaVu Sans Mono", "Liberation Mono", ui-monospace, monospace;
 }
 
 * {
@@ -396,17 +400,38 @@ body {
   white-space: nowrap;
 }
 
+/* 终端输出：紧凑行距、真等宽。默认自动换行（侧栏很窄），
+   也可以切成不换行，保持终端原本的列对齐。 */
 .output {
   margin: 0;
   padding: 10px;
   max-height: 38vh;
   overflow: auto;
+  overscroll-behavior: contain;
   background: var(--pc-sunken);
   color: var(--pc-text);
-  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--pc-mono);
+  font-size: 12px;
+  line-height: 1.4;
+  font-variant-ligatures: none;
+  tab-size: 2;
   white-space: pre-wrap;
-  word-break: break-word;
-  tab-size: 4;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.output.nowrap {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+/* 中日韩字形在多数系统上不是等宽字体，会把终端里的列顶歪。
+   宽字符单独占 2 个等宽单元格（终端的通行口径），其余仍是普通文本。 */
+.output .wide {
+  display: inline-block;
+  width: 2ch;
+  text-align: center;
+  overflow: visible;
 }
 
 .composer {
@@ -427,7 +452,9 @@ body {
 
 .composer textarea {
   width: 100%;
-  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--pc-mono);
+  font-size: 12px;
+  line-height: 1.5;
   padding: 7px 8px;
   border-radius: 8px;
   border: 1px solid var(--pc-line);

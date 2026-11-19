@@ -24,6 +24,8 @@ const strings = {
     panes: '个 pane',
     sessions: '个 session',
     collapse: '收起',
+    wrapOn: '自动换行',
+    wrapOff: '不换行',
     loading: '读取中…',
     noOutput: '(没有输出)',
     readFailed: '读取失败',
@@ -55,6 +57,8 @@ const strings = {
     panes: 'pane(s)',
     sessions: 'session(s)',
     collapse: 'Collapse',
+    wrapOn: 'Wrap',
+    wrapOff: 'No wrap',
     loading: 'Loading…',
     noOutput: '(no output)',
     readFailed: 'Could not read',
@@ -86,6 +90,8 @@ const strings = {
     panes: 'pane',
     sessions: 'セッション',
     collapse: '閉じる',
+    wrapOn: '自動折り返し',
+    wrapOff: '折り返さない',
     loading: '読み込み中…',
     noOutput: '（出力なし）',
     readFailed: '読み込みに失敗',
@@ -117,6 +123,8 @@ const strings = {
     panes: '개 창',
     sessions: '개 세션',
     collapse: '접기',
+    wrapOn: '자동 줄바꿈',
+    wrapOff: '줄바꿈 안 함',
     loading: '읽는 중…',
     noOutput: '(출력 없음)',
     readFailed: '읽지 못했습니다',
@@ -277,7 +285,19 @@ function localize() {
   $('#composer-text').placeholder = T.placeholder;
   $('#detail-close').setAttribute('aria-label', T.collapse);
   $('#refresh').setAttribute('aria-label', T.updated);
+  syncWrapButton();
   syncComposerButtons();
+}
+
+// 终端输出默认自动换行；切到「不换行」可以保住终端原本的列对齐。
+let outputWrap = true;
+
+function syncWrapButton() {
+  const button = $('#detail-wrap');
+  button.textContent = outputWrap ? T.wrapOn : T.wrapOff;
+  button.setAttribute('aria-pressed', outputWrap ? 'true' : 'false');
+  const output = $('#detail-body');
+  output.classList.toggle('nowrap', !outputWrap);
 }
 
 // tmux 的文本发送是字面量，不会自己回车，所以主按钮是「发送并回车」；
@@ -379,14 +399,15 @@ async function openPane(pane) {
     .filter(Boolean).join(' · ');
   setDetailState(String(pane.agent_status || 'unknown').toLowerCase(), statusLabel(pane.agent_status));
   setComposerTarget([pane.label || pane.pane_id, pane.agent].filter(Boolean).join(' · '));
+  renderOutput('');
   $('#detail-body').textContent = T.loading;
   try {
     const result = await request('read', { pane_id: pane.pane_id, source: 'visible', lines: 80 });
     if (token !== readToken) return;
-    $('#detail-body').textContent = result.text || T.noOutput;
+    renderOutput(result.text || T.noOutput);
   } catch (error) {
     if (token !== readToken) return;
-    $('#detail-body').textContent = error.message || T.readFailed;
+    renderOutput(error.message || T.readFailed);
   }
 }
 
@@ -486,14 +507,15 @@ async function openTmuxPane(pane) {
     .filter(Boolean).join(' · ');
   setDetailState(pane.dead ? 'blocked' : pane.active ? 'working' : 'unknown', statusLabelForTmux(pane));
   setComposerTarget(pane.target);
+  renderOutput('');
   $('#detail-body').textContent = T.loading;
   try {
     const result = await request('tmux_read', { target: pane.target });
     if (token !== readToken) return;
-    $('#detail-body').textContent = result.text || T.noOutput;
+    renderOutput(result.text || T.noOutput);
   } catch (error) {
     if (token !== readToken) return;
-    $('#detail-body').textContent = error.message || T.readFailed;
+    renderOutput(error.message || T.readFailed);
   }
 }
 
@@ -534,8 +556,46 @@ async function send(submit) {
       await openPane(selectedPane || { pane_id: paneId });
     }
   } catch (error) {
-    $('#detail-body').textContent = error.message || T.sendFailed;
+    renderOutput(error.message || T.sendFailed);
   }
+}
+
+
+// 中日韩字符在多数系统上会掉到比例字体，终端的列就会歪。把宽字符单独包一层、
+// 固定占 2 个等宽单元格（和真实终端的口径一致），其余字符保持普通文本，
+// 这样换行和性能都不受影响。内容很大或没有宽字符时直接走纯文本。
+const WIDE_CHAR = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE6F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F300}-\u{1FAFF}\u{20000}-\u{2FA1F}]/u;
+const CELL_CAP = 20000;
+
+function renderOutput(text) {
+  const body = $('#detail-body');
+  body.textContent = '';
+  if (!text) return;
+  const source = text.length > CELL_CAP ? text.slice(text.length - CELL_CAP) : text;
+  if (!WIDE_CHAR.test(source)) {
+    body.appendChild(document.createTextNode(source));
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  let plain = '';
+  const flush = function () {
+    if (!plain) return;
+    fragment.appendChild(document.createTextNode(plain));
+    plain = '';
+  };
+  for (const char of source) {
+    if (WIDE_CHAR.test(char)) {
+      flush();
+      const cell = document.createElement('span');
+      cell.className = 'wide';
+      cell.textContent = char;
+      fragment.appendChild(cell);
+    } else {
+      plain += char;
+    }
+  }
+  flush();
+  body.appendChild(fragment);
 }
 
 function setDetailState(dotClass, label) {
@@ -575,6 +635,10 @@ $('#refresh').addEventListener('click', refresh);
 $('#composer-send').addEventListener('click', function () { send(false); });
 $('#composer-submit').addEventListener('click', function () { send(true); });
 $('#detail-close').addEventListener('click', closeDetail);
+$('#detail-wrap').addEventListener('click', function () {
+  outputWrap = !outputWrap;
+  syncWrapButton();
+});
 $('#composer-text').addEventListener('keydown', function (event) {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
