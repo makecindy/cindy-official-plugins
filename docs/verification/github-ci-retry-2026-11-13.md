@@ -729,6 +729,40 @@ actual tested local runtime remains 97d540e / 1.5.19. Genuine denied-rerun recov
 current UI/read-ordering and inherited native-follow runtime gaps remain; green
 CI or resolved threads do not waive them.
 
+## Synchronize main #355 — source 1.5.34 (2026-11-19)
+
+Round 25 merges main `84b1ba819f13b06b87fcfc84883b7538551bde54` (#355) into
+the same feature branch. Only manifest/release-note and version-assertion
+conflicts required resolution. Source/package remains 1.5.34, above main's
+1.5.21; the merged release notes retain both changes.
+
+The upstream snapshot failure path reports DNS, authentication, rate limit,
+timeout or unknown causes before CLI login suggestions, retains full stderr,
+and emits the optional diagnosis/failure count/actual next-probe timestamp.
+This snapshot diagnosis is separate from the verified CI-retry failure key.
+Existing thresholds, backoff ownership and exit-code workflow are retained.
+The CI parser, raw preservation/slot functions, budget operation and `runGate`
+coordinator were compared byte-for-byte with a17f39c and are unchanged. Main.js,
+settings, Node helper, locales and the CI-retry guide are also unchanged; Node,
+Host tools, network and minimum-version declarations still match main.
+
+The four required repository suites plus plugin tests passed: 389 pass, 19
+Windows platform skips, 0 failures in 118.5 seconds. This includes upstream's
+isolated gate-process cases for DNS with login suggestions, HTTP 401/429,
+timeout and unknown failure; these are local fixtures, not live Cindy fault
+injection. Manifest and in-memory package/content checks passed: staged tree
+`4d2253a44fb06005110cdba01e4c2d7eaf695972`, 32 files, 229942 compressed bytes,
+637351 expanded bytes, all contents match Git blobs; no package file retained.
+
+No plugin or client was installed, no real preference/credential/permission/quota
+changed, and no recovery rewrite, PR merge or publication occurred. The original
+source-checkout follower remains active. The last actually tested local runtime
+is still 97d540e / 1.5.19. Current source 1.5.34 differs from a17f39c despite the
+same version; use its commit identity. Real 403 recovery, UI/read ordering,
+inherited native follow-up and client diagnosis presentation remain unverified.
+Maintainer comment 7005560347 still requires genuine recovery evidence and then
+a review of the current head; green CI and resolved threads do not supply it.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected
