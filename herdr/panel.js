@@ -228,15 +228,29 @@ function statusLabelForTmux(pane) {
 
 // agent pane 用 chip 呈现：一颗 chip 就是「一个正在跑的东西」，
 // 名称、状态点都在里面，扫一眼就知道谁在忙。
-function agentIcon() {
+// 每种 agent 一个小图标：都是通用几何形，不冒充任何品牌 Logo。
+function agentIcon(kind) {
   const icon = document.createElement('span');
   icon.className = 'chip-icon';
+  const shape = kind === 'codex'
+    ? '<path d="M5.5 4L2 8l3.5 4" fill="none" stroke="currentColor" stroke-width="1.6"'
+      + ' stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<path d="M10.5 4L14 8l-3.5 4" fill="none" stroke="currentColor" stroke-width="1.6"'
+      + ' stroke-linecap="round" stroke-linejoin="round"/>'
+    : '<path d="M8 1.6l1.7 3.9 3.9 1.7-3.9 1.7L8 12.8 6.3 8.9 2.4 7.2l3.9-1.7z"'
+      + ' fill="currentColor"/>';
   icon.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
-    + '<path d="M8 1.5l1.6 3.6 3.6 1.6-3.6 1.6L8 11.9 6.4 8.3 2.8 6.7l3.6-1.6z"'
-    + ' fill="currentColor"/>'
-    + '<path d="M12.6 11.2l.8 1.8 1.8.8-1.8.8-.8 1.8-.8-1.8-1.8-.8 1.8-.8z"'
-    + ' fill="currentColor" opacity=".7"/></svg>';
+    + shape + '</svg>';
+  icon.title = kind || 'agent';
   return icon;
+}
+
+// agent pane 上显示目录名（去掉路径，只留最后一段），放不下时 hover 看完整信息。
+function dirName(path) {
+  const text = String(path || '').replace(/\/+$/, '');
+  if (!text) return '';
+  const parts = text.split('/');
+  return parts[parts.length - 1] || text;
 }
 
 function makeChip(options) {
@@ -244,7 +258,7 @@ function makeChip(options) {
   chip.type = 'button';
   chip.className = 'chip' + (options.on ? ' on' : '');
   chip.title = options.title || '';
-  if (options.icon === 'agent') chip.appendChild(agentIcon());
+  if (options.icon) chip.appendChild(agentIcon(options.icon));
   const dot = document.createElement('span');
   dot.className = 'dot ' + (options.dotClass || 'unknown');
   chip.appendChild(dot);
@@ -361,11 +375,11 @@ function renderHerdr() {
     chips.className = 'chips';
     for (const pane of panes) {
       chips.appendChild(makeChip({
-        icon: pane.agent ? 'agent' : null,
-        name: paneDisplayName(pane),
-        meta: pane.title || pane.cwd || '',
+        icon: pane.agent ? pane.agent : null,
+        name: pane.agent ? (dirName(pane.cwd) || paneDisplayName(pane)) : paneDisplayName(pane),
+        meta: pane.agent ? '' : (pane.cwd ? dirName(pane.cwd) : pane.title || ''),
         dotClass: paneDotClass(pane),
-        title: [pane.title, pane.cwd, pane.pane_id].filter(Boolean).join(' · '),
+        title: [pane.agent, pane.title, pane.cwd, pane.pane_id].filter(Boolean).join(' · '),
         on: Boolean(selectedPane && selectedPane.pane_id === pane.pane_id),
         onSelect: function () { openPane(pane); }
       }));
@@ -385,8 +399,8 @@ async function openPane(pane) {
   const token = readToken;
   renderHerdr();
   $('#detail').hidden = false;
-  $('#detail-title').textContent = pane.title || paneDisplayName(pane);
-  $('#detail-sub').textContent = [paneDisplayName(pane), pane.cwd]
+  $('#detail-title').textContent = pane.title || dirName(pane.cwd) || paneDisplayName(pane);
+  $('#detail-sub').textContent = [pane.agent, pane.cwd]
     .filter(Boolean).join(' · ');
   setDetailState(paneDotClass(pane), statusLabel(pane.agent_status));
   // 原始 pane id 只在真正能操作它的地方出现：发送目标行。

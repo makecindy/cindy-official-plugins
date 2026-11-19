@@ -260,9 +260,12 @@ body {
 
 .chip-icon {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
+  border-radius: 4px;
   color: var(--pc-muted);
 }
 
