@@ -7,6 +7,10 @@ const CHANNEL = 'cindy-plugin-herdr';
 // KV 里只放自动化 id（不是凭据）。Webhook 接收地址本身是能触发自动化的持有式
 // 凭据，所以插件从不保存、也不返回它：事件由插件交给宿主调度器去唤醒自动化。
 const SCHEDULE_ID_KEY = 'herdrScheduleId';
+// 用户显式退订过的偏好：宿主 wake 不能把它悄悄撤销。
+const SUBSCRIBED_KEY = 'herdrSubscribed';
+// null = 还没表态；true/false = 用户的选择（优先于 KV，因为 KV 可能读不到）。
+let subscriptionPreference = null;
 // 同一个 agent 连续进入 blocked/done 时不要反复唤醒自动化。
 const TRIGGER_THROTTLE_MS = 30000;
 // 本插件创建的自动化，prompt 末尾都带这个标记；只有带标记、且 manual 的才复用，
@@ -612,9 +616,13 @@ const tools = {
   async herdr_events(args) {
     const mode = args.mode || 'status';
     if (mode === 'subscribe') {
+      subscriptionPreference = true;
+      await persistSubscriptionPreference(true);
       return nodeRequest('herdr/subscribe', {}, args.__callId);
     }
     if (mode === 'unsubscribe') {
+      subscriptionPreference = false;
+      await persistSubscriptionPreference(false);
       return nodeRequest('herdr/unsubscribe', {}, args.__callId);
     }
     if (mode === 'wait') {
@@ -878,9 +886,28 @@ cindy.onHostMessage(async function (msg) {
   }
 });
 
-// Keep the event subscription alive for panel and webhook users.
+// 偏好尽量写进 KV（跨重启生效）；写不进去也不影响本次动作——
+// 会话内的 subscriptionPreference 已经记下了。
+async function persistSubscriptionPreference(wanted) {
+  try {
+    await writeKv({ [SUBSCRIBED_KEY]: wanted });
+  } catch (error) {
+    void error;
+  }
+}
+
+// Keep the event subscription alive for panel and webhook users ——
+// 除非用户显式退订过：wake 不能把那次退订撤销。
 async function ensureSubscription() {
   try {
+    if (subscriptionPreference === false) return;
+    if (subscriptionPreference === null) {
+      const kv = await readKv();
+      if (kv[SUBSCRIBED_KEY] === false) {
+        subscriptionPreference = false;
+        return;
+      }
+    }
     await nodeRequest('herdr/subscribe', {});
   } catch (error) {
     void error;

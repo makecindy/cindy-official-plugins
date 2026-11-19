@@ -245,6 +245,18 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the deferred trigger must re-read the schedule id'
   );
 
+  // 显式退订不能被 wake 撤销。
+  assert.match(
+    mainSource,
+    /subscriptionPreference === false[\s\S]*?return;/,
+    'ensureSubscription must honour an explicit unsubscribe'
+  );
+  assert.match(
+    mainSource,
+    /mode === 'unsubscribe'[\s\S]*?subscriptionPreference = false/,
+    'unsubscribe must record the preference'
+  );
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,
