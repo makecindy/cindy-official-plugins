@@ -408,6 +408,74 @@ test('changing only silentWhenIdle updates the existing schedule', async () => {
 });
 
 
+test('a lost schedule_create receipt is reported as outcome-unknown', async () => {
+  const mainSource = readFileSync(path.join(root, 'herdr', 'main.js'), 'utf8');
+  const kv = { herdrScheduleId: 'S1', herdrSubscribed: true };
+
+  const reply = (data) => Promise.resolve({
+    isError: false,
+    content: [{ type: 'text', text: JSON.stringify({ ok: true, data: data }) }]
+  });
+
+  const sandbox = {
+    console,
+    BroadcastChannel: class {
+      constructor() {}
+      addEventListener() {}
+      removeEventListener() {}
+      postMessage() {}
+    },
+    fetch: (url, opts) => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(opts && opts.method === 'PUT'
+        ? Object.assign({}, kv, JSON.parse(opts.body))
+        : Object.assign({}, kv))
+    }),
+    setTimeout: () => 0,
+    clearTimeout() {},
+    setInterval: () => 0,
+    clearInterval() {},
+    Date, Math, JSON, Object, Array, String, Number, Boolean, Error, Promise, RegExp, Intl,
+    cindy: {
+      request: () => Promise.resolve({ context: { locale: 'zh-CN' } }),
+      send: () => Promise.resolve(),
+      onHostMessage: () => {},
+      node: { request: () => Promise.resolve({ ok: true, result: { subscribed: true } }) },
+      host: {
+        call: (tool, name) => {
+          if (name === 'schedule_get') {
+            // 记录里的自动化已经被用户删了：NOT_FOUND，允许重建。
+            return Promise.resolve({
+              isError: true,
+              content: [{ type: 'text', text: JSON.stringify({ ok: false, errorCode: 'NOT_FOUND' }) }]
+            });
+          }
+          if (name === 'schedule_create') return Promise.reject(new Error('transport lost'));
+          return reply(null);
+        }
+      }
+    }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(mainSource, sandbox, { filename: 'main.js' });
+
+  await assert.rejects(
+    () => sandbox.ensureAutomationSchedule('Herdr 事件处理', {}),
+    (error) => {
+      // 不能是普通 HERDR_REQUEST_FAILED：必须让调用方先核对再重试。
+      assert.match(String(error.message), /^HERDR_OUTCOME_UNKNOWN/,
+        `expected outcome-unknown, got: ${error.message}`);
+      assert.match(String(error.message), /核对/,
+        'the message must tell the caller to reconcile first');
+      return true;
+    },
+    'a lost create receipt must be outcome-unknown, not a plain failure'
+  );
+});
+
 test('a subscription handover delivers each event exactly once', async () => {
   const dir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'herdr-handover-'));
   const socketPath = path.join(dir, 'herdr.sock');
