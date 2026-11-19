@@ -22,8 +22,8 @@
 - **面板** —— 右侧栏实时列出工作区、分屏与 agent 状态，点一下可看画面并直接
   输入。工具栏上的 Herdr / tmux 切换用同样的方式列出 tmux 的 session 与 pane。
 - **事件桥** —— 订阅 Herdr 事件，agent 进入 blocked 或 done 时弹 Cindy 轻提示
-  并点亮未读角标；还可以用 Webhook 唤醒一条 Cindy 自动化，让 Cindy 不用再
-  定时轮询。
+  并点亮未读角标；同时请宿主调度器跑一次 Cindy 自动化，让 Cindy 不用再定时
+  轮询。插件不持有也不外发任何 Webhook 地址，投递由宿主完成。
 
 ## 使用前提
 
@@ -36,9 +36,10 @@
 
 装好插件后，直接说「看一下 Herdr 现在在跑什么」。如果希望 Cindy 在终端事件
 发生时主动醒来而不用轮询，调一次 herdr_automation_setup 工具即可，它会创建
-一条 webhook 触发的自动化并返回 id 与接收地址。
+一条只在 Herdr 报告 agent blocked/done 时才运行的自动化（不按时间自己跑），
+并返回 id。
 
 ## 权限说明
 
 插件带一个随包 Node 工作进程，权限等同当前登录用户；它只访问本机 Herdr
-socket、本机 tmux 可执行文件，以及搭建自动化事件桥时显示的那个 webhook 地址。
+socket 和本机 tmux 可执行文件，不建立任何网络连接——唤醒自动化走宿主调度器。

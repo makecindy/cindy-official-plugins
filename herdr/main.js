@@ -4,7 +4,12 @@
 // and bridges Herdr events into Cindy notifications and automation webhooks.
 
 const CHANNEL = 'cindy-plugin-herdr';
-const WEBHOOK_KEY = 'herdrWebhookUrl';
+// KV 里只放自动化 id（不是凭据）。Webhook 接收地址本身是能触发自动化的持有式
+// 凭据，所以插件从不保存、也不返回它：事件由插件交给宿主调度器去唤醒自动化。
+const SCHEDULE_ID_KEY = 'herdrScheduleId';
+// 同一个 agent 连续进入 blocked/done 时不要反复唤醒自动化。
+const TRIGGER_THROTTLE_MS = 30000;
+let lastTriggerAt = 0;
 
 // 宿主给随包 Node 进程的单次请求上限是 120 秒，超时就断。长等待因此拆成一段段
 // 的短请求：每段最多 WAIT_CHUNK_MS，段内超时（Herdr 返回 timeout）就接着等下一段，
@@ -24,7 +29,7 @@ const runtimeStrings = {
     agentFallback: 'agent',
     automationFailed: '创建自动化失败：',
     automationUnknown: '未知错误',
-    automationNoAddress: '自动化已创建，但读取不到 Webhook 接收地址，请在自动化详情里查看',
+    automationNoId: '自动化已创建，但没拿到 id，请到自动化列表里查看',
     waitTimeout: '等待超时',
     nodeFailed: 'Node 工作进程调用失败',
     missingTarget: '缺少 target（session、window 或 pane 的名字）',
@@ -39,7 +44,7 @@ const runtimeStrings = {
     agentFallback: 'agent',
     automationFailed: 'Could not create the automation: ',
     automationUnknown: 'unknown error',
-    automationNoAddress: 'The automation was created but its webhook address is unavailable; check the automation details',
+    automationNoId: 'The automation was created but returned no id; check the automation list',
     waitTimeout: 'Timed out',
     nodeFailed: 'The bundled Node worker call failed',
     missingTarget: 'target is required (session, window, or pane name)',
@@ -81,6 +86,10 @@ function replyTool(callId, ok, payload) {
     errorCode: payload.errorCode || 'HERDR_REQUEST_FAILED',
     message: payload.message || 'herdr 调用失败'
   });
+}
+
+function isUnknownOutcome(error) {
+  return /HERDR_OUTCOME_UNKNOWN/.test(String((error && error.message) || ''));
 }
 
 async function nodeRequest(method, params, callId, timeoutMs) {
@@ -169,6 +178,64 @@ async function waitForAgentState(target, until, deadline, callId) {
     }
   }
 }
+
+// 找一条同名自动化；没有就建一条「只由事件唤醒」的：
+// manual=true 表示不按时间自动触发（nextFireAt 为空），需要时由插件调用
+// schedule_run_now 唤醒，不会自己按小时跑。
+async function ensureAutomationSchedule(name, args) {
+  const listed = await cindy.host.call('cindy_scheduler', 'schedule_list', { query: name });
+  if (!listed.isError) {
+    const info = JSON.parse(listed.content[0].text);
+    const schedules = (info.data && (info.data.schedules || info.data)) || [];
+    const existing = Array.isArray(schedules)
+      ? schedules.find(function (item) { return item && item.name === name; })
+      : null;
+    if (existing && existing.id) {
+      await writeKv({ [SCHEDULE_ID_KEY]: existing.id });
+      return existing.id;
+    }
+  }
+  const created = await cindy.host.call('cindy_scheduler', 'schedule_create', {
+    name: name,
+    prompt: args.prompt || 'Herdr 报告终端里的 agent 状态发生变化。请用 Herdr 插件的工具读取最新画面，判断发生了什么，只在需要用户决策或值得提醒时汇报。',
+    // cronExpr / timezone 是 schema 必填项；manual=true 时它不会真的按时间跑，
+    // 只是留着，用户以后想恢复定时触发时不用重填。
+    cronExpr: '0 9 * * *',
+    timezone: args.timezone || 'Asia/Shanghai',
+    recurring: true,
+    manual: true,
+    agentKind: args.agentKind || 'codex',
+    targetSessionId: args.targetSessionId || undefined,
+    silentWhenIdle: args.silentWhenIdle === true,
+    notify: { desktop: true, feishu: false }
+  });
+  if (created.isError) {
+    const detail = created.content && created.content[0] && created.content[0].text;
+    throw new Error(runtime.automationFailed + (detail || runtime.automationUnknown));
+  }
+  const body = JSON.parse(created.content[0].text);
+  const scheduleId = body.data && body.data.id;
+  if (!scheduleId) throw new Error(runtime.automationNoId);
+  await writeKv({ [SCHEDULE_ID_KEY]: scheduleId });
+  return scheduleId;
+}
+
+// Herdr 报告 agent 进入 blocked/done 时，让宿主调度器跑一次那条自动化。
+// 由宿主负责投递，插件不持有也不外发任何地址。
+async function triggerAutomation() {
+  try {
+    const kv = await readKv();
+    const scheduleId = kv[SCHEDULE_ID_KEY];
+    if (!scheduleId) return;
+    const now = Date.now();
+    if (now - lastTriggerAt < TRIGGER_THROTTLE_MS) return;
+    lastTriggerAt = now;
+    await cindy.host.call('cindy_scheduler', 'schedule_run_now', { id: scheduleId });
+  } catch (error) {
+    void error;
+  }
+}
+
 
 // --- Tool implementations ------------------------------------------------
 
@@ -383,11 +450,7 @@ const tools = {
   async herdr_events(args) {
     const mode = args.mode || 'status';
     if (mode === 'subscribe') {
-      const kv = await readKv();
-      const result = await nodeRequest('herdr/subscribe', {
-        webhookUrl: kv[WEBHOOK_KEY] || null
-      }, args.__callId);
-      return result;
+      return nodeRequest('herdr/subscribe', {}, args.__callId);
     }
     if (mode === 'unsubscribe') {
       return nodeRequest('herdr/unsubscribe', {}, args.__callId);
@@ -419,70 +482,10 @@ const tools = {
 
   async herdr_automation_setup(args) {
     const wantedName = args.name || 'Herdr 事件处理';
-    const existing = await cindy.host.call('cindy_scheduler', 'schedule_webhook_list', {});
-    if (!existing.isError) {
-      const info = JSON.parse(existing.content[0].text);
-      const endpoints = (info.data && info.data.endpoints) || [];
-      const match = endpoints.find(function (item) { return item.scheduleName === wantedName; });
-      if (match && match.url) {
-        await writeKv({ [WEBHOOK_KEY]: match.url });
-        await nodeRequest('herdr/configure', { webhookUrl: match.url });
-        return {
-          schedule_id: match.scheduleId,
-          webhook_address: match.url,
-          reused: true
-        };
-      }
-    }
-    const created = await cindy.host.call('cindy_scheduler', 'schedule_create', {
-      name: wantedName,
-      targetSessionId: args.targetSessionId || undefined,
-      prompt: args.prompt || 'Herdr 报告终端里的 agent 状态发生变化。请用 Herdr 插件的工具读取最新画面，判断发生了什么，只在需要用户决策或值得提醒时汇报。',
-      cronExpr: args.cronExpr || '0 * * * *',
-      timezone: args.timezone || 'Asia/Shanghai',
-      recurring: true,
-      manual: true,
-      agentKind: args.agentKind || 'codex',
-      targetSessionId: args.targetSessionId || undefined,
-      silentWhenIdle: args.silentWhenIdle === true,
-      notify: { desktop: true, feishu: false },
-      webhookTrigger: {
-        events: ['pane_agent_status_changed'],
-        source: {
-          preset: 'standard-webhooks',
-          signed: false
-        }
-      }
-    });
-    if (created.isError) {
-      const detail = created.content && created.content[0] && created.content[0].text;
-      throw new Error(runtime.automationFailed + (detail || runtime.automationUnknown));
-    }
-    const body = JSON.parse(created.content[0].text);
-    const scheduleId = body.data && body.data.id;
-    if (!scheduleId) throw new Error('自动化创建成功但没有拿到 id');
-    let address = null;
-    const fetched = await cindy.host.call('cindy_scheduler', 'schedule_get', { id: scheduleId });
-    if (!fetched.isError) {
-      const info = JSON.parse(fetched.content[0].text);
-      const status = info.data && info.data.webhookStatus;
-      address = status && (status.url || status.address) ? (status.url || status.address) : null;
-    }
-    if (!address) {
-      const list = await cindy.host.call('cindy_scheduler', 'schedule_webhook_list', {});
-      if (!list.isError) {
-        const info = JSON.parse(list.content[0].text);
-        const endpoints = (info.data && info.data.endpoints) || [];
-        const match = endpoints.find(function (item) { return item.scheduleId === scheduleId; });
-        if (match && match.url) address = match.url;
-      }
-    }
-    if (!address) {
-      throw new Error(runtime.automationNoAddress);
-    }
-    await writeKv({ [WEBHOOK_KEY]: address });
-    await nodeRequest('herdr/configure', { webhookUrl: address });
-    return { schedule_id: scheduleId, webhook_address: address };
+    const scheduleId = await ensureAutomationSchedule(wantedName, args);
+    // 订阅要真的开着，否则事件到了也没人接。
+    await nodeRequest('herdr/subscribe', {}, args.__callId);
+    return { schedule_id: scheduleId, name: wantedName, trigger: 'event-only' };
   },
 
   async herdr_call(args) {
@@ -650,6 +653,7 @@ cindy.onHostMessage(async function (msg) {
       await replyTool(msg.callId, true, result);
     } catch (error) {
       await replyTool(msg.callId, false, {
+        errorCode: isUnknownOutcome(error) ? 'HERDR_OUTCOME_UNKNOWN' : 'HERDR_REQUEST_FAILED',
         message: error && error.message ? error.message : String(error)
       });
     }
@@ -687,6 +691,7 @@ cindy.onHostMessage(async function (msg) {
       } catch (error) {
         void error;
       }
+      await triggerAutomation();
     }
   }
 
@@ -700,8 +705,7 @@ cindy.onHostMessage(async function (msg) {
 // Keep the event subscription alive for panel and webhook users.
 async function ensureSubscription() {
   try {
-    const kv = await readKv();
-    await nodeRequest('herdr/subscribe', { webhookUrl: kv[WEBHOOK_KEY] || null });
+    await nodeRequest('herdr/subscribe', {});
   } catch (error) {
     void error;
   }

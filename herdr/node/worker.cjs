@@ -1,7 +1,6 @@
 'use strict';
 
 const net = require('node:net');
-const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
@@ -30,6 +29,17 @@ function fail(id, code, message) {
   reply({ jsonrpc: '2.0', id: id, error: { code: code, message: message } });
 }
 
+// 写操作「已发出但结果未知」的错误：调用方必须先核对终端实际状态，
+// 不要盲目重试（重试可能重复发送输入、任务或关闭操作）。
+function outcomeUnknown(method) {
+  const error = new Error(
+    'HERDR_OUTCOME_UNKNOWN: 请求已发出但未收到回包（' + method
+    + '）。操作可能已经生效，请先读取终端/分屏确认实际状态，再决定是否重试。'
+  );
+  error.code = 'HERDR_OUTCOME_UNKNOWN';
+  return error;
+}
+
 let requestCounter = 0;
 function nextId() {
   requestCounter += 1;
@@ -48,8 +58,14 @@ function callOnce(method, params, timeoutMs) {
     const socket = net.createConnection(socketPath());
     let buffer = '';
     let settled = false;
+    // sent 表示请求已经写进 socket。写进去之后超时或断线，就不能断言
+    // 「没执行」——写操作可能已经生效，只是回包没回来。这种情况必须报
+    // 「结果未知」，让调用方先核对实际状态再决定是否重试。
+    let sent = false;
     const timer = setTimeout(function () {
-      finish(reject, new Error('herdr 请求超时：' + method));
+      finish(reject, sent
+        ? outcomeUnknown(method)
+        : new Error('herdr 请求超时（未发出）：' + method));
     }, timeoutMs || DEFAULT_TIMEOUT_MS);
 
     function finish(fn, value) {
@@ -62,6 +78,7 @@ function callOnce(method, params, timeoutMs) {
 
     socket.on('connect', function () {
       sendLine(socket, { id: id, method: method, params: params || {} });
+      sent = true;
     });
 
     socket.on('data', function (chunk) {
@@ -93,9 +110,15 @@ function callOnce(method, params, timeoutMs) {
       }
     });
 
-    socket.on('error', function (error) { finish(reject, error); });
+    socket.on('error', function (error) {
+      finish(reject, sent ? outcomeUnknown(method) : error);
+    });
     socket.on('close', function () {
-      if (!settled) finish(reject, new Error('herdr 连接在返回前关闭：' + method));
+      if (!settled) {
+        finish(reject, sent
+          ? outcomeUnknown(method)
+          : new Error('herdr 连接在返回前关闭（未发出）：' + method));
+      }
     });
   });
 }
@@ -109,7 +132,6 @@ function callOnce(method, params, timeoutMs) {
 const subscription = {
   socket: null,
   paneIds: [],
-  webhookUrl: null,
   running: false,
   desired: false,
   attempts: 0,
@@ -205,59 +227,12 @@ function handleEvent(message) {
   const data = message.data || {};
   notify('herdr/event', { event: message.event, data: data });
   notifyEventWaiters(message.event, data);
-  const status = data.agent_status;
-  if (isStatusEvent(message.event)
-      && (status === 'blocked' || status === 'done')
-      && subscription.webhookUrl) {
-    postWebhook({
-      event: isStatusEvent(message.event) ? 'pane_agent_status_changed' : message.event,
-      pane_id: data.pane_id,
-      workspace_id: data.workspace_id,
-      agent_status: status,
-      agent: data.agent || null,
-      title: data.title || null
-    }).catch(function () {});
-  }
   // 分屏变了就重新订阅：新分屏的状态事件否则收不到，已关闭的分屏还会让整条
   // 订阅请求被 Herdr 拒绝。
   if (isPaneLifecycleEvent(message.event)) schedulePaneRefresh();
 }
 
-async function postWebhook(payload) {
-  const url = subscription.webhookUrl;
-  if (!url) return;
-  const body = JSON.stringify({
-    type: payload.event,
-    source: 'cindy-plugin:herdr',
-    data: payload
-  });
-  await new Promise(function (resolve) {
-    let settled = false;
-    const done = function () {
-      if (settled) return;
-      settled = true;
-      resolve();
-    };
-    const request = https.request(url, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'content-length': Buffer.byteLength(body)
-      }
-    }, function (response) {
-      response.resume();
-      response.on('end', done);
-    });
-    request.on('error', done);
-    request.setTimeout(10000, function () {
-      request.destroy();
-      done();
-    });
-    request.end(body);
-  });
-}
-
-async function openSubscription(webhookUrl) {
+async function openSubscription() {
   const previous = subscription.socket;
   subscription.socket = null;
   subscription.running = false;
@@ -267,7 +242,6 @@ async function openSubscription(webhookUrl) {
     try { previous.destroy(); } catch (error) { void error; }
   }
 
-  subscription.webhookUrl = webhookUrl || null;
   const paneIds = await listPaneIds();
   subscription.paneIds = paneIds;
   const entries = buildEntries(paneIds);
@@ -360,7 +334,7 @@ function scheduleReconnect() {
     withSubscriptionLock(async function () {
       if (!subscription.desired) return;
       try {
-        await openSubscription(subscription.webhookUrl);
+        await openSubscription();
       } catch (error) {
         scheduleReconnect();
       }
@@ -377,7 +351,7 @@ function schedulePaneRefresh() {
     withSubscriptionLock(async function () {
       if (!subscription.desired) return;
       try {
-        await openSubscription(subscription.webhookUrl);
+        await openSubscription();
       } catch (error) {
         scheduleReconnect();
       }
@@ -668,12 +642,11 @@ const handlers = {
     return callOnce('session.snapshot', {}, 30000);
   },
 
-  async 'herdr/subscribe'(params) {
+  async 'herdr/subscribe'() {
     subscription.desired = true;
-    const webhookUrl = params.webhookUrl || null;
     try {
       await withSubscriptionLock(async function () {
-        await openSubscription(webhookUrl);
+        await openSubscription();
       });
     } catch (error) {
       scheduleReconnect();
@@ -682,12 +655,11 @@ const handlers = {
     return { subscribed: true, panes: subscription.paneIds.length };
   },
 
-  async 'herdr/configure'(params) {
+  async 'herdr/configure'() {
     subscription.desired = true;
-    subscription.webhookUrl = params.webhookUrl || null;
     try {
       await withSubscriptionLock(async function () {
-        await openSubscription(subscription.webhookUrl);
+        await openSubscription();
       });
     } catch (error) {
       scheduleReconnect();
@@ -701,7 +673,7 @@ const handlers = {
     const timeoutMs = requested > 0 ? Math.min(requested, 60000) : 60000;
     if (!subscription.running) {
       await withSubscriptionLock(async function () {
-        await openSubscription(subscription.webhookUrl);
+        await openSubscription();
       });
     }
     return new Promise(function (resolve, reject) {
@@ -726,7 +698,6 @@ const handlers = {
     return {
       subscribed: subscription.running,
       panes: subscription.paneIds.length,
-      webhook: Boolean(subscription.webhookUrl),
       socket: socketPath()
     };
   },

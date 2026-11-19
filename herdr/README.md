@@ -18,9 +18,10 @@ a second backend, so one plugin is enough for both terminal managers.
   side; click a pane to read its output and type back into it. A Herdr / tmux
   switcher in the toolbar shows tmux sessions and panes the same way.
 - **Event bridge** — subscribes to Herdr events; blocked/done transitions raise a
-  Cindy toast and an unread badge, and can wake a Cindy automation through a
-  webhook so Cindy stops polling. The subscription is rebuilt when panes are
-  created or closed and reconnects on its own after Herdr restarts.
+  Cindy toast and an unread badge, and ask the host scheduler to run a Cindy
+  automation once, so Cindy stops polling. The plugin never holds or posts to a
+  webhook address; the host does the delivery. The subscription is rebuilt when
+  panes are created or closed and reconnects on its own after Herdr restarts.
 
 ## Limits
 
@@ -44,12 +45,13 @@ a second backend, so one plugin is enough for both terminal managers.
 
 Install the plugin, then ask the agent to look at what Herdr is running now. To
 let Cindy react to terminal events without polling, call the
-herdr_automation_setup tool once; it creates a webhook-triggered automation and
-returns its id and receiving address.
+herdr_automation_setup tool once; it creates an automation that only runs when
+Herdr reports a blocked or done agent, and returns its id. The automation never
+runs on a timer.
 
 ## Privacy
 
 The plugin runs a bundled Node worker with the permissions of your user
-account. It talks only to the local Herdr socket, the local tmux executable,
-and — when you set up the automation bridge — the webhook address shown in the
-setup result.
+account. It talks only to the local Herdr socket and the local tmux executable.
+The worker opens no network connection at all: waking the automation goes
+through the Cindy host scheduler.

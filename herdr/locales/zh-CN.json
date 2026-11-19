@@ -10,10 +10,10 @@
       "description": "读取一个分屏或 agent 的终端输出。source=visible 是当前画面，recent 是最近若干行，recent_unwrapped 适合看日志（忽略软换行）。"
     },
     "herdr_prompt": {
-      "description": "给 Herdr 里的 agent 发一段提示词。可选 wait_until 等待它进入某个状态（idle/working/blocked/done/unknown），等待时长受 timeout_ms 限制（默认 120000）。目标已经 blocked 时不会发送，直接返回。"
+      "description": "给 Herdr 里的 agent 发一段提示词。可选 wait_until 等待它进入某个状态（idle/working/blocked/done/unknown），等待时长受 timeout_ms 限制（默认 120000）。目标已经 blocked 时不会发送，直接返回。若返回 HERDR_OUTCOME_UNKNOWN，请先读取画面确认提示是否已送达。"
     },
     "herdr_send": {
-      "description": "向某个分屏发送文本或按键（keys 用 Herdr 键位写法，如 enter、ctrl+h、alt+x、f1、shift+tab）。"
+      "description": "向某个分屏发送文本或按键（keys 用 Herdr 键位写法，如 enter、ctrl+h、alt+x、f1、shift+tab）。若返回 HERDR_OUTCOME_UNKNOWN，说明请求已发出但没收到回包，可能已经生效，请先读取画面确认再决定是否重发。"
     },
     "herdr_wait": {
       "description": "等待某个 agent 进入指定状态，或等待某个分屏输出命中指定文本（match 形如 {type:\"substring\"|\"regex\", value:\"文本\"}）。长等待拆成多段执行，总时长受 timeout_ms 限制（默认 300000），到时仍未命中就报错。"
@@ -28,10 +28,10 @@
       "description": "管理 Herdr 事件订阅：mode=status 查看当前订阅状态，subscribe 开始订阅（agent 状态变化、输出命中、分屏开关等），unsubscribe 停止订阅，wait 在当前订阅上等一个事件（match_event 形如 {event:\"pane.agent_status_changed\", pane_id:\"w1:p1\"}，pane_id 可省略）。"
     },
     "herdr_automation_setup": {
-      "description": "创建一条由 Herdr 事件触发的 Cindy 自动化：agent 进入 blocked 或 done 时自动醒来处理，取代定时轮询。targetSessionId 可把自动化绑到某个已有会话，让它在原对话里继续。返回自动化 id 与 Webhook 接收地址。"
+      "description": "创建一条只由 Herdr 事件唤醒的 Cindy 自动化：agent 进入 blocked 或 done 时由插件请宿主调度器跑一次，这条自动化不会自己按时间运行。targetSessionId 可把自动化绑到某个已有会话，让它在原对话里继续。返回自动化 id。"
     },
     "herdr_call": {
-      "description": "直接调用任意 Herdr socket API 方法（完整方法名 + params），用于上面工具没覆盖的少见方法。方法名见 Herdr Socket API 文档。"
+      "description": "直接调用任意 Herdr socket API 方法（完整方法名 + params），用于上面工具没覆盖的少见方法。调用会改变 Herdr 状态（包括创建、关闭分屏或工作区），执行前先确认用户意图。方法名见 Herdr Socket API 文档。"
     },
     "tmux_state": {
       "description": "读取本机 tmux 现状：有哪些 session、每个 session 里有哪些 pane（含当前命令、工作目录、尺寸、是否活动）。想知道「tmux 里现在开着什么」时先调它。这台电脑没装 tmux 时返回 available=false 与提示，不报错。"

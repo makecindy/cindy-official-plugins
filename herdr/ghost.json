@@ -7,7 +7,7 @@
   "icon": "assets/icon.png",
   "description": "把本机 Herdr 终端工作区与 tmux session 接入 Cindy：查看工作区/标签/分屏与 agent 状态、读取画面、发送输入与按键、等待 agent 状态变化，并把 Herdr 事件推成 Cindy 通知与自动化。",
   "whenToUse": "需要看 Herdr 里正在跑什么 agent、读某个分屏的输出、给 agent 派活、等待它完成或需要授权；或者要看/操作本机 tmux 的 session、pane 与画面；或者想把终端事件接到 Cindy 通知与自动化时找我",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "kind": "chip",
   "entry": "main.js",
   "command": "herdr",
@@ -82,7 +82,7 @@
     },
     {
       "name": "herdr_prompt",
-      "description": "给 Herdr 里的 agent 发一段提示词。可选 wait_until 等待它进入某个状态（idle/working/blocked/done/unknown），等待时长受 timeout_ms 限制（默认 120000）。目标已经 blocked 时不会发送，直接返回。",
+      "description": "给 Herdr 里的 agent 发一段提示词。可选 wait_until 等待它进入某个状态（idle/working/blocked/done/unknown），等待时长受 timeout_ms 限制（默认 120000）。目标已经 blocked 时不会发送，直接返回。若返回 HERDR_OUTCOME_UNKNOWN，请先读取画面确认提示是否已送达。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -121,7 +121,7 @@
     },
     {
       "name": "herdr_send",
-      "description": "向某个分屏发送文本或按键（keys 用 Herdr 键位写法，如 enter、ctrl+h、alt+x、f1、shift+tab）。",
+      "description": "向某个分屏发送文本或按键（keys 用 Herdr 键位写法，如 enter、ctrl+h、alt+x、f1、shift+tab）。若返回 HERDR_OUTCOME_UNKNOWN，说明请求已发出但没收到回包，可能已经生效，请先读取画面确认再决定是否重发。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -353,7 +353,7 @@
     },
     {
       "name": "herdr_automation_setup",
-      "description": "创建一条由 Herdr 事件触发的 Cindy 自动化：agent 进入 blocked 或 done 时自动醒来处理，取代定时轮询。targetSessionId 可把自动化绑到某个已有会话，让它在原对话里继续。返回自动化 id 与 Webhook 接收地址。",
+      "description": "创建一条只由 Herdr 事件唤醒的 Cindy 自动化：agent 进入 blocked 或 done 时由插件请宿主调度器跑一次，这条自动化不会自己按时间运行。targetSessionId 可把自动化绑到某个已有会话，让它在原对话里继续。返回自动化 id。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -389,7 +389,7 @@
     },
     {
       "name": "herdr_call",
-      "description": "直接调用任意 Herdr socket API 方法（完整方法名 + params），用于上面工具没覆盖的少见方法。方法名见 Herdr Socket API 文档。",
+      "description": "直接调用任意 Herdr socket API 方法（完整方法名 + params），用于上面工具没覆盖的少见方法。调用会改变 Herdr 状态（包括创建、关闭分屏或工作区），执行前先确认用户意图。方法名见 Herdr Socket API 文档。",
       "parameters": {
         "type": "object",
         "properties": {

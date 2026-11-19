@@ -10,10 +10,10 @@
       "description": "Read pane or agent terminal output. Use visible for the current screen, recent for the latest lines, or recent_unwrapped for unwrapped log lines."
     },
     "herdr_prompt": {
-      "description": "Send a prompt to a Herdr agent. With wait_until it waits for the agent to reach one of those states (idle/working/blocked/done/unknown), bounded by timeout_ms (default 120000). A target that is already blocked receives nothing."
+      "description": "Send a prompt to a Herdr agent. With wait_until it waits for the agent to reach one of those states (idle/working/blocked/done/unknown), bounded by timeout_ms (default 120000). A target that is already blocked receives nothing. If the result is HERDR_OUTCOME_UNKNOWN, read the pane first to see whether the prompt arrived."
     },
     "herdr_send": {
-      "description": "Send text or keys to a Herdr pane. Use Herdr key names such as enter, ctrl+h, or shift+tab."
+      "description": "Send text or keys to a Herdr pane (keys use Herdr key names such as enter, ctrl+h, alt+x, f1, shift+tab). If the result is HERDR_OUTCOME_UNKNOWN the request was sent but no reply arrived, so it may already have taken effect: read the pane before sending again."
     },
     "herdr_wait": {
       "description": "Wait for an agent to reach a state, or for pane output to match text (match like {type:\"substring\"|\"regex\", value:\"text\"}). A long wait runs in bounded segments under one timeout_ms budget (default 300000) and fails when that budget runs out."
@@ -28,10 +28,10 @@
       "description": "Manage Herdr event subscriptions: mode=status reports the current subscription, subscribe starts it (agent status changes, output matches, pane lifecycle), unsubscribe stops it, wait blocks until one event arrives on the live subscription (match_event like {event:\"pane.agent_status_changed\", pane_id:\"w1:p1\"}; pane_id is optional)."
     },
     "herdr_automation_setup": {
-      "description": "Create a Cindy automation triggered by blocked or done events, optionally linked to an existing session. Returns the automation ID and webhook address."
+      "description": "Create a Cindy automation that only wakes on Herdr events: when an agent turns blocked or done the plugin asks the host scheduler to run it once, and the automation never runs on a timer. targetSessionId links it to an existing session. Returns the automation ID."
     },
     "herdr_call": {
-      "description": "Call a Herdr socket API method by its full name and parameters. Calls can change Herdr state."
+      "description": "Call a Herdr socket API method by its full name and parameters, for the rare methods the other tools do not cover. A call can change Herdr state, including creating or closing panes and workspaces, so confirm the intent first. Method names are in the Herdr Socket API documentation."
     },
     "tmux_state": {
       "description": "List local tmux sessions and panes with commands, working directories, sizes, and active state. When tmux is unavailable, return available=false and a hint."
