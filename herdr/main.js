@@ -303,6 +303,19 @@ async function ensureAutomationSchedule(name, args) {
         cachedScheduleId = storedId;   // 缓存跟着这次配置走，兜底时不会跑旧任务
         return storedId;
       }
+      // silentWhenIdle 是暴露给用户的工具参数：改了就必须写进 scheduler，
+      // 否则返回旧 id、配置看起来生效了实际没生效。
+      if (args.silentWhenIdle !== undefined
+          && Boolean(item.silentWhenIdle) !== Boolean(args.silentWhenIdle)) {
+        const patched = await cindy.host.call('cindy_scheduler', 'schedule_update', {
+          id: storedId,
+          silentWhenIdle: Boolean(args.silentWhenIdle)
+        });
+        const patchOutcome = hostBody(patched);
+        if (!patchOutcome.ok) {
+          throw new Error(runtime.automationFailed + (patchOutcome.detail || runtime.automationUnknown));
+        }
+      }
       const refreshed = await writeKv({ [SCHEDULE_ID_KEY]: storedId });
       if (refreshed[SCHEDULE_ID_KEY] !== storedId) throw new Error(runtime.automationSaveFailed);
       cachedScheduleId = storedId;
@@ -371,7 +384,14 @@ async function triggerAutomation() {
   triggerTimer = setTimeout(async function () {
     triggerTimer = null;
     lastTriggerAt = Date.now();
-    await cindy.host.call('cindy_scheduler', 'schedule_run_now', { id: scheduleId });
+    // 等待期间用户可能换掉或解绑了自动化：到点时重新读一次当前 id，
+    // 不能再跑闭包里那条旧的。
+    let current = scheduleId;
+    try { current = await readScheduleId(); } catch (error) { current = cachedScheduleId; }
+    if (!current || current !== scheduleId) {
+      if (!current) return;
+    }
+    await cindy.host.call('cindy_scheduler', 'schedule_run_now', { id: current });
   }, wait);
   if (triggerTimer.unref) triggerTimer.unref();
 }
@@ -522,12 +542,9 @@ const tools = {
       }, args.__callId);
       return { pane_id: args.pane_id, mode: 'text', result: result || null };
     }
-    const result = await herdrCall('pane.send_input', {
-      pane_id: args.pane_id,
-      text: args.text || '',
-      keys: args.keys || []
-    }, args.__callId);
-    return { pane_id: args.pane_id, mode: 'input', result: result || null };
+    // 到这里说明 pane_id / text / keys 组合无效：schema 要求 pane_id 必填，
+    // 上面的校验又要求 text 或 keys 至少有一个，所以不会再有第三种发送。
+    throw new Error(runtime.missingTextOrKeys);
   },
 
   async herdr_wait(args) {
@@ -694,7 +711,8 @@ const tools = {
 // --- Panel bridge --------------------------------------------------------
 
 async function panelState() {
-  const raw = await nodeRequest('herdr/snapshot', {});
+  // worker 的 herdr/snapshot 等 30 秒；宿主要留出余量，否则回包前就被掐掉。
+  const raw = await nodeRequest('herdr/snapshot', {}, undefined, 45000);
   const snapshot = unwrapSnapshot(raw);
   const workspaces = (snapshot && snapshot.workspaces) || [];
   const tabs = (snapshot && snapshot.tabs) || [];
@@ -742,11 +760,20 @@ async function handlePanelRequest(request) {
     return tools.herdr_read({ pane_id: request.pane_id, source: request.source, lines: request.lines });
   }
   if (action === 'send') {
-    // 面板的终端输入：文本走 pane.send_input（自带回车），按键走 send_keys。
-    if (request.keys && request.keys.length) {
-      return tools.herdr_send({ pane_id: request.pane_id, keys: request.keys });
+    // 面板的按键转发：只发按键，不动文本。
+    return tools.herdr_send({ pane_id: request.pane_id, keys: request.keys });
+  }
+  if (action === 'submit') {
+    // 面板回车 = 提交这一行。pane.send_text 只是把字打进输入行、不带回车，
+    // 必须用 pane.send_input（相当于「跑一条命令」）才会执行。
+    if (request.pane_id === undefined || request.pane_id === null) {
+      throw new Error(runtime.missingTarget);
     }
-    return tools.herdr_send({ pane_id: request.pane_id, text: request.text });
+    if (request.text === undefined || request.text === null || request.text === '') {
+      throw new Error(runtime.missingTextOrKeys);
+    }
+    // 面板请求不是 Agent 工具调用，没有 callId 可带。
+    return herdrCall('pane.send_input', { pane_id: request.pane_id, text: request.text });
   }
   if (action === 'prompt') {
     return tools.herdr_prompt({ target: request.target, text: request.text });

@@ -217,6 +217,34 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the old bound schedule must be removed after the new one is saved'
   );
 
+  // 面板回车必须走 pane.send_input（带回车），不能是只打字的 pane.send_text。
+  assert.match(
+    mainSource,
+    /if \(action === 'submit'\)[\s\S]*?pane\.send_input/,
+    'the panel submit path must use pane.send_input'
+  );
+
+  // 面板快照的宿主要比 worker 的 30 秒更宽。
+  assert.match(
+    mainSource,
+    /nodeRequest\('herdr\/snapshot', \{\}, undefined, 45000\)/,
+    'panel snapshot needs a host budget above the worker wait'
+  );
+
+  // silentWhenIdle 是暴露给用户的参数，改了必须写进 scheduler。
+  assert.match(
+    mainSource,
+    /silentWhenIdle !== undefined[\s\S]*?schedule_update/,
+    'silentWhenIdle changes must be applied to the schedule'
+  );
+
+  // 延迟触发到点时要重新读当前 id，不能跑闭包里的旧 id。
+  assert.match(
+    mainSource,
+    /triggerTimer = setTimeout[\s\S]*?readScheduleId\(\)/,
+    'the deferred trigger must re-read the schedule id'
+  );
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,

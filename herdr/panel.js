@@ -394,16 +394,21 @@ async function submitLine() {
   const field = $('#term-input');
   const text = field.value;
   if (!text) return;
+  // 先把目标钉死：两条请求之间用户可能已经切到别的分屏，
+  // 不能把 Enter 发到新目标上。
+  const target = selectedTarget;
+  const paneId = selectedPane ? selectedPane.pane_id : null;
+  if (view === 'tmux' && !target) return;
+  if (view !== 'tmux' && !paneId) return;
   field.value = '';
   try {
     if (view === 'tmux') {
-      if (!selectedTarget) return;
-      await request('tmux_send', { target: selectedTarget, text: text });
-      await request('tmux_send', { target: selectedTarget, keys: ['Enter'] });
+      await request('tmux_send', { target: target, text: text });
+      await request('tmux_send', { target: target, keys: ['Enter'] });
       await refreshTerminal();
     } else {
-      if (!selectedPane) return;
-      await request('send', { pane_id: selectedPane.pane_id, text: text });
+      // submit = pane.send_input，自带回车；pane.send_text 只打字不执行。
+      await request('submit', { pane_id: paneId, text: text });
       await refreshTerminal();
     }
   } catch (error) {
