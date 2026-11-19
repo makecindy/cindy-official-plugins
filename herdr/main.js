@@ -152,7 +152,11 @@ async function readKv() {
 async function writeKv(patch) {
   const current = await readKv();
   const next = Object.assign({}, current, patch);
-  await fetch('/kv', { method: 'PUT', body: JSON.stringify(next) });
+  const response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(next) });
+  // 不看响应的话，存没存上根本无从判断——返回的只是内存里的对象。
+  if (!response || response.ok === false) {
+    throw new Error(runtime.automationSaveFailed);
+  }
   return next;
 }
 
@@ -202,6 +206,8 @@ function isOurAutomation(item, name, args) {
     // 用户点名了会话：绑定必须一模一样，没有绑定的也不能顶替。
     if (item.targetSessionId !== args.targetSessionId) return false;
   }
+  if (!args.targetSessionId && item.targetSessionId) return false; // 没点名会话时，不接受已绑定别的会话的
+  if (item.status && item.status !== 'active') return false;       // 非 active 复用不了
   if (args.prompt && prompt.indexOf(String(args.prompt)) !== 0) return false;
   if (args.agentKind && item.agentKind !== args.agentKind) return false;
   return true;
@@ -219,7 +225,8 @@ async function ensureAutomationSchedule(name, args) {
       const existing = schedules.find(function (item) { return isOurAutomation(item, name, args); });
       if (existing && existing.id) {
         const saved = await writeKv({ [SCHEDULE_ID_KEY]: existing.id });
-        if (saved && saved[SCHEDULE_ID_KEY] === existing.id) return existing.id;
+        if (saved[SCHEDULE_ID_KEY] !== existing.id) throw new Error(runtime.automationSaveFailed);
+        return existing.id;
       }
     }
   }
@@ -246,9 +253,7 @@ async function ensureAutomationSchedule(name, args) {
   if (!scheduleId) throw new Error(runtime.automationNoId);
   const saved = await writeKv({ [SCHEDULE_ID_KEY]: scheduleId });
   // 存不上就不能当成配置完成：后续事件会因为读不到 id 而永远不触发。
-  if (!saved || saved[SCHEDULE_ID_KEY] !== scheduleId) {
-    throw new Error(runtime.automationSaveFailed);
-  }
+  if (saved[SCHEDULE_ID_KEY] !== scheduleId) throw new Error(runtime.automationSaveFailed);
   return scheduleId;
 }
 

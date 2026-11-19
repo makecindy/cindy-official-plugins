@@ -146,3 +146,29 @@ test('the worker socket timer waits longer than the Herdr-side wait', async () =
     await import('node:fs/promises').then((fs) => fs.rm(dir, { recursive: true, force: true }));
   }
 });
+
+
+test('automation setup surfaces KV failures and never reuses a foreign session', () => {
+  const mainSource = readFileSync(path.join(root, 'herdr', 'main.js'), 'utf8');
+
+  // 写 KV 必须看响应：只看返回对象会把 HTTP 500 当成保存成功。
+  assert.match(
+    mainSource,
+    /async function writeKv[\s\S]*?response\.ok === false[\s\S]*?throw new Error/,
+    'writeKv must check the PUT response and throw on failure'
+  );
+
+  // 复用只允许本插件建的、manual 的，且不能把事件丢进调用方没点名的会话。
+  assert.match(
+    mainSource,
+    /function isOurAutomation[\s\S]*?item\.manual !== true[\s\S]*?AUTOMATION_MARK[\s\S]*?!args\.targetSessionId && item\.targetSessionId/,
+    'reuse must verify ownership, manual-only trigger and the target session'
+  );
+
+  // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
+  assert.match(
+    mainSource,
+    /async herdr_send\([\s\S]*?runtime\.missingTextOrKeys/,
+    'herdr_send must reject calls without text or keys'
+  );
+});
