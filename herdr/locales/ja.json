@@ -1,0 +1,46 @@
+{
+  "name": "Herdr コンソール",
+  "description": "ローカルの Herdr と tmux のペインを確認・操作し、Herdr のイベントを Cindy の通知や自動化につなぎます。",
+  "whenToUse": "ローカルの Herdr エージェントの状態を確認する、入力を送る、状態の変化を待つ、Herdr や tmux のペインを操作する、または Herdr イベントを Cindy に連携する際に使用します。",
+  "tools": {
+    "herdr_state": {
+      "description": "Herdr のワークスペース、タブ、ペイン、エージェントを状態、作業ディレクトリ、タイトルとともに一覧表示します。"
+    },
+    "herdr_read": {
+      "description": "ペインやエージェントの端末出力を読み取ります。現在の画面は visible、直近の行は recent、折り返しを除いた行は recent_unwrapped を指定します。"
+    },
+    "herdr_prompt": {
+      "description": "Herdr エージェントにプロンプトを送り、必要に応じて指定の状態を待ちます。対象が blocked の場合は送信しません。"
+    },
+    "herdr_send": {
+      "description": "Herdr のペインにテキストやキーを送ります。キーには enter、ctrl+h、shift+tab などを指定します。"
+    },
+    "herdr_wait": {
+      "description": "エージェントが指定の状態になるか、ペインの出力が指定の文字列に一致するまで待ちます。"
+    },
+    "herdr_control": {
+      "description": "Herdr のワークスペース、タブ、ペイン、Git worktree を管理します。閉じる操作はユーザーが明示的に要求した場合に実行します。"
+    },
+    "herdr_notify": {
+      "description": "Herdr の端末画面に通知を表示します。"
+    },
+    "herdr_events": {
+      "description": "Herdr イベントの購読状態を確認し、購読を開始・停止するか、イベントを待ちます。"
+    },
+    "herdr_automation_setup": {
+      "description": "blocked または done イベントで起動する Cindy の自動化を作成し、必要に応じて既存のセッションに接続します。自動化 ID と Webhook アドレスを返します。"
+    },
+    "herdr_call": {
+      "description": "完全なメソッド名とパラメーターを指定して Herdr のソケット API を呼び出します。Herdr の状態が変わることがあります。"
+    },
+    "tmux_state": {
+      "description": "ローカルの tmux セッションとペインをコマンド、作業ディレクトリ、サイズ、状態とともに表示します。利用できない場合は available=false と案内を返します。"
+    },
+    "tmux_read": {
+      "description": "tmux のペインに表示されている画面か、スクロールバックを含む直近 N 行を読み取ります。"
+    },
+    "tmux_send": {
+      "description": "指定した tmux ペインに文字どおりのテキストまたは名前付きキーを送ります。"
+    }
+  }
+}

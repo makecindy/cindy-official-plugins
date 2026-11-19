@@ -1,0 +1,46 @@
+{
+  "name": "Herdr Console",
+  "description": "Inspect local Herdr workspaces and tmux sessions, read panes, send input, and receive Cindy notifications or automation triggers from Herdr events.",
+  "whenToUse": "Use to inspect local Herdr agents and their panes, send prompts or input, wait for agent states, manage local Herdr and tmux panes, or bridge Herdr events into Cindy.",
+  "tools": {
+    "herdr_state": {
+      "description": "List Herdr workspaces, tabs, panes, and agents, including status, working directories, and titles."
+    },
+    "herdr_read": {
+      "description": "Read pane or agent terminal output. Use visible for the current screen, recent for the latest lines, or recent_unwrapped for unwrapped log lines."
+    },
+    "herdr_prompt": {
+      "description": "Prompt a Herdr agent and optionally wait for idle, working, blocked, done, or unknown. A blocked target receives no prompt."
+    },
+    "herdr_send": {
+      "description": "Send text or keys to a Herdr pane. Use Herdr key names such as enter, ctrl+h, or shift+tab."
+    },
+    "herdr_wait": {
+      "description": "Wait for an agent state or for pane output matching the supplied text."
+    },
+    "herdr_control": {
+      "description": "Manage Herdr workspaces, tabs, panes, and Git worktrees. Close only when the user explicitly requests it."
+    },
+    "herdr_notify": {
+      "description": "Show a notification in the Herdr terminal interface."
+    },
+    "herdr_events": {
+      "description": "Check, start, or stop a Herdr event subscription, or wait for an event."
+    },
+    "herdr_automation_setup": {
+      "description": "Create a Cindy automation triggered by blocked or done events, optionally linked to an existing session. Returns the automation ID and webhook address."
+    },
+    "herdr_call": {
+      "description": "Call a Herdr socket API method by its full name and parameters. Calls can change Herdr state."
+    },
+    "tmux_state": {
+      "description": "List local tmux sessions and panes with commands, working directories, sizes, and active state. When tmux is unavailable, return available=false and a hint."
+    },
+    "tmux_read": {
+      "description": "Read the visible tmux pane or the most recent N lines, including scrollback."
+    },
+    "tmux_send": {
+      "description": "Send literal text or named keys to the selected tmux pane."
+    }
+  }
+}

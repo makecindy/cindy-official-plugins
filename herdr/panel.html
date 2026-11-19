@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<body>
+<div class="wrap">
+  <div class="toolbar">
+    <div class="views" role="tablist" aria-label="数据源">
+      <button type="button" data-view="herdr" class="on" role="tab" aria-selected="true">Herdr</button>
+      <button type="button" data-view="tmux" role="tab" aria-selected="false">tmux</button>
+    </div>
+    <button id="refresh" type="button">刷新</button>
+    <span id="status" class="status">连接中…</span>
+  </div>
+  <div id="list" class="list"></div>
+  <div id="detail" class="detail" hidden>
+    <div class="detail-head">
+      <span id="detail-title"></span>
+      <button id="detail-close" type="button" class="link">收起</button>
+    </div>
+    <pre id="detail-body" class="pane-body"></pre>
+    <div class="composer">
+      <textarea id="composer-text" rows="2" placeholder="输入内容发送给选中的 pane，回车发送"></textarea>
+      <button id="composer-send" type="button">发送</button>
+    </div>
+  </div>
+</div>
+<script src="/panel.js"></script>

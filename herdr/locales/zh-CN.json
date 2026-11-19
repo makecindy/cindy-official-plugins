@@ -1,0 +1,46 @@
+{
+  "name": "Herdr 控制台",
+  "description": "把本机 Herdr 终端工作区与 tmux session 接入 Cindy：查看工作区/标签/分屏与 agent 状态、读取画面、发送输入与按键、等待 agent 状态变化，并把 Herdr 事件推成 Cindy 通知与自动化。",
+  "whenToUse": "需要看 Herdr 里正在跑什么 agent、读某个分屏的输出、给 agent 派活、等待它完成或需要授权；或者要看/操作本机 tmux 的 session、pane 与画面；或者想把终端事件接到 Cindy 通知与自动化时找我",
+  "tools": {
+    "herdr_state": {
+      "description": "读取 Herdr 当前状态：工作区、标签、分屏与 agent 列表（含 agent 状态、工作目录、标题）。想知道「现在 Herdr 里有什么、谁在做什么」时先调用它。"
+    },
+    "herdr_read": {
+      "description": "读取一个分屏或 agent 的终端输出。source=visible 是当前画面，recent 是最近若干行，recent_unwrapped 适合看日志（忽略软换行）。"
+    },
+    "herdr_prompt": {
+      "description": "给 Herdr 里的 agent 发一段提示词。可选 wait_until 等待它进入某个状态（idle/working/blocked/done/unknown）。目标已经 blocked 时不会发送，直接返回。"
+    },
+    "herdr_send": {
+      "description": "向某个分屏发送文本或按键（keys 用 Herdr 键位写法，如 enter、ctrl+h、alt+x、f1、shift+tab）。"
+    },
+    "herdr_wait": {
+      "description": "等待某个 agent 进入指定状态，或等待某个分屏输出命中指定文本（用 match 匹配）。用于「等它做完再继续」。"
+    },
+    "herdr_control": {
+      "description": "管理 Herdr 的工作区、标签与分屏：创建/聚焦/重命名/关闭工作区与标签，拆分、移动、交换、缩放、调整分屏大小，创建 git worktree。破坏性操作（close）只在用户明确要求时执行。"
+    },
+    "herdr_notify": {
+      "description": "在 Herdr 自己的界面里弹一条通知（走 Herdr 的 toast），用于把信息同步到终端那一侧。"
+    },
+    "herdr_events": {
+      "description": "管理 Herdr 事件订阅：mode=status 查看当前订阅状态，subscribe 开始订阅（agent 状态变化、输出命中、分屏开关等），unsubscribe 停止订阅，wait 阻塞等一个事件。"
+    },
+    "herdr_automation_setup": {
+      "description": "创建一条由 Herdr 事件触发的 Cindy 自动化：agent 进入 blocked 或 done 时自动醒来处理，取代定时轮询。targetSessionId 可把自动化绑到某个已有会话，让它在原对话里继续。返回自动化 id 与 Webhook 接收地址。"
+    },
+    "herdr_call": {
+      "description": "直接调用任意 Herdr socket API 方法（完整方法名 + params），用于上面工具没覆盖的少见方法。方法名见 Herdr Socket API 文档。"
+    },
+    "tmux_state": {
+      "description": "读取本机 tmux 现状：有哪些 session、每个 session 里有哪些 pane（含当前命令、工作目录、尺寸、是否活动）。想知道「tmux 里现在开着什么」时先调它。这台电脑没装 tmux 时返回 available=false 与提示，不报错。"
+    },
+    "tmux_read": {
+      "description": "读取某个 tmux session / window / pane 的画面。默认是当前可见屏；给 lines 则取最近 N 行（含历史滚动区，历史不够时返回全部）。"
+    },
+    "tmux_send": {
+      "description": "往 tmux 的 session / window / pane 发文本或按键。发文本走字面量模式（-l），内容里的 C-b、Enter 这类不会被当成键名；发具名按键用 keys。"
+    }
+  }
+}
