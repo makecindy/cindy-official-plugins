@@ -4085,10 +4085,14 @@ async function watchRead(path, callId) {
 }
 
 // Keep the failure class so the list can tell the user what to fix.
+// Matrix: 401 auth, 403 permission, 404/410 target gone or inaccessible, everything
+// transient (rate limit, 5xx, network, 422) unavailable; one cleanup path clears any
+// of them on the watch's next successful read.
 function watchProblemOf(error) {
   if (error && error.rateLimited) return 'unavailable';
   if (error && error.status === 401) return 'auth_required';
   if (error && error.status === 403) return 'forbidden';
+  if (error && (error.status === 404 || error.status === 410)) return 'gone';
   return 'unavailable';
 }
 

@@ -86,7 +86,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.28');
+  assert.equal(manifest.version, '1.5.29');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -1900,6 +1900,7 @@ function statusWatchFixture(initial = {}, options = {}) {
   let userCalls = 0;
   let limitedPath = null;
   let deniedPath = null;
+  let missingPath = null;
   let holdKey = null;
   let holdGate = null;
   let kvGate = null;
@@ -1952,6 +1953,7 @@ function statusWatchFixture(initial = {}, options = {}) {
       if (key === holdKey) await holdGate.promise;
       if (rateLimited || key === limitedPath) return jsonResponse({ message: 'API rate limit exceeded' }, 403);
       if (key === deniedPath) return jsonResponse({ message: 'Resource not accessible by integration' }, 403);
+      if (key === missingPath) return jsonResponse({ message: 'Not Found' }, 404);
       const object = response[key];
       return object ? jsonResponse(object) : jsonResponse({ message: 'forbidden' }, 403);
     },
@@ -1967,6 +1969,7 @@ function statusWatchFixture(initial = {}, options = {}) {
     useAccount: id => { account = id; },
     failAccount: (value = 401) => { accountStatus = value === false ? null : value; },
     limitPath: p => { limitedPath = p; }, denyPath: p => { deniedPath = p; },
+    missingPath: p => { missingPath = p; },
     limitAccountFrom: n => { accountLimited = n; }, limitRequests: () => { rateLimited = true; },
     holdPath: p => { holdKey = p; holdGate = makeGate(); },
     releasePath: () => { const gate = holdGate; holdKey = null; holdGate = null; gate.release(); },
@@ -2135,6 +2138,35 @@ test('an unauthorized account probe surfaces an actionable problem', async () =>
   assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
 });
 
+test('read failures map to the documented problem classes and clear on recovery', async () => {
+  const cases = [[401, 'auth_required'], [403, 'forbidden'], [404, 'gone'], [410, 'gone'],
+    [429, 'unavailable'], [503, 'unavailable']];
+  for (const [status, expected] of cases) {
+    const a = statusWatchFixture();
+    assert.equal((await a.tool('add', 'issue', 2)).ok, true);
+    const f = statusWatchFixture(a.saved());
+    await flushAsync();
+    f.failAccount(status);
+    await f.timers.shift().fn();
+    assert.equal(f.saved().githubStatusWatches[0].problem, expected, `probe ${status}`);
+    f.failAccount(false);
+    await f.timers.shift().fn();
+    assert.equal(f.saved().githubStatusWatches[0].problem, undefined, `recovery ${status}`);
+  }
+});
+
+test('a deleted or inaccessible target is reported as gone', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.missingPath('/issues/2');
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'gone');
+  assert.equal((await f.tool('list', 'issue', 2)).result.watches[0].problem, 'gone');
+  f.missingPath(null);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
+});
+
 test('a permission failure on a watched target is reported as forbidden', async () => {
   const f = statusWatchFixture();
   assert.equal((await f.tool('add', 'issue', 2)).ok, true);
@@ -2236,7 +2268,7 @@ test('a refused status notification stays pending across restart until acknowled
 
 test('status_watch descriptions define the status format and every problem value in four locales', () => {
   const states = ['open', 'closed', 'merged', 'draft', 'ready', 'queued', 'in_progress', 'completed', 'none',
-    'success', 'failure', 'account_changed', 'target_changed', 'unavailable', 'auth_required', 'forbidden'];
+    'success', 'failure', 'account_changed', 'target_changed', 'unavailable', 'auth_required', 'forbidden', 'gone'];
   const manifestDescription = manifest.tools.find((tool) => tool.name === 'status_watch').description;
   assert.ok(manifestDescription.includes('account_changed'), 'ghost.json status_watch description omits account_changed');
   for (const locale of hostLocales) {
