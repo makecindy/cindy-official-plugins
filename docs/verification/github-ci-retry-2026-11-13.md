@@ -709,6 +709,20 @@ panel are retained. Inherited card/native scheduling has no new live acceptance
 here. The existing source-checkout follower and schedule were not replaced or
 duplicated, and this source hook is not an installed agent-skills entry.
 
+The final four required suites plus plugin tests passed: 388 pass, 19 Windows
+platform skips, 0 failures in 125.0 seconds. An initial pre-commit run could not
+find the new Node entry in HEAD's tracked package list. After the merge commit,
+the contract exposed the combined English description exceeding 1024 characters;
+it was reduced to 911 without dropping native follow-up or CI-retry limits.
+Contract/localization recheck passed 50 tests before the final full run above.
+No test or production-code workaround was introduced.
+
+Manifest validation and in-memory package/content checks passed: staged tree
+`11d8aeed17e68ddff127eb64ef1c7390328efa8b`, 32 files, 229314 compressed bytes,
+635934 expanded bytes; all files match their Git blobs and no package artifact
+was retained. This package differs from cd3cf48 despite sharing version 1.5.34;
+identify the source by commit, not version alone.
+
 No plugin was installed, no real preference/credential/permission/quota was
 changed, and no CI-only rewrite, PR merge or publication was performed. The last
 actual tested local runtime remains 97d540e / 1.5.19. Genuine denied-rerun recovery,
