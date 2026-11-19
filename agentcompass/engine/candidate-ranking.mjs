@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-ranking.js at c27dd73065cddb0c01a45d6010f03ad2740a5e56 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-ranking.js at e49bda0c73713f11b739dd53d9a8d5d82d1bb7f0 (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Ranking and ordering of evaluated candidates (`candidate_ranking.py`).
@@ -115,7 +115,6 @@ export function rank(taskIn, ctx) {
     metered_ok: true,
     metered_fallback: false,
     disable_fast: false,
-    force_fast: false,
     _economy_pool: true,
   };
   const pool = Object.values(poolBundles)

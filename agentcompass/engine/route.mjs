@@ -1,6 +1,6 @@
 // The built-in AgentCompass router for Cindy: classifies the task through Cindy's quick-text channel (or uses an explicit caller
 // profile), applies the profile-driven split and self gates, and ranks every route the user's Cindy can actually run (its live
-// `tasks.models()` catalog) with the AgentCompass v0.7.0 allocator, by capability fit and session continuity: the catalog cannot say
+// `tasks.models()` catalog) with the AgentCompass v0.7.1 allocator, by capability fit and session continuity: the catalog cannot say
 // which connection is the user's own sign-in and which is the Cindy gateway, so no quota reading is attached to any of them and every
 // row runs on the engine's built-in gateway account. No keyword/regex task heuristics, no network, no credentials, no third-party modules.
 import fs from 'node:fs';
@@ -21,7 +21,7 @@ export const HARNESS = {cc: 'claude', codex: 'codex', pi: 'pi'};
 export const routeKey = (harness, providerId, model) => `${harness}\0${providerId}\0${model}`;
 const MODE = {claude: 'bypassPermissions', codex: 'full-access', pi: 'full-access'};
 
-// ---- classifier schema & prompt (AgentCompass v0.7.0: scorer_client.py SCORER_PROMPT, task_intake.py TASK_PROFILE_SCHEMA) -------
+// ---- classifier schema & prompt (AgentCompass v0.7.1: scorer_client.py SCORER_PROMPT, task_intake.py TASK_PROFILE_SCHEMA) -------
 // The 11 work kinds a classifier may name (task_intake.WORK_KINDS); `other_or_mixed` is a route, never an answer.
 export {WORK_KINDS};
 
@@ -163,7 +163,7 @@ export const ONESHOT_PROMPT_LIMIT = 32768;
 // The host answers (or reports TIMEOUT) within 60 s; this only ends the wait on a host that never answers.
 export const DEFAULT_CLASSIFIER_TIMEOUT_MS = 65000;
 export const DEFAULT_CLASSIFIER_CACHE_TTL_MS = 10 * 60 * 1000;
-// 5: the v0.7.0 profile. An entry of an older version is a miss, and ages out of the file within the cache's lifetime.
+// 5: the v0.7.0 profile, unchanged in v0.7.1. An entry of an older version is a miss, and ages out of the file within the cache's lifetime.
 const SCORE_CACHE_VERSION = 5;
 const SCORE_CACHE_MAX = 200;
 

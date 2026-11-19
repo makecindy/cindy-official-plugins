@@ -2,7 +2,7 @@
 // Part 1: main.js at the official tasks API boundary with a fixture host (exact route and permission per harness,
 //         a fast route only when the router names one, unchanged task, idempotent create/send, honest stop/cancel/cleanup, PR #274 regressions).
 // Part 1b: the live classifier through Cindy's quick-text channel at the logic page (no keyword fallback, cache, refusals, split/self).
-// Part 2: the built-in routing engine (agentcompass/engine/route.mjs, AgentCompass v0.6.0 scoring) over the catalog a real Cindy 0.1.121
+// Part 2: the built-in routing engine (agentcompass/engine/route.mjs, AgentCompass v0.7.1 scoring) over the catalog a real Cindy 0.1.121
 //         reported, driven by task profiles: the tests assert rules (exact catalog rows, gates, no quota attached, fast mode never chosen,
 //         no file of Cindy's or of a Codex home read), never a hand-picked winner.
 // Part 3: the real worker.cjs as a node child over JSON-RPC stdio: zero-configuration built-in routing, and the

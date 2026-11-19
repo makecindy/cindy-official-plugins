@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/task-intake.js at c27dd73065cddb0c01a45d6010f03ad2740a5e56 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/task-intake.js at e49bda0c73713f11b739dd53d9a8d5d82d1bb7f0 (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * The task as the allocator sees it (`task_intake.py`): its route kind, modality needs, named pins, hours and chain. The profile
@@ -166,7 +166,6 @@ export function normalizeTask(raw, { policy = SCORING_POLICY, routes = ROUTES, m
     needs_gui: needsGui,
     wants_fast: wantsFast,
     read_only_review: readOnlyReview,
-    force_fast: Boolean(task.force_fast || needs.force_fast),
     disable_fast: Boolean(task.disable_fast || needs.disable_fast),
     pinned_bundle: task.pinned_bundle || null,
     chain_hours: Number(chain.total_hours || hours),
@@ -181,7 +180,6 @@ export function normalizeTask(raw, { policy = SCORING_POLICY, routes = ROUTES, m
     constraint_model: constraintModel,
     constraint_effort: constraintEffort,
     metered_ok: Boolean(task.metered_ok),
-    include_unverified: Boolean(task.include_unverified),
     can_wait_hours: Number(task.can_wait_hours || 0),
     chain_id: chain.id || null,
     cwd: task.cwd || null,

@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-eval.js at c27dd73065cddb0c01a45d6010f03ad2740a5e56 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-eval.js at e49bda0c73713f11b739dd53d9a8d5d82d1bb7f0 (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Candidate evaluation (`candidate_eval.py`): one bundle against one task, its gates, exclusions (rule B) and breakdown.
@@ -26,8 +26,9 @@ import {
   fiveAxisLevel,
   fiveAxisShares,
   fiveAxisValues,
+  readingEffort,
 } from "./axis-scores.mjs";
-import { CATEGORY_FACETS } from "./user-scores.mjs";
+import { CATEGORY_FACETS, appliedNote, appliedScores } from "./user-scores.mjs";
 import {
   bundleTaskUsd,
   capacityUsd,
@@ -294,7 +295,7 @@ export function evaluateBundle(bundle, task, ctx) {
       exclude(billing === "metered" ? METERED_LAST_RESORT : `${billing} billing: explicit selection only`);
     }
   }
-  if (spec.verified === false && !task.include_unverified) exclude("account not verified as launchable");
+  if (spec.verified === false) exclude("account not verified as launchable");
   if (info.advisor_only && (!(info.advisor_for || []).includes(kind) || (task.profile || {}).access === "write")) exclude("advisor only; cannot execute");
   const accountOut = result.excluded.length > 0; // out by the account, the checkbox, a hold or billing: not by this task
   if (info.excluded_when === "local_only" && task.local_only) {
@@ -373,13 +374,11 @@ export function evaluateBundle(bundle, task, ctx) {
       exclude(`data error: ${error} (out of automatic routing; name the model to dispatch it)`);
     }
   }
-  const manualApplied = state.manual_scores || {};
+  // What the overlay applied, read at the effort this candidate is scored with (`user-scores.js` owns the text).
+  const manualApplied = appliedScores(state, readingEffort(state, eff));
   if (Object.keys(manualApplied).length > 0) {
-    const parts = Object.entries(manualApplied)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([t, r]) => `${t}=${Number(r.level)} (z=${r.z >= 0 ? "+" : "-"}${Math.abs(r.z).toFixed(4)}, ${r.kind}, ${r.as_of})`);
-    result.notes.push(`manual capability scores applied: ${parts.join("; ")}`);
-    result.manual_scores = { ...manualApplied };
+    result.notes.push(appliedNote(manualApplied, readingEffort(state, eff)));
+    result.manual_scores = manualApplied;
   }
   const estimated = state.estimates || {};
   if (Object.keys(estimated).length > 0) {

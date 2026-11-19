@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/fleet.js at c27dd73065cddb0c01a45d6010f03ad2740a5e56 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/fleet.js at e49bda0c73713f11b739dd53d9a8d5d82d1bb7f0 (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * The fleet the allocator ranks over, built from what the gateway has: a candidate pool and a quota snapshot.
@@ -19,7 +19,6 @@
 
 import {
   DISPATCH_EFFORTS,
-  EFFORT_ORDER,
   FAMILIES,
   MODEL_ALIASES,
   SCORING_POLICY,
@@ -31,6 +30,7 @@ import {
 import { PLAN_CAPACITY } from "./reference-data.mjs";
 import { canonicalWindowId, configuredPlan, planDefaults, planTable, planUnknownText } from "./plans.mjs";
 import { defaultScoredModels, scoredModels } from "./axis-scores.mjs";
+import { EFFORTS } from "./user-scores.mjs";
 import { dispatchAllowedEfforts, modelInfo } from "./candidate-eval.mjs";
 import { inferModelProviderFamily, normalizeProviderFamily, providerMatchesModel, providersMatch } from "./quota.mjs";
 
@@ -140,7 +140,7 @@ export function bareEfforts(provider, model, fleet) {
   if (allowed !== null && allowed.length === 0) return [null];
   const timed = Object.keys((((info.five_axis || {}).duration) || {}).by_effort || {});
   const pool = allowed !== null ? allowed : timed;
-  const known = EFFORT_ORDER.filter((e) => pool.includes(e));
+  const known = EFFORTS.filter((e) => pool.includes(e));
   return known.length > 0 ? known : [null];
 }
 
@@ -153,7 +153,7 @@ export function effortRows(entry, fleet) {
   const { name: modelName, effort: colon } = splitEffortSuffix(stripped);
   const resolved = resolveModel(modelName, fleet.models, fleet.aliases, fleet.families);
   const suffix = colon || resolved.effort || null;
-  const fixedBySuffix = suffix && EFFORT_ORDER.includes(suffix);
+  const fixedBySuffix = suffix && EFFORTS.includes(suffix);
   const model = fixedBySuffix ? modelName : stripped;
   const provider = obj.provider || inferModelProviderFamily(model, fleet.aliases) || "gateway";
   // A row that lists its efforts is launched at those: the list is the host's (Cindy's `tasks.models()`) or the operator's

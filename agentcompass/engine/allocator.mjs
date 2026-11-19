@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/allocator.js at c27dd73065cddb0c01a45d6010f03ad2740a5e56 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/allocator.js at e49bda0c73713f11b739dd53d9a8d5d82d1bb7f0 (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * AgentCompass allocator for the Magpie gateway: the port of `allocator.py` (`plan`) onto a gateway's inputs.
@@ -21,7 +21,6 @@
 
 import {
   CATALOG_NAME_WARNING,
-  EFFORT_ORDER,
   MODELS,
   MODEL_ALIASES,
   ROUTES,
@@ -37,6 +36,7 @@ import {
 } from "./catalog.mjs";
 import { WORK_KINDS, unroutedDecision } from "./profiler.mjs";
 import { FIVE_AXES } from "./axis-scores.mjs";
+import { EFFORTS } from "./user-scores.mjs";
 import { listQuotaAccounts, normalizeQuotaSnapshot } from "./quota.mjs";
 import { InvalidCallerProfile, normalizeTask } from "./task-intake.mjs";
 import { candidateForBundle, rank } from "./candidate-ranking.mjs";
@@ -455,9 +455,9 @@ export function heldEffortOn(list, model, effort, catalog, { pins, profile } = {
   const ranked = fullProfile ? rankCandidates(fullProfile, { candidateModels: list, catalog }).ranking : null;
   const key = rowKeyOf(model, fleet);
   const passes = (candidate) => !ranked || ranked.some((row) => rowKeyOf(row.model, fleet) === key && row.effort === candidate);
-  const rank = EFFORT_ORDER.indexOf(effort);
+  const rank = EFFORTS.indexOf(effort);
   for (let i = rank - 1; i >= 0; i--) {
-    if (offers(EFFORT_ORDER[i]) && passes(EFFORT_ORDER[i])) return EFFORT_ORDER[i];
+    if (offers(EFFORTS[i]) && passes(EFFORTS[i])) return EFFORTS[i];
   }
   return null;
 }
@@ -528,9 +528,9 @@ export function heldTarget(model, sessionState, candidateModels, catalog) {
 
 // ---------------------------------------------------------------------------- warnings and refusals
 
-/** One line of why a row is out, naming the row. */
+/** One line of why a row is out, naming the row (a row with no effort of its own runs its single configuration, `default`). */
 function excludedLine(candidate, why) {
-  return why.startsWith(`${candidate.model}`) ? why : `${candidate.model}@${candidate.effort}: ${why}`;
+  return why.startsWith(`${candidate.model}`) ? why : `${candidate.model}@${candidate.effort ?? "default"}: ${why}`;
 }
 
 /** Pool names routed on no row of their own: without this, a retired name just stops being picked. */

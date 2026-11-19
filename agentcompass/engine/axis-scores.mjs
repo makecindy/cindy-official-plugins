@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/axis-scores.js at c27dd73065cddb0c01a45d6010f03ad2740a5e56 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/axis-scores.js at e49bda0c73713f11b739dd53d9a8d5d82d1bb7f0 (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Four-category (five-axis) scoring (`axis_scores.py`): the category scores of a model, the demand of a task, the panel targets
@@ -16,7 +16,7 @@
  */
 
 import { MODELS, MODEL_ALIASES, SCORING_POLICY, pyRound } from "./catalog.mjs";
-import { FIVE_AXIS_ANCHOR, FIVE_AXIS_MODELS, FIVE_AXIS_SCHEMA, MAINTAINER_SCORES } from "./reference-data.mjs";
+import { FIVE_AXIS_ANCHOR, FIVE_AXIS_EFFORT_READINGS, FIVE_AXIS_EFFORT_STEPS, FIVE_AXIS_MODELS, FIVE_AXIS_SCHEMA, MAINTAINER_SCORES } from "./reference-data.mjs";
 import { CATEGORIES, TOOL_LEVEL_FACETS, applyOverlay, validateScores } from "./user-scores.mjs";
 
 export const FIVE_AXES = CATEGORIES;
@@ -29,8 +29,11 @@ export { TOOL_LEVEL_FACETS };
 export const AESTHETICS_LEVEL_FACETS = { 1: ["design"], 2: ["design", "image_recognition"], 3: ["design", "image_recognition"] };
 export const LEVEL_FACETS = { aesthetics: AESTHETICS_LEVEL_FACETS, tool_operation: TOOL_LEVEL_FACETS };
 export const FACET_CATEGORY = { design: "aesthetics", responsiveness: "tool_operation", image_recognition: "tool_operation" };
-/** The schema of `five-axis-scores.json` this code reads: level 3 of a facet is the panel maximum there. */
-export const CURRENT_FIVE_AXIS_SCHEMA = "agent-compass.five-axis-scores/6";
+/**
+ * The schema of `five-axis-scores.json` this code reads: level 3 of a facet is the panel maximum (/6), a value at every effort and
+ * the `effort_steps` a manual score fills from (/7), `minimal` (/8), `ultra` and the declared `effort_readings` (/9), `none` (/10).
+ */
+export const CURRENT_FIVE_AXIS_SCHEMA = "agent-compass.five-axis-scores/12";
 /** `tool_operation` at this level must read images: a text-only model leaves the task. */
 export const IMAGE_INPUT_LEVEL = 3;
 export const FIVE_AXIS_DEFAULTS = {
@@ -86,6 +89,7 @@ export function scoredModels({ models = MODELS, aliases = MODEL_ALIASES, userSco
     const cats = (five && five.categories) || {};
     const usd = five ? five.usd_per_hour : null;
     info.five_axis = {
+      effort_readings: { ...FIVE_AXIS_EFFORT_READINGS },
       categories: Object.fromEntries(FIVE_AXES.filter((a) => cats[a] && typeof cats[a] === "object").map((a) => [a, clone(cats[a])])),
       scores: Object.fromEntries(FIVE_AXES.map((a) => [a, (cats[a] || {}).value ?? null])),
       missing: five ? [...(five.missing || [])] : [...FIVE_AXES],
@@ -101,7 +105,7 @@ export function scoredModels({ models = MODELS, aliases = MODEL_ALIASES, userSco
     else delete info.usd_per_hour;
     out[name] = info;
   }
-  applyOverlay(out, FIVE_AXIS_ANCHOR.targets, { publicScores: MAINTAINER_SCORES, localScores: local, aliases });
+  applyOverlay(out, FIVE_AXIS_ANCHOR.targets, { publicScores: MAINTAINER_SCORES, localScores: local, aliases, effortSteps: FIVE_AXIS_EFFORT_STEPS });
   for (const info of Object.values(out)) {
     if (info && info.five_axis) info.five_axis.shares = fiveAxisShares(fiveAxisValues(info.five_axis, "high"), FIVE_AXIS_ANCHOR.targets);
   }
@@ -111,7 +115,7 @@ export function scoredModels({ models = MODELS, aliases = MODEL_ALIASES, userSco
 /** `five_axis_overlay`'s `require_current_schema`: a shipped data file of another schema would be read on the wrong scale. */
 export function requireCurrentSchema(schema) {
   if (schema !== CURRENT_FIVE_AXIS_SCHEMA) {
-    throw new Error(`five-axis-scores has schema ${JSON.stringify(schema)}; this code reads ${CURRENT_FIVE_AXIS_SCHEMA} (level 3 is the panel maximum there): run npm run catalog:sync`);
+    throw new Error(`five-axis-scores has schema ${JSON.stringify(schema)}; this code reads ${CURRENT_FIVE_AXIS_SCHEMA}: run npm run catalog:sync`);
   }
 }
 
@@ -144,10 +148,23 @@ export function facetAtEffort(cats, category, facet, effort) {
 }
 
 /**
+ * `reading_effort`: the effort whose stored values a launch at `effort` reads. An effort name off the scale reads the effort
+ * `five-axis-scores.json` `effort_readings` declares for it (`default`: High); a bundle that names no effort runs its single
+ * configuration, the `default` reading; an effort on the scale (`EFFORTS`) reads itself. `state` is a model's `five_axis`.
+ */
+export function readingEffort(state, effort) {
+  const key = effort || "default";
+  const readings = (state && state.effort_readings) || {};
+  return Object.hasOwn(readings, key) ? readings[key] : key;
+}
+
+/**
  * `{ category: z }`, with `aesthetics` and `tool_operation` as `{ facet: z }`: this model's panel standard scores at `effort` (null
- * where none). `aesthetics` shares `tool_operation.image_recognition` beside its own `design`.
+ * where none; an effort off the scale reads its declared effort, `readingEffort`). `aesthetics` shares
+ * `tool_operation.image_recognition` beside its own `design`.
  */
 export function fiveAxisValues(state, effort) {
+  effort = readingEffort(state, effort);
   const cats = (state && state.categories) || {};
   const out = {};
   for (const a of FIVE_AXES) if (!(a in LEVEL_FACETS)) out[a] = atEffort(cats[a], effort);
