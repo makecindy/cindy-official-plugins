@@ -1365,9 +1365,32 @@ function emit(args, payload, out = (text) => process.stdout.write(text)) {
   );
 }
 
+// gh auth status prints recovery suggestions even when it cannot reach GitHub.
+function snapshotDiagnosis(stderr) {
+  const dns = /\blookup ([\w.-]+)(?::\d+)?[^\n]*(?:no such host|server misbehaving)|\b(?:ENOTFOUND|EAI_AGAIN) ([\w.-]+)/i.exec(stderr);
+  if (dns) {
+    const host = dns[1] || dns[2];
+    return { kind: 'dns', host, summary: `DNS lookup failed for ${host}` };
+  }
+  if (/rate limit|\[gh-rate-limit\]|HTTP 429\b/i.test(stderr)) {
+    return { kind: 'rate-limit', summary: 'GitHub API rate limit reached' };
+  }
+  if (/i\/o timeout|timed? ?out|context deadline exceeded/i.test(stderr)) {
+    return { kind: 'timeout', summary: 'Connection to GitHub timed out' };
+  }
+  if (/HTTP 401\b|bad credentials|token[^\n]* is invalid|not logged into any GitHub hosts|authentication required/i.test(stderr)) {
+    return { kind: 'auth', summary: 'GitHub sign-in required' };
+  }
+  const lines = stderr.trim().split(/\r?\n/).map(line => line.trim())
+    .filter(line => line && !/^-?\s*To (?:re-authenticate|forget about this account)/i.test(line));
+  const summary = lines.findLast(line => /\b(?:error|failed|fatal)\b/i.test(line)) ?? lines.at(-1);
+  return { kind: 'unknown', summary: summary?.slice(0, 200) || 'PR snapshot failed' };
+}
+
 /** Per-PR existing state owns backoff; no global lock or shared service. */
 export function snapshotFailurePlan(run, previous, now, threshold = DEFAULT_MAX_SNAPSHOT_FAILURES) {
-  const rateLimited = /rate limit|\[gh-rate-limit\]/i.test(run.stderr);
+  const diagnosis = snapshotDiagnosis(run.stderr);
+  const rateLimited = diagnosis.kind === 'rate-limit';
   const normalized = rateLimited ? 'rate-limit' : run.stderr.trim().split('\n').slice(-3).join(' ')
     .replace(/\b\d{4}-\d{2}-\d{2}T\S+/g, '<time>')
     .replace(/\b(?:request|trace)[-_ ]?id[=: ]+\S+/gi, 'request-id=<id>');
@@ -1381,7 +1404,7 @@ export function snapshotFailurePlan(run, previous, now, threshold = DEFAULT_MAX_
   const until = eligible ? (rateLimited && retryAt > now ? retryAt + 1000 : now + 30 * 60_000) : 0;
   const block = eligible && !alreadyReported;
   if (block) reports[fingerprint] = now;
-  return { failures, fingerprint, rateLimited, block, until, reports: Object.fromEntries(Object.entries(reports).slice(-8)) };
+  return { diagnosis, failures, fingerprint, rateLimited, block, until, reports: Object.fromEntries(Object.entries(reports).slice(-8)) };
 }
 
 async function gateMain(argv, ctx) {
@@ -1561,8 +1584,8 @@ async function gateMain(argv, ctx) {
   if (!snap) {
     const plan = snapshotFailurePlan(run, previous, now, args.maxSnapshotFailures);
     const { failures } = plan;
-    const tail = run.stderr.trim().split('\n').slice(-3).join(' / ').slice(0, 500);
-    const detail = `${plan.rateLimited ? 'rate limit; ' : ''}snapshotExit=${run.code} failures=${failures}/${args.maxSnapshotFailures}${tail ? ` stderr=${tail}` : ''}`;
+    const { summary, ...cause } = plan.diagnosis;
+    const detail = `${summary}; snapshotExit=${run.code} failures=${failures}/${args.maxSnapshotFailures}`;
     writeState(file, {
       ...(previous ?? {}),
       consecutiveSnapshotFailures: failures,
@@ -1581,7 +1604,8 @@ async function gateMain(argv, ctx) {
       },
     }, out);
     if (plan.block) {
-      throw new Error(`PR snapshot failed ${failures} consecutive rounds; ${detail}`);
+      out(`CINDY_PR_CHECK_DIAGNOSIS ${JSON.stringify({ ...cause, failures, retryAt: plan.until })}\n`);
+      throw new Error(`${summary}; PR snapshot failed ${failures} consecutive rounds. Next probe: ${new Date(plan.until).toISOString()}\n${run.stderr.trim()}`);
     }
     emit(args, {
       exitCode: EXIT_SKIP,
