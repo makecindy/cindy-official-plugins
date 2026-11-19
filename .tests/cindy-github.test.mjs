@@ -1867,3 +1867,20 @@ test('an externally stopped follow-up stays stopped after refresh', async () => 
   assert.equal(refreshed.reply.result.follow_state, 'stopped');
   assert.equal(calls.filter(c => c === 'schedule_create').length, 1);
 });
+
+test('paused follow-up refreshes, retains its reservation and shows terminal PR status', async () => {
+  const { hostApi, rows, calls } = followScheduler();
+  const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+  rows.get('sch-1').status = 'paused';
+  const paused = await rt.tool({ card_id: opened.callId, claim_follow: true });
+  assert.equal(paused.reply.result.follow_state, 'paused');
+  assert.equal(paused.reply.result.follow_claimed, false);
+  assert.match(rt.lastCard(opened.callId).html, /跟进已暂停/);
+  const peer = await rt.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(peer.reply.result.disposition, 'existing_task');
+  assert.equal(calls.filter(c => c === 'schedule_create').length, 1);
+  rt.setGithub(prGraphql({ merged: true }));
+  const merged = await rt.tool({ card_id: opened.callId });
+  assert.equal(merged.reply.result.stage, 'merged');
+});

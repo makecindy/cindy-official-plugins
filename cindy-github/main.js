@@ -133,6 +133,7 @@ var MESSAGES = {
     prQueuedMeta: '已排队，当前回复结束后开始',
     prStateOpen: '已发布',
     prStateDraft: '草稿',
+    prFollowPaused: '跟进已暂停',
     prStateFollowing: '跟进中',
     prStateMerged: '已合并',
     prStateClosed: '已关闭',
@@ -274,6 +275,7 @@ var MESSAGES = {
     prQueuedMeta: 'Queued. It starts after the current reply.',
     prStateOpen: 'Open',
     prStateDraft: 'Draft',
+    prFollowPaused: 'Follow-up paused',
     prStateFollowing: 'Following',
     prStateMerged: 'Merged',
     prStateClosed: 'Closed',
@@ -415,6 +417,7 @@ var MESSAGES = {
     prQueuedMeta: 'キューに追加しました。現在の返信が終わると始まります',
     prStateOpen: '公開済み',
     prStateDraft: '下書き',
+    prFollowPaused: 'フォローを一時停止中',
     prStateFollowing: 'フォロー中',
     prStateMerged: 'マージ済み',
     prStateClosed: 'クローズ済み',
@@ -556,6 +559,7 @@ var MESSAGES = {
     prQueuedMeta: '대기열에 추가했습니다. 현재 응답이 끝나면 시작합니다',
     prStateOpen: '게시됨',
     prStateDraft: '초안',
+    prFollowPaused: '팔로우 일시 중지됨',
     prStateFollowing: '팔로우 중',
     prStateMerged: '병합됨',
     prStateClosed: '닫힘',
@@ -2573,7 +2577,7 @@ async function savePrCardRetry(card) {
 // Runs inside enqueuePr: reserving a follow-up and saving its card are serialized.
 // An idle card never permanently owns a PR; active reservations survive restarts.
 function prFollowActive(card) {
-  return card.following === true || card.pending === 'follow' || card.pending === 'stop';
+  return card.following === true || !!card.scheduleId || card.pending === 'follow' || card.pending === 'stop';
 }
 
 async function findPrCardOwner(repo, number, head, explicitId, sessionId, localOnly) {
@@ -3265,9 +3269,11 @@ function renderPrCard(card, settings) {
             ? prChip(t('prMarkingReady'), true)
             : card.following
               ? prQuietButton('pr:stop', t('prStop')) + prFollowingPill()
-              : pr.draft
-                ? (card.readyUncertain ? '' : prCtaButton('pr:ready', t('prMarkReady')))
-                : prPillButton('pr:follow', t('prFollow'));
+              : card.scheduleId
+                ? prQuietButton('pr:stop', t('prStop')) + prChip(card.scheduleStatus === 'paused' ? t('prFollowPaused') : t('prFollowEnded'))
+                : pr.draft
+                  ? (card.readyUncertain ? '' : prCtaButton('pr:ready', t('prMarkReady')))
+                  : prPillButton('pr:follow', t('prFollow'));
     } else {
       tile = card.stage === 'merged' ? prTile('merged', 'merged') : prTile('closed', 'muted');
       meta = [prEsc(card.repo), prEsc(card.stage === 'merged' ? t('prStateMerged') : t('prStateClosed'))];
@@ -3443,6 +3449,7 @@ async function syncCardSchedule(card, settings, start) {
       var saved = await prSchedule('schedule_get', { id: row.id });
       if (!ownedFollowSchedule(saved, card) || saved.status !== 'active' || saved.id !== row.id) throw new Error('schedule_get');
       card.scheduleId = row.id;
+      card.scheduleStatus = null;
       card.followedEver = true;
     } else {
       var owned = await prSchedule('schedule_get', { id: card.scheduleId });
@@ -3452,6 +3459,7 @@ async function syncCardSchedule(card, settings, start) {
         if (await prSchedule('schedule_get', { id: owned.id })) throw new Error('schedule_delete');
       }
       card.scheduleId = null;
+      card.scheduleStatus = null;
     }
     card.following = start;
     card.pending = card.scheduleAction = null;
@@ -3539,10 +3547,13 @@ async function prCardTool(args, callId) {
   if (card.scheduleId && hasCardScheduler() && !card.scheduleAction) {
     try {
       var currentSchedule = await prSchedule('schedule_get', { id: card.scheduleId });
-      if (currentSchedule && (!ownedFollowSchedule(currentSchedule, card) || currentSchedule.status !== 'active'))
+      if (currentSchedule && !ownedFollowSchedule(currentSchedule, card))
         return fail(t('prScheduleFailed', { detail: t('prOwnershipUnknown') }));
       if (currentSchedule && a.following === false) return fail(t('prScheduleFailed', { detail: currentSchedule.status }));
-      card.following = !!currentSchedule;
+      if (currentSchedule && a.following === true && currentSchedule.status !== 'active')
+        return fail(t('prScheduleFailed', { detail: currentSchedule.status }));
+      card.following = !!currentSchedule && currentSchedule.status === 'active';
+      card.scheduleStatus = currentSchedule && !card.following ? currentSchedule.status : null;
       if (!currentSchedule) {
         card.scheduleId = null;
         if (a.following === true) return fail(t('prScheduleFailed', { detail: 'schedule_get' }));
@@ -3552,7 +3563,7 @@ async function prCardTool(args, callId) {
   if (typeof a.following === 'boolean') {
     card.following = a.following;
     card.scheduleAction = null;
-    if (!a.following) card.scheduleId = null;
+    if (!a.following) card.scheduleId = card.scheduleStatus = null;
     if (a.following) card.followedEver = true;
     if (card.pending === 'follow' || card.pending === 'stop') card.pending = null;
   }
@@ -3584,7 +3595,7 @@ async function prCardTool(args, callId) {
   // A claim is permission to create a schedule, not a report that one already exists.
   // Keep stop reservations until deletion is confirmed; contradictory requests never reacquire.
   var pendingBefore = card.pending;
-  if (a.claim_follow === true && a.following !== false && card.stage === 'open' && card.pending !== 'stop' && !card.following) {
+  if (a.claim_follow === true && a.following !== false && card.stage === 'open' && card.pending !== 'stop' && !card.following && !card.scheduleId) {
     card.pending = 'follow';
   }
 
@@ -3600,7 +3611,7 @@ async function prCardTool(args, callId) {
     card.settingsApplied = true;
     card.publishedHere = true;
     if (settings.autoRename && !card.renamed) todo.push(t('prTodoRename', { title: prTaskTitle(card) }));
-    if (settings.autoFollow && a.following !== false && card.pending !== 'stop' && !card.following && !card.pr.draft) {
+    if (settings.autoFollow && a.following !== false && card.pending !== 'stop' && !card.following && !card.scheduleId && !card.pr.draft) {
       card.pending = 'follow';
       nativeStart = hasCardScheduler();
       if (!nativeStart) todo.push(t('prTodoFollow', { url: card.pr.url }));
@@ -3649,11 +3660,12 @@ async function prCardTool(args, callId) {
   if (nativeStart || card.scheduleId || card.scheduleAction || card.managedFollow) {
     if (card.scheduleAction) result.follow_state = 'unverified';
     else if (card.following) result.follow_state = 'active';
+    else if (card.scheduleStatus === 'paused') result.follow_state = 'paused';
     else result.follow_state = card.scheduleError || !card.followedEver ? 'failed' : 'stopped';
   }
   if (!delivered) { result.card_shown = false; notes.push(t('prCardNotShown')); }
   if (a.claim_follow === true) result.follow_claimed = a.following !== false && card.stage === 'open' &&
-    card.pending !== 'stop' && prFollowActive(card);
+    card.pending !== 'stop' && !card.scheduleId && prFollowActive(card);
   if (card.pr) {
     result.pr = { number: card.pr.number, title: card.pr.title, url: card.pr.url, state: card.pr.state, draft: card.pr.draft };
   }
@@ -3672,8 +3684,8 @@ async function prCardTool(args, callId) {
 var PR_AGENT_ACTIONS = {
   'pr:publish': function (card) { return card.stage === 'ask'; },
   'pr:draft': function (card) { return card.stage === 'ask'; },
-  'pr:follow': function (card) { return card.stage === 'open' && !card.pr.draft && !card.following && !card.pending; },
-  'pr:stop': function (card) { return card.stage === 'open' && card.following && !card.pending; },
+  'pr:follow': function (card) { return card.stage === 'open' && !card.pr.draft && !card.following && !card.scheduleId && !card.pending; },
+  'pr:stop': function (card) { return card.stage === 'open' && (card.following || card.scheduleId) && !card.pending; },
 };
 
 /**
