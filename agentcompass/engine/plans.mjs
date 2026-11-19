@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/plans.js at e49bda0c73713f11b739dd53d9a8d5d82d1bb7f0 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/plans.js at 1bd01814e1f950628ebf44b3de0679218ec7bffb (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Plan names and plan templates (`provider_inventory.configured_plan`, `plan_defaults`, `usage_magpie.window_name`): which plan a

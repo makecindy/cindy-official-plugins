@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/catalog.js at e49bda0c73713f11b739dd53d9a8d5d82d1bb7f0 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/catalog.js at 1bd01814e1f950628ebf44b3de0679218ec7bffb (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * AgentCompass catalogue: model rows, aliases, family patterns, launch efforts, route scopes, plan windows, the scoring
@@ -1102,8 +1102,9 @@ function familyRegex(pattern) {
 /**
  * The one model-name resolver (`model_resolution.resolve_model`): `{ key, source, effort, bare }`.
  * `source`: `exact` (the catalogue has this name), `alias` (another spelling of a row: provider prefix, case, date, `-latest`,
- * `-preview`, a vendor tag, an effort suffix or a listed alias), `family` (a different model of a known family, scored as an
- * estimate of its target), `unknown` (`key: null`, no scores). `effort` is what the name itself asked for.
+ * `-preview`, a vendor tag, an effort suffix or a listed alias), `family` (only a family pattern matched: `key` is the first
+ * model of that family the catalogue knows, and the name has no scores), `unknown` (`key: null`, no scores). `effort` is what
+ * the name itself asked for.
  */
 export function resolveModel(rawModel, models = MODELS, aliases = MODEL_ALIASES, families = FAMILIES) {
   const known = knownNames(models);
@@ -1185,7 +1186,7 @@ export function modelSpec(rawModel, models = MODELS, aliases = MODEL_ALIASES, fa
 
 /**
  * What a failure counts against. An `exact` or `alias` name is its row. A `family` or `unknown` name is only itself: a family
- * row is an estimate of its target, so a preview that fails says nothing about the flagship it was placed on.
+ * name is a different model from the row its pattern points at, so a preview that fails says nothing about that flagship.
  */
 export function healthKey(rawModel, models = MODELS, aliases = MODEL_ALIASES, families = FAMILIES) {
   if (!rawModel || typeof rawModel !== "string") return "";

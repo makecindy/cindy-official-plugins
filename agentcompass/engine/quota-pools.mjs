@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/quota-pools.js at e49bda0c73713f11b739dd53d9a8d5d82d1bb7f0 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/quota-pools.js at 1bd01814e1f950628ebf44b3de0679218ec7bffb (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Quota windows and pools (`quota_pools.py`, `window_scope.py`): which windows a bundle draws, their state, and the refusals
