@@ -37,7 +37,8 @@ const strings = {
     statusBlocked: '待处理',
     statusDone: '已完成',
     statusIdle: '空闲',
-    sendingTo: '发送到 '
+    sendingTo: '发送到 ',
+    paneFallback: '分屏'
   },
   en: {
     refreshing: 'Refreshing…',
@@ -70,7 +71,8 @@ const strings = {
     statusBlocked: 'blocked',
     statusDone: 'done',
     statusIdle: 'idle',
-    sendingTo: 'Send to '
+    sendingTo: 'Send to ',
+    paneFallback: 'pane'
   },
   ja: {
     refreshing: '更新中…',
@@ -103,7 +105,8 @@ const strings = {
     statusBlocked: '要対応',
     statusDone: '完了',
     statusIdle: '待機',
-    sendingTo: '送信先: '
+    sendingTo: '送信先: ',
+    paneFallback: 'pane'
   },
   ko: {
     refreshing: '새로 고치는 중…',
@@ -136,7 +139,8 @@ const strings = {
     statusBlocked: '확인 필요',
     statusDone: '완료',
     statusIdle: '대기',
-    sendingTo: '보낼 대상: '
+    sendingTo: '보낼 대상: ',
+    paneFallback: '창'
   }
 };
 
@@ -181,7 +185,29 @@ function request(action, payload) {
   });
 }
 
-// 状态：一个小圆点 + 一个词。颜色只做辅助，文字始终说明状态本身。
+// 状态点配色：agent 运行中绿、出错红、空闲/已完成灰；普通 pane 中性色。
+// 颜色只做辅助，详情卡里的文字始终说明状态本身。
+function paneDotClass(pane) {
+  if (!pane.agent) return 'hollow';
+  const status = String(pane.agent_status || 'unknown').toLowerCase();
+  if (status === 'working') return 'working';
+  if (status === 'blocked') return 'blocked';
+  return 'idle';
+}
+
+// 没有 agent 也没有 label 的分屏，用「分屏 N」而不是 w7:p3 这种原始 ID。
+function paneDisplayName(pane) {
+  if (pane.agent) return pane.agent;
+  if (pane.label) return pane.label;
+  const match = /p(\d+)$/.exec(String(pane.pane_id || ''));
+  return match ? T.paneFallback + ' ' + match[1] : (pane.pane_id || '');
+}
+
+function tmuxDotClass(pane) {
+  if (pane.dead) return 'blocked';
+  if (pane.active) return 'plain';
+  return 'hollow';
+}
 const STATUS_TEXT = {
   working: 'statusWorking',
   blocked: 'statusBlocked',
@@ -336,9 +362,9 @@ function renderHerdr() {
     for (const pane of panes) {
       chips.appendChild(makeChip({
         icon: pane.agent ? 'agent' : null,
-        name: pane.agent || pane.label || pane.pane_id,
+        name: paneDisplayName(pane),
         meta: pane.title || pane.cwd || '',
-        dotClass: String(pane.agent_status || 'unknown').toLowerCase(),
+        dotClass: paneDotClass(pane),
         title: [pane.title, pane.cwd, pane.pane_id].filter(Boolean).join(' · '),
         on: Boolean(selectedPane && selectedPane.pane_id === pane.pane_id),
         onSelect: function () { openPane(pane); }
@@ -359,11 +385,12 @@ async function openPane(pane) {
   const token = readToken;
   renderHerdr();
   $('#detail').hidden = false;
-  $('#detail-title').textContent = pane.title || pane.label || pane.pane_id;
-  $('#detail-sub').textContent = [pane.label, pane.agent, pane.cwd, pane.pane_id]
+  $('#detail-title').textContent = pane.title || paneDisplayName(pane);
+  $('#detail-sub').textContent = [paneDisplayName(pane), pane.cwd]
     .filter(Boolean).join(' · ');
-  setDetailState(String(pane.agent_status || 'unknown').toLowerCase(), statusLabel(pane.agent_status));
-  setComposerTarget([pane.label || pane.pane_id, pane.agent].filter(Boolean).join(' · '));
+  setDetailState(paneDotClass(pane), statusLabel(pane.agent_status));
+  // 原始 pane id 只在真正能操作它的地方出现：发送目标行。
+  setComposerTarget([paneDisplayName(pane), pane.pane_id].filter(Boolean).join(' · '));
   renderOutput('');
   $('#detail-body').textContent = T.loading;
   try {
@@ -435,7 +462,7 @@ function renderTmux() {
         name: pane.target,
         meta: [pane.window_name, pane.command].filter(Boolean).join(' · '),
         icon: null,
-        dotClass: pane.dead ? 'blocked' : pane.active ? 'working' : 'unknown',
+        dotClass: tmuxDotClass(pane),
         title: [pane.path, pane.target].filter(Boolean).join(' · '),
         on: selectedTarget === pane.target,
         onSelect: function () { openTmuxPane(pane); }
@@ -471,7 +498,7 @@ async function openTmuxPane(pane) {
   $('#detail-title').textContent = pane.target;
   $('#detail-sub').textContent = [pane.window_name, pane.command, pane.path]
     .filter(Boolean).join(' · ');
-  setDetailState(pane.dead ? 'blocked' : pane.active ? 'working' : 'unknown', statusLabelForTmux(pane));
+  setDetailState(tmuxDotClass(pane), statusLabelForTmux(pane));
   setComposerTarget(pane.target);
   renderOutput('');
   $('#detail-body').textContent = T.loading;

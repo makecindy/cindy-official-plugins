@@ -15,10 +15,11 @@
   --pc-line: var(--border-default, #e4e4e0);
   --pc-line-strong: var(--border-strong, #c9c9c2);
 
-  /* 状态色只用于状态点；文字仍用正文色，避免只靠颜色传达信息。 */
-  --pc-working: #2f6feb;
+  /* 状态点颜色：运行中绿、出错红、空闲灰；普通 pane 用中性色（空心环）。 */
+  --pc-working: #12a150;
   --pc-blocked: #d93a3a;
-  --pc-done: #12a150;
+  --pc-idle: #8d8d85;
+  --pc-neutral: #a9a9a1;
   --pc-accent: #2fa85a;
   /* 终端输出等宽栈：有 CJK 等宽字体的机器上中文也能对齐。 */
   --pc-mono: "FiraCode Nerd Font Mono", "JetBrains Mono", "Cascadia Code",
@@ -198,14 +199,20 @@ body {
   background: var(--pc-blocked);
 }
 
-.dot.done {
-  background: var(--pc-done);
+/* 空闲 / 已完成：灰点 */
+.dot.idle {
+  background: var(--pc-idle);
 }
 
-.dot.idle,
-.dot.unknown {
+/* 普通 pane（没有 agent）和不在用的 tmux pane：中性色空心环 */
+.dot.plain,
+.dot.hollow {
   background: transparent;
-  border: 1px solid var(--pc-line-strong);
+  border: 1px solid var(--pc-neutral);
+}
+
+.dot.plain {
+  background: var(--pc-neutral);
 }
 
 .empty {
