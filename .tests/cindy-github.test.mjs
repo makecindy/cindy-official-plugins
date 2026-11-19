@@ -81,6 +81,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.card, { externalLinks: true });
   assert.deepEqual(manifest.agent, {});
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
+  assert.equal(manifest.version, '1.5.32');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -891,7 +892,9 @@ test('card settings persist in /kv and become one-time todos once the PR exists'
 test('PR cards carry a hidden host copy-link button for the PR URL', async () => {
   const runtime = createPrRuntime({ github: prGraphql({ number: 7, title: 'Fix login' }) });
   const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '7' })).reply.result.card_id;
-  const button = runtime.lastCard(cardId).html.match(/<button data-ghost-copy-link=[^>]*>/)?.[0] ?? '';
+  const html = runtime.lastCard(cardId).html;
+  assert.match(html, /Fix login<\/a><\/span><button data-ghost-copy-link=/);
+  const button = html.match(/<button data-ghost-copy-link=[^>]*>/)?.[0] ?? '';
   assert.match(button, /^<button data-ghost-copy-link="https:\/\/github\.com\/octo\/repo\/pull\/7" aria-label="复制链接" style="display:none;/);
   assert.doesNotMatch(button, /data-ghost-action|data-ghost-link|data-ghost-task-archive/);
 });

@@ -2894,14 +2894,14 @@ function newPrCard(id, repo) {
 var PR_GREEN = 'light-dark(#2ea043,#3fb950)';
 var PR_BLUE = '#417cdd';
 var PR_HOVER = 'color-mix(in srgb,transparent,var(--text-primary) 7%)';
-var PR_CSS =
-  '<style>' +
+var PR_BASE_CSS =
   '*{box-sizing:border-box}' +
   'button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:var(--bg,transparent);cursor:pointer;' +
   '-webkit-user-select:none;user-select:none;transition:background-color var(--motion-fast,120ms) var(--motion-ease-out,ease-out)}' +
   'button:hover:not(:disabled){background:var(--hover,var(--bg,transparent))}' +
   'button:disabled{cursor:default;opacity:.5}' +
-  'button:focus-visible{outline:2px solid var(--focus-ring,#417cdd);outline-offset:2px}' +
+  'button:focus-visible{outline:2px solid var(--focus-ring,#417cdd);outline-offset:2px}';
+var PR_CSS = '<style>' + PR_BASE_CSS +
   'button[data-ghost-action^="pr:"]::before,button[data-ghost-task-archive]::before{content:attr(aria-label)}' +
   'a{color:inherit;text-decoration:none}a:hover{text-decoration:underline;text-underline-offset:2px}' +
   'button[data-ghost-action="pr:stop"]{opacity:0;visibility:hidden;transition:opacity var(--motion-fast,120ms) var(--motion-ease-out,ease-out),visibility 0s linear var(--motion-fast,120ms)}' +
@@ -2996,11 +2996,13 @@ function prTile(glyph, tone) {
 var PR_SEP = '<span style="color:var(--text-tertiary)"> · </span>';
 
 /** 上层:图标、标题、仓库或进度说明,设置按钮靠右。 */
-function prHeader(tile, titleHtml, metaParts, gear) {
+function prHeader(tile, titleHtml, metaParts, pr, gear) {
   return '<div style="display:flex;align-items:center;gap:12px;padding:14px 12px 14px 16px">' +
     tile +
     '<div style="flex:1;min-width:0">' +
-    '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:14px;line-height:20px;font-weight:500">' + titleHtml + '</div>' +
+    '<div style="display:flex;align-items:center;gap:2px">' +
+    '<span style="min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:14px;line-height:20px;font-weight:500">' + titleHtml + '</span>' +
+    prCopyButton(pr) + '</div>' +
     '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-top:2px;font-size:12px;line-height:16px;color:var(--text-secondary)">' +
     metaParts.join(PR_SEP) + '</div>' +
     '</div>' + (gear || '') + '</div>';
@@ -3204,9 +3206,9 @@ function prGearButton(open) {
 
 /** 两张叠放的圆角方块,与 App 的复制图标同形;新版宿主按 data-ghost-icon="copy" 换成 App 图标。 */
 function prCopyGlyph() {
-  return '<span data-ghost-icon="copy" style="position:relative;display:block;width:16px;height:16px">' +
-    prSpan('left:5.6px;top:5.6px;width:9.6px;height:9.6px;border:1.6px solid currentColor;border-radius:2px') +
-    prSpan('left:0.8px;top:0.8px;width:9.6px;height:9.6px;border-top:1.6px solid currentColor;border-left:1.6px solid currentColor;border-top-left-radius:2px') +
+  return '<span data-ghost-icon="copy" style="position:relative;display:block;width:14px;height:14px">' +
+    prSpan('left:5px;top:5px;width:8px;height:8px;border:1.4px solid currentColor;border-radius:2px') +
+    prSpan('left:1px;top:1px;width:8px;height:8px;border-top:1.4px solid currentColor;border-left:1.4px solid currentColor;border-top-left-radius:2px') +
     '</span>';
 }
 
@@ -3217,13 +3219,8 @@ function prCopyGlyph() {
 function prCopyButton(pr) {
   if (!pr || !/^https:\/\/github\.com\//.test(pr.url || '')) return '';
   return '<button data-ghost-copy-link="' + prEsc(pr.url) + '" aria-label="' + prEsc(t('prCopyLink')) + '"' +
-    ' style="display:none;flex:none;align-items:center;justify-content:center;width:32px;height:32px;border-radius:9999px;' +
+    ' style="display:none;flex:none;align-items:center;justify-content:center;width:24px;height:24px;border-radius:4px;' +
     'color:var(--text-tertiary);--hover:' + PR_HOVER + '">' + prCopyGlyph() + '</button>';
-}
-
-/** 标题行右侧的图标按钮:复制链接在前,设置在后。 */
-function prHeaderButtons(copy, gear) {
-  return copy || gear ? '<div style="display:flex;flex:none;align-self:flex-start;gap:2px">' + copy + gear + '</div>' : '';
 }
 
 function prStatsParts(card) {
@@ -3249,9 +3246,9 @@ function renderPrReference(card, owner) {
     '" style="display:inline-flex;align-items:center;padding:5px 10px;border:1px solid var(--border-default);' +
     'border-radius:9999px;background:transparent;color:var(--text-primary);font:inherit;font-size:12px;white-space:nowrap;cursor:pointer">' +
     prEsc(t('prOpenTask')) + ' ↗</button>';
-  return '<style>*{box-sizing:border-box}</style><div data-ghost-width="full" style="overflow:hidden;border:1px solid var(--border-default);border-radius:12px;' +
+  return '<style>' + PR_BASE_CSS + '</style><div data-ghost-width="full" style="overflow:hidden;border:1px solid var(--border-default);border-radius:12px;' +
     'background:var(--surface-elevated);color:var(--text-primary);font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5">' +
-    prHeader(tile, prEsc(title), [prEsc(card.repo), prEsc(owner.pending === 'follow' ? t('prOtherStarting') : owner.pending === 'stop' ? t('prOtherStopping') : t('prReadOnly'))], prHeaderButtons(prCopyButton(pr), '')) + prFooter(status, taskLink, '', '') + '</div>';
+    prHeader(tile, prEsc(title), [prEsc(card.repo), prEsc(owner.pending === 'follow' ? t('prOtherStarting') : owner.pending === 'stop' ? t('prOtherStopping') : t('prReadOnly'))], pr) + prFooter(status, taskLink, '', '') + '</div>';
 }
 
 function prHasSettings(card) {
@@ -3315,7 +3312,7 @@ function renderPrCard(card, settings) {
     left += '<div style="margin-top:4px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
   }
   var openOnly = card.stage === 'open' ? prOpenOnly(card) : '';
-  var body = prHeader(tile, title, meta, prHeaderButtons(prCopyButton(card.pr), gear ? prGearButton(card.settingsOpen) : '')) + prFooter(left, actions, openOnly, prArchiveButton(card, settings));
+  var body = prHeader(tile, title, meta, card.pr, gear ? prGearButton(card.settingsOpen) : '') + prFooter(left, actions, openOnly, prArchiveButton(card, settings));
   // Settings remain available after merge/close, including when the host updates an open snapshot.
   if (gear && card.settingsOpen) body += prSettingsPanel(settings);
   // 排到本轮末尾、铺满消息列:宿主把卡放在「已更改 N 个文件」卡之后,与它同宽。

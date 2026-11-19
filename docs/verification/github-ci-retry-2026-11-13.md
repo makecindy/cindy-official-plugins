@@ -568,6 +568,35 @@ order above. Source 1.5.31 was not installed, and real recovery/UI prerequisites
 remain unmet. No real preference, credentials, permissions, quota, CI-only
 rewrite, merge or publication changed.
 
+## Synchronize main #351 — source 1.5.32 (2026-11-19)
+
+Merged main `01b42db13d6ee9ca6f236722bfa171afd71e46b8` (#351) into this same
+feature branch to clear the reported conflict. Only manifest/version-assertion
+conflicts needed resolution. The upstream title-adjacent copy control, smaller
+glyph and shared reference-card button CSS are retained, as are this PR's
+preference ordering, reference height, unknown panel and bounded recovery.
+Source/package version is 1.5.32, above main's 1.5.19.
+
+The recovery scripts, settings page and all four locale files are byte-identical
+to 3213807. Main's diff is the imported header/copy layout; no new preference,
+storage, network, permission, queue, lock, retry or dependency was introduced.
+Main's 1.5.19 at 01b42db and the historically installed/tested local 1.5.19 at
+97d540e have different contents: equal version numbers do not make them the
+same runtime. Source 1.5.32 was not installed. The inherited title-adjacent copy
+layout/hover, current phone/unknown-panel/read-ordering paths and genuine
+denied-rerun recovery remain unverified in live Cindy; earlier evidence is not
+claimed for these changed paths.
+
+The four required repository suites plus plugin tests passed: 348 passed,
+19 Windows platform skips, zero failures in 113.7 seconds, with existing Git
+Bash/jq/unzip selected only for the test process. The upstream title/copy
+placement regression and existing recovery/preference/reference regressions
+all remain in the run. Manifest and staged-tree package/content checks passed:
+tree `9608cfa5155b25ce3bc49600f899e0a569a65e4a`, 31 files, 224395 compressed
+bytes and 620598 expanded bytes. Archive inspected in memory; no new package
+file retained. No installation, real preference/credential/permission/quota
+change, CI-only rewrite, PR merge or publication was performed.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected
