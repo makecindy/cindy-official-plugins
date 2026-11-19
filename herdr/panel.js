@@ -200,46 +200,25 @@ function statusLabelForTmux(pane) {
   return '';
 }
 
-function makeRow(options) {
-  const row = document.createElement('button');
-  row.type = 'button';
-  row.className = 'row' + (options.dead ? ' is-dead' : '');
-  row.setAttribute('role', 'listitem');
-
-  const dot = document.createElement('span');
-  dot.className = 'dot ' + (options.dotClass || 'unknown');
-  row.appendChild(dot);
-
-  const main = document.createElement('span');
-  main.className = 'row-main';
-  const title = document.createElement('span');
-  title.className = 'row-title';
-  title.textContent = options.title;
-  main.appendChild(title);
-  if (options.subtitle) {
-    const sub = document.createElement('span');
-    sub.className = 'row-sub';
-    sub.textContent = options.subtitle;
-    main.appendChild(sub);
-  }
-  row.appendChild(main);
-
-  const stateLabel = document.createElement('span');
-  stateLabel.className = 'row-state';
-  stateLabel.textContent = options.state || '';
-  row.appendChild(stateLabel);
-
-  if (options.onSelect) row.addEventListener('click', options.onSelect);
-  return row;
-}
-
 // agent pane 用 chip 呈现：一颗 chip 就是「一个正在跑的东西」，
 // 名称、状态点都在里面，扫一眼就知道谁在忙。
+function agentIcon() {
+  const icon = document.createElement('span');
+  icon.className = 'chip-icon';
+  icon.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
+    + '<path d="M8 1.5l1.6 3.6 3.6 1.6-3.6 1.6L8 11.9 6.4 8.3 2.8 6.7l3.6-1.6z"'
+    + ' fill="currentColor"/>'
+    + '<path d="M12.6 11.2l.8 1.8 1.8.8-1.8.8-.8 1.8-.8-1.8-1.8-.8 1.8-.8z"'
+    + ' fill="currentColor" opacity=".7"/></svg>';
+  return icon;
+}
+
 function makeChip(options) {
   const chip = document.createElement('button');
   chip.type = 'button';
   chip.className = 'chip' + (options.on ? ' on' : '');
   chip.title = options.title || '';
+  if (options.icon === 'agent') chip.appendChild(agentIcon());
   const dot = document.createElement('span');
   dot.className = 'dot ' + (options.dotClass || 'unknown');
   chip.appendChild(dot);
@@ -352,34 +331,20 @@ function renderHerdr() {
     if (workspace.focused) meta.push(T.focused);
     list.appendChild(makeGroup(workspace.label || workspace.workspace_id, meta.join(' · ')));
 
-    const agents = panes.filter(function (pane) { return pane.agent; });
-    const others = panes.filter(function (pane) { return !pane.agent; });
-    if (agents.length) {
-      const chips = document.createElement('div');
-      chips.className = 'chips';
-      for (const pane of agents) {
-        chips.appendChild(makeChip({
-          name: pane.agent,
-          meta: pane.title || pane.label || '',
-          dotClass: String(pane.agent_status || 'unknown').toLowerCase(),
-          title: (pane.title || '') + ' · ' + pane.pane_id,
-          on: Boolean(selectedPane && selectedPane.pane_id === pane.pane_id),
-          onSelect: function () { openPane(pane); }
-        }));
-      }
-      list.appendChild(chips);
-    }
-    for (const pane of others) {
-      const row = makeRow({
-        title: pane.label || pane.pane_id,
-        subtitle: pane.title || pane.cwd || '',
+    const chips = document.createElement('div');
+    chips.className = 'chips';
+    for (const pane of panes) {
+      chips.appendChild(makeChip({
+        icon: pane.agent ? 'agent' : null,
+        name: pane.agent || pane.label || pane.pane_id,
+        meta: pane.title || pane.cwd || '',
         dotClass: String(pane.agent_status || 'unknown').toLowerCase(),
-        state: statusLabel(pane.agent_status),
+        title: [pane.title, pane.cwd, pane.pane_id].filter(Boolean).join(' · '),
+        on: Boolean(selectedPane && selectedPane.pane_id === pane.pane_id),
         onSelect: function () { openPane(pane); }
-      });
-      if (selectedPane && selectedPane.pane_id === pane.pane_id) row.classList.add('on');
-      list.appendChild(row);
+      }));
     }
+    list.appendChild(chips);
   }
 }
 
@@ -469,6 +434,7 @@ function renderTmux() {
       chips.appendChild(makeChip({
         name: pane.target,
         meta: [pane.window_name, pane.command].filter(Boolean).join(' · '),
+        icon: null,
         dotClass: pane.dead ? 'blocked' : pane.active ? 'working' : 'unknown',
         title: [pane.path, pane.target].filter(Boolean).join(' · '),
         on: selectedTarget === pane.target,

@@ -182,77 +182,6 @@ body {
   color: var(--pc-text);
 }
 
-.row {
-  position: relative;
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 8px 7px 6px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background .12s ease;
-}
-
-.row:hover {
-  background: var(--pc-sunken);
-}
-
-/* 选中项：左侧一条品牌色竖条 + 弱底色，比描边更安静也更清楚。 */
-.row.on {
-  background: var(--pc-sunken);
-}
-
-.row.on::before {
-  content: "";
-  position: absolute;
-  left: -1px;
-  top: 7px;
-  bottom: 7px;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--pc-accent);
-}
-
-.row-main {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.row-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--pc-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.row-sub {
-  font-size: 11px;
-  color: var(--pc-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.row-state {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--pc-muted);
-}
-
 .dot {
   width: 7px;
   height: 7px;
@@ -277,11 +206,6 @@ body {
 .dot.unknown {
   background: transparent;
   border: 1px solid var(--pc-line-strong);
-}
-
-.row.is-dead .row-title,
-.row.is-dead .row-sub {
-  color: var(--pc-faint);
 }
 
 .empty {
@@ -325,6 +249,24 @@ body {
 .chip.on {
   border-color: var(--pc-accent);
   box-shadow: inset 0 0 0 1px var(--pc-accent);
+}
+
+.chip-icon {
+  display: inline-flex;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--pc-muted);
+}
+
+.chip-icon svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.chip.on .chip-icon {
+  color: var(--pc-accent);
 }
 
 .chip-name {
@@ -508,7 +450,8 @@ body {
 }
 
 button:focus-visible,
-.row:focus-visible {
+.chip:focus-visible,
+textarea:focus-visible {
   outline: 2px solid var(--pc-line-strong);
   outline-offset: 1px;
 }
