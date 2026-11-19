@@ -1,4 +1,6 @@
-# Herdr 控制台
+# Herdr Console
+
+![Herdr Console icon](assets/icon.png)
 
 Connect Cindy to a local Herdr terminal workspace: inspect workspaces, tabs,
 panes and agents, read the terminal output, drive agents, and turn Herdr events

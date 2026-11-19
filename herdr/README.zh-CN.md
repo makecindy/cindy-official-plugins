@@ -1,4 +1,5 @@
 # Herdr 控制台
+![Herdr 控制台图标](assets/icon.png)
 
 把本机 Herdr 终端工作区接进 Cindy：查看工作区、标签、分屏与 agent 状态，
 读取终端画面，给 agent 派活，并把 Herdr 事件变成 Cindy 通知与自动化。同一套
