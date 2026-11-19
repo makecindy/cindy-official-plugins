@@ -231,8 +231,9 @@ function matchesEvent(waiter, event, data) {
       return false;
     }
   }
-  if (waiter.pane_id && data && data.pane_id && data.pane_id !== waiter.pane_id) {
-    return false;
+  if (waiter.pane_id) {
+    // 指定了 pane：事件没带 pane_id（workspace/tab 等全局事件）也算不匹配。
+    if (!data || data.pane_id !== waiter.pane_id) return false;
   }
   return true;
 }
@@ -649,6 +650,26 @@ function validateTmuxKeys(keys) {
   });
 }
 
+// 写操作的超时不是「没执行」：命令可能已经交给 tmux server，
+// 只是客户端没在时限内退出。必须报「结果未知」，让调用方先看画面。
+function tmuxOutcomeUnknown(target, what) {
+  const error = new Error(
+    'HERDR_OUTCOME_UNKNOWN: tmux 命令已交给 ' + target + '，但超时没有回执（' + what
+    + '）。可能已经生效，请先读取画面确认，再决定是否重试。'
+  );
+  error.code = 'HERDR_OUTCOME_UNKNOWN';
+  return error;
+}
+
+async function tmuxWrite(args, what) {
+  try {
+    await runTmux(args);
+  } catch (error) {
+    if (error && error.code === 'TMUX_TIMEOUT') throw tmuxOutcomeUnknown(args[args.indexOf('-t') + 1], what);
+    throw error;
+  }
+}
+
 async function tmuxSend(target, params) {
   const dest = String(target || '');
   if (!dest) throw tmuxError('缺少 target', 'TMUX_BAD_TARGET');
@@ -656,14 +677,14 @@ async function tmuxSend(target, params) {
     ? validateTmuxKeys(params.keys)
     : null;
   if (keys) {
-    await runTmux(['send-keys', '-t', dest, '--'].concat(keys));
+    await tmuxWrite(['send-keys', '-t', dest, '--'].concat(keys), '按键');
     return { target: dest, mode: 'keys', keys: keys };
   }
   if (params.text === undefined || params.text === null) {
     throw tmuxError('缺少 text 或 keys', 'TMUX_BAD_TARGET');
   }
   // -l 让 tmux 把内容当字面量，不解释 C-b / Enter 这类键名；-- 允许以 - 开头的文本。
-  await runTmux(['send-keys', '-t', dest, '-l', '--', String(params.text)]);
+  await tmuxWrite(['send-keys', '-t', dest, '-l', '--', String(params.text)], '文本');
   return { target: dest, mode: 'text', text: String(params.text) };
 }
 

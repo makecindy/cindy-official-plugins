@@ -527,11 +527,12 @@ function renderTmux() {
   if (!tmux.available) {
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.textContent = tmux.hint || T.tmuxMissing;
+    // 面板用自己四语言的文案，不依赖工具返回的 hint（那条只有中英两版）。
+    empty.textContent = T.tmuxMissing;
     list.appendChild(empty);
     const note = document.createElement('div');
     note.className = 'empty';
-    note.textContent = tmux.message || T.tmuxMissingHint;
+    note.textContent = T.tmuxMissingHint;
     list.appendChild(note);
     return;
   }

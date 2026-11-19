@@ -322,6 +322,36 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.ok(ackAt > 0 && oldCloseAt > ackAt,
     'the old subscription must be closed only after the new one is acknowledged');
 
+  // 创建成功但 KV 没落盘：要带 id 报「已创建、需对账」，不能让人重试重复创建。
+  assert.match(mainSource, /自动化已创建（id=/,
+    'a create that could not be persisted must report the created id');
+  assert.match(mainSource, /cachedScheduleId = scheduleId;\s*\n\s*const saved = await writeKv/,
+    'the cache must be updated before the KV write so events still find the schedule');
+
+  // Node 传输层断开时，写路径要报「结果未知」。
+  assert.match(mainSource, /function isPotentiallyMutating[\s\S]*?tmux\/send/,
+    'tmux sends must be treated as mutating');
+  assert.match(mainSource, /与插件工作进程的连接中断，请求可能已执行/,
+    'a transport rejection on a write must be outcome-unknown');
+
+  // tmux 写操作超时 = 结果未知（读命令仍是普通超时）。
+  const workerSource2 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSource2, /function tmuxOutcomeUnknown[\s\S]*?HERDR_OUTCOME_UNKNOWN/,
+    'tmux write timeouts must be outcome-unknown');
+  assert.match(workerSource2, /await tmuxWrite\(\['send-keys'/,
+    'both tmux send paths must go through tmuxWrite');
+
+  // 指定 pane_id 时，没有 pane_id 的全局事件不能完成等待。
+  assert.match(workerSource2, /if \(!data \|\| data\.pane_id !== waiter\.pane_id\) return false;/,
+    'events without a pane id must not satisfy a pane-scoped waiter');
+
+  // 面板用自己四语言的 tmux 缺失文案。
+  const panelSource2 = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSource2, /textContent = T\.tmuxMissing;/,
+    'the panel must use its own localized text for a missing tmux');
+  assert.doesNotMatch(panelSource2, /tmux\.hint \|\|/,
+    'the panel must not prefer the tool hint over its localized text');
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,

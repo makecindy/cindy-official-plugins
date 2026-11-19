@@ -60,7 +60,8 @@ const runtimeStrings = {
     unknownPanelAction: '未知的面板动作：',
     herdrNotRunning: '找不到或连不上 Herdr 的 socket。请先启动 Herdr，或用 HERDR_SOCKET_PATH 指定正确路径。',
     herdrSocketDenied: '没有权限访问 Herdr 的 socket。请检查文件权限，或用 HERDR_SOCKET_PATH 指定路径。',
-    herdrUnsubscribed: '已经退订事件，无法等待事件；先用 herdr_events 的 subscribe 恢复订阅。'
+    herdrUnsubscribed: '已经退订事件，无法等待事件；先用 herdr_events 的 subscribe 恢复订阅。',
+    tmuxMissingHint: '这台电脑上没有 tmux。装上 tmux 后这里会列出 session 与 pane。'
   },
   en: {
     notifyBlocked: 'needs attention',
@@ -80,7 +81,8 @@ const runtimeStrings = {
     unknownPanelAction: 'Unknown panel action: ',
     herdrNotRunning: 'The Herdr socket is missing or unreachable. Start Herdr, or point HERDR_SOCKET_PATH at the right socket.',
     herdrSocketDenied: 'No permission to access the Herdr socket. Check its file permissions, or point HERDR_SOCKET_PATH at it.',
-    herdrUnsubscribed: 'Events are unsubscribed, so no event can be waited on; subscribe again with herdr_events first.'
+    herdrUnsubscribed: 'Events are unsubscribed, so no event can be waited on; subscribe again with herdr_events first.',
+    tmuxMissingHint: 'tmux is not installed on this computer. Install it to list sessions and panes here.'
   }
 };
 
@@ -123,13 +125,42 @@ function isUnknownOutcome(error) {
   return /HERDR_OUTCOME_UNKNOWN/.test(String((error && error.message) || ''));
 }
 
+// 只读的 Herdr 方法：传输断了就是普通失败；其余（含 tmux/send）
+// 可能已经交给本机执行，必须报「结果未知」。
+const READ_ONLY_HERDR_METHODS = {
+  ping: true, 'session.snapshot': true, 'pane.read': true, 'pane.list': true,
+  'pane.get': true, 'pane.current': true, 'agent.read': true, 'agent.list': true,
+  'agent.get': true, 'workspace.list': true, 'workspace.get': true,
+  'tab.list': true, 'tab.get': true, 'worktree.list': true, 'events.wait': true
+};
+
+function isPotentiallyMutating(method, params) {
+  if (method === 'tmux/send') return true;
+  if (method !== 'herdr/request') return false;   // tmux/read、tmux/sessions 等
+  const inner = params && params.method;
+  return !READ_ONLY_HERDR_METHODS[inner];
+}
+
 async function nodeRequest(method, params, callId, timeoutMs) {
   const request = { method: method, params: params || {} };
   if (callId) request.callId = callId;
   if (typeof timeoutMs === 'number' && timeoutMs > 0) {
     request.timeoutMs = Math.min(Math.round(timeoutMs), HOST_REQUEST_TIMEOUT_MAX_MS);
   }
-  const response = await cindy.node.request(request);
+  let response;
+  try {
+    response = await cindy.node.request(request);
+  } catch (error) {
+    // 传输层断了（worker 崩溃、stdio 掉线）：请求可能已经交给本机执行，
+    // 写路径必须报「结果未知」，否则重试会重复执行。
+    if (isPotentiallyMutating(method, request.params)) {
+      throw new Error(
+        'HERDR_OUTCOME_UNKNOWN: 与插件工作进程的连接中断，请求可能已执行；'
+        + '请先核对终端实际状态，再决定是否重试。'
+      );
+    }
+    throw error;
+  }
   if (!response.ok) {
     const error = new Error(localizeHerdrError(response.message) || runtime.nodeFailed);
     error.code = response.errorCode;
@@ -364,10 +395,17 @@ async function ensureAutomationSchedule(name, args) {
   const body = createdOutcome.body;
   const scheduleId = body.data && body.data.id;
   if (!scheduleId) throw new Error(runtime.automationNoId);
+  // 先记缓存：即使接下来 KV 写失败，本会话的事件唤醒也用得上这条新的。
+  cachedScheduleId = scheduleId;
   const saved = await writeKv({ [SCHEDULE_ID_KEY]: scheduleId });
-  // 存不上就不能当成配置完成：后续事件会因为读不到 id 而永远不触发。
-  if (saved[SCHEDULE_ID_KEY] !== scheduleId) throw new Error(runtime.automationSaveFailed);
-  cachedScheduleId = scheduleId;   // 同上：兜底要用最新的那条
+  // 自动化已经确定创建了：不能报「请重试」（重试会再建一条），
+  // 要带着 id 报「已创建但没存上，先核对」。
+  if (saved[SCHEDULE_ID_KEY] !== scheduleId) {
+    throw new Error(
+      'HERDR_OUTCOME_UNKNOWN: 自动化已创建（id=' + scheduleId + '），但 id 没保存成功。'
+      + '请先核对自动化列表，不要直接重试重复创建。'
+    );
+  }
   return scheduleId;
 }
 
@@ -381,9 +419,14 @@ async function replaceUnboundSchedule(storedId, oldItem, name, args) {
   const body = outcome.body;
   const scheduleId = body && body.data && body.data.id;
   if (!scheduleId) throw new Error(runtime.automationNoId);
-  const saved = await writeKv({ [SCHEDULE_ID_KEY]: scheduleId });
-  if (saved[SCHEDULE_ID_KEY] !== scheduleId) throw new Error(runtime.automationSaveFailed);
   cachedScheduleId = scheduleId;
+  const saved = await writeKv({ [SCHEDULE_ID_KEY]: scheduleId });
+  if (saved[SCHEDULE_ID_KEY] !== scheduleId) {
+    throw new Error(
+      'HERDR_OUTCOME_UNKNOWN: 自动化已创建（id=' + scheduleId + '），但 id 没保存成功。'
+      + '请先核对自动化列表，不要直接重试重复创建。'
+    );
+  }
   if (isOurAutomation(oldItem, name, args)) {
     await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_delete', { id: storedId }));
   }
@@ -758,7 +801,7 @@ const tools = {
         message: available.message || null,
         sessions: [],
         panes: [],
-        hint: '这台电脑上没有 tmux。装上 tmux 后这里会列出 session 与 pane。'
+        hint: runtime.tmuxMissingHint
       };
     }
     const sessions = await nodeRequest('tmux/sessions', {}, args.__callId);
