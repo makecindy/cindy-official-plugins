@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { promises as fsPromises } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import lib from '../herdr/panel-lib.js';
@@ -404,4 +405,102 @@ test('changing only silentWhenIdle updates the existing schedule', async () => {
   assert.equal(updates[0].args.silentWhenIdle, true, 'the silent flag must be written through');
   assert.equal(calls.filter((entry) => entry.tool === 'schedule_create').length, 0,
     'a silent-flag change must not create a second schedule');
+});
+
+
+test('a subscription handover delivers each event exactly once', async () => {
+  const dir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'herdr-handover-'));
+  const socketPath = path.join(dir, 'herdr.sock');
+  const conns = [];
+
+  const server = net.createServer((conn) => {
+    let buffer = '';
+    conn.on('data', (chunk) => {
+      buffer += String(chunk);
+      let index;
+      while ((index = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, index);
+        buffer = buffer.slice(index + 1);
+        if (!line.trim()) continue;
+        const request = JSON.parse(line);
+        if (request.method === 'events.subscribe') {
+          conns.push(conn);
+          conn.write(JSON.stringify({ id: request.id, result: { ok: true } }) + '\n');
+        } else if (request.method === 'pane.list') {
+          conn.write(JSON.stringify({ id: request.id, result: { panes: [{ pane_id: 'w1:p1' }] } }) + '\n');
+        } else {
+          conn.write(JSON.stringify({ id: request.id, result: {} }) + '\n');
+        }
+      }
+    });
+  });
+  await new Promise((resolve) => server.listen(socketPath, resolve));
+
+  const worker = spawn(process.execPath, [path.join(root, 'herdr', 'node', 'worker.cjs')], {
+    env: { ...process.env, HERDR_SOCKET_PATH: socketPath },
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+
+  const notifications = [];
+  let stdout = '';
+  worker.stdout.on('data', (chunk) => {
+    stdout += String(chunk);
+    let index;
+    while ((index = stdout.indexOf('\n')) >= 0) {
+      const line = stdout.slice(0, index);
+      stdout = stdout.slice(index + 1);
+      if (!line.trim()) continue;
+      try {
+        const message = JSON.parse(line);
+        if (message.method === 'herdr/event') notifications.push(message);
+      } catch (error) { void error; }
+    }
+  });
+
+  const call = (method, params) => new Promise((resolve, reject) => {
+    const id = 'h' + method + Date.now();
+    const timer = setTimeout(() => reject(new Error('timeout ' + method)), 8000);
+    const onData = (chunk) => {
+      const text = String(chunk);
+      if (!text.includes(id)) return;
+      worker.stdout.off('data', onData);
+      clearTimeout(timer);
+      resolve();
+    };
+    worker.stdout.on('data', onData);
+    worker.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params: params || {} }) + '\n');
+  });
+
+  const waitFor = async (predicate, label) => {
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline) {
+      if (predicate()) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error('timed out waiting for ' + label);
+  };
+
+  try {
+    await call('herdr/subscribe', {});
+    await waitFor(() => conns.length === 1, 'first subscription');
+    await call('herdr/subscribe', {});
+    await waitFor(() => conns.length === 2, 'second subscription');
+
+    // 同一个事件同时从新旧两条连接推过来：交接期间只应转发一次。
+    const payload = JSON.stringify({
+      event: 'pane_agent_status_changed',
+      data: { pane_id: 'w1:p1', agent_status: 'blocked' }
+    }) + '\n';
+    conns[0].write(payload);
+    conns[1].write(payload);
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    assert.equal(notifications.length, 1,
+      `expected one event delivery, got ${notifications.length}`);
+  } finally {
+    worker.kill();
+    await new Promise((resolve) => server.close(resolve));
+    for (const conn of conns) { try { conn.destroy(); } catch (error) { void error; } }
+    await fsPromises.rm(dir, { recursive: true, force: true });
+  }
 });

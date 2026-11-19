@@ -1009,8 +1009,9 @@ async function ensureSubscription() {
         // 不能因为一次读取失败就连订阅都不发起。
         schedulePreferenceRecheck();
       }
-      // 读取期间用户可能刚退订：以最新的选择为准。
-      if (subscriptionPreference === false) return;
+      // 读取期间用户可能刚表态（哪怕那次持久化失败了）：以最新的内存选择为准，
+      // 存储里的旧值只在「还没表态」时才生效。
+      if (subscriptionPreference !== null) return;
       if (kv && kv[SUBSCRIBED_KEY] === false) {
         subscriptionPreference = false;
         return;
@@ -1031,7 +1032,9 @@ function schedulePreferenceRecheck() {
     preferenceRetryTimer = null;
     try {
       const kv = await readKv();
-      if (kv[SUBSCRIBED_KEY] === false && subscriptionPreference !== false) {
+      // 只在用户仍未表态时恢复存储里的退订值；读取期间用户刚选过就尊重它。
+      if (subscriptionPreference !== null) return;
+      if (kv[SUBSCRIBED_KEY] === false) {
         subscriptionPreference = false;
         await nodeRequest('herdr/unsubscribe', {});
       }
