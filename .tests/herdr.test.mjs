@@ -173,7 +173,9 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   );
 
   // 复用不再按名称搜索全部自动化：只认 KV 记录的那一条。
-  assert.doesNotMatch(mainSource, /schedule_list/, 'reuse must not search schedules by name');
+  // （错误提示里可以提到让用户去核对，但代码不能真的调 schedule_list 去挑。）
+  assert.doesNotMatch(mainSource, /cindy\.host\.call\('cindy_scheduler', 'schedule_list'/,
+    'reuse must not search schedules by name');
   assert.match(
     mainSource,
     /schedule_get[\s\S]*?isOurAutomation/,
@@ -277,6 +279,43 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     /enableSubscription\(args\.__callId\)/,
     'setup must re-enable the subscription with the recorded preference'
   );
+
+  // 原始调用的内层等待要封顶，三层预算才兜得住。
+  assert.match(mainSource, /const RAW_WAIT_MAX_MS = 90000;/, 'raw waits must be capped');
+  assert.match(mainSource, /clampRawWait\(/, 'herdr_call must clamp the inner wait');
+
+  // 触发自动化要核对业务回执，失败要复位限流。
+  assert.match(mainSource, /async function runAutomationNow[\s\S]*?hostBody\(called\)/,
+    'schedule_run_now results must be checked');
+
+  // worker 退订后不能被 wait 重新打开长连接。
+  const worker = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(worker, /'herdr\/wait-event'[\s\S]*?!subscription\.desired[\s\S]*?HERDR_UNSUBSCRIBED/,
+    'wait-event must respect an explicit unsubscribe');
+
+  // 面板轮询不能在上一次刷新未完成时再开一次。
+  const panel = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panel, /if \(refreshRunning && !force\) return;/,
+    'a refresh must not start while another is running');
+
+  // 提示词已发出、等待超时 → 必须是「结果未知」，不能报普通失败让 Agent 重发。
+  assert.match(mainSource, /HERDR_OUTCOME_UNKNOWN: 提示词已发送/,
+    'a timed-out prompt wait must be reported as outcome-unknown');
+
+  // 操作执行完之后，回执送不出去不能报成操作失败。
+  assert.match(mainSource, /操作已经执行完了[\s\S]*?void error;/,
+    'a failed receipt must not turn an executed operation into a failure');
+
+  // schedule_create 回执丢失要报「结果未知」，禁止盲目重试。
+  assert.match(mainSource, /schedule_create[\s\S]*?HERDR_OUTCOME_UNKNOWN: 自动化可能已创建/,
+    'a lost create receipt must be reported as outcome-unknown');
+
+  // worker 重建订阅要先建后断（旧连接在新连接确认后才关）。
+  const workerSource = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  const ackAt = workerSource.indexOf('subscription.running = true;');
+  const oldCloseAt = workerSource.indexOf('previous.herdrIntentionalClose = true;', ackAt);
+  assert.ok(ackAt > 0 && oldCloseAt > ackAt,
+    'the old subscription must be closed only after the new one is acknowledged');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(

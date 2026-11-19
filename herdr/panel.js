@@ -643,8 +643,14 @@ async function openTmuxPane(pane) {
 
 // 切换视图会让进行中的刷新作废：旧结果回来时视图可能已经变了。
 let refreshToken = 0;
+// 正在刷新时不要再开新的：否则快照慢于轮询间隔（15 秒）时，
+// 每次轮询都会把上一个有效结果判成过期，面板永远停在「刷新中」。
+let refreshRunning = false;
 
-async function refresh() {
+// force = 视图切换这类必须立刻开始的刷新（允许作废进行中的那次）。
+async function refresh(force) {
+  if (refreshRunning && !force) return;
+  refreshRunning = true;
   const status = $('#status');
   // 每次刷新都领一个新序号：上一次刷新若最后返回，就会被判定为过期，
   // 不会把新列表覆盖成旧快照。
@@ -664,7 +670,9 @@ async function refresh() {
         const fresh = ((tmux && tmux.panes) || []).find(function (pane) {
           return pane.target === selectedTarget;
         });
+        // 分屏已经没了：关掉详情，别继续对着无效目标发输入。
         if (fresh) renderTmuxDetail(fresh);
+        else closeDetail();
       }
     } else if (selectedPane) {
       const fresh = (state.panes || []).find(function (pane) {
@@ -673,6 +681,8 @@ async function refresh() {
       if (fresh) {
         selectedPane = fresh;
         renderHerdrDetail(fresh);
+      } else {
+        closeDetail();
       }
     }
     const hasOpenDetail = view === 'tmux' ? selectedTarget : selectedPane;
@@ -682,6 +692,10 @@ async function refresh() {
   } catch (error) {
     if (stale()) return;
     status.textContent = error.message || T.refreshFailed;
+  } finally {
+    // 只有自己仍是最新那次刷新时才解除占位；
+    // 被 force 作废的旧刷新不能把新刷新的占位清掉。
+    if (token === refreshToken) refreshRunning = false;
   }
 }
 
@@ -755,7 +769,7 @@ function setView(next) {
     button.setAttribute('aria-selected', on ? 'true' : 'false');
   });
   syncTermTarget();
-  refresh();
+  refresh(true);
 }
 
 $('#refresh').addEventListener('click', refresh);

@@ -209,7 +209,7 @@ test('the detail header follows the pane state after a rebind', async () => {
 
 test('each refresh gets its own token so a stale response cannot overwrite', () => {
   const source = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
-  const body = /async function refresh\(\) \{([\s\S]*?)\n\}/.exec(source);
+  const body = /async function refresh\(force\) \{([\s\S]*?)\n\}/.exec(source);
   assert.ok(body, 'refresh() must exist');
   assert.match(body[1], /refreshToken \+= 1;/, 'refresh must allocate a new token at the start');
 
@@ -253,6 +253,16 @@ test('submitting a line pins one target for both tmux sends', () => {
   // Herdr 的提交走 submit 动作（pane.send_input），不是只打字的 send。
   assert.match(text, /request\('submit', \{ pane_id: paneId, text: text \}\)/,
     'herdr submission must go through the submit action');
+});
+
+test('the detail closes when the selected pane disappears', () => {
+  const source = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  const body = /async function refresh\(force\) \{([\s\S]*?)\n\}/.exec(source);
+  assert.ok(body, 'refresh must exist');
+  assert.match(body[1], /if \(fresh\) renderTmuxDetail\(fresh\);\s*else closeDetail\(\);/,
+    'a vanished tmux target must close the detail');
+  assert.match(body[1], /if \(fresh\) \{[\s\S]*?renderHerdrDetail\(fresh\);\s*\} else \{\s*closeDetail\(\);/,
+    'a vanished herdr pane must close the detail');
 });
 
 test('the panel waits longer than the slowest backend operation', () => {

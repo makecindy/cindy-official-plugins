@@ -298,20 +298,7 @@ body {
   border-radius: 2px;
 }
 
-.chip.on /* 换行开关：两种状态各一个图标，跟着 aria-pressed 走。 */
-#detail-wrap .wrap-off {
-  display: none;
-}
-
-#detail-wrap[aria-pressed='false'] .wrap-on {
-  display: none;
-}
-
-#detail-wrap[aria-pressed='false'] .wrap-off {
-  display: block;
-}
-
-.chip-icon {
+.chip.on .chip-icon {
   color: var(--pc-accent);
 }
 

@@ -29,6 +29,24 @@ function notify(method, params) {
   reply({ jsonrpc: '2.0', method: method, params: params });
 }
 
+// Herdr 没起来、socket 不存在或没权限：换成带错误码的可行动描述，
+// 主进程再按宿主语言给出提示，而不是把 ENOENT 这种底层消息直接丢给用户。
+function describeConnectionError(error) {
+  const code = error && error.code;
+  const path = socketPath();
+  if (code === 'ENOENT' || code === 'ECONNREFUSED') {
+    const wrapped = new Error('HERDR_NOT_RUNNING: 找不到或连不上 Herdr 的 socket（' + path + '）。');
+    wrapped.code = 'HERDR_NOT_RUNNING';
+    return wrapped;
+  }
+  if (code === 'EACCES' || code === 'EPERM') {
+    const wrapped = new Error('HERDR_SOCKET_DENIED: 没有权限访问 Herdr 的 socket（' + path + '）。');
+    wrapped.code = 'HERDR_SOCKET_DENIED';
+    return wrapped;
+  }
+  return error;
+}
+
 function fail(id, code, message) {
   reply({ jsonrpc: '2.0', id: id, error: { code: code, message: message } });
 }
@@ -117,7 +135,7 @@ function callOnce(method, params, timeoutMs) {
     });
 
     socket.on('error', function (error) {
-      finish(reject, sent ? outcomeUnknown(method) : error);
+      finish(reject, sent ? outcomeUnknown(method) : describeConnectionError(error));
     });
     socket.on('close', function () {
       if (!settled) {
@@ -239,14 +257,9 @@ function handleEvent(message) {
 }
 
 async function openSubscription() {
+  // 先留着旧连接：新的订阅确认之后再关，切换期间的 blocked/done 不会漏。
+  // 新的失败时旧连接继续服务，不会出现没人收事件的空窗。
   const previous = subscription.socket;
-  subscription.socket = null;
-  subscription.running = false;
-  if (previous) {
-    // 主动关掉的旧连接不该触发重连，也不该清空新连接的状态。
-    previous.herdrIntentionalClose = true;
-    try { previous.destroy(); } catch (error) { void error; }
-  }
 
   const paneIds = await listPaneIds();
   subscription.paneIds = paneIds;
@@ -255,7 +268,8 @@ async function openSubscription() {
   const socket = net.createConnection(socketPath());
   subscription.socket = socket;
 
-  await new Promise(function (resolve, reject) {
+  try {
+    await new Promise(function (resolve, reject) {
     let buffer = '';
     let settled = false;
     const timer = setTimeout(function () { finish(reject, new Error('订阅连接超时')); }, 15000);
@@ -301,19 +315,33 @@ async function openSubscription() {
     socket.on('error', function (error) {
       finish(reject, error);
     });
-    socket.on('close', function () {
-      if (socket.herdrIntentionalClose) return;
-      // 只清理属于自己的状态：旧连接的 close 不能抹掉新连接。
-      if (subscription.socket === socket) {
-        subscription.socket = null;
-        subscription.running = false;
-      }
-      if (!settled) finish(reject, new Error('订阅连接在确认前关闭'));
-      scheduleReconnect();
+      socket.on('close', function () {
+        if (socket.herdrIntentionalClose) return;
+        // 只清理属于自己的状态：旧连接的 close 不能抹掉新连接。
+        if (subscription.socket === socket) {
+          subscription.socket = null;
+          subscription.running = false;
+        }
+        if (!settled) finish(reject, new Error('订阅连接在确认前关闭'));
+        scheduleReconnect();
+      });
     });
-  });
+  } catch (error) {
+    // 新订阅没成：把它撤掉，旧连接继续服务。
+    if (subscription.socket === socket) {
+      subscription.socket = previous || null;
+      subscription.running = Boolean(previous);
+    }
+    try { socket.destroy(); } catch (destroyError) { void destroyError; }
+    throw error;
+  }
   subscription.running = true;
   subscription.attempts = 0;
+  // 新连接已经确认，再关旧的（主动关不触发重连，也不清新连接的状态）。
+  if (previous && previous !== socket) {
+    previous.herdrIntentionalClose = true;
+    try { previous.destroy(); } catch (error) { void error; }
+  }
 }
 
 async function closeSubscription() {
@@ -688,6 +716,12 @@ const handlers = {
   async 'herdr/wait-event'(params) {
     const requested = Number(params.timeout_ms || 0);
     const timeoutMs = requested > 0 ? Math.min(requested, 60000) : 60000;
+    // 用户退订过就不能借 wait 把长连接重新打开（否则通知和自动化会自己回来）。
+    if (!subscription.desired) {
+      const error = new Error('HERDR_UNSUBSCRIBED: 已退订，事件等待需要先订阅（herdr_events mode=subscribe）。');
+      error.code = 'HERDR_UNSUBSCRIBED';
+      throw error;
+    }
     if (!subscription.running) {
       await withSubscriptionLock(async function () {
         await openSubscription();

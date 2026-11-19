@@ -30,6 +30,15 @@ const WAIT_CHUNK_MS = 45000;
 // 否则宿主会先把续段循环打断。45s 的一段因此是 45 < 60 < 70 秒的次序。
 const WAIT_CHUNK_MARGIN_MS = 25000;
 
+// Herdr 连不上时，把 Node 的底层错误码换成可行动的本地化提示。
+function localizeHerdrError(message) {
+  const text = String(message || '');
+  if (/HERDR_NOT_RUNNING/.test(text)) return runtime.herdrNotRunning;
+  if (/HERDR_SOCKET_DENIED/.test(text)) return runtime.herdrSocketDenied;
+  if (/HERDR_UNSUBSCRIBED/.test(text)) return runtime.herdrUnsubscribed;
+  return text;
+}
+
 // 运行时文案跟随宿主语言：只读 /app-context 的 uiLocale ?? locale，
 // 插件没提供的语言回退英文。不读 navigator.language。
 const runtimeStrings = {
@@ -48,7 +57,10 @@ const runtimeStrings = {
     nodeFailed: 'Node 工作进程调用失败',
     missingTarget: '缺少 target（session、window 或 pane 的名字）',
     missingTextOrKeys: '缺少 text 或 keys',
-    unknownPanelAction: '未知的面板动作：'
+    unknownPanelAction: '未知的面板动作：',
+    herdrNotRunning: '找不到或连不上 Herdr 的 socket。请先启动 Herdr，或用 HERDR_SOCKET_PATH 指定正确路径。',
+    herdrSocketDenied: '没有权限访问 Herdr 的 socket。请检查文件权限，或用 HERDR_SOCKET_PATH 指定路径。',
+    herdrUnsubscribed: '已经退订事件，无法等待事件；先用 herdr_events 的 subscribe 恢复订阅。'
   },
   en: {
     notifyBlocked: 'needs attention',
@@ -65,7 +77,10 @@ const runtimeStrings = {
     nodeFailed: 'The bundled Node worker call failed',
     missingTarget: 'target is required (session, window, or pane name)',
     missingTextOrKeys: 'text or keys is required',
-    unknownPanelAction: 'Unknown panel action: '
+    unknownPanelAction: 'Unknown panel action: ',
+    herdrNotRunning: 'The Herdr socket is missing or unreachable. Start Herdr, or point HERDR_SOCKET_PATH at the right socket.',
+    herdrSocketDenied: 'No permission to access the Herdr socket. Check its file permissions, or point HERDR_SOCKET_PATH at it.',
+    herdrUnsubscribed: 'Events are unsubscribed, so no event can be waited on; subscribe again with herdr_events first.'
   }
 };
 
@@ -116,7 +131,7 @@ async function nodeRequest(method, params, callId, timeoutMs) {
   }
   const response = await cindy.node.request(request);
   if (!response.ok) {
-    const error = new Error(response.message || runtime.nodeFailed);
+    const error = new Error(localizeHerdrError(response.message) || runtime.nodeFailed);
     error.code = response.errorCode;
     throw error;
   }
@@ -127,12 +142,35 @@ async function nodeRequest(method, params, callId, timeoutMs) {
 // 默认 30 秒断，而 worker 默认等 120 秒，写操作可能已经生效、宿主却先报一个
 // 普通 Node 失败，丢掉「结果未知」这个可核对的信号。这里让 worker 先到点。
 const DEFAULT_HERDR_CALL_TIMEOUT_MS = 45000;
+// worker 的 socket 计时 = 内层等待 + 这个余量（与 worker.cjs 保持一致）。
+const WORKER_TIMEOUT_MARGIN_MS = 15000;
+// 原始 herdr_call 允许的最大内层等待：再长的话宿主 120 秒上限兜不住，
+// 会被迫切成「宿主先断、worker 还在等」。更长的等待请用分段的 herdr_wait。
+const RAW_WAIT_MAX_MS = 90000;
 
-// Herdr 的超时写在 worker 请求的外层参数里；host 这一层要多留一点余量。
+function clampRawWait(params) {
+  const clamp = function (value) {
+    return Number(value) > RAW_WAIT_MAX_MS ? RAW_WAIT_MAX_MS : value;
+  };
+  if (params.timeout_ms !== undefined) params.timeout_ms = clamp(params.timeout_ms);
+  if (params.wait && params.wait.timeout_ms !== undefined) {
+    params.wait.timeout_ms = clamp(params.wait.timeout_ms);
+  }
+  return params;
+}
+
+// 三层预算从同一个内层截止时间派生：内层 ≤ 90s → worker ≤ 105s → 宿主 120s，
+// 顺序永远是 内层 < worker < 宿主。
 async function herdrCall(method, params, callId, timeoutMs) {
-  const budget = (typeof timeoutMs === 'number' && timeoutMs > 0)
-    ? Math.min(Math.round(timeoutMs), HOST_REQUEST_TIMEOUT_MAX_MS)
-    : DEFAULT_HERDR_CALL_TIMEOUT_MS;
+  const inner = Math.max(
+    Number((params && params.timeout_ms) || 0),
+    Number((params && params.wait && params.wait.timeout_ms) || 0)
+  );
+  let budget;
+  if (typeof timeoutMs === 'number' && timeoutMs > 0) budget = timeoutMs;
+  else if (inner > 0) budget = inner + WORKER_TIMEOUT_MARGIN_MS;
+  else budget = DEFAULT_HERDR_CALL_TIMEOUT_MS;
+  budget = Math.min(budget, HOST_REQUEST_TIMEOUT_MAX_MS - WAIT_CHUNK_MARGIN_MS);
   const request = { method: method, params: params || {}, timeout_ms: budget };
   return nodeRequest('herdr/request', request, callId, budget + WAIT_CHUNK_MARGIN_MS);
 }
@@ -330,7 +368,16 @@ async function ensureAutomationSchedule(name, args) {
       return storedId;
     }
   }
-  const created = await cindy.host.call('cindy_scheduler', 'schedule_create', schedulePayload(name, args));
+  let created;
+  try {
+    created = await cindy.host.call('cindy_scheduler', 'schedule_create', schedulePayload(name, args));
+  } catch (error) {
+    // 回执丢了：自动化可能已经建好，直接报普通失败会让调用方重试出重复任务。
+    throw new Error(
+      'HERDR_OUTCOME_UNKNOWN: 自动化可能已创建，但没拿到回执。'
+      + '请先用 schedule_list 核对是否已存在，再决定是否重试，不要直接再建。'
+    );
+  }
   const createdOutcome = hostBody(created);
   if (!createdOutcome.ok) {
     throw new Error(runtime.automationFailed + (createdOutcome.detail || runtime.automationUnknown));
@@ -368,6 +415,17 @@ async function replaceUnboundSchedule(storedId, oldItem, name, args) {
   return scheduleId;
 }
 
+// 触发一次自动化并核对业务回执；失败时把限流窗口复位，
+// 让下一次 blocked/done 能立刻重试，而不是被这次失败挡住。
+async function runAutomationNow(scheduleId) {
+  const called = await cindy.host.call('cindy_scheduler', 'schedule_run_now', { id: scheduleId });
+  const outcome = hostBody(called);
+  if (!outcome.ok) {
+    lastTriggerAt = 0;
+    throw new Error(runtime.automationFailed + (outcome.detail || runtime.automationUnknown));
+  }
+}
+
 // Herdr 报告 agent 进入 blocked/done 时，让宿主调度器跑一次那条自动化。
 // 由宿主负责投递，插件不持有也不外发任何地址。
 // 限流窗口内到达的新事件不丢弃：合并成一次延后执行，否则后一个分屏的
@@ -385,7 +443,11 @@ async function triggerAutomation() {
   if (triggerTimer) return;                       // 已经排了延后执行
   if (now - lastTriggerAt >= TRIGGER_THROTTLE_MS) {
     lastTriggerAt = now;
-    await cindy.host.call('cindy_scheduler', 'schedule_run_now', { id: scheduleId });
+    try {
+      await runAutomationNow(scheduleId);
+    } catch (error) {
+      void error;   // 后台唤醒没有读者；失败已复位限流，下个事件会重试
+    }
     return;
   }
   const wait = TRIGGER_THROTTLE_MS - (now - lastTriggerAt);
@@ -396,10 +458,12 @@ async function triggerAutomation() {
     // 不能再跑闭包里那条旧的。
     let current = scheduleId;
     try { current = await readScheduleId(); } catch (error) { current = cachedScheduleId; }
-    if (!current || current !== scheduleId) {
-      if (!current) return;
+    if (!current) return;
+    try {
+      await runAutomationNow(current);
+    } catch (error) {
+      void error;
     }
-    await cindy.host.call('cindy_scheduler', 'schedule_run_now', { id: current });
   }, wait);
   if (triggerTimer.unref) triggerTimer.unref();
 }
@@ -521,13 +585,25 @@ const tools = {
     } catch (error) {
       if (!isTimeoutError(error)) throw error;
     }
-    const result = await waitForAgentState(args.target, until, deadline, args.__callId);
-    return {
-      target: args.target,
-      agent_status: result && result.agent_status ? result.agent_status : null,
-      completion: result ? result.completion || null : null,
-      result: result || null
-    };
+    try {
+      const result = await waitForAgentState(args.target, until, deadline, args.__callId);
+      return {
+        target: args.target,
+        agent_status: result && result.agent_status ? result.agent_status : null,
+        completion: result ? result.completion || null : null,
+        result: result || null
+      };
+    } catch (error) {
+      // 提示词已经发出去了，等待没到目标状态——这不是「没执行」，
+      // 必须让 Agent 知道别直接重发。
+      if (/等待 agent 状态超时/.test(String(error && error.message))) {
+        throw new Error(
+          'HERDR_OUTCOME_UNKNOWN: 提示词已发送，但等待 ' + until.join('/')
+          + ' 超时。请先读取画面确认状态，再决定是否重发，避免重复执行。'
+        );
+      }
+      throw error;
+    }
   },
 
   async herdr_send(args) {
@@ -662,7 +738,8 @@ const tools = {
   },
 
   async herdr_call(args) {
-    const result = await herdrCall(args.method, args.params || {}, args.__callId);
+    const params = clampRawWait(Object.assign({}, args.params || {}));
+    const result = await herdrCall(args.method, params, args.__callId);
     return result === undefined ? null : result;
   },
 
@@ -833,16 +910,24 @@ cindy.onHostMessage(async function (msg) {
   if (msg.type === 'tool-call') {
     const handler = tools[msg.tool];
     if (!handler) return;
+    const args = Object.assign({}, msg.args || {});
+    args.__callId = msg.callId;
+    let result;
     try {
-      const args = Object.assign({}, msg.args || {});
-      args.__callId = msg.callId;
-      const result = await handler(args);
-      await replyTool(msg.callId, true, result);
+      result = await handler(args);
     } catch (error) {
       await replyTool(msg.callId, false, {
         errorCode: isUnknownOutcome(error) ? 'HERDR_OUTCOME_UNKNOWN' : 'HERDR_REQUEST_FAILED',
         message: error && error.message ? error.message : String(error)
       });
+      return;
+    }
+    // 操作已经执行完了：回执送不出去也不能报成「操作失败」，
+    // 否则 Agent 会以为没做而重试（重复发送输入、重复关闭分屏）。
+    try {
+      await replyTool(msg.callId, true, result);
+    } catch (error) {
+      void error;
     }
     return;
   }
