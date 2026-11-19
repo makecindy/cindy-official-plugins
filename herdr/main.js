@@ -213,20 +213,31 @@ function isOurAutomation(item, name, args) {
   return true;
 }
 
-// 找本插件建过的同名自动化；没有就建一条「只由事件唤醒」的：
-// manual=true 表示不按时间自动触发（nextFireAt 为空），需要时由插件调用
-// schedule_run_now 唤醒，不会自己按小时跑。
+// 复用只认本插件自己记录的那一条：拿 KV 里的 id 去 schedule_get 取回来逐项核实，
+// 不再按名称从全部自动化里挑——按名称挑会把用户的同名定时任务接到事件桥上。
+// 认下来但会话不一致时，用 schedule_update 把绑定改成这次要求的，不新建重复任务。
 async function ensureAutomationSchedule(name, args) {
-  const listed = await cindy.host.call('cindy_scheduler', 'schedule_list', { query: name });
-  if (!listed.isError) {
-    const info = JSON.parse(listed.content[0].text);
-    const schedules = (info.data && (info.data.schedules || info.data)) || [];
-    if (Array.isArray(schedules)) {
-      const existing = schedules.find(function (item) { return isOurAutomation(item, name, args); });
-      if (existing && existing.id) {
-        const saved = await writeKv({ [SCHEDULE_ID_KEY]: existing.id });
-        if (saved[SCHEDULE_ID_KEY] !== existing.id) throw new Error(runtime.automationSaveFailed);
-        return existing.id;
+  const kv = await readKv();
+  const storedId = kv[SCHEDULE_ID_KEY];
+  if (storedId) {
+    const fetched = await cindy.host.call('cindy_scheduler', 'schedule_get', { id: storedId });
+    if (!fetched.isError) {
+      const info = JSON.parse(fetched.content[0].text);
+      const item = info && info.data;
+      if (isOurAutomation(item, name, args)) {
+        if (args.targetSessionId && item.targetSessionId !== args.targetSessionId) {
+          const updated = await cindy.host.call('cindy_scheduler', 'schedule_update', {
+            id: storedId,
+            targetSessionId: args.targetSessionId
+          });
+          if (updated.isError) {
+            const detail = updated.content && updated.content[0] && updated.content[0].text;
+            throw new Error(runtime.automationFailed + (detail || runtime.automationUnknown));
+          }
+        }
+        const saved = await writeKv({ [SCHEDULE_ID_KEY]: storedId });
+        if (saved[SCHEDULE_ID_KEY] !== storedId) throw new Error(runtime.automationSaveFailed);
+        return storedId;
       }
     }
   }

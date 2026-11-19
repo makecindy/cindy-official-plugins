@@ -165,6 +165,14 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'reuse must verify ownership, manual-only trigger and the target session'
   );
 
+  // 复用不再按名称搜索全部自动化：只认 KV 记录的那一条。
+  assert.doesNotMatch(mainSource, /schedule_list/, 'reuse must not search schedules by name');
+  assert.match(
+    mainSource,
+    /schedule_get[\s\S]*?isOurAutomation/,
+    'reuse must fetch the stored schedule and verify it'
+  );
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,
