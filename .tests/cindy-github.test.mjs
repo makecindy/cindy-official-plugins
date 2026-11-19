@@ -76,11 +76,12 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.equal('slots' in manifest, false);
   assert.equal(manifest.notify, true);
   assert.equal(manifest.fs, true);
-  // PR card: the title links to the PR; agent turns only on clicks, no background runs.
+  // The card can manage its saved follow-up directly.
   assert.deepEqual(manifest.card, { externalLinks: true });
-  assert.deepEqual(manifest.agent, {});
+  assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
+  assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.19');
+  assert.equal(manifest.version, '1.5.20');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -655,6 +656,7 @@ function createPrRuntime(options = {}) {
   const agentRuns = [];
   let kv = options.kv ?? {};
   const cindy = {
+    ...options.hostApi,
     ...(options.pickModel ? { pickModel: options.pickModel } : {}),
     async request() { return { ok: true, context: { locale: 'zh-CN' } }; },
     onHostMessage(fn) { handler = fn; },
@@ -1740,4 +1742,128 @@ test('legacy task-entry clicks return only a navigation handoff and retain follo
   await runtime.tool({ repo: 'octo/repo', pr: 42, following: true, session_context: { session_id: 's3' } });
   await runtime.click(ref.callId, 'pr:open-task', { sessionId: 's2' });
   assert.equal(runtime.agentRuns.at(-1).event.task_url, 'cindy://session/s3');
+});
+
+function followScheduler(options = {}) {
+  const rows = new Map();
+  const calls = [];
+  const hostApi = {
+    host: { async call(server, tool, args) {
+      assert.equal(server, 'cindy_scheduler');
+      assert.equal(args.device, 'local');
+      calls.push(tool);
+      let data;
+      if (tool === 'schedule_create') {
+        if (options.reject) throw new Error('scheduler unavailable');
+        data = { ...args, id: 'sch-1', status: 'active' };
+        rows.set(data.id, data);
+        if (options.loseCreateReceipt) throw new Error('lost receipt');
+      } else if (tool === 'schedule_get') {
+        if (options.failGet) throw new Error('cannot verify');
+        data = rows.get(args.id) ?? null;
+      } else if (tool === 'schedule_list') {
+        data = [...rows.values()];
+      } else if (tool === 'schedule_delete') {
+        data = { deleted: args.id };
+        rows.delete(args.id);
+      } else throw new Error('unexpected ' + tool);
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, data }) }] };
+    } },
+    node: { async request({ method }) {
+      assert.equal(method, 'followSkillDir');
+      return { ok: true, result: '/approved skills/agent-skills/skills/_root__cindy-github--pr' };
+    } },
+  };
+  return { hostApi, calls, rows };
+}
+
+test('publication starts exactly one verified follow-up without a model turn and stop removes it', async () => {
+  const { hostApi, calls, rows } = followScheduler({ loseCreateReceipt: true });
+  const runtime = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: {
+    autoFollow: true, followModel: { route: { agentKind: 'cc', providerId: 'chosen', model: 'sonnet',
+      effort: 'high', fastMode: false, agentDeviceId: 'remote' } },
+  } } });
+  const { callId } = await runtime.tool({ repo: 'octo/repo', head: 'topic' });
+  const result = (await runtime.tool({ card_id: callId, pr: 42 })).reply.result;
+  assert.equal(result.follow_state, 'active');
+  assert.equal(result.todo, undefined);
+  const schedule = rows.get('sch-1');
+  assert.equal(schedule.targetSessionId, 's1');
+  assert.equal(schedule.modelAgentKind, 'claude-code');
+  assert.equal(schedule.modelAgentDeviceId, 'remote');
+  assert.equal(schedule.providerId, 'chosen');
+  assert.equal(schedule.model, 'sonnet');
+  assert.equal(schedule.effort, 'high');
+  assert.equal(schedule.intervalMs, 300000);
+  assert.equal(schedule.prTrigger.url, 'https://github.com/octo/repo/pull/42');
+  assert.match(schedule.preRunHook.command, /pr-heartbeat-gate\.mjs" https:\/\/github\.com\/octo\/repo\/pull\/42$/);
+  await runtime.tool({ card_id: callId, pr: 42, published: true });
+  assert.equal(calls.filter(c => c === 'schedule_create').length, 1);
+  await runtime.click(callId, 'pr:stop');
+  assert.equal(rows.size, 0);
+  await runtime.tool({ card_id: callId });
+  assert.equal(rows.size, 0);
+  assert.equal(runtime.agentRuns.length, 0);
+});
+
+test('publication without an ask card is distinct from viewing a PR or declining follow-up', async () => {
+  for (const [args, enabled, expected] of [
+    [{}, true, 0], [{ published: true }, false, 0], [{ published: true, following: false }, true, 0],
+    [{ published: true }, true, 1],
+  ]) {
+    const { hostApi, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: enabled } } });
+    await rt.tool({ repo: 'octo/repo', pr: 42, ...args });
+    assert.equal(rows.size, expected);
+  }
+});
+
+test('rejected creation stays stopped and can be retried from the card', async () => {
+  const fault = { reject: true };
+  const { hostApi, rows } = followScheduler(fault);
+  const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+  assert.equal(opened.reply.result.follow_state, 'failed');
+  assert.match(opened.reply.result.note, /scheduler unavailable/);
+  fault.reject = false;
+  await rt.click(opened.callId, 'pr:follow');
+  assert.equal(rows.size, 1);
+  assert.equal(rt.agentRuns.length, 0);
+});
+
+test('restart after an unreadable receipt reconciles the existing schedule', async () => {
+  const fault = { failGet: true };
+  const { hostApi, calls } = followScheduler(fault);
+  const kv = { prCard: { autoFollow: true } };
+  const rt = createPrRuntime({ github: prGraphql(), hostApi, kv });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+  assert.equal(opened.reply.result.follow_state, 'unverified');
+  fault.failGet = false;
+  const restarted = createPrRuntime({ github: prGraphql(), hostApi, kv, files: rt.files });
+  const result = await restarted.tool({ card_id: opened.callId });
+  assert.equal(result.reply.result.follow_state, 'active');
+  assert.equal(calls.filter(c => c === 'schedule_create').length, 1);
+});
+
+test('a foreign schedule blocks creation while a similarly numbered PR does not', async () => {
+  for (const number of [42, 420]) {
+    const { hostApi, rows, calls } = followScheduler();
+    const url = 'https://github.com/octo/repo/pull/' + number;
+    rows.set('foreign', { id: 'foreign', prompt: 'Follow ' + url, targetSessionId: 'other', status: 'active' });
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_state, number === 42 ? 'failed' : 'active');
+    assert.equal(calls.includes('schedule_create'), number !== 42);
+    assert.equal(rows.get('foreign').targetSessionId, 'other');
+  }
+});
+
+test('an externally stopped follow-up stays stopped after refresh', async () => {
+  const { hostApi, rows, calls } = followScheduler();
+  const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+  rows.clear();
+  const refreshed = await rt.tool({ card_id: opened.callId });
+  assert.equal(refreshed.reply.result.follow_state, 'stopped');
+  assert.equal(calls.filter(c => c === 'schedule_create').length, 1);
 });
