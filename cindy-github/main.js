@@ -4039,6 +4039,7 @@ var WATCH_LIMIT = 5;
 var watchRevision = 0;
 var watchTimerAt;
 var watchTimerToken;
+var watchTimerSoonerDelay;
 var WATCH_PATH = { pr: 'pulls', issue: 'issues', run: 'actions/runs' };
 var WATCH_RUN_STATES = ['queued', 'requested', 'waiting', 'pending', 'in_progress', 'completed'];
 var WATCH_CONCLUSIONS = ['success', 'failure', 'cancelled', 'neutral', 'skipped', 'timed_out',
@@ -4112,15 +4113,23 @@ async function watchSnapshot(target, callId) {
 function armWatchTimer(delay, replaceLater) {
   var at = Date.now() + delay;
   if (watchTimerToken !== undefined) {
-    // Keep an earlier deadline; only a successful add supersedes a later backoff.
-    if (watchTimerAt === undefined || watchTimerAt <= at) return;
-    if (!replaceLater) return;
+    if (watchTimerAt !== undefined) {
+      // Keep an earlier deadline; only a successful add supersedes a later backoff.
+      if (watchTimerAt <= at) return;
+      if (!replaceLater) return;
+    } else {
+      // A round is in flight: remember the earliest add request for its finally.
+      if (!replaceLater) return;
+      if (watchTimerSoonerDelay === undefined || delay < watchTimerSoonerDelay) watchTimerSoonerDelay = delay;
+      return;
+    }
   }
   var token = {};
   watchTimerToken = token;
   watchTimerAt = at;
   setTimeout(async function () {
     if (watchTimerToken !== token) return;
+    watchTimerAt = undefined;
     var next = WATCH_INTERVAL;
     try {
       next = await pollWatches();
@@ -4128,10 +4137,12 @@ function armWatchTimer(delay, replaceLater) {
       // Failed store, credential or transport reads must never replace the baseline.
       next = WATCH_INTERVAL * 3;
     } finally {
+      var sooner = watchTimerSoonerDelay;
+      watchTimerSoonerDelay = undefined;
       if (watchTimerToken === token) {
         watchTimerToken = undefined;
         watchTimerAt = undefined;
-        if (next) armWatchTimer(next);
+        if (next) armWatchTimer(sooner !== undefined && sooner < next ? sooner : next);
       }
     }
   }, delay);
@@ -4191,17 +4202,19 @@ async function pollWatches() {
   });
   var hasWork = updates.length > 0 || failures.length > 0 || hasPendingNotice;
   if (!hasWork && !rateLimited) return WATCH_INTERVAL;
+  var confirmFailed = false;
   if (hasWork) {
     if (!rateLimited) {
       try {
         if (await watchAccount() !== account) return WATCH_INTERVAL * 3;
       } catch (_) {
-        // The confirmation probe failed: persist this round's observations before backing off.
+        // Persist this round's observations, then keep the timer's backoff for the failed check.
+        confirmFailed = true;
       }
     }
     await applyWatchRound(revision, account, updates, failures);
   }
-  return rateLimited ? WATCH_INTERVAL * 3 : WATCH_INTERVAL;
+  return rateLimited || confirmFailed ? WATCH_INTERVAL * 3 : WATCH_INTERVAL;
 }
 
 async function applyWatchRound(revision, account, updates, failures) {
