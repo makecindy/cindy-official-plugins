@@ -6,6 +6,10 @@ const path = require('node:path');
 const readline = require('node:readline');
 
 const DEFAULT_TIMEOUT_MS = 120000;
+// Herdr 自己的等待（参数里的 timeout_ms）先到点并返回 timeout；worker 的 socket
+// 计时要比它晚一截，否则同一时刻超时会抢先把错误定成「结果未知」。
+const WORKER_TIMEOUT_MARGIN_MS = 15000;
+const WORKER_TIMEOUT_MAX_MS = 120000;
 
 function socketPath() {
   if (process.env.HERDR_SOCKET_PATH) return process.env.HERDR_SOCKET_PATH;
@@ -40,10 +44,12 @@ function outcomeUnknown(method) {
   return error;
 }
 
-let requestCounter = 0;
+const crypto = require('node:crypto');
+
+// 请求 id 不用可预测的序号：一次连接里 id 要能唯一对应请求，
+// 用随机 id 顺带避免不同会话/进程撞号。
 function nextId() {
-  requestCounter += 1;
-  return 'w' + requestCounter;
+  return 'w_' + crypto.randomUUID();
 }
 
 function sendLine(socket, payload) {
@@ -633,9 +639,15 @@ const handlers = {
   async 'herdr/request'(params) {
     const method = String(params.method || '');
     if (!method) throw new Error('缺少 method');
-    const requested = Number(params.timeout_ms || 0);
-    const timeout = requested > 0 ? Math.min(requested, 120000) : 0;
-    return callOnce(method, params.params || {}, timeout || undefined);
+    const inner = params.params || {};
+    const innerWait = Number(inner.timeout_ms || 0);
+    // 外层 = 调用方给的上限，但至少比 Herdr 内层等待多留一点余量。
+    const requested = Math.max(
+      Number(params.timeout_ms || 0),
+      innerWait > 0 ? innerWait + WORKER_TIMEOUT_MARGIN_MS : 0
+    );
+    const timeout = requested > 0 ? Math.min(requested, WORKER_TIMEOUT_MAX_MS) : 0;
+    return callOnce(method, inner, timeout || undefined);
   },
 
   async 'herdr/snapshot'() {

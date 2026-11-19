@@ -25,7 +25,7 @@
       "description": "Show a notification in the Herdr terminal interface."
     },
     "herdr_events": {
-      "description": "Manage Herdr event subscriptions: mode=status reports the current subscription, subscribe starts it (agent status changes, output matches, pane lifecycle), unsubscribe stops it, wait blocks until one event arrives on the live subscription (match_event like {event:\"pane.agent_status_changed\", pane_id:\"w1:p1\"}; pane_id is optional)."
+      "description": "Manage Herdr event subscriptions: mode=status reports the current subscription, subscribe starts it (agent status changes, pane lifecycle, tab focus), unsubscribe stops it, wait blocks until one event arrives on the live subscription (match_event like {event:\"pane.agent_status_changed\", pane_id:\"w1:p1\"}; pane_id is optional)."
     },
     "herdr_automation_setup": {
       "description": "Create a Cindy automation that only wakes on Herdr events: when an agent turns blocked or done the plugin asks the host scheduler to run it once, and the automation never runs on a timer. targetSessionId links it to an existing session. Returns the automation ID."

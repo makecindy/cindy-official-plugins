@@ -22,7 +22,9 @@ let triggerTimer = null;
 // 直到用户给的等待上限。主机这一层的等待要比 Herdr 那一段略长，否则先断的是主机。
 const HOST_REQUEST_TIMEOUT_MAX_MS = 120000;
 const WAIT_CHUNK_MS = 45000;
-const WAIT_CHUNK_MARGIN_MS = 10000;
+// 宿主这一层要比 worker 的 socket 计时更晚到点（worker = 内层 + 15s），
+// 否则宿主会先把续段循环打断。45s 的一段因此是 45 < 60 < 70 秒的次序。
+const WAIT_CHUNK_MARGIN_MS = 25000;
 
 // 运行时文案跟随宿主语言：只读 /app-context 的 uiLocale ?? locale，
 // 插件没提供的语言回退英文。不读 navigator.language。
@@ -36,6 +38,7 @@ const runtimeStrings = {
     automationFailed: '创建自动化失败：',
     automationUnknown: '未知错误',
     automationNoId: '自动化已创建，但没拿到 id，请到自动化列表里查看',
+    automationSaveFailed: '自动化 id 没有保存成功，事件桥暂时不会触发；请重新调用本工具重试',
     waitTimeout: '等待超时',
     nodeFailed: 'Node 工作进程调用失败',
     missingTarget: '缺少 target（session、window 或 pane 的名字）',
@@ -51,6 +54,7 @@ const runtimeStrings = {
     automationFailed: 'Could not create the automation: ',
     automationUnknown: 'unknown error',
     automationNoId: 'The automation was created but returned no id; check the automation list',
+    automationSaveFailed: 'The automation id could not be saved, so events will not trigger; call this tool again',
     waitTimeout: 'Timed out',
     nodeFailed: 'The bundled Node worker call failed',
     missingTarget: 'target is required (session, window, or pane name)',
@@ -214,8 +218,8 @@ async function ensureAutomationSchedule(name, args) {
     if (Array.isArray(schedules)) {
       const existing = schedules.find(function (item) { return isOurAutomation(item, name, args); });
       if (existing && existing.id) {
-        await writeKv({ [SCHEDULE_ID_KEY]: existing.id });
-        return existing.id;
+        const saved = await writeKv({ [SCHEDULE_ID_KEY]: existing.id });
+        if (saved && saved[SCHEDULE_ID_KEY] === existing.id) return existing.id;
       }
     }
   }
@@ -240,7 +244,11 @@ async function ensureAutomationSchedule(name, args) {
   const body = JSON.parse(created.content[0].text);
   const scheduleId = body.data && body.data.id;
   if (!scheduleId) throw new Error(runtime.automationNoId);
-  await writeKv({ [SCHEDULE_ID_KEY]: scheduleId });
+  const saved = await writeKv({ [SCHEDULE_ID_KEY]: scheduleId });
+  // 存不上就不能当成配置完成：后续事件会因为读不到 id 而永远不触发。
+  if (!saved || saved[SCHEDULE_ID_KEY] !== scheduleId) {
+    throw new Error(runtime.automationSaveFailed);
+  }
   return scheduleId;
 }
 
@@ -400,6 +408,11 @@ const tools = {
   },
 
   async herdr_send(args) {
+    // 只传 pane_id 是无效参数：send_input 会把终端里已有的草稿提交掉，
+    // 不能当成「空发送」执行，要像 tmux_send 一样明确报错。
+    if (!(args.keys && args.keys.length) && (args.text === undefined || args.text === null || args.text === '')) {
+      throw new Error(runtime.missingTextOrKeys);
+    }
     if (args.pane_id && args.keys && args.keys.length) {
       const result = await herdrCall('pane.send_keys', {
         pane_id: args.pane_id,

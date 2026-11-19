@@ -1,4 +1,10 @@
 import test from 'node:test';
+// CI 只运行 .tests/<plugin>.test.mjs，从这里把面板渲染测试一并引入。
+import './herdr-panel.test.mjs';
+
+import net from 'node:net';
+import os from 'node:os';
+import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -74,4 +80,69 @@ test('no wide-character fast path is needed for plain terminal text', () => {
   const plain = '$ gh pr checks 353 --repo makecindy/cindy-official-plugins\nok\n';
   assert.equal(WIDE_CHAR.test(plain), false);
   assert.equal(WIDE_CHAR.test('Herdr 控制台'), true);
+});
+
+
+test('the worker socket timer waits longer than the Herdr-side wait', async () => {
+  // 复现 Codex 那条 P1：调用方把同一个 chunk 写进 Herdr 内层 timeout_ms 和
+  // worker 外层计时。外层若不比内层多留余量，内层超时的那一刻会被抢成
+  // 「结果未知」，续段等待收不到可继续的 timeout。
+  // 这里让假 Herdr 在内层超时之后、余量之内回包：外层必须还活着并以成功收尾。
+  const dir = await import('node:fs/promises').then((fs) => fs.mkdtemp(path.join(os.tmpdir(), 'herdr-timeout-')));
+  const socketPath = path.join(dir, 'herdr.sock');
+  const innerWaitMs = 100;
+  const replyAfterMs = 450;
+
+  const server = net.createServer((conn) => {
+    let buffer = '';
+    conn.on('data', (chunk) => {
+      buffer += String(chunk);
+      if (!buffer.includes('\n')) return;
+      // 必须回同一个 id，worker 才会把它当成这次请求的结果。
+      const request = JSON.parse(buffer.split('\n')[0]);
+      setTimeout(() => {
+        conn.end(JSON.stringify({ id: request.id, result: { ok: true } }) + '\n');
+      }, replyAfterMs);
+    });
+  });
+  await new Promise((resolve) => server.listen(socketPath, resolve));
+
+  const worker = spawn(process.execPath, [path.join(root, 'herdr', 'node', 'worker.cjs')], {
+    env: { ...process.env, HERDR_SOCKET_PATH: socketPath },
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+
+  try {
+    const startedAt = Date.now();
+    const response = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('worker did not answer in time')), 12000);
+      worker.stdout.on('data', (chunk) => {
+        const line = String(chunk).split('\n').find((entry) => entry.trim());
+        if (!line) return;
+        try {
+          const message = JSON.parse(line);
+          if (message.id === 'regression-1') {
+            clearTimeout(timer);
+            resolve(message);
+          }
+        } catch (error) { void error; }
+      });
+      worker.on('error', reject);
+      worker.stdin.write(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'regression-1',
+        method: 'herdr/request',
+        // 外层和内层都给 100ms，正是老代码的竞态形状。
+        params: { method: 'session.snapshot', params: { timeout_ms: innerWaitMs }, timeout_ms: innerWaitMs }
+      }) + '\n');
+    });
+    const elapsed = Date.now() - startedAt;
+    assert.equal(response.error, undefined, `expected success, got ${JSON.stringify(response.error)}`);
+    assert.deepEqual(response.result, { ok: true });
+    assert.ok(elapsed >= innerWaitMs + 300, `worker answered too early: ${elapsed}ms`);
+  } finally {
+    worker.kill();
+    await new Promise((resolve) => server.close(resolve));
+    await import('node:fs/promises').then((fs) => fs.rm(dir, { recursive: true, force: true }));
+  }
 });

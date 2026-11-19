@@ -25,7 +25,7 @@
       "description": "Herdr 터미널 화면에 알림을 표시합니다."
     },
     "herdr_events": {
-      "description": "Herdr 이벤트 구독을 관리합니다: mode=status 는 현재 구독 상태, subscribe 는 구독을 시작하고(에이전트 상태 변화, 출력 일치, 창 생성·종료 등), unsubscribe 는 멈추며, wait 는 현재 구독에서 이벤트 하나가 올 때까지 기다립니다(match_event 는 {event:\"pane_agent_status_changed\", pane_id:\"w1:p1\"} 형태이며 pane_id 는 생략 가능)."
+      "description": "Herdr 이벤트 구독을 관리합니다: mode=status 는 현재 구독 상태, subscribe 는 구독을 시작하고(에이전트 상태 변화, 창 생성·종료, 탭 전환 등), unsubscribe 는 멈추며, wait 는 현재 구독에서 이벤트 하나가 올 때까지 기다립니다(match_event 는 {event:\"pane_agent_status_changed\", pane_id:\"w1:p1\"} 형태이며 pane_id 는 생략 가능)."
     },
     "herdr_automation_setup": {
       "description": "Herdr 이벤트에만 깨어나는 Cindy 자동화를 만듭니다: 에이전트가 blocked 또는 done 이 되면 플러그인이 호스트 스케줄러에 한 번 실행을 요청하며, 이 자동화는 타이머로 스스로 실행되지 않습니다. targetSessionId 를 주면 기존 세션에 연결됩니다. 자동화 id 를 반환합니다."

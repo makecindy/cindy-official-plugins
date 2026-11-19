@@ -25,7 +25,7 @@
       "description": "在 Herdr 自己的界面里弹一条通知（走 Herdr 的 toast），用于把信息同步到终端那一侧。"
     },
     "herdr_events": {
-      "description": "管理 Herdr 事件订阅：mode=status 查看当前订阅状态，subscribe 开始订阅（agent 状态变化、输出命中、分屏开关等），unsubscribe 停止订阅，wait 在当前订阅上等一个事件（match_event 形如 {event:\"pane.agent_status_changed\", pane_id:\"w1:p1\"}，pane_id 可省略）。"
+      "description": "管理 Herdr 事件订阅：mode=status 查看当前订阅状态，subscribe 开始订阅（agent 状态变化、分屏开关、标签切换等），unsubscribe 停止订阅，wait 在当前订阅上等一个事件（match_event 形如 {event:\"pane.agent_status_changed\", pane_id:\"w1:p1\"}，pane_id 可省略）。"
     },
     "herdr_automation_setup": {
       "description": "创建一条只由 Herdr 事件唤醒的 Cindy 自动化：agent 进入 blocked 或 done 时由插件请宿主调度器跑一次，这条自动化不会自己按时间运行。targetSessionId 可把自动化绑到某个已有会话，让它在原对话里继续。返回自动化 id。"

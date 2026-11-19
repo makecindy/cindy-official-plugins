@@ -25,7 +25,7 @@
       "description": "Herdr の端末画面に通知を表示します。"
     },
     "herdr_events": {
-      "description": "Herdr のイベント購読を管理します：mode=status は現在の購読状態、subscribe は購読を開始（agent の状態変化、出力一致、pane の生成・破棄など）、unsubscribe は停止、wait は現在の購読上でイベントが 1 つ届くまで待ちます（match_event は {event:\"pane.agent_status_changed\", pane_id:\"w1:p1\"} の形式、pane_id は省略可）。"
+      "description": "Herdr のイベント購読を管理します：mode=status は現在の購読状態、subscribe は購読を開始（agent の状態変化、pane の生成・破棄、タブの切替など）、unsubscribe は停止、wait は現在の購読上でイベントが 1 つ届くまで待ちます（match_event は {event:\"pane.agent_status_changed\", pane_id:\"w1:p1\"} の形式、pane_id は省略可）。"
     },
     "herdr_automation_setup": {
       "description": "Herdr のイベントだけで起きる Cindy の自動化を作ります：agent が blocked / done になると、プラグインがホストのスケジューラに 1 回実行を頼みます。タイマーでは動きません。targetSessionId を指定すると既存のセッションに紐づきます。自動化の id を返します。"

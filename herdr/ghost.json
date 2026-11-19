@@ -7,7 +7,7 @@
   "icon": "assets/icon.png",
   "description": "把本机 Herdr 终端工作区与 tmux session 接入 Cindy：查看工作区/标签/分屏与 agent 状态、读取画面、发送输入与按键、等待 agent 状态变化，并把 Herdr 事件推成 Cindy 通知与自动化。",
   "whenToUse": "需要看 Herdr 里正在跑什么 agent、读某个分屏的输出、给 agent 派活、等待它完成或需要授权；或者要看/操作本机 tmux 的 session、pane 与画面；或者想把终端事件接到 Cindy 通知与自动化时找我",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "kind": "chip",
   "entry": "main.js",
   "command": "herdr",
@@ -326,7 +326,7 @@
     },
     {
       "name": "herdr_events",
-      "description": "管理 Herdr 事件订阅：mode=status 查看当前订阅状态，subscribe 开始订阅（agent 状态变化、输出命中、分屏开关等），unsubscribe 停止订阅，wait 在当前订阅上等一个事件（match_event 形如 {event:\"pane.agent_status_changed\", pane_id:\"w1:p1\"}，pane_id 可省略）。",
+      "description": "管理 Herdr 事件订阅：mode=status 查看当前订阅状态，subscribe 开始订阅（agent 状态变化、分屏开关、标签切换等），unsubscribe 停止订阅，wait 在当前订阅上等一个事件（match_event 形如 {event:\"pane.agent_status_changed\", pane_id:\"w1:p1\"}，pane_id 可省略）。",
       "parameters": {
         "type": "object",
         "properties": {

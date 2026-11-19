@@ -599,14 +599,27 @@ async function openTmuxPane(pane) {
 
 // --- 共用 ---------------------------------------------------------------
 
+// 切换视图会让进行中的刷新作废：旧结果回来时视图可能已经变了。
+let refreshToken = 0;
+
 async function refresh() {
   const status = $('#status');
+  const startedView = view;
+  const token = refreshToken;
+  const stale = function () { return view !== startedView || token !== refreshToken; };
   status.textContent = T.refreshing;
   try {
     if (view === 'tmux') await refreshTmux();
     else await refreshHerdr();
+    if (stale()) return;
+    // 详情卡开着的时候，顺带把选中分屏的正文也读一遍，
+    // 否则终端会一直停在第一次打开时的快照。
+    const hasOpenDetail = view === 'tmux' ? selectedTarget : selectedPane;
+    if (hasOpenDetail) await refreshTerminal();
+    if (stale()) return;
     status.textContent = T.updated;
   } catch (error) {
+    if (stale()) return;
     status.textContent = error.message || T.refreshFailed;
   }
 }
@@ -670,6 +683,7 @@ function closeDetail() {
 }
 
 function setView(next) {
+  refreshToken += 1;
   view = next;
   selectedPane = null;
   selectedTarget = null;
