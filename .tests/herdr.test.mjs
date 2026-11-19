@@ -156,7 +156,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   // 写 KV 必须看响应：只看返回对象会把 HTTP 500 当成保存成功。
   assert.match(
     mainSource,
-    /async function writeKv[\s\S]*?response\.ok === false[\s\S]*?throw new Error/,
+    /function writeKv\(patch\)[\s\S]*?response\.ok === false[\s\S]*?throw new Error/,
     'writeKv must check the PUT response and throw on failure'
   );
 
@@ -368,6 +368,21 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const panelSource3 = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSource3, /'#refresh'\)\.addEventListener\('click', function \(\) \{ refresh\(\); \}\)/,
     'the refresh click handler must not pass the event as force');
+
+  // 所有 KV 补丁要排队，避免并发互相覆盖。
+  assert.match(mainSource, /let kvWriteLock = Promise\.resolve\(\);[\s\S]*?kvWriteLock\.then\(async function \(\) \{[\s\S]*?await readKv\(\)/,
+    'KV read-modify-writes must be serialized');
+
+  // 订阅握手要给宿主超时留余量（worker 两段各 15 秒）。
+  assert.match(mainSource, /nodeRequest\('herdr\/subscribe', \{\}, callId, SUBSCRIBE_HOST_TIMEOUT_MS\)/,
+    'the subscribe call must carry a host timeout above the handshake budget');
+
+  // tmux 行数封顶要如实标记。
+  const workerSource3 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSource3, /truncated: truncated \|\| requested > want/,
+    'a clamped line count must be reported as truncated');
+  assert.match(workerSource3, /max_lines: 5000/,
+    'the response must expose the line cap');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
@@ -616,6 +631,48 @@ test('a subscription handover delivers each event exactly once', async () => {
     worker.kill();
     await new Promise((resolve) => server.close(resolve));
     for (const conn of conns) { try { conn.destroy(); } catch (error) { void error; } }
+    await fsPromises.rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test('tmux key names are validated against the keys tmux recognises', async () => {
+  const dir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'herdr-keys-'));
+  const worker = spawn(process.execPath, [path.join(root, 'herdr', 'node', 'worker.cjs')], {
+    env: { ...process.env, HERDR_SOCKET_PATH: path.join(dir, 'missing.sock') },
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+
+  const call = (method, params) => new Promise((resolve) => {
+    const id = 'k' + Date.now();
+    const timer = setTimeout(() => resolve({ timeout: true }), 5000);
+    const onData = (chunk) => {
+      const text = String(chunk);
+      if (!text.includes(id)) return;
+      worker.stdout.off('data', onData);
+      clearTimeout(timer);
+      try { resolve(JSON.parse(text.split('\n').find((line) => line.includes(id)))); }
+      catch (error) { resolve({ parseError: String(error) }); }
+    };
+    worker.stdout.on('data', onData);
+    worker.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+  });
+
+  try {
+    // 拼错的键名必须被拒绝：tmux 会把它当字面文本发出去。
+    const typo = await call('tmux/send', { target: 'x:0.0', keys: ['Entter'] });
+    assert.ok(typo.error, `expected an error for a misspelled key, got ${JSON.stringify(typo)}`);
+    assert.match(typo.error.message, /TMUX_BAD_KEY|不支持的按键/,
+      `expected a key rejection, got ${typo.error.message}`);
+
+    // 修饰键 + 单字符、以及 tmux 的具名键要放行（校验先于任何 tmux 调用）。
+    for (const key of ['C-c', 'M-x', 'S-Tab', 'Enter', 'F12', 'a']) {
+      const result = await call('tmux/send', { target: 'x:0.0', keys: [key] });
+      assert.ok(!result.error || !/TMUX_BAD_KEY/.test(result.error.message || ''),
+        `expected ${key} to be accepted, got ${JSON.stringify(result)}`);
+    }
+  } finally {
+    worker.kill();
     await fsPromises.rm(dir, { recursive: true, force: true });
   }
 });

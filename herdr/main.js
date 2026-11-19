@@ -237,15 +237,23 @@ async function readScheduleId() {
   return cachedScheduleId;
 }
 
-async function writeKv(patch) {
-  const current = await readKv();
-  const next = Object.assign({}, current, patch);
-  const response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(next) });
-  // 不看响应的话，存没存上根本无从判断——返回的只是内存里的对象。
-  if (!response || response.ok === false) {
-    throw new Error(runtime.automationSaveFailed);
-  }
-  return next;
+// KV 是「整份读 → 合并 → 整份写」：并发的两次补丁会互相覆盖
+// （setup 存的 id 可能被订阅偏好抹掉，反之亦然），所以所有补丁统一排队。
+let kvWriteLock = Promise.resolve();
+
+function writeKv(patch) {
+  const task = kvWriteLock.then(async function () {
+    const current = await readKv();
+    const next = Object.assign({}, current, patch);
+    const response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(next) });
+    // 不看响应的话，存没存上根本无从判断——返回的只是内存里的对象。
+    if (!response || response.ok === false) {
+      throw new Error(runtime.automationSaveFailed);
+    }
+    return next;
+  });
+  kvWriteLock = task.then(function () {}, function () {});
+  return task;
 }
 
 function unwrapSnapshot(raw) {
@@ -1062,12 +1070,17 @@ async function persistSubscriptionPreference(wanted) {
   }
 }
 
+// worker 握手两段各 15 秒上限，宿主给 45 秒。
+const SUBSCRIBE_HOST_TIMEOUT_MS = 45000;
+
 // 打开订阅并记住这次的意图（setup 与 subscribe 共用，
 // 否则 setup 成功后重启仍会按旧的退订偏好停摆）。
 async function enableSubscription(callId) {
   subscriptionPreference = true;
   await persistSubscriptionPreference(true);
-  return nodeRequest('herdr/subscribe', {}, callId);
+  // worker 的握手是 pane.list(15s) + 订阅确认(15s)，宿主要留出余量，
+  // 否则宿主先超时，setup 会在自动化已创建后报普通失败。
+  return nodeRequest('herdr/subscribe', {}, callId, SUBSCRIBE_HOST_TIMEOUT_MS);
 }
 
 // Keep the event subscription alive for panel and webhook users ——
@@ -1092,7 +1105,7 @@ async function ensureSubscription() {
         return;
       }
     }
-    await nodeRequest('herdr/subscribe', {});
+    await nodeRequest('herdr/subscribe', {}, undefined, SUBSCRIBE_HOST_TIMEOUT_MS);
   } catch (error) {
     void error;
   }

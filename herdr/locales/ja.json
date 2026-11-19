@@ -37,10 +37,10 @@
       "description": "ローカルの tmux セッションとペインをコマンド、作業ディレクトリ、サイズ、状態とともに表示します。利用できない場合は available=false と案内を返します。"
     },
     "tmux_read": {
-      "description": "tmux のペインに表示されている画面か、スクロールバックを含む直近 N 行を読み取ります。"
+      "description": "tmux のペインに表示されている画面か、スクロールバックを含む最近 N 行を読み取ります。一度に取得できるのは最大 5000 行で、それを超えると truncated=true と requested_lines / max_lines を返します。履歴がそれ未満なら全部返ります。"
     },
     "tmux_send": {
-      "description": "tmux の session / window / pane にテキストまたはキーを送ります。テキストはリテラル（-l）で送られるため、C-b や Enter を含む内容もキー名として解釈されません。keys には \"Enter\" や \"C-c\" のようなキー名のみ指定でき、区切り文字や - で始まる値は拒否されます。"
+      "description": "tmux の session / window / pane にテキストまたはキーを送ります。テキストはリテラル（-l）で送られるため、C-b や Enter を含む内容もキー名として解釈されません。keys は tmux が認識するキー名（Enter、Escape、F1、C-c、M-x、S-Tab など）のみ受け付け、未認識の名前は文字列として送らず拒否します。"
     }
   }
 }

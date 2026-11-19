@@ -605,7 +605,8 @@ async function tmuxCapture(target, lines) {
   if (!dest) throw tmuxError('缺少 target', 'TMUX_BAD_TARGET');
   const args = ['capture-pane', '-p', '-t', dest];
   const count = Number(lines);
-  const want = Number.isFinite(count) && count > 0 ? Math.min(Math.floor(count), 5000) : 0;
+  const requested = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+  const want = Math.min(requested, 5000);   // tmux 历史区一次最多取 5000 行
   if (want > 0) {
     // tmux 的行号语义（man capture-pane）：0 是可见屏第一行，负数只数 history，
     // 「-」到 -E 是可见屏末行。所以「最近 N 行」不能写成 -S -N -E -1 —— 那样
@@ -628,21 +629,41 @@ async function tmuxCapture(target, lines) {
     target: dest,
     text: text,
     lines: text ? text.split('\n').length : 0,
-    truncated: truncated
+    // 请求超过 5000 行时行数被封顶：必须如实标记，否则调用方分不清
+    // 「历史只有这么多」和「更早的行没取」。
+    truncated: truncated || requested > want,
+    requested_lines: requested || null,
+    max_lines: 5000
   };
 }
 
 // tmux 自己的命令行解析就是一层注入面：spawn 不经 shell，但 tmux 仍会把独立的
 // `;` 当命令分隔符，把以 `-` 开头的值当选项。所以按键只允许「键名」形态，
 // 并且用 `--` 结束选项解析。
-const TMUX_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_+.-]{0,31}$/;
+// tmux(1) 对无法识别的键名会「当作一系列字符发出去」——拼错的 Entter 会变成
+// 字面文本。所以只接受 tmux 真正认识的键名：单字符字面量，或「修饰键前缀 +
+// tmux 键名」。修饰键只允许 tmux 文档里的 C- / M- / S-。
+const TMUX_NAMED_KEY = /^(Escape|BSpace|BTab|DC|Down|End|F[1-9]|F1[0-2]|Home|IC|Left|NPage|PPage|Right|Up|Tab|Enter|Space)$/;
+
+function isTmuxKeyName(value) {
+  if (value.length === 1) return true;               // 单字符（含标点、'-'）
+  const parts = value.split('-');
+  let index = 0;
+  while (index < parts.length - 1) {
+    if (!/^[CMS]$/.test(parts[index])) return false; // 只认 C- / M- / S-
+    index += 1;
+  }
+  const base = parts.slice(index).join('-');
+  return TMUX_NAMED_KEY.test(base) || base.length === 1;
+}
 
 function validateTmuxKeys(keys) {
   return keys.map(function (key) {
     const value = String(key);
-    if (!TMUX_KEY_PATTERN.test(value)) {
+    if (!isTmuxKeyName(value)) {
       throw tmuxError(
-        '不支持的按键：' + value + '（只允许字母、数字和 C-/M- 形式的组合键）',
+        '不支持的按键：' + value
+        + '（只接受 tmux 认识的键名，如 Enter、Escape、F1、C-c、M-x、S-Tab）',
         'TMUX_BAD_KEY'
       );
     }

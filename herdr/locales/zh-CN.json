@@ -37,10 +37,10 @@
       "description": "读取本机 tmux 现状：有哪些 session、每个 session 里有哪些 pane（含当前命令、工作目录、尺寸、是否活动）。想知道「tmux 里现在开着什么」时先调它。这台电脑没装 tmux 时返回 available=false 与提示，不报错。"
     },
     "tmux_read": {
-      "description": "读取某个 tmux session / window / pane 的画面。默认是当前可见屏；给 lines 则取最近 N 行（含历史滚动区，历史不够时返回全部）。"
+      "description": "读取某个 tmux session / window / pane 的画面。默认是当前可见屏；给 lines 则取最近 N 行（含历史滚动区），一次最多 5000 行，超出时返回 truncated=true 并带上 requested_lines 与 max_lines，历史不够时返回全部。"
     },
     "tmux_send": {
-      "description": "往 tmux 的 session / window / pane 发文本或按键。发文本走字面量模式（-l），内容里的 C-b、Enter 这类不会被当成键名；发具名按键用 keys，按键只接受键名（如 \"Enter\"、\"C-c\"），分隔符和以 - 开头的值会被拒绝。"
+      "description": "往 tmux 的 session / window / pane 发文本或按键。发文本走字面量模式（-l），内容里的 C-b、Enter 这类不会被当成键名；发具名按键用 keys，只接受 tmux 认识的键名（Enter、Escape、F1、C-c、M-x、S-Tab 这类），不认识的名字会被拒绝而不是当字面文本发出去。"
     }
   }
 }

@@ -37,10 +37,10 @@
       "description": "List local tmux sessions and panes with commands, working directories, sizes, and active state. When tmux is unavailable, return available=false and a hint."
     },
     "tmux_read": {
-      "description": "Read the visible tmux pane or the most recent N lines, including scrollback."
+      "description": "Read the visible tmux pane or the most recent N lines, including scrollback. At most 5000 lines are captured; beyond that the result sets truncated=true with requested_lines and max_lines. Shorter histories return everything."
     },
     "tmux_send": {
-      "description": "Send text or keys to a tmux session / window / pane. Text is sent literally (-l), so C-b or Enter inside it are not key names; keys accepts key names only (such as \"Enter\" or \"C-c\") and rejects separators or values starting with -."
+      "description": "Send text or keys to a tmux session / window / pane. Text is sent literally (-l), so C-b or Enter inside it are not key names; keys accepts only key names tmux recognises (Enter, Escape, F1, C-c, M-x, S-Tab) and rejects unknown names instead of typing them as text."
     }
   }
 }
