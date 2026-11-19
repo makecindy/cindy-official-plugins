@@ -34,7 +34,8 @@ const strings = {
     statusWorking: '进行中',
     statusBlocked: '待处理',
     statusDone: '已完成',
-    statusIdle: '空闲'
+    statusIdle: '空闲',
+    sendingTo: '发送到 '
   },
   en: {
     refreshing: 'Refreshing…',
@@ -64,7 +65,8 @@ const strings = {
     statusWorking: 'working',
     statusBlocked: 'blocked',
     statusDone: 'done',
-    statusIdle: 'idle'
+    statusIdle: 'idle',
+    sendingTo: 'Send to '
   },
   ja: {
     refreshing: '更新中…',
@@ -94,7 +96,8 @@ const strings = {
     statusWorking: '作業中',
     statusBlocked: '要対応',
     statusDone: '完了',
-    statusIdle: '待機'
+    statusIdle: '待機',
+    sendingTo: '送信先: '
   },
   ko: {
     refreshing: '새로 고치는 중…',
@@ -124,7 +127,8 @@ const strings = {
     statusWorking: '작업 중',
     statusBlocked: '확인 필요',
     statusDone: '완료',
-    statusIdle: '대기'
+    statusIdle: '대기',
+    sendingTo: '보낼 대상: '
   }
 };
 
@@ -221,6 +225,30 @@ function makeRow(options) {
   return row;
 }
 
+// agent pane 用 chip 呈现：一颗 chip 就是「一个正在跑的东西」，
+// 名称、状态点都在里面，扫一眼就知道谁在忙。
+function makeChip(options) {
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'chip' + (options.on ? ' on' : '');
+  chip.title = options.title || '';
+  const dot = document.createElement('span');
+  dot.className = 'dot ' + (options.dotClass || 'unknown');
+  chip.appendChild(dot);
+  const name = document.createElement('span');
+  name.className = 'chip-name';
+  name.textContent = options.name;
+  chip.appendChild(name);
+  if (options.meta) {
+    const meta = document.createElement('span');
+    meta.className = 'chip-meta';
+    meta.textContent = options.meta;
+    chip.appendChild(meta);
+  }
+  if (options.onSelect) chip.addEventListener('click', options.onSelect);
+  return chip;
+}
+
 function makeGroup(name, meta, link) {
   const group = document.createElement('div');
   group.className = 'group';
@@ -303,10 +331,28 @@ function renderHerdr() {
     const meta = [panes.length + ' ' + T.panes];
     if (workspace.focused) meta.push(T.focused);
     list.appendChild(makeGroup(workspace.label || workspace.workspace_id, meta.join(' · ')));
-    for (const pane of panes) {
+
+    const agents = panes.filter(function (pane) { return pane.agent; });
+    const others = panes.filter(function (pane) { return !pane.agent; });
+    if (agents.length) {
+      const chips = document.createElement('div');
+      chips.className = 'chips';
+      for (const pane of agents) {
+        chips.appendChild(makeChip({
+          name: pane.agent,
+          meta: pane.title || pane.label || '',
+          dotClass: String(pane.agent_status || 'unknown').toLowerCase(),
+          title: (pane.title || '') + ' · ' + pane.pane_id,
+          on: Boolean(selectedPane && selectedPane.pane_id === pane.pane_id),
+          onSelect: function () { openPane(pane); }
+        }));
+      }
+      list.appendChild(chips);
+    }
+    for (const pane of others) {
       const row = makeRow({
         title: pane.label || pane.pane_id,
-        subtitle: pane.title || pane.cwd || pane.agent || '',
+        subtitle: pane.title || pane.cwd || '',
         dotClass: String(pane.agent_status || 'unknown').toLowerCase(),
         state: statusLabel(pane.agent_status),
         onSelect: function () { openPane(pane); }
@@ -328,9 +374,11 @@ async function openPane(pane) {
   const token = readToken;
   renderHerdr();
   $('#detail').hidden = false;
-  $('#detail-title').textContent = pane.label || pane.pane_id;
-  $('#detail-sub').textContent = [pane.pane_id, statusLabel(pane.agent_status), pane.cwd]
+  $('#detail-title').textContent = pane.title || pane.label || pane.pane_id;
+  $('#detail-sub').textContent = [pane.label, pane.agent, pane.cwd, pane.pane_id]
     .filter(Boolean).join(' · ');
+  setDetailState(String(pane.agent_status || 'unknown').toLowerCase(), statusLabel(pane.agent_status));
+  setComposerTarget([pane.label || pane.pane_id, pane.agent].filter(Boolean).join(' · '));
   $('#detail-body').textContent = T.loading;
   try {
     const result = await request('read', { pane_id: pane.pane_id, source: 'visible', lines: 80 });
@@ -394,18 +442,19 @@ function renderTmux() {
       list.appendChild(none);
       continue;
     }
+    const chips = document.createElement('div');
+    chips.className = 'chips';
     for (const pane of sessionPanes) {
-      const row = makeRow({
-        title: pane.target,
-        subtitle: [pane.window_name, pane.command, pane.path].filter(Boolean).join(' · '),
+      chips.appendChild(makeChip({
+        name: pane.target,
+        meta: [pane.window_name, pane.command].filter(Boolean).join(' · '),
         dotClass: pane.dead ? 'blocked' : pane.active ? 'working' : 'unknown',
-        state: statusLabelForTmux(pane),
-        dead: pane.dead,
+        title: [pane.path, pane.target].filter(Boolean).join(' · '),
+        on: selectedTarget === pane.target,
         onSelect: function () { openTmuxPane(pane); }
-      });
-      if (selectedTarget === pane.target) row.classList.add('on');
-      list.appendChild(row);
+      }));
     }
+    list.appendChild(chips);
   }
 }
 
@@ -435,6 +484,8 @@ async function openTmuxPane(pane) {
   $('#detail-title').textContent = pane.target;
   $('#detail-sub').textContent = [pane.window_name, pane.command, pane.path]
     .filter(Boolean).join(' · ');
+  setDetailState(pane.dead ? 'blocked' : pane.active ? 'working' : 'unknown', statusLabelForTmux(pane));
+  setComposerTarget(pane.target);
   $('#detail-body').textContent = T.loading;
   try {
     const result = await request('tmux_read', { target: pane.target });
@@ -466,22 +517,35 @@ async function send(submit) {
   const field = $('#composer-text');
   const text = field.value;
   if (!text.trim()) return;
+  // 发送开始时锁定目标：中途切换选中项，文本和回车仍发往同一个分屏。
+  const paneId = selectedPane ? selectedPane.pane_id : null;
+  const target = selectedTarget;
+  if (view === 'tmux' && !target) return;
+  if (view !== 'tmux' && !paneId) return;
   try {
     if (view === 'tmux') {
-      if (!selectedTarget) return;
-      await request('tmux_send', { target: selectedTarget, text: text });
-      if (submit) await request('tmux_send', { target: selectedTarget, keys: ['Enter'] });
+      await request('tmux_send', { target: target, text: text });
+      if (submit) await request('tmux_send', { target: target, keys: ['Enter'] });
       field.value = '';
-      await openTmuxPane({ target: selectedTarget });
+      await openTmuxPane({ target: target });
     } else {
-      if (!selectedPane) return;
-      await request('send', { pane_id: selectedPane.pane_id, text: text });
+      await request('send', { pane_id: paneId, text: text });
       field.value = '';
-      await openPane(selectedPane);
+      await openPane(selectedPane || { pane_id: paneId });
     }
   } catch (error) {
     $('#detail-body').textContent = error.message || T.sendFailed;
   }
+}
+
+function setDetailState(dotClass, label) {
+  $('#detail-state-dot').className = 'dot ' + dotClass;
+  $('#detail-state-text').textContent = label || '';
+  $('#detail-state').hidden = !label;
+}
+
+function setComposerTarget(text) {
+  $('#composer-target').textContent = text ? (T.sendingTo + text) : '';
 }
 
 function closeDetail() {

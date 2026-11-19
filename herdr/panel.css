@@ -19,6 +19,7 @@
   --pc-working: #2f6feb;
   --pc-blocked: #d93a3a;
   --pc-done: #12a150;
+  --pc-accent: #2fa85a;
 }
 
 * {
@@ -126,8 +127,8 @@ body {
 .list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding-top: 8px;
+  gap: 1px;
+  padding-top: 6px;
 }
 
 .group {
@@ -137,6 +138,11 @@ body {
   padding: 10px 2px 4px;
   font-size: 11px;
   color: var(--pc-muted);
+}
+
+.group + .group {
+  border-top: 1px solid var(--pc-line);
+  padding-top: 9px;
 }
 
 .group:first-child {
@@ -173,12 +179,13 @@ body {
 }
 
 .row {
+  position: relative;
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 7px 8px 7px 6px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
@@ -193,9 +200,20 @@ body {
   background: var(--pc-sunken);
 }
 
+/* 选中项：左侧一条品牌色竖条 + 弱底色，比描边更安静也更清楚。 */
 .row.on {
   background: var(--pc-sunken);
-  border-color: var(--pc-line);
+}
+
+.row.on::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--pc-accent);
 }
 
 .row-main {
@@ -269,6 +287,69 @@ body {
   text-align: center;
 }
 
+/* --- chip：agent pane --------------------------------------------------- */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 2px 0 4px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 9px;
+  border: 1px solid var(--pc-line);
+  border-radius: 999px;
+  background: var(--pc-surface);
+  color: var(--pc-text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.3;
+  cursor: pointer;
+  transition: background .12s ease, border-color .12s ease;
+}
+
+.chip:hover {
+  border-color: var(--pc-line-strong);
+  background: var(--pc-sunken);
+}
+
+.chip.on {
+  border-color: var(--pc-accent);
+  box-shadow: inset 0 0 0 1px var(--pc-accent);
+}
+
+.chip-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chip-meta {
+  color: var(--pc-faint);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12ch;
+}
+
+.chip-state {
+  flex: none;
+  cursor: default;
+  background: transparent;
+  border-color: transparent;
+  padding: 2px 0 2px 8px;
+}
+
+.chip-state:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
 /* --- 详情 -------------------------------------------------------------- */
 
 .detail {
@@ -285,6 +366,10 @@ body {
   gap: 8px;
   padding: 9px 10px;
   border-bottom: 1px solid var(--pc-line);
+}
+
+.detail-head .chip-state {
+  margin-top: -1px;
 }
 
 .detail-id {
@@ -327,9 +412,17 @@ body {
 .composer {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
   padding: 10px;
   border-top: 1px solid var(--pc-line);
+}
+
+.composer-target {
+  font-size: 11px;
+  color: var(--pc-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .composer textarea {

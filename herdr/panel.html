@@ -28,6 +28,10 @@
         <span id="detail-title" class="detail-title"></span>
         <span id="detail-sub" class="detail-sub"></span>
       </div>
+      <span id="detail-state" class="chip chip-state">
+        <span id="detail-state-dot" class="dot"></span>
+        <span id="detail-state-text"></span>
+      </span>
       <button id="detail-close" type="button" class="icon" aria-label="收起">
         <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
           <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -36,6 +40,7 @@
     </div>
     <pre id="detail-body" class="output"></pre>
     <div class="composer">
+      <div id="composer-target" class="composer-target"></div>
       <textarea id="composer-text" rows="2" placeholder="输入内容发送给选中的 pane"></textarea>
       <div class="composer-actions">
         <button id="composer-send" type="button" class="ghost"></button>
