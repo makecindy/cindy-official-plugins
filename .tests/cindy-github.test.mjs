@@ -86,7 +86,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.23');
+  assert.equal(manifest.version, '1.5.24');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -1978,8 +1978,16 @@ test('status watches resume locally, skip changed GitHub accounts, report permis
   assert.equal(f.timers.length, 1);
   f.useAccount(88);
   await f.timers.shift().fn();
-  assert.deepEqual(f.paths, ['/user']);
+  assert.deepEqual(f.paths, ['/user', '/user']);
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'account_changed');
+  assert.equal((await f.tool('list', 'issue', 2)).result.watches[0].problem, 'account_changed');
+  assert.equal(f.timers[0].delay, 300_000);
+  await f.timers.shift().fn();
+  assert.deepEqual(f.paths, ['/user', '/user', '/user']);
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'account_changed');
   f.useAccount(17);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
   delete f.response['/issues/2'];
   await f.timers.shift().fn();
   assert.equal(f.saved().githubStatusWatches[0].problem, 'unavailable');
@@ -2049,4 +2057,23 @@ test('a refused status notification stays pending across restart until acknowled
   assert.equal(restored.saved().githubStatusWatches[0].noticePending, undefined);
   await restored.timers.shift().fn();
   assert.equal(restored.sent.filter(message => message.type === 'notify').length, 1);
+});
+
+test('status_watch descriptions define the status format and every problem value in four locales', () => {
+  const states = ['open', 'closed', 'merged', 'draft', 'ready', 'queued', 'in_progress', 'completed', 'none',
+    'success', 'failure', 'account_changed', 'target_changed', 'unavailable'];
+  const manifestDescription = manifest.tools.find((tool) => tool.name === 'status_watch').description;
+  assert.ok(manifestDescription.includes('account_changed'), 'ghost.json status_watch description omits account_changed');
+  for (const locale of hostLocales) {
+    const resource = JSON.parse(
+      readFileSync(new URL(`../cindy-github/locales/${locale}.json`, import.meta.url), 'utf8'),
+    );
+    const text = resource.tools.status_watch.description;
+    for (const token of states) {
+      assert.ok(text.includes(token), `${locale} status_watch description omits ${token}`);
+    }
+    assert.match(text, /comment|댓글|コメント|评论/, `${locale} status_watch description omits the comment segment`);
+    assert.match(text, /attempt|시도|回数|第几次/, `${locale} status_watch description omits the attempt segment`);
+    assert.match(text, /remove/, `${locale} status_watch description omits the recovery action`);
+  }
 });

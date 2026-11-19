@@ -4134,7 +4134,11 @@ async function pollWatches() {
   var rateLimited = false;
   for (var watch of watches) {
     if (watchRevision !== revision) return WATCH_INTERVAL;
-    if (watch.account !== account) continue;
+    if (watch.account !== account) {
+      // Keep the saved target but stop reading it under the new account until it matches again.
+      if (watch.problem !== 'account_changed') failures.push({ watch: watch, problem: 'account_changed' });
+      continue;
+    }
     try {
       var result = await watchSnapshot(watch);
       if (result.objectId !== watch.objectId) {
