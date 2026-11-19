@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.27",
-  "releaseNotes": "支持在本机明确关注 PR、Issue 和 Actions 运行，每五分钟有界轮询并提示状态变化。宿主 GitHub 账号切换后关注标记为已暂停，账号切回后自动恢复；账号探测失败时在列表标记轮询停摆；退避前保留本轮已读取的变化；成功添加关注会替换更晚的退避定时器，轮询进行中添加也保持五分钟检查；最后的账号核对限流时先保存再退避。修复 PR 卡片无法启动后台跟进，以及关注恢复和通知重试。",
+  "version": "1.5.28",
+  "releaseNotes": "支持在本机明确关注 PR、Issue 和 Actions 运行，每五分钟有界轮询并提示状态变化。宿主 GitHub 账号切换后关注暂停并在切回后自动恢复；凭证失效（auth_required）与权限不足（forbidden）在列表单独标出，便于提示重新连接或检查访问权限，临时失败（unavailable）自动重试；退避前保留已读变化；添加关注按绝对截止时间排程，空轮次也不会丢弃并发新增的定时器。修复 PR 卡片无法启动后台跟进，以及关注恢复和通知重试。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -190,7 +190,7 @@
     },
     {
       "name": "status_watch",
-      "description": "管理本机 GitHub 状态关注。仅在用户明确要求时 add。指定 owner/repo、pr / issue / run 和 PR 号、Issue 号或 Actions run ID。remove 停止关注，list 查看。最多 5 个对象，每 5 分钟轮询；仅提示状态变化。list 每项返回 kind、repo、id、status、problem。pr 与 issue 的 status 为 `状态:草稿:评论数`：状态取 open/closed/merged（PR 合并后为 merged），草稿取 draft/ready，末段是评论数。run 的 status 为 `状态:结果:第几次`：状态取 queued/requested/waiting/pending/in_progress/completed，未完成时结果为 none，完成后取 success/failure/cancelled/neutral/skipped/timed_out/action_required/stale/startup_failure/unknown，末段是第几次运行。problem 为 null 表示正常；unavailable 表示读取失败或权限不足，下轮读取成功后自动清除，期间继续轮询；account_changed 表示宿主 GitHub 账号已切换、此关注已暂停，切回原账号后自动恢复，要在新账号下关注须先 remove 再 add；target_changed 表示对象身份已变，不会自动恢复，必须先 remove 再 add。",
+      "description": "管理本机 GitHub 状态关注。仅在用户明确要求时 add。指定 owner/repo、pr / issue / run 和 PR 号、Issue 号或 Actions run ID。remove 停止关注，list 查看。最多 5 个对象，每 5 分钟轮询；仅提示状态变化。list 每项返回 kind、repo、id、status、problem。pr 与 issue 的 status 为 `状态:草稿:评论数`：状态取 open/closed/merged（PR 合并后为 merged），草稿取 draft/ready，末段是评论数。run 的 status 为 `状态:结果:第几次`：状态取 queued/requested/waiting/pending/in_progress/completed，未完成时结果为 none，完成后取 success/failure/cancelled/neutral/skipped/timed_out/action_required/stale/startup_failure/unknown，末段是第几次运行。problem 为 null 表示正常；unavailable 表示临时读取失败或限流，下轮读取成功后自动清除，期间继续轮询；auth_required 表示凭证失效（HTTP 401），forbidden 表示无权限（HTTP 403），两者同样在读取成功后自动清除，但应先提示用户到插件详情页重新连接账号或检查访问权限；account_changed 表示宿主 GitHub 账号已切换、此关注已暂停，切回原账号后自动恢复，要在新账号下关注须先 remove 再 add；target_changed 表示对象身份已变，不会自动恢复，必须先 remove 再 add。",
       "parameters": {
         "type": "object",
         "properties": {

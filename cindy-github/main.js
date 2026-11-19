@@ -4039,7 +4039,7 @@ var WATCH_LIMIT = 5;
 var watchRevision = 0;
 var watchTimerAt;
 var watchTimerToken;
-var watchTimerSoonerDelay;
+var watchTimerSoonerAt;
 var WATCH_PATH = { pr: 'pulls', issue: 'issues', run: 'actions/runs' };
 var WATCH_RUN_STATES = ['queued', 'requested', 'waiting', 'pending', 'in_progress', 'completed'];
 var WATCH_CONCLUSIONS = ['success', 'failure', 'cancelled', 'neutral', 'skipped', 'timed_out',
@@ -4078,9 +4078,18 @@ async function watchRead(path, callId) {
   if (result.err) {
     var error = new Error(result.err);
     error.rateLimited = result.status === 429 || result.rateLimited;
+    error.status = result.status;
     throw error;
   }
   return result.data;
+}
+
+// Keep the failure class so the list can tell the user what to fix.
+function watchProblemOf(error) {
+  if (error && error.rateLimited) return 'unavailable';
+  if (error && error.status === 401) return 'auth_required';
+  if (error && error.status === 403) return 'forbidden';
+  return 'unavailable';
 }
 
 async function watchAccount(callId) {
@@ -4118,9 +4127,9 @@ function armWatchTimer(delay, replaceLater) {
       if (watchTimerAt <= at) return;
       if (!replaceLater) return;
     } else {
-      // A round is in flight: remember the earliest add request for its finally.
+      // A round is in flight: remember the earliest add deadline for its finally.
       if (!replaceLater) return;
-      if (watchTimerSoonerDelay === undefined || delay < watchTimerSoonerDelay) watchTimerSoonerDelay = delay;
+      if (watchTimerSoonerAt === undefined || at < watchTimerSoonerAt) watchTimerSoonerAt = at;
       return;
     }
   }
@@ -4137,26 +4146,36 @@ function armWatchTimer(delay, replaceLater) {
       // Failed store, credential or transport reads must never replace the baseline.
       next = WATCH_INTERVAL * 3;
     } finally {
-      var sooner = watchTimerSoonerDelay;
-      watchTimerSoonerDelay = undefined;
+      var soonerAt = watchTimerSoonerAt;
+      watchTimerSoonerAt = undefined;
       if (watchTimerToken === token) {
         watchTimerToken = undefined;
         watchTimerAt = undefined;
-        if (next) armWatchTimer(sooner !== undefined && sooner < next ? sooner : next);
+        var delay;
+        if (next) delay = next;
+        if (soonerAt !== undefined) {
+          var remaining = Math.max(0, soonerAt - Date.now());
+          if (delay === undefined || remaining < delay) delay = remaining;
+        }
+        // An empty round stops itself, but never drops a concurrent add's request.
+        // An empty round stops itself, but never drops a concurrent add's request.
+        if (delay !== undefined) armWatchTimer(delay);
       }
     }
   }, delay);
 }
 
-async function markPollingStalled(revision) {
+async function markPollingStalled(revision, problem) {
   await enqueuePr(async function () {
     if (watchRevision !== revision) return;
     var kv = await readKv(true);
     var current = readWatches(kv);
     var changed = false;
     for (var row of current) {
-      if (row.problem) continue;
-      row.problem = 'unavailable';
+      // Keep more specific states; only healthy or transient rows take the new problem.
+      if (row.problem && row.problem !== 'unavailable') continue;
+      if (row.problem === problem) continue;
+      row.problem = problem;
       changed = true;
     }
     if (changed) await saveWatches(kv, current);
@@ -4170,9 +4189,9 @@ async function pollWatches() {
   var account;
   try {
     account = await watchAccount();
-  } catch (_) {
+  } catch (error) {
     // No target was read this round: surface the stall instead of claiming healthy polling.
-    await markPollingStalled(revision);
+    await markPollingStalled(revision, watchProblemOf(error));
     return WATCH_INTERVAL * 3;
   }
   var updates = [];
@@ -4193,7 +4212,8 @@ async function pollWatches() {
         updates.push({ watch: watch, snapshot: result.snapshot });
       }
     } catch (error) {
-      if (watch.problem !== 'unavailable') failures.push({ watch: watch, problem: 'unavailable' });
+      var problem = watchProblemOf(error);
+      if (watch.problem !== problem) failures.push({ watch: watch, problem: problem });
       if (error.rateLimited) { rateLimited = true; break; }
     }
   }
