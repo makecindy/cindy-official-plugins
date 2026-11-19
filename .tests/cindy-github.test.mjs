@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { createContext, Script } from 'node:vm';
@@ -40,7 +42,10 @@ async function testConnection() {
     }
   }
 
-  const fetch = async (url) => { throw new Error(`unexpected fetch: ${url}`); };
+  const fetch = async (url) => {
+    if (url === '/kv') return { ok: true, json: async () => ({}) };
+    throw new Error(`unexpected fetch: ${url}`);
+  };
 
   const cindy = {
     onHostMessage() {},
@@ -81,7 +86,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.22');
+  assert.equal(manifest.version, '1.5.23');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -166,7 +171,7 @@ function createRuntime(options = {}) {
       return { ok: true, context: { region: 'cn', locale: options.locale ?? 'zh-CN' } };
     },
     onHostMessage(fn) { handler = fn; },
-    send(message) { sent.push(message); return Promise.resolve({ ok: true }); },
+    send(message) { sent.push(message); return Promise.resolve(options.send ? options.send(message) : { ok: true }); },
     async fetch(request) {
       fetches.push(request);
       if (options.github) return options.github(request);
@@ -181,7 +186,10 @@ function createRuntime(options = {}) {
   const context = createContext({
     cindy,
     BroadcastChannel: FakeBroadcastChannel,
-    fetch: options.localFetch ?? (async (url) => { throw new Error(`unexpected fetch: ${url}`); }),
+    fetch: options.localFetch ?? (async (url) => {
+      assert.equal(url, '/kv');
+      return { ok: true, json: async () => ({}) };
+    }),
     setTimeout: options.setTimeout ?? setTimeout,
     clearTimeout,
     URL,
@@ -704,7 +712,7 @@ function createPrRuntime(options = {}) {
       if (init.method === 'PUT') { kv = JSON.parse(init.body); return { ok: true, status: 204 }; }
       return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(kv)) };
     },
-    setTimeout,
+    setTimeout(fn, delay) { return delay >= 300_000 ? 0 : setTimeout(fn, delay); },
     clearTimeout,
     URL,
     encodeURIComponent,
@@ -1885,7 +1893,8 @@ test('paused follow-up refreshes, retains its reservation and shows terminal PR 
   assert.equal(merged.reply.result.stage, 'merged');
 });
 
-function statusWatchFixture(initial = {}) {
+function statusWatchFixture(initial = {}, options = {}) {
+  let failRead = options.failBoot;
   let kv = structuredClone(initial);
   let account = 17;
   let rateLimited = false;
@@ -1904,8 +1913,13 @@ function statusWatchFixture(initial = {}) {
     async localFetch(url, init) {
       assert.equal(url, '/kv');
       if (init?.method === 'PUT') kv = JSON.parse(init.body);
+      else if (failRead) {
+        failRead = false;
+        throw new Error('temporary storage failure');
+      }
       return { ok: true, json: async () => structuredClone(kv) };
     },
+    send: options.send,
     github(request) {
       const url = new URL(request.url);
       assert.equal(url.origin, 'https://api.github.com');
@@ -1991,4 +2005,48 @@ test('status watches cap stored targets and reject a replaced object without adv
   assert.equal(f.saved().githubStatusWatches[0].problem, 'target_changed');
   assert.equal((await f.tool('add', 'issue', 10)).ok, false);
   assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
+});
+
+test('the Cindy Node bootstrap starts the PR follow worker when loading it via require', () => {
+  const entry = fileURLToPath(new URL('../cindy-github/node/follow.cjs', import.meta.url));
+  const request = { id: 1, method: 'unsupported', jsonrpc: '2.0' };
+  const result = spawnSync(process.execPath, ['-e', 'globalThis.__CINDY_NODE__ = {}; require(process.argv[1]);', entry], {
+    input: JSON.stringify(request) + '\n',
+    encoding: 'utf8',
+    timeout: 5000,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    id: 1, jsonrpc: '2.0', error: { code: -32000, message: 'Unsupported method' },
+  });
+});
+
+test('saved status watches recover after the startup KV read fails', async () => {
+  const first = statusWatchFixture();
+  assert.equal((await first.tool('add', 'issue', 2)).ok, true);
+  const restored = statusWatchFixture(first.saved(), { failBoot: true });
+  await flushAsync();
+  assert.equal(restored.timers[0].delay, 900_000);
+  await restored.timers.shift().fn();
+  assert.deepEqual(restored.paths, ['/user', '/repos/example/widget/issues/2']);
+  assert.equal(restored.timers[0].delay, 300_000);
+});
+
+test('a refused status notification stays pending across restart until acknowledged', async () => {
+  const first = statusWatchFixture({}, { send: message => ({ ok: message.type !== 'notify' }) });
+  assert.equal((await first.tool('add', 'issue', 2)).ok, true);
+  first.response['/issues/2'].state = 'closed';
+  await first.timers.shift().fn();
+  assert.equal(first.saved().githubStatusWatches[0].snapshot, 'closed:ready:1');
+  assert.equal(first.saved().githubStatusWatches[0].noticePending, true);
+
+  const restored = statusWatchFixture(first.saved());
+  restored.response['/issues/2'].state = 'closed';
+  await flushAsync();
+  await restored.timers.shift().fn();
+  assert.equal(restored.sent.filter(message => message.type === 'notify').length, 1);
+  assert.equal(restored.saved().githubStatusWatches[0].noticePending, undefined);
+  await restored.timers.shift().fn();
+  assert.equal(restored.sent.filter(message => message.type === 'notify').length, 1);
 });

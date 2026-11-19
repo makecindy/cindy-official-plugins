@@ -4148,29 +4148,40 @@ async function pollWatches() {
     }
   }
   if (rateLimited) return WATCH_INTERVAL * 3;
-  if (!updates.length && !failures.length) return WATCH_INTERVAL;
+  var hasPendingNotice = watches.some(function (watch) {
+    return watch.account === account && watch.noticePending === true;
+  });
+  if (!updates.length && !failures.length && !hasPendingNotice) return WATCH_INTERVAL;
   if (await watchAccount() !== account) return WATCH_INTERVAL * 3;
   await enqueuePr(async function () {
     if (watchRevision !== revision) return;
     var kv = await readKv(true);
     var current = readWatches(kv);
-    var changed = [];
     for (var row of current) {
       var update = updates.find(function (item) { return sameWatch(row, item.watch); });
       var failure = failures.find(function (item) { return sameWatch(row, item.watch); });
       if (update) {
-        if (row.snapshot !== update.snapshot) changed.push(row.repo + ' ' + row.kind + ' #' + row.id);
+        if (row.snapshot !== update.snapshot) row.noticePending = true;
         row.snapshot = update.snapshot;
         delete row.problem;
       } else if (failure) {
         row.problem = failure.problem;
       }
     }
+    if (updates.length || failures.length) await saveWatches(kv, current);
+    var pending = current.filter(function (row) {
+      return row.account === account && row.noticePending === true;
+    });
+    if (!pending.length) return;
+    var first = pending[0];
+    var targets = pending.length === 1 ? first.repo + ' ' + first.kind + ' #' + first.id : String(pending.length);
+    await ensureLocale();
+    // Keep the change durable until Host confirms delivery. If the receipt or
+    // the subsequent KV write is lost, the next round may show it again.
+    var receipt = await cindy.send({ type: 'notify', text: t('watchChanged', { targets: targets }).slice(0, 200) });
+    if (!receipt || receipt.ok !== true) return;
+    for (var delivered of pending) delete delivered.noticePending;
     await saveWatches(kv, current);
-    if (changed.length) {
-      await ensureLocale();
-      await cindy.send({ type: 'notify', text: t('watchChanged', { targets: changed.length === 1 ? changed[0] : String(changed.length) }).slice(0, 200) });
-    }
   });
   return WATCH_INTERVAL;
 }
@@ -4270,4 +4281,6 @@ cindy.onHostMessage(async function (msg) {
 // On wake, restore only explicit watches. Empty installations make no GitHub requests.
 void readKv(true).then(function (kv) {
   if (readWatches(kv).length) armWatchTimer(WATCH_INTERVAL);
-}).catch(function () {});
+}).catch(function () {
+  armWatchTimer(WATCH_INTERVAL * 3);
+});
