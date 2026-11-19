@@ -180,6 +180,27 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'reuse must fetch the stored schedule and verify it'
   );
 
+  // KV 读取失败必须抛出来：当成空配置会丢掉唤醒、还会新建第二条自动化。
+  assert.match(
+    mainSource,
+    /async function readKv[\s\S]*?throw new Error\(runtime\.kvReadFailed\)/,
+    'readKv must fail loudly instead of returning an empty config'
+  );
+
+  // 宿主回执要同时看外层 isError 和正文里的 ok。
+  assert.match(
+    mainSource,
+    /function hostBody[\s\S]*?body\.ok === false/,
+    'host results must be checked at both levels'
+  );
+
+  // 普通调用也要带明确预算，让 worker 先于宿主到点、报出可核对的结果。
+  assert.match(
+    mainSource,
+    /const request = \{ method: method, params: params \|\| \{\}, timeout_ms: budget \}/,
+    'herdrCall must always send an explicit worker timeout'
+  );
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,

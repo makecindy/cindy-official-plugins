@@ -39,6 +39,7 @@ const runtimeStrings = {
     automationUnknown: '未知错误',
     automationNoId: '自动化已创建，但没拿到 id，请到自动化列表里查看',
     automationSaveFailed: '自动化 id 没有保存成功，事件桥暂时不会触发；请重新调用本工具重试',
+    kvReadFailed: '读取插件存储失败，暂不改动自动化配置',
     waitTimeout: '等待超时',
     nodeFailed: 'Node 工作进程调用失败',
     missingTarget: '缺少 target（session、window 或 pane 的名字）',
@@ -55,6 +56,7 @@ const runtimeStrings = {
     automationUnknown: 'unknown error',
     automationNoId: 'The automation was created but returned no id; check the automation list',
     automationSaveFailed: 'The automation id could not be saved, so events will not trigger; call this tool again',
+    kvReadFailed: 'Could not read plugin storage; automation setup was left untouched',
     waitTimeout: 'Timed out',
     nodeFailed: 'The bundled Node worker call failed',
     missingTarget: 'target is required (session, window, or pane name)',
@@ -117,18 +119,18 @@ async function nodeRequest(method, params, callId, timeoutMs) {
   return response.result;
 }
 
+// 普通调用（读状态、发输入、关闭分屏等）也要给明确预算：不给的话宿主按
+// 默认 30 秒断，而 worker 默认等 120 秒，写操作可能已经生效、宿主却先报一个
+// 普通 Node 失败，丢掉「结果未知」这个可核对的信号。这里让 worker 先到点。
+const DEFAULT_HERDR_CALL_TIMEOUT_MS = 45000;
+
 // Herdr 的超时写在 worker 请求的外层参数里；host 这一层要多留一点余量。
 async function herdrCall(method, params, callId, timeoutMs) {
-  const request = { method: method, params: params || {} };
-  if (typeof timeoutMs === 'number' && timeoutMs > 0) {
-    request.timeout_ms = Math.min(Math.round(timeoutMs), HOST_REQUEST_TIMEOUT_MAX_MS);
-  }
-  return nodeRequest(
-    'herdr/request',
-    request,
-    callId,
-    timeoutMs ? timeoutMs + WAIT_CHUNK_MARGIN_MS : undefined
-  );
+  const budget = (typeof timeoutMs === 'number' && timeoutMs > 0)
+    ? Math.min(Math.round(timeoutMs), HOST_REQUEST_TIMEOUT_MAX_MS)
+    : DEFAULT_HERDR_CALL_TIMEOUT_MS;
+  const request = { method: method, params: params || {}, timeout_ms: budget };
+  return nodeRequest('herdr/request', request, callId, budget + WAIT_CHUNK_MARGIN_MS);
 }
 
 // Herdr 等待超时时返回 code=timeout；这属于「还没等到」，可以接着等下一段。
@@ -138,15 +140,28 @@ function isTimeoutError(error) {
   return /(^|[\s:])timeout([\s:]|$)/i.test(text) || /timed out/i.test(text);
 }
 
+// 读取失败必须抛出来：当成空配置会让事件触发以为「没配过」而丢掉这次唤醒，
+// setup 还会因此新建第二条自动化、覆盖归属 id。
 async function readKv() {
-  try {
-    const response = await fetch('/kv');
-    if (!response.ok) return {};
-    const value = await response.json();
-    return value && typeof value === 'object' ? value : {};
-  } catch (error) {
-    return {};
+  const response = await fetch('/kv');
+  if (!response || response.ok === false) {
+    throw new Error(runtime.kvReadFailed);
   }
+  const value = await response.json();
+  return value && typeof value === 'object' ? value : {};
+}
+
+// 上次成功读到的自动化 id：存储暂时不可读时用它兜底，不丢这次唤醒。
+let cachedScheduleId = null;
+
+async function readScheduleId() {
+  const kv = await readKv();
+  const id = kv[SCHEDULE_ID_KEY];
+  if (id) {
+    cachedScheduleId = id;
+    return id;
+  }
+  return cachedScheduleId;
 }
 
 async function writeKv(patch) {
@@ -193,6 +208,27 @@ async function waitForAgentState(target, until, deadline, callId) {
   }
 }
 
+// 宿主工具回执有两层：外层 isError，正文里还可能有 { ok:false }。
+// 只看外层会把「传输成功但业务失败」当成成功。
+function hostBody(call) {
+  const detail = call && call.content && call.content[0] && call.content[0].text;
+  let body = null;
+  if (detail) {
+    try { body = JSON.parse(detail); } catch (error) { body = null; }
+  }
+  if (call && call.isError) return { ok: false, body: body, detail: detail };
+  if (body && body.ok === false) return { ok: false, body: body, detail: detail };
+  return { ok: true, body: body, detail: detail };
+}
+
+// 用户可能已经把那条自动化删了：NOT_FOUND 属于「没有了，可以重建」，
+// 不是「查询失败」。
+function isNotFound(outcome) {
+  const text = String(outcome.detail || '');
+  const code = outcome.body && outcome.body.errorCode;
+  return code === 'NOT_FOUND' || text.indexOf('NOT_FOUND') >= 0;
+}
+
 // 判断一条已有自动化是不是本插件建的，并且和本次要求完全对得上。
 // 任何一项不匹配都不复用——复用错任务会让事件跑错内容、或把用户自己的
 // 定时任务当成事件桥。
@@ -215,31 +251,35 @@ function isOurAutomation(item, name, args) {
 // 不再按名称从全部自动化里挑——按名称挑会把用户的同名定时任务接到事件桥上。
 // 认下来但会话不一致时，用 schedule_update 把绑定改成这次要求的，不新建重复任务。
 async function ensureAutomationSchedule(name, args) {
+  // 读不到就抛：不能把「存储不可读」当成「没配过」再去新建一条。
   const kv = await readKv();
   const storedId = kv[SCHEDULE_ID_KEY];
   if (storedId) {
     const fetched = await cindy.host.call('cindy_scheduler', 'schedule_get', { id: storedId });
-    if (!fetched.isError) {
-      const info = JSON.parse(fetched.content[0].text);
-      const item = info && info.data;
-      if (isOurAutomation(item, name, args)) {
-        const wantSession = args.targetSessionId || null;
-        // 只在本次点名了会话且与现绑定不同才更新；没点名时保留原绑定
-        // （那是上次显式请求的结果），也不尝试用 null 解绑。
-        if (wantSession && wantSession !== (item.targetSessionId || null)) {
-          const updated = await cindy.host.call('cindy_scheduler', 'schedule_update', {
-            id: storedId,
-            targetSessionId: wantSession || null
-          });
-          if (updated.isError) {
-            const detail = updated.content && updated.content[0] && updated.content[0].text;
-            throw new Error(runtime.automationFailed + (detail || runtime.automationUnknown));
-          }
+    const outcome = hostBody(fetched);
+    if (!outcome.ok && !isNotFound(outcome)) {
+      // 查询失败时不能闷头新建：那会让归属 id 被第二条覆盖。
+      throw new Error(runtime.automationFailed + (outcome.detail || runtime.automationUnknown));
+    }
+    const info = outcome.ok ? outcome.body : null;
+    const item = info && info.data;
+    if (isOurAutomation(item, name, args)) {
+      const wantSession = args.targetSessionId || null;
+      // 只在本次点名了会话且与现绑定不同才更新；没点名时保留原绑定
+      // （那是上次显式请求的结果），也不尝试用 null 解绑。
+      if (wantSession && wantSession !== (item.targetSessionId || null)) {
+        const updated = await cindy.host.call('cindy_scheduler', 'schedule_update', {
+          id: storedId,
+          targetSessionId: wantSession || null
+        });
+        const updateOutcome = hostBody(updated);
+        if (!updateOutcome.ok) {
+          throw new Error(runtime.automationFailed + (updateOutcome.detail || runtime.automationUnknown));
         }
-        const saved = await writeKv({ [SCHEDULE_ID_KEY]: storedId });
-        if (saved[SCHEDULE_ID_KEY] !== storedId) throw new Error(runtime.automationSaveFailed);
-        return storedId;
       }
+      const saved = await writeKv({ [SCHEDULE_ID_KEY]: storedId });
+      if (saved[SCHEDULE_ID_KEY] !== storedId) throw new Error(runtime.automationSaveFailed);
+      return storedId;
     }
   }
   const created = await cindy.host.call('cindy_scheduler', 'schedule_create', {
@@ -256,9 +296,9 @@ async function ensureAutomationSchedule(name, args) {
     silentWhenIdle: args.silentWhenIdle === true,
     notify: { desktop: true, feishu: false }
   });
-  if (created.isError) {
-    const detail = created.content && created.content[0] && created.content[0].text;
-    throw new Error(runtime.automationFailed + (detail || runtime.automationUnknown));
+  const createdOutcome = hostBody(created);
+  if (!createdOutcome.ok) {
+    throw new Error(runtime.automationFailed + (createdOutcome.detail || runtime.automationUnknown));
   }
   const body = JSON.parse(created.content[0].text);
   const scheduleId = body.data && body.data.id;
@@ -276,10 +316,10 @@ async function ensureAutomationSchedule(name, args) {
 async function triggerAutomation() {
   let scheduleId;
   try {
-    const kv = await readKv();
-    scheduleId = kv[SCHEDULE_ID_KEY];
+    scheduleId = await readScheduleId();
   } catch (error) {
-    return;
+    // 存储暂时读不了时退回上次记下的 id，不把这次唤醒直接丢掉。
+    scheduleId = cachedScheduleId;
   }
   if (!scheduleId) return;
   const now = Date.now();

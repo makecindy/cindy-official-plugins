@@ -207,6 +207,34 @@ test('the detail header follows the pane state after a rebind', async () => {
   assert.equal(state.textContent, '待处理', 'detail state must follow the fresh pane object');
 });
 
+test('each refresh gets its own token so a stale response cannot overwrite', () => {
+  const source = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  const body = /async function refresh\(\) \{([\s\S]*?)\n\}/.exec(source);
+  assert.ok(body, 'refresh() must exist');
+  assert.match(body[1], /refreshToken \+= 1;/, 'refresh must allocate a new token at the start');
+});
+
+test('the wrap toggle keeps its icon and the refresh button names its action', async () => {
+  const { sandbox, nodes } = loadPanel();
+  await sandbox.loadLocale();
+  const wrap = nodes.get('#detail-wrap');
+  const refresh = nodes.get('#refresh');
+
+  // 换行开关不能用 textContent 把 SVG 抹掉。
+  assert.equal(wrap.innerHTML, '', 'icon markup lives in panel.html, not in JS');
+  assert.equal(wrap.attrs['aria-label'], '自动换行');
+  assert.equal(wrap.attrs['aria-pressed'], 'true');
+
+  // 刷新按钮的可访问名要是动作，不能是「已更新」这种状态。
+  assert.equal(refresh.attrs['aria-label'], '刷新');
+  assert.equal(refresh.attrs['title'], '刷新');
+
+  // outputWrap 是顶层 let，要同一 context 里改。
+  vm.runInContext('outputWrap = false; syncWrapButton();', sandbox);
+  assert.equal(wrap.attrs['aria-pressed'], 'false');
+  assert.equal(wrap.attrs['aria-label'], '不换行');
+});
+
 test('the panel waits longer than the slowest backend operation', () => {
   const source = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   const match = /const PANEL_REQUEST_TIMEOUT_MS = (\d+);/.exec(source);

@@ -15,6 +15,7 @@ const strings = {
   'zh-CN': {
     refreshing: '刷新中…',
     updated: '已更新',
+    refreshAction: '刷新',
     refreshFailed: '刷新失败',
     noWorkspaces: '没有可显示的工作区',
     focused: '当前',
@@ -49,6 +50,7 @@ const strings = {
   en: {
     refreshing: 'Refreshing…',
     updated: 'Updated',
+    refreshAction: 'Refresh',
     refreshFailed: 'Could not refresh',
     noWorkspaces: 'No workspace to show',
     focused: 'focused',
@@ -83,6 +85,7 @@ const strings = {
   ja: {
     refreshing: '更新中…',
     updated: '更新しました',
+    refreshAction: '更新',
     refreshFailed: '更新できませんでした',
     noWorkspaces: '表示できるワークスペースがありません',
     focused: '現在',
@@ -117,6 +120,7 @@ const strings = {
   ko: {
     refreshing: '새로 고치는 중…',
     updated: '갱신됨',
+    refreshAction: '새로 고침',
     refreshFailed: '갱신하지 못했습니다',
     noWorkspaces: '표시할 작업 공간이 없습니다',
     focused: '현재',
@@ -324,7 +328,9 @@ function syncTermTarget() {
 function localize() {
   syncTermTarget();
   $('#detail-close').setAttribute('aria-label', T.collapse);
-  $('#refresh').setAttribute('aria-label', T.updated);
+  // 按钮的可访问名要说它会做什么，不能用「已更新」这种状态文案。
+  $('#refresh').setAttribute('aria-label', T.refreshAction);
+  $('#refresh').setAttribute('title', T.refreshAction);
   syncWrapButton();
 }
 
@@ -333,7 +339,10 @@ let outputWrap = true;
 
 function syncWrapButton() {
   const button = $('#detail-wrap');
-  button.textContent = outputWrap ? T.wrapOn : T.wrapOff;
+  const label = outputWrap ? T.wrapOn : T.wrapOff;
+  // 保留按钮里的 SVG，只更新可访问名与状态；图标切换交给 CSS（aria-pressed）。
+  button.setAttribute('aria-label', label);
+  button.setAttribute('title', label);
   button.setAttribute('aria-pressed', outputWrap ? 'true' : 'false');
   const output = $('#detail-body');
   output.classList.toggle('nowrap', !outputWrap);
@@ -623,6 +632,9 @@ let refreshToken = 0;
 
 async function refresh() {
   const status = $('#status');
+  // 每次刷新都领一个新序号：上一次刷新若最后返回，就会被判定为过期，
+  // 不会把新列表覆盖成旧快照。
+  refreshToken += 1;
   const startedView = view;
   const token = refreshToken;
   const stale = function () { return view !== startedView || token !== refreshToken; };
