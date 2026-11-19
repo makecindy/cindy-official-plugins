@@ -669,6 +669,14 @@ test('tmux key names are validated against the keys tmux recognises', async () =
     assert.match(typo.error.message, /TMUX_BAD_KEY|不支持的按键/,
       `expected a key rejection, got ${typo.error.message}`);
 
+    // 跨层一致性：面板能发出的每一个 tmux 键名，都必须通过 worker 的白名单。
+    const panelNames = Object.values(lib.TMUX_KEYS);
+    for (const key of panelNames) {
+      const result = await call('tmux/send', { target: 'x:0.0', keys: [key] });
+      assert.ok(!result.error || !/TMUX_BAD_KEY/.test(result.error.message || ''),
+        `panel key ${key} must pass the worker whitelist, got ${JSON.stringify(result)}`);
+    }
+
     // 修饰键 + 单字符、以及 tmux 的具名键要放行（校验先于任何 tmux 调用）。
     for (const key of ['C-c', 'M-x', 'S-Tab', 'Enter', 'F12', 'a']) {
       const result = await call('tmux/send', { target: 'x:0.0', keys: [key] });

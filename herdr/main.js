@@ -818,8 +818,26 @@ const tools = {
     const scheduleId = await ensureAutomationSchedule(wantedName, args);
     // 订阅要真的开着，否则事件到了也没人接；同时把偏好改回「订阅」，
     // 让重启后不会按旧的退订值停摆。
-    await enableSubscription(args.__callId);
-    return { schedule_id: scheduleId, name: wantedName, trigger: 'event-only' };
+    // 订阅失败不能把「自动化已创建并保存」这个事实也报成失败：
+    // worker 已经记下 desired 并排了重连，Herdr 可用后会自己恢复。
+    let subscribed = true;
+    let subscriptionError = null;
+    try {
+      await enableSubscription(args.__callId);
+    } catch (error) {
+      subscribed = false;
+      subscriptionError = error && error.message ? error.message : String(error);
+    }
+    return {
+      schedule_id: scheduleId,
+      name: wantedName,
+      trigger: 'event-only',
+      subscribed: subscribed,
+      subscription_note: subscribed
+        ? null
+        : '自动化已创建并保存，但当前没能打开事件订阅（' + subscriptionError
+          + '）。worker 已排好重连，Herdr 可用后会自动恢复订阅。'
+    };
   },
 
   async herdr_call(args) {
