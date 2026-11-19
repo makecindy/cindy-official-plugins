@@ -4055,6 +4055,20 @@ function sameWatch(a, b) {
   return a.kind === b.kind && a.repo === b.repo && a.id === b.id;
 }
 
+// Instance marker for each add: a removed-and-re-added target must not receive
+// an in-flight round's observations for the previous instance.
+var watchCreated = 0;
+
+function nextWatchCreated() {
+  watchCreated = Math.max(Date.now(), watchCreated + 1);
+  return watchCreated;
+}
+
+function sameWatchIdentity(row, observed) {
+  return sameWatch(row, observed) && row.account === observed.account &&
+    row.objectId === observed.objectId && row.created === observed.created;
+}
+
 function readWatches(kv) {
   var watches = kv.githubStatusWatches;
   if (watches === undefined) return [];
@@ -4188,9 +4202,7 @@ async function pollWatches() {
   if (!watches.length) return 0;
   // Rows created after this snapshot keep their fresh baseline and are never marked here.
   var existedAtStart = function (row) {
-    return watches.some(function (item) {
-      return sameWatch(row, item) && item.account === row.account && item.objectId === row.objectId;
-    });
+    return watches.some(function (item) { return sameWatchIdentity(row, item); });
   };
   var account;
   try {
@@ -4265,13 +4277,11 @@ async function applyWatchRound(account, updates, failures) {
     var kv = await readKv(true);
     var current = readWatches(kv);
     // Merge only rows whose identity still matches the observation: a concurrent
-    // add/remove of any target must not discard work for the rows that survived.
-    var sameIdentity = function (row, observed) {
-      return sameWatch(row, observed) && row.account === observed.account && row.objectId === observed.objectId;
-    };
+    // add/remove of any target must not discard work for the rows that survived,
+    // and a re-added target must not receive the previous instance's results.
     for (var row of current) {
-      var update = updates.find(function (item) { return sameIdentity(row, item.watch); });
-      var failure = failures.find(function (item) { return sameIdentity(row, item.watch); });
+      var update = updates.find(function (item) { return sameWatchIdentity(row, item.watch); });
+      var failure = failures.find(function (item) { return sameWatchIdentity(row, item.watch); });
       if (update) {
         if (row.snapshot !== update.snapshot) row.noticePending = true;
         row.snapshot = update.snapshot;
@@ -4330,7 +4340,7 @@ async function watchTool(args, callId) {
       }
       if (index >= 0) return fail(t('watchRebind'));
       if (watches.length >= WATCH_LIMIT) return fail(t('watchLimit'));
-      watches.push(Object.assign({}, target, baseline, { account: account }));
+      watches.push(Object.assign({}, target, baseline, { account: account, created: nextWatchCreated() }));
     }
     await saveWatches(kv, watches);
     if (watches.length) armWatchTimer(WATCH_INTERVAL, action === 'add');

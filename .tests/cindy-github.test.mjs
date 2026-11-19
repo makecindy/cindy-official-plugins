@@ -86,7 +86,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.32');
+  assert.equal(manifest.version, '1.5.33');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -2209,6 +2209,39 @@ test('a concurrent modification during the reads does not abort the round', asyn
   await round;
   assert.equal(f.saved().githubStatusWatches.find(w => w.kind === 'issue').snapshot, 'open:ready:5');
   assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
+});
+
+test('a watch re-added during a round keeps its fresh baseline', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.response['/issues/2'].comments = 5;
+  f.holdUserAt(4);
+  const round = f.timers.shift().fn();
+  await flushAsync();
+  f.response['/issues/2'].comments = 7;
+  assert.equal((await f.tool('remove', 'issue', 2)).ok, true);
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.releaseUser();
+  await round;
+  const row = f.saved().githubStatusWatches[0];
+  assert.equal(row.snapshot, 'open:ready:7');
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
+});
+
+test('a watch re-added during a failed probe is not marked stale', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.holdUserAt(3);
+  const round = f.timers.shift().fn();
+  await flushAsync();
+  assert.equal((await f.tool('remove', 'issue', 2)).ok, true);
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.failAccount(503);
+  f.releaseUser();
+  await round;
+  const row = f.saved().githubStatusWatches[0];
+  assert.equal(row.problem, undefined);
+  assert.equal(row.snapshot, 'open:ready:1');
 });
 
 test('a later remove wins over an add still reading its baseline', async () => {
