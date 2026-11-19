@@ -212,6 +212,13 @@ test('each refresh gets its own token so a stale response cannot overwrite', () 
   const body = /async function refresh\(\) \{([\s\S]*?)\n\}/.exec(source);
   assert.ok(body, 'refresh() must exist');
   assert.match(body[1], /refreshToken \+= 1;/, 'refresh must allocate a new token at the start');
+
+  // 过期检查必须发生在写 state / 渲染之前：等 refresh() 回来再判已经晚了。
+  const herdr = /async function refreshHerdr\(token\) \{([\s\S]*?)\n\}/.exec(source);
+  assert.ok(herdr, 'refreshHerdr must take the token');
+  const assignAt = herdr[1].indexOf('state = snapshot');
+  const checkAt = herdr[1].indexOf('token !== refreshToken');
+  assert.ok(checkAt >= 0 && assignAt > checkAt, 'stale check must run before writing state');
 });
 
 test('the wrap toggle keeps its icon and the refresh button names its action', async () => {

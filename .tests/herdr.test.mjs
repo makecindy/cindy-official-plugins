@@ -165,10 +165,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'reuse must verify ownership, manual-only trigger, active state and an exact prompt'
   );
 
-  // 会话不一致要能走到 schedule_update 修复分支，而不是先被归属校验挡掉。
+  // 会话不一致要能走到改绑分支，而不是先被归属校验挡掉。
   assert.match(
     mainSource,
-    /if \(wantSession && wantSession !== \(item\.targetSessionId \|\| null\)\)[\s\S]*?schedule_update/,
+    /if \(wantSession && \(!hasSession \|\| item\.targetSessionId !== wantSession\)\)[\s\S]*?schedule_update/,
     'a session mismatch must reach the schedule_update repair path'
   );
 
@@ -199,6 +199,22 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     mainSource,
     /const request = \{ method: method, params: params \|\| \{\}, timeout_ms: budget \}/,
     'herdrCall must always send an explicit worker timeout'
+  );
+
+  // 保存/复用后必须同步缓存，否则存储读不了时会跑旧任务。
+  const cacheWrites = (mainSource.match(/cachedScheduleId = /g) || []).length;
+  assert.ok(cacheWrites >= 3, `cache must be updated on read, reuse and create (found ${cacheWrites})`);
+
+  // 省略 targetSessionId = 承诺每次新开会话；宿主不支持 null 解绑，要走替换。
+  assert.match(
+    mainSource,
+    /!wantSession && hasSession[\s\S]*?replaceUnboundSchedule/,
+    'omitting the session must replace the bound schedule'
+  );
+  assert.match(
+    mainSource,
+    /function replaceUnboundSchedule[\s\S]*?schedule_delete/,
+    'the old bound schedule must be removed after the new one is saved'
   );
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。

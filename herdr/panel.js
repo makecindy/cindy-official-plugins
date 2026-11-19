@@ -468,8 +468,11 @@ function renderHerdr() {
   }
 }
 
-async function refreshHerdr() {
-  state = await request('state');
+async function refreshHerdr(token) {
+  const snapshot = await request('state');
+  // 先判过期再写 state：否则旧请求最后返回时已经把列表画成旧快照了。
+  if (token !== undefined && token !== refreshToken) return;
+  state = snapshot;
   renderHerdr();
 }
 
@@ -577,16 +580,21 @@ function renderTmux() {
   }
 }
 
-async function refreshTmux() {
+async function refreshTmux(token) {
+  const stale = function () { return token !== undefined && token !== refreshToken; };
+  let next;
   try {
-    tmux = await request('tmux_state', tmuxFilter ? { session: tmuxFilter } : {});
+    next = await request('tmux_state', tmuxFilter ? { session: tmuxFilter } : {});
   } catch (error) {
     // 带 filter 时那个 session 可能刚好退出：退回全部 session 再试一次。不能
     // 让面板停在错误态——那时「全部 session」按钮还没渲染，用户点不回来。
     if (!tmuxFilter) throw error;
+    if (stale()) return;
     tmuxFilter = null;
-    tmux = await request('tmux_state', {});
+    next = await request('tmux_state', {});
   }
+  if (stale()) return;
+  tmux = next;
   const sessions = (tmux && tmux.sessions) || [];
   if (tmuxFilter && !sessions.some(function (s) { return s.name === tmuxFilter; })) {
     tmuxFilter = null;
@@ -640,8 +648,8 @@ async function refresh() {
   const stale = function () { return view !== startedView || token !== refreshToken; };
   status.textContent = T.refreshing;
   try {
-    if (view === 'tmux') await refreshTmux();
-    else await refreshHerdr();
+    if (view === 'tmux') await refreshTmux(token);
+    else await refreshHerdr(token);
     if (stale()) return;
     // 详情卡开着的时候，先按 id 把选中对象换成最新的一份并刷新头部，
     // 再重读正文：否则列表显示新状态、详情卡还是旧值。

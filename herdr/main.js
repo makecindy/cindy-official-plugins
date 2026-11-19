@@ -247,6 +247,23 @@ function isOurAutomation(item, name, args) {
   return true;
 }
 
+// 「只由事件唤醒」的自动化载荷：cronExpr/timezone 是 schema 必填项，
+// manual=true 时它不会真的按时间跑，只是留着，用户以后想恢复定时触发不用重填。
+function schedulePayload(name, args) {
+  return {
+    name: name,
+    prompt: (args.prompt || AUTOMATION_PROMPT_DEFAULT) + '\n\n' + AUTOMATION_MARK,
+    cronExpr: '0 9 * * *',
+    timezone: args.timezone || 'Asia/Shanghai',
+    recurring: true,
+    manual: true,
+    agentKind: args.agentKind || 'codex',
+    targetSessionId: args.targetSessionId || undefined,
+    silentWhenIdle: args.silentWhenIdle === true,
+    notify: { desktop: true, feishu: false }
+  };
+}
+
 // 复用只认本插件自己记录的那一条：拿 KV 里的 id 去 schedule_get 取回来逐项核实，
 // 不再按名称从全部自动化里挑——按名称挑会把用户的同名定时任务接到事件桥上。
 // 认下来但会话不一致时，用 schedule_update 把绑定改成这次要求的，不新建重复任务。
@@ -265,37 +282,34 @@ async function ensureAutomationSchedule(name, args) {
     const item = info && info.data;
     if (isOurAutomation(item, name, args)) {
       const wantSession = args.targetSessionId || null;
-      // 只在本次点名了会话且与现绑定不同才更新；没点名时保留原绑定
-      // （那是上次显式请求的结果），也不尝试用 null 解绑。
-      if (wantSession && wantSession !== (item.targetSessionId || null)) {
+      const hasSession = Boolean(item.targetSessionId);
+      if (wantSession && (!hasSession || item.targetSessionId !== wantSession)) {
+        // 点名了会话（或换了会话）：直接改绑定。
         const updated = await cindy.host.call('cindy_scheduler', 'schedule_update', {
           id: storedId,
-          targetSessionId: wantSession || null
+          targetSessionId: wantSession
         });
         const updateOutcome = hostBody(updated);
         if (!updateOutcome.ok) {
           throw new Error(runtime.automationFailed + (updateOutcome.detail || runtime.automationUnknown));
         }
+      } else if (!wantSession && hasSession) {
+        // 没点名会话 = 承诺「每次新开会话」。宿主不接受 null 解绑，
+        // 所以新建一条未绑定的，成功后再删掉旧的（先确认旧的确实是我们的）。
+        return await replaceUnboundSchedule(storedId, item, name, args);
+      } else {
+        const saved = await writeKv({ [SCHEDULE_ID_KEY]: storedId });
+        if (saved[SCHEDULE_ID_KEY] !== storedId) throw new Error(runtime.automationSaveFailed);
+        cachedScheduleId = storedId;   // 缓存跟着这次配置走，兜底时不会跑旧任务
+        return storedId;
       }
-      const saved = await writeKv({ [SCHEDULE_ID_KEY]: storedId });
-      if (saved[SCHEDULE_ID_KEY] !== storedId) throw new Error(runtime.automationSaveFailed);
+      const refreshed = await writeKv({ [SCHEDULE_ID_KEY]: storedId });
+      if (refreshed[SCHEDULE_ID_KEY] !== storedId) throw new Error(runtime.automationSaveFailed);
+      cachedScheduleId = storedId;
       return storedId;
     }
   }
-  const created = await cindy.host.call('cindy_scheduler', 'schedule_create', {
-    name: name,
-    prompt: (args.prompt || AUTOMATION_PROMPT_DEFAULT) + '\n\n' + AUTOMATION_MARK,
-    // cronExpr / timezone 是 schema 必填项；manual=true 时它不会真的按时间跑，
-    // 只是留着，用户以后想恢复定时触发时不用重填。
-    cronExpr: '0 9 * * *',
-    timezone: args.timezone || 'Asia/Shanghai',
-    recurring: true,
-    manual: true,
-    agentKind: args.agentKind || 'codex',
-    targetSessionId: args.targetSessionId || undefined,
-    silentWhenIdle: args.silentWhenIdle === true,
-    notify: { desktop: true, feishu: false }
-  });
+  const created = await cindy.host.call('cindy_scheduler', 'schedule_create', schedulePayload(name, args));
   const createdOutcome = hostBody(created);
   if (!createdOutcome.ok) {
     throw new Error(runtime.automationFailed + (createdOutcome.detail || runtime.automationUnknown));
@@ -306,6 +320,30 @@ async function ensureAutomationSchedule(name, args) {
   const saved = await writeKv({ [SCHEDULE_ID_KEY]: scheduleId });
   // 存不上就不能当成配置完成：后续事件会因为读不到 id 而永远不触发。
   if (saved[SCHEDULE_ID_KEY] !== scheduleId) throw new Error(runtime.automationSaveFailed);
+  cachedScheduleId = scheduleId;   // 同上：兜底要用最新的那条
+  return scheduleId;
+}
+
+// 旧任务已绑到别的会话、而这次要求不绑：宿主的 schedule_update 不接受
+// targetSessionId:null，所以新建一条未绑定的；只有新条目保存成功后才删旧的，
+// 且删之前再确认旧条目确实带本插件的标记。
+async function replaceUnboundSchedule(storedId, oldItem, name, args) {
+  const created = await cindy.host.call('cindy_scheduler', 'schedule_create', schedulePayload(name, args));
+  const outcome = hostBody(created);
+  if (!outcome.ok) {
+    throw new Error(runtime.automationFailed + (outcome.detail || runtime.automationUnknown));
+  }
+  const body = outcome.body;
+  const scheduleId = body && body.data && body.data.id;
+  if (!scheduleId) throw new Error(runtime.automationNoId);
+  const saved = await writeKv({ [SCHEDULE_ID_KEY]: scheduleId });
+  if (saved[SCHEDULE_ID_KEY] !== scheduleId) throw new Error(runtime.automationSaveFailed);
+  cachedScheduleId = scheduleId;
+  if (isOurAutomation(oldItem, name, args)) {
+    const removed = await cindy.host.call('cindy_scheduler', 'schedule_delete', { id: storedId });
+    const removeOutcome = hostBody(removed);
+    if (!removeOutcome.ok) throw new Error(runtime.automationFailed + (removeOutcome.detail || runtime.automationUnknown));
+  }
   return scheduleId;
 }
 
