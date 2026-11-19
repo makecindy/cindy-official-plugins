@@ -7,7 +7,7 @@
   "icon": "assets/icon.png",
   "description": "把本机 Herdr 终端工作区与 tmux session 接入 Cindy：查看工作区/标签/分屏与 agent 状态、读取画面、发送输入与按键、等待 agent 状态变化，并把 Herdr 事件推成 Cindy 通知与自动化。",
   "whenToUse": "需要看 Herdr 里正在跑什么 agent、读某个分屏的输出、给 agent 派活、等待它完成或需要授权；或者要看/操作本机 tmux 的 session、pane 与画面；或者想把终端事件接到 Cindy 通知与自动化时找我",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "kind": "chip",
   "entry": "main.js",
   "command": "herdr",

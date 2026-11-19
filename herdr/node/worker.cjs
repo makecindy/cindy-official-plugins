@@ -305,11 +305,15 @@ async function openSubscription() {
           if (message.error) {
             finish(reject, new Error(message.error.code + ': ' + message.error.message));
           } else {
+            // 订阅确认的同一段数据里就开始以新连接为准，避免交接期间
+            // 新旧两条连接各转发一次事件。
+            socket.isCurrentSubscription = true;
+            if (previous) previous.isCurrentSubscription = false;
             finish(resolve);
           }
           continue;
         }
-        if (message.event) handleEvent(message);
+        if (message.event && socket.isCurrentSubscription) handleEvent(message);
       }
     });
     socket.on('error', function (error) {
@@ -327,12 +331,18 @@ async function openSubscription() {
       });
     });
   } catch (error) {
-    // 新订阅没成：把它撤掉，旧连接继续服务。
-    if (subscription.socket === socket) {
-      subscription.socket = previous || null;
-      subscription.running = Boolean(previous);
-    }
+    // 新订阅没成：无论 close 回调有没有先把记录清掉，都要把旧连接
+    // 接回来（还活着）或排一次重连（已经死了），不能让它失管。
     try { socket.destroy(); } catch (destroyError) { void destroyError; }
+    if (previous && previous !== socket && !previous.destroyed) {
+      subscription.socket = previous;
+      subscription.running = true;
+      previous.isCurrentSubscription = true;
+    } else {
+      subscription.socket = null;
+      subscription.running = false;
+      if (subscription.desired) scheduleReconnect();
+    }
     throw error;
   }
   subscription.running = true;

@@ -331,36 +331,24 @@ async function ensureAutomationSchedule(name, args) {
       const hasSession = Boolean(item.targetSessionId);
       if (wantSession && (!hasSession || item.targetSessionId !== wantSession)) {
         // 点名了会话（或换了会话）：直接改绑定。
-        const updated = await cindy.host.call('cindy_scheduler', 'schedule_update', {
+        await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_update', {
           id: storedId,
           targetSessionId: wantSession
-        });
-        const updateOutcome = hostBody(updated);
-        if (!updateOutcome.ok) {
-          throw new Error(runtime.automationFailed + (updateOutcome.detail || runtime.automationUnknown));
-        }
+        }));
       } else if (!wantSession && hasSession) {
         // 没点名会话 = 承诺「每次新开会话」。宿主不接受 null 解绑，
         // 所以新建一条未绑定的，成功后再删掉旧的（先确认旧的确实是我们的）。
         return await replaceUnboundSchedule(storedId, item, name, args);
-      } else {
-        const saved = await writeKv({ [SCHEDULE_ID_KEY]: storedId });
-        if (saved[SCHEDULE_ID_KEY] !== storedId) throw new Error(runtime.automationSaveFailed);
-        cachedScheduleId = storedId;   // 缓存跟着这次配置走，兜底时不会跑旧任务
-        return storedId;
       }
+      // 常规复用（含会话改绑之后）都要走到这里：silentWhenIdle 只有这一条路径能落下去。
       // silentWhenIdle 是暴露给用户的工具参数：改了就必须写进 scheduler，
       // 否则返回旧 id、配置看起来生效了实际没生效。
       if (args.silentWhenIdle !== undefined
           && Boolean(item.silentWhenIdle) !== Boolean(args.silentWhenIdle)) {
-        const patched = await cindy.host.call('cindy_scheduler', 'schedule_update', {
+        await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_update', {
           id: storedId,
           silentWhenIdle: Boolean(args.silentWhenIdle)
-        });
-        const patchOutcome = hostBody(patched);
-        if (!patchOutcome.ok) {
-          throw new Error(runtime.automationFailed + (patchOutcome.detail || runtime.automationUnknown));
-        }
+        }));
       }
       const refreshed = await writeKv({ [SCHEDULE_ID_KEY]: storedId });
       if (refreshed[SCHEDULE_ID_KEY] !== storedId) throw new Error(runtime.automationSaveFailed);
@@ -368,21 +356,12 @@ async function ensureAutomationSchedule(name, args) {
       return storedId;
     }
   }
-  let created;
-  try {
-    created = await cindy.host.call('cindy_scheduler', 'schedule_create', schedulePayload(name, args));
-  } catch (error) {
-    // 回执丢了：自动化可能已经建好，直接报普通失败会让调用方重试出重复任务。
-    throw new Error(
-      'HERDR_OUTCOME_UNKNOWN: 自动化可能已创建，但没拿到回执。'
-      + '请先用 schedule_list 核对是否已存在，再决定是否重试，不要直接再建。'
-    );
-  }
-  const createdOutcome = hostBody(created);
-  if (!createdOutcome.ok) {
-    throw new Error(runtime.automationFailed + (createdOutcome.detail || runtime.automationUnknown));
-  }
-  const body = JSON.parse(created.content[0].text);
+  // 两个创建入口（普通新建、替换解绑）都走 hostWrite：回执丢失 = 结果未知，
+  // 必须提示先核对，不能报普通失败让调用方重试出重复任务。
+  const createdOutcome = await hostWrite(
+    cindy.host.call('cindy_scheduler', 'schedule_create', schedulePayload(name, args))
+  );
+  const body = createdOutcome.body;
   const scheduleId = body.data && body.data.id;
   if (!scheduleId) throw new Error(runtime.automationNoId);
   const saved = await writeKv({ [SCHEDULE_ID_KEY]: scheduleId });
@@ -396,11 +375,9 @@ async function ensureAutomationSchedule(name, args) {
 // targetSessionId:null，所以新建一条未绑定的；只有新条目保存成功后才删旧的，
 // 且删之前再确认旧条目确实带本插件的标记。
 async function replaceUnboundSchedule(storedId, oldItem, name, args) {
-  const created = await cindy.host.call('cindy_scheduler', 'schedule_create', schedulePayload(name, args));
-  const outcome = hostBody(created);
-  if (!outcome.ok) {
-    throw new Error(runtime.automationFailed + (outcome.detail || runtime.automationUnknown));
-  }
+  const outcome = await hostWrite(
+    cindy.host.call('cindy_scheduler', 'schedule_create', schedulePayload(name, args))
+  );
   const body = outcome.body;
   const scheduleId = body && body.data && body.data.id;
   if (!scheduleId) throw new Error(runtime.automationNoId);
@@ -408,11 +385,37 @@ async function replaceUnboundSchedule(storedId, oldItem, name, args) {
   if (saved[SCHEDULE_ID_KEY] !== scheduleId) throw new Error(runtime.automationSaveFailed);
   cachedScheduleId = scheduleId;
   if (isOurAutomation(oldItem, name, args)) {
-    const removed = await cindy.host.call('cindy_scheduler', 'schedule_delete', { id: storedId });
-    const removeOutcome = hostBody(removed);
-    if (!removeOutcome.ok) throw new Error(runtime.automationFailed + (removeOutcome.detail || runtime.automationUnknown));
+    await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_delete', { id: storedId }));
   }
   return scheduleId;
+}
+
+// 所有调度器写操作共用的回执处理：抛错 = 结果未知（可能已经生效），
+// 明确失败 = 报错。两种都要让调用方先核对，不能当成「没执行」。
+function hostWriteFailure(outcome) {
+  return new Error(
+    'HERDR_OUTCOME_UNKNOWN: 操作可能已经生效，但没拿到回执。'
+    + '请先核对自动化列表确认实际状态，再决定是否重试。'
+    + (outcome && outcome.detail ? '（' + outcome.detail + '）' : '')
+  );
+}
+
+async function hostWrite(call) {
+  let result;
+  try {
+    result = await call;
+  } catch (error) {
+    throw hostWriteFailure(null);
+  }
+  const outcome = hostBody(result);
+  if (!outcome.ok) {
+    // 明确失败（isError / ok:false / 解析不了）：原样报业务错误。
+    if (result && result.isError) {
+      throw new Error(runtime.automationFailed + (outcome.detail || runtime.automationUnknown));
+    }
+    throw new Error(runtime.automationFailed + (outcome.detail || runtime.automationUnknown));
+  }
+  return outcome;
 }
 
 // 触发一次自动化并核对业务回执；失败时把限流窗口复位，
@@ -998,8 +1001,17 @@ async function ensureSubscription() {
   try {
     if (subscriptionPreference === false) return;
     if (subscriptionPreference === null) {
-      const kv = await readKv();
-      if (kv[SUBSCRIBED_KEY] === false) {
+      let kv = null;
+      try {
+        kv = await readKv();
+      } catch (error) {
+        // 存储读不了：先按「没表态 = 默认订阅」继续，稍后重试核对偏好，
+        // 不能因为一次读取失败就连订阅都不发起。
+        schedulePreferenceRecheck();
+      }
+      // 读取期间用户可能刚退订：以最新的选择为准。
+      if (subscriptionPreference === false) return;
+      if (kv && kv[SUBSCRIBED_KEY] === false) {
         subscriptionPreference = false;
         return;
       }
@@ -1008,6 +1020,26 @@ async function ensureSubscription() {
   } catch (error) {
     void error;
   }
+}
+
+// 存储恢复后重新核对退订偏好；仍然读不到就继续排下一次（定时器不占着进程）。
+let preferenceRetryTimer = null;
+
+function schedulePreferenceRecheck() {
+  if (preferenceRetryTimer) return;
+  preferenceRetryTimer = setTimeout(async function () {
+    preferenceRetryTimer = null;
+    try {
+      const kv = await readKv();
+      if (kv[SUBSCRIBED_KEY] === false && subscriptionPreference !== false) {
+        subscriptionPreference = false;
+        await nodeRequest('herdr/unsubscribe', {});
+      }
+    } catch (error) {
+      schedulePreferenceRecheck();
+    }
+  }, 30000);
+  if (preferenceRetryTimer.unref) preferenceRetryTimer.unref();
 }
 
 cindy.onHostMessage(function (msg) {

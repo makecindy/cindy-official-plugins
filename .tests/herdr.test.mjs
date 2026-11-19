@@ -3,6 +3,7 @@ import test from 'node:test';
 import './herdr-panel.test.mjs';
 
 import net from 'node:net';
+import vm from 'node:vm';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
@@ -306,9 +307,12 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(mainSource, /操作已经执行完了[\s\S]*?void error;/,
     'a failed receipt must not turn an executed operation into a failure');
 
-  // schedule_create 回执丢失要报「结果未知」，禁止盲目重试。
-  assert.match(mainSource, /schedule_create[\s\S]*?HERDR_OUTCOME_UNKNOWN: 自动化可能已创建/,
-    'a lost create receipt must be reported as outcome-unknown');
+  // 所有调度器写操作（create/update/delete）回执丢失都要报「结果未知」。
+  assert.match(mainSource, /function hostWrite[\s\S]*?HERDR_OUTCOME_UNKNOWN: 操作可能已经生效/,
+    'a lost write receipt must be reported as outcome-unknown');
+  const writeCalls = (mainSource.match(/hostWrite\(\s*cindy\.host\.call\('cindy_scheduler', 'schedule_(create|update|delete)'/g) || []);
+  assert.ok(writeCalls.length >= 4,
+    `every scheduler write must go through hostWrite (found ${writeCalls.length})`);
 
   // worker 重建订阅要先建后断（旧连接在新连接确认后才关）。
   const workerSource = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
@@ -323,4 +327,81 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     /async herdr_send\([\s\S]*?runtime\.missingTextOrKeys/,
     'herdr_send must reject calls without text or keys'
   );
+});
+
+
+test('changing only silentWhenIdle updates the existing schedule', async () => {
+  const mainSource = readFileSync(path.join(root, 'herdr', 'main.js'), 'utf8');
+  const kv = { herdrScheduleId: 'S1', herdrSubscribed: true };
+  const calls = [];
+
+  const owned = {
+    id: 'S1',
+    name: 'Herdr 事件处理',
+    manual: true,
+    status: 'active',
+    prompt: '默认提示词\n\n[cindy-plugin:herdr]',
+    silentWhenIdle: false,
+    targetSessionId: null,
+    agentKind: 'codex'
+  };
+
+  const reply = (data) => Promise.resolve({
+    isError: false,
+    content: [{ type: 'text', text: JSON.stringify({ ok: true, data: data }) }]
+  });
+
+  const sandbox = {
+    console,
+    BroadcastChannel: class {
+      constructor() {}
+      addEventListener() {}
+      removeEventListener() {}
+      postMessage() {}
+    },
+    fetch: (url, opts) => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(opts && opts.method === 'PUT'
+        ? Object.assign({}, kv, JSON.parse(opts.body))
+        : Object.assign({}, kv))
+    }),
+    setTimeout: () => 0,
+    clearTimeout() {},
+    setInterval: () => 0,
+    clearInterval() {},
+    Date, Math, JSON, Object, Array, String, Number, Boolean, Error, Promise, RegExp, Intl,
+    cindy: {
+      request: () => Promise.resolve({ context: { locale: 'zh-CN' } }),
+      send: () => Promise.resolve(),
+      onHostMessage: () => {},
+      node: { request: () => Promise.resolve({ ok: true, result: { subscribed: true } }) },
+      host: {
+        call: (tool, name, args) => {
+          calls.push({ tool: name, args: args });
+          if (name === 'schedule_get') return reply(owned);
+          if (name === 'schedule_update') return reply({ id: 'S1' });
+          if (name === 'schedule_create') return reply({ id: 'NEW' });
+          if (name === 'schedule_delete') return reply({ deleted: 'S1' });
+          if (name === 'schedule_run_now') return reply({ runId: 'R1' });
+          return reply(null);
+        }
+      }
+    }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(mainSource, sandbox, { filename: 'main.js' });
+
+  const id = await sandbox.ensureAutomationSchedule('Herdr 事件处理', { silentWhenIdle: true });
+
+  assert.equal(id, 'S1', 'must reuse the recorded schedule');
+  const updates = calls.filter((entry) => entry.tool === 'schedule_update');
+  assert.equal(updates.length, 1, `expected one schedule_update, got ${JSON.stringify(calls)}`);
+  // 跨 realm 的对象不能用 deepStrictEqual（原型不同），逐字段比。
+  assert.equal(updates[0].args.id, 'S1', 'the silent flag must target the recorded schedule');
+  assert.equal(updates[0].args.silentWhenIdle, true, 'the silent flag must be written through');
+  assert.equal(calls.filter((entry) => entry.tool === 'schedule_create').length, 0,
+    'a silent-flag change must not create a second schedule');
 });
