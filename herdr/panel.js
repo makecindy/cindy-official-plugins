@@ -30,7 +30,7 @@ const strings = {
     noOutput: '(没有输出)',
     readFailed: '读取失败',
     sendFailed: '发送失败',
-    placeholder: '输入内容发送给选中的 pane',
+    termPlaceholder: '直接输入命令，回车执行',
     send: '发送',
     submit: '发送并回车',
     statusWorking: '进行中',
@@ -64,7 +64,7 @@ const strings = {
     noOutput: '(no output)',
     readFailed: 'Could not read',
     sendFailed: 'Could not send',
-    placeholder: 'Type to send to the selected pane',
+    termPlaceholder: 'Type a command, Enter runs it',
     send: 'Send',
     submit: 'Send and press Enter',
     statusWorking: 'working',
@@ -98,7 +98,7 @@ const strings = {
     noOutput: '（出力なし）',
     readFailed: '読み込みに失敗',
     sendFailed: '送信に失敗',
-    placeholder: '選択中の pane へ送信する文字',
+    termPlaceholder: 'ここにコマンドを入力し Enter で実行',
     send: '送信',
     submit: '送信して Enter',
     statusWorking: '作業中',
@@ -132,7 +132,7 @@ const strings = {
     noOutput: '(출력 없음)',
     readFailed: '읽지 못했습니다',
     sendFailed: '보내지 못했습니다',
-    placeholder: '선택한 창으로 보낼 입력',
+    termPlaceholder: '명령을 입력하고 Enter 로 실행',
     send: '보내기',
     submit: '보내고 Enter',
     statusWorking: '작업 중',
@@ -300,12 +300,16 @@ function makeGroup(name, meta, link) {
   return group;
 }
 
+// 终端输入框的占位提示跟随语言；输入本身就是终端，没有额外按钮。
+function syncTermTarget() {
+  $('#term-input').placeholder = T.termPlaceholder;
+}
+
 function localize() {
-  $('#composer-text').placeholder = T.placeholder;
+  syncTermTarget();
   $('#detail-close').setAttribute('aria-label', T.collapse);
   $('#refresh').setAttribute('aria-label', T.updated);
   syncWrapButton();
-  syncComposerButtons();
 }
 
 // 终端输出默认自动换行；切到「不换行」可以保住终端原本的列对齐。
@@ -317,24 +321,6 @@ function syncWrapButton() {
   button.setAttribute('aria-pressed', outputWrap ? 'true' : 'false');
   const output = $('#detail-body');
   output.classList.toggle('nowrap', !outputWrap);
-}
-
-// tmux 的文本发送是字面量，不会自己回车，所以主按钮是「发送并回车」；
-// Herdr 的 pane.send_input 本身就会提交，只需要一个「发送」。
-function syncComposerButtons() {
-  const send = $('#composer-send');
-  const submit = $('#composer-submit');
-  if (view === 'tmux') {
-    send.textContent = T.send;
-    submit.textContent = T.submit;
-    submit.hidden = false;
-    submit.classList.add('primary');
-    send.classList.remove('primary');
-  } else {
-    send.textContent = T.send;
-    submit.hidden = true;
-    send.classList.add('primary');
-  }
 }
 
 async function loadLocale() {
@@ -349,6 +335,72 @@ async function loadLocale() {
     T = strings.en;
   }
   localize();
+}
+
+// 特殊键直接发给终端：方向键、翻页、Home/End、Tab、Esc 和 Ctrl 组合。
+const HERDR_KEYS = {
+  ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+  PageUp: 'pageup', PageDown: 'pagedown', Home: 'home', End: 'end',
+  Tab: 'tab', Escape: 'esc', Backspace: 'backspace', Delete: 'delete'
+};
+const TMUX_KEYS = {
+  ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+  PageUp: 'PageUp', PageDown: 'PageDown', Home: 'Home', End: 'End',
+  Tab: 'Tab', Escape: 'Escape', Backspace: 'BSpace', Delete: 'DC'
+};
+
+function specialKey(event) {
+  const table = view === 'tmux' ? TMUX_KEYS : HERDR_KEYS;
+  let name = table[event.key];
+  if (!name) return null;
+  if (event.ctrlKey || event.metaKey) {
+    if (event.key.length !== 1) return null;
+    name = (view === 'tmux' ? 'C-' : 'ctrl+') + event.key.toLowerCase();
+  }
+  return name;
+}
+
+async function forwardKey(event) {
+  const key = specialKey(event);
+  if (!key) return false;
+  event.preventDefault();
+  try {
+    if (view === 'tmux') {
+      if (!selectedTarget) return true;
+      await request('tmux_send', { target: selectedTarget, keys: [key] });
+      await openTmuxPane({ target: selectedTarget });
+    } else {
+      if (!selectedPane) return true;
+      await request('send', { pane_id: selectedPane.pane_id, keys: [key] });
+      await openPane(selectedPane);
+    }
+  } catch (error) {
+    renderOutput(error.message || T.sendFailed);
+  }
+  return true;
+}
+
+// 回车提交这一行：Herdr 的 pane.send_input 本身带回车；tmux 是字面量发送，
+// 需要再补一个 Enter。
+async function submitLine() {
+  const field = $('#term-input');
+  const text = field.value;
+  if (!text) return;
+  field.value = '';
+  try {
+    if (view === 'tmux') {
+      if (!selectedTarget) return;
+      await request('tmux_send', { target: selectedTarget, text: text });
+      await request('tmux_send', { target: selectedTarget, keys: ['Enter'] });
+      await openTmuxPane({ target: selectedTarget });
+    } else {
+      if (!selectedPane) return;
+      await request('send', { pane_id: selectedPane.pane_id, text: text });
+      await openPane(selectedPane);
+    }
+  } catch (error) {
+    renderOutput(error.message || T.sendFailed);
+  }
 }
 
 // --- Herdr 视图 ----------------------------------------------------------
@@ -514,6 +566,8 @@ async function openTmuxPane(pane) {
     .filter(Boolean).join(' · ');
   setDetailState(tmuxDotClass(pane), statusLabelForTmux(pane));
   setComposerTarget(pane.target);
+  $('#term-input').value = '';
+  $('#term-input').focus();
   renderOutput('');
   $('#detail-body').textContent = T.loading;
   try {
@@ -537,33 +591,6 @@ async function refresh() {
     status.textContent = T.updated;
   } catch (error) {
     status.textContent = error.message || T.refreshFailed;
-  }
-}
-
-// submit=true 时额外发一个 Enter：tmux 的文本发送是字面量，不会自己回车，
-// 所以「发送并回车」才是真正跑起一条命令的动作。
-async function send(submit) {
-  const field = $('#composer-text');
-  const text = field.value;
-  if (!text.trim()) return;
-  // 发送开始时锁定目标：中途切换选中项，文本和回车仍发往同一个分屏。
-  const paneId = selectedPane ? selectedPane.pane_id : null;
-  const target = selectedTarget;
-  if (view === 'tmux' && !target) return;
-  if (view !== 'tmux' && !paneId) return;
-  try {
-    if (view === 'tmux') {
-      await request('tmux_send', { target: target, text: text });
-      if (submit) await request('tmux_send', { target: target, keys: ['Enter'] });
-      field.value = '';
-      await openTmuxPane({ target: target });
-    } else {
-      await request('send', { pane_id: paneId, text: text });
-      field.value = '';
-      await openPane(selectedPane || { pane_id: paneId });
-    }
-  } catch (error) {
-    renderOutput(error.message || T.sendFailed);
   }
 }
 
@@ -634,23 +661,23 @@ function setView(next) {
     button.classList.toggle('on', on);
     button.setAttribute('aria-selected', on ? 'true' : 'false');
   });
-  syncComposerButtons();
+  syncTermTarget();
   refresh();
 }
 
 $('#refresh').addEventListener('click', refresh);
-$('#composer-send').addEventListener('click', function () { send(false); });
-$('#composer-submit').addEventListener('click', function () { send(true); });
 $('#detail-close').addEventListener('click', closeDetail);
 $('#detail-wrap').addEventListener('click', function () {
   outputWrap = !outputWrap;
   syncWrapButton();
 });
-$('#composer-text').addEventListener('keydown', function (event) {
+$('#term-input').addEventListener('keydown', function (event) {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
-    send(view === 'tmux');
+    submitLine();
+    return;
   }
+  forwardKey(event);
 });
 document.querySelectorAll('[data-view]').forEach(function (button) {
   button.addEventListener('click', function () { setView(button.getAttribute('data-view')); });

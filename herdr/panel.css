@@ -386,77 +386,56 @@ body {
   overflow: visible;
 }
 
-.composer {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 10px;
+/* 输入就在终端里：最后一行带提示符，光标用终端强调色。
+   回车提交；方向键、PageUp/Down、Home/End、Tab、Esc 和 Ctrl 组合直接发给终端。 */
+.term {
   border-top: 1px solid var(--pc-line);
+  background: var(--pc-sunken);
+}
+
+.term .output {
+  background: transparent;
+}
+
+.term-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px 10px;
+}
+
+.term-prompt {
+  font-family: var(--pc-mono);
+  font-size: 12px;
+  color: var(--pc-accent);
+}
+
+.term-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--pc-text);
+  caret-color: var(--pc-accent);
+  font-family: var(--pc-mono);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.term-input::placeholder {
+  color: var(--pc-faint);
 }
 
 .composer-target {
+  padding: 7px 10px 9px;
+  border-top: 1px solid var(--pc-line);
   font-size: 11px;
   color: var(--pc-faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.composer textarea {
-  width: 100%;
-  font-family: var(--pc-mono);
-  font-size: 12px;
-  line-height: 1.5;
-  padding: 7px 8px;
-  border-radius: 8px;
-  border: 1px solid var(--pc-line);
-  background: var(--pc-bg);
-  color: var(--pc-text);
-  resize: vertical;
-}
-
-.composer textarea:focus-visible {
-  outline: 2px solid var(--pc-line-strong);
-  outline-offset: 1px;
-}
-
-.composer-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.composer-actions button {
-  appearance: none;
-  font: inherit;
-  font-size: 12px;
-  line-height: 1;
-  padding: 7px 12px;
-  border-radius: 7px;
-  cursor: pointer;
-  transition: background .12s ease, border-color .12s ease, color .12s ease;
-}
-
-.composer-actions .ghost {
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--pc-muted);
-}
-
-.composer-actions .ghost:hover {
-  background: var(--pc-sunken);
-  color: var(--pc-text);
-}
-
-.composer-actions .primary {
-  border: 1px solid var(--pc-line-strong);
-  background: var(--pc-surface);
-  color: var(--pc-text);
-  font-weight: 600;
-}
-
-.composer-actions .primary:hover {
-  background: var(--pc-sunken);
 }
 
 button:focus-visible,

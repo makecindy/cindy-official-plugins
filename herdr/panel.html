@@ -44,15 +44,15 @@
         </svg>
       </button>
     </div>
-    <pre id="detail-body" class="output"></pre>
-    <div class="composer">
-      <div id="composer-target" class="composer-target"></div>
-      <textarea id="composer-text" rows="2" placeholder="输入内容发送给选中的 pane"></textarea>
-      <div class="composer-actions">
-        <button id="composer-send" type="button" class="ghost"></button>
-        <button id="composer-submit" type="button" class="primary"></button>
+    <div class="term">
+      <pre id="detail-body" class="output"></pre>
+      <div class="term-line">
+        <span class="term-prompt" aria-hidden="true">&gt;</span>
+        <input id="term-input" class="term-input" type="text" autocomplete="off"
+          autocapitalize="off" spellcheck="false" aria-label="终端输入">
       </div>
     </div>
+    <div id="composer-target" class="composer-target"></div>
   </section>
 </div>
 <script src="/panel.js"></script>

@@ -597,6 +597,10 @@ async function handlePanelRequest(request) {
     return tools.herdr_read({ pane_id: request.pane_id, source: request.source, lines: request.lines });
   }
   if (action === 'send') {
+    // 面板的终端输入：文本走 pane.send_input（自带回车），按键走 send_keys。
+    if (request.keys && request.keys.length) {
+      return tools.herdr_send({ pane_id: request.pane_id, keys: request.keys });
+    }
     return tools.herdr_send({ pane_id: request.pane_id, text: request.text });
   }
   if (action === 'prompt') {
