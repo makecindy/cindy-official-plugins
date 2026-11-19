@@ -86,7 +86,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.29');
+  assert.equal(manifest.version, '1.5.30');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -1896,7 +1896,10 @@ test('paused follow-up refreshes, retains its reservation and shows terminal PR 
 function statusWatchFixture(initial = {}, options = {}) {
   let failRead = options.failBoot;
   let accountStatus = null;
+  let accountStatusFrom = 1;
   let accountLimited = null;
+  let accountSwitchAt = null;
+  let accountSwitchTo = null;
   let userCalls = 0;
   let limitedPath = null;
   let deniedPath = null;
@@ -1945,8 +1948,9 @@ function statusWatchFixture(initial = {}, options = {}) {
       paths.push(url.pathname);
       if (url.pathname === '/user') {
         userCalls++;
-        if (accountStatus) return jsonResponse({ message: 'credentials rejected' }, accountStatus);
+        if (accountStatus && userCalls >= accountStatusFrom) return jsonResponse({ message: 'credentials rejected' }, accountStatus);
         if (accountLimited !== null && userCalls >= accountLimited) return jsonResponse({ message: 'API rate limit exceeded' }, 403);
+        if (accountSwitchAt !== null && userCalls >= accountSwitchAt) return jsonResponse({ id: accountSwitchTo });
         return jsonResponse({ id: account });
       }
       const key = url.pathname.replace('/repos/example/widget', '');
@@ -1967,7 +1971,8 @@ function statusWatchFixture(initial = {}, options = {}) {
   };
   return { ...runtime, tool, timers, paths, response, saved: () => kv,
     useAccount: id => { account = id; },
-    failAccount: (value = 401) => { accountStatus = value === false ? null : value; },
+    failAccount: (value = 401, from = 1) => { accountStatus = value === false ? null : value; accountStatusFrom = from; },
+    switchAccountAt: (n, id) => { accountSwitchAt = n; accountSwitchTo = id; },
     limitPath: p => { limitedPath = p; }, denyPath: p => { deniedPath = p; },
     missingPath: p => { missingPath = p; },
     limitAccountFrom: n => { accountLimited = n; }, limitRequests: () => { rateLimited = true; },
@@ -2155,6 +2160,47 @@ test('read failures map to the documented problem classes and clear on recovery'
   }
 });
 
+test('an account switch at the final check persists account_changed', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.response['/issues/2'].comments = 5;
+  f.switchAccountAt(4, 88);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'account_changed');
+  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:1');
+  assert.equal(f.timers[0].delay, 900_000);
+});
+
+test('a failed final account check persists the failure class', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.response['/issues/2'].comments = 5;
+  f.failAccount(401, 4);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:5');
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'auth_required');
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
+  assert.equal(f.timers[0].delay, 900_000);
+});
+
+test('a newer failure class replaces an older one on the same watch', async () => {
+  const a = statusWatchFixture();
+  assert.equal((await a.tool('add', 'issue', 2)).ok, true);
+  const f = statusWatchFixture(a.saved());
+  await flushAsync();
+  f.missingPath('/issues/2');
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'gone');
+  f.missingPath(null);
+  f.failAccount(401);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'auth_required');
+  f.failAccount(false);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
+});
+
 test('a deleted or inaccessible target is reported as gone', async () => {
   const f = statusWatchFixture();
   assert.equal((await f.tool('add', 'issue', 2)).ok, true);
@@ -2268,7 +2314,9 @@ test('a refused status notification stays pending across restart until acknowled
 
 test('status_watch descriptions define the status format and every problem value in four locales', () => {
   const states = ['open', 'closed', 'merged', 'draft', 'ready', 'queued', 'in_progress', 'completed', 'none',
-    'success', 'failure', 'account_changed', 'target_changed', 'unavailable', 'auth_required', 'forbidden', 'gone'];
+    'success', 'failure', 'cancelled', 'neutral', 'skipped', 'timed_out', 'action_required', 'stale',
+    'startup_failure', 'unknown', 'account_changed', 'target_changed', 'unavailable', 'auth_required',
+    'forbidden', 'gone'];
   const manifestDescription = manifest.tools.find((tool) => tool.name === 'status_watch').description;
   assert.ok(manifestDescription.includes('account_changed'), 'ghost.json status_watch description omits account_changed');
   for (const locale of hostLocales) {

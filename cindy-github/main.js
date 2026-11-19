@@ -4169,15 +4169,15 @@ function armWatchTimer(delay, replaceLater) {
   }, delay);
 }
 
-async function markPollingStalled(revision, problem) {
+async function markWatchProblems(revision, problem, eligible) {
   await enqueuePr(async function () {
     if (watchRevision !== revision) return;
     var kv = await readKv(true);
     var current = readWatches(kv);
     var changed = false;
     for (var row of current) {
-      // Keep more specific states; only healthy or transient rows take the new problem.
-      if (row.problem && row.problem !== 'unavailable') continue;
+      if (eligible && !eligible(row)) continue;
+      // The newest failed read always wins; older states re-form on the next read.
       if (row.problem === problem) continue;
       row.problem = problem;
       changed = true;
@@ -4195,7 +4195,7 @@ async function pollWatches() {
     account = await watchAccount();
   } catch (error) {
     // No target was read this round: surface the stall instead of claiming healthy polling.
-    await markPollingStalled(revision, watchProblemOf(error));
+    await markWatchProblems(revision, watchProblemOf(error), null);
     return WATCH_INTERVAL * 3;
   }
   var updates = [];
@@ -4226,19 +4226,27 @@ async function pollWatches() {
   });
   var hasWork = updates.length > 0 || failures.length > 0 || hasPendingNotice;
   if (!hasWork && !rateLimited) return WATCH_INTERVAL;
-  var confirmFailed = false;
+  var confirmProblem = null;
   if (hasWork) {
     if (!rateLimited) {
+      var confirmed;
       try {
-        if (await watchAccount() !== account) return WATCH_INTERVAL * 3;
-      } catch (_) {
-        // Persist this round's observations, then keep the timer's backoff for the failed check.
-        confirmFailed = true;
+        confirmed = await watchAccount();
+      } catch (error) {
+        // Persist this round's observations, then the failed check's class, before backing off.
+        confirmProblem = watchProblemOf(error);
+      }
+      if (confirmed !== undefined && confirmed !== account) {
+        // The login switched mid-round: pause the old account's watches instead of
+        // leaving list to claim healthy polling through the backoff.
+        await markWatchProblems(revision, 'account_changed', function (row) { return row.account !== confirmed; });
+        return WATCH_INTERVAL * 3;
       }
     }
     await applyWatchRound(revision, account, updates, failures);
+    if (confirmProblem) await markWatchProblems(revision, confirmProblem, null);
   }
-  return rateLimited || confirmFailed ? WATCH_INTERVAL * 3 : WATCH_INTERVAL;
+  return rateLimited || confirmProblem ? WATCH_INTERVAL * 3 : WATCH_INTERVAL;
 }
 
 async function applyWatchRound(revision, account, updates, failures) {
