@@ -217,11 +217,14 @@ async function waitForAgentState(target, until, deadline, callId) {
 function hostBody(call) {
   const detail = call && call.content && call.content[0] && call.content[0].text;
   let body = null;
+  let parsed = false;
   if (detail) {
-    try { body = JSON.parse(detail); } catch (error) { body = null; }
+    try { body = JSON.parse(detail); parsed = true; } catch (error) { body = null; }
   }
   if (call && call.isError) return { ok: false, body: body, detail: detail };
-  if (body && body.ok === false) return { ok: false, body: body, detail: detail };
+  // 只认「解析成功且 ok === true」的回包：空正文或不是 JSON 都按失败处理，
+  // 否则会把未知结果当成成功去新建/删除自动化。
+  if (!parsed || !body || body.ok !== true) return { ok: false, body: body, detail: detail };
   return { ok: true, body: body, detail: detail };
 }
 
@@ -263,7 +266,8 @@ function schedulePayload(name, args) {
     manual: true,
     agentKind: args.agentKind || 'codex',
     targetSessionId: args.targetSessionId || undefined,
-    silentWhenIdle: args.silentWhenIdle === true,
+    // 工具契约写的是「默认静默」：省略时按 true，只有显式要求提醒才关掉。
+    silentWhenIdle: args.silentWhenIdle !== false,
     notify: { desktop: true, feishu: false }
   };
 }
@@ -616,9 +620,7 @@ const tools = {
   async herdr_events(args) {
     const mode = args.mode || 'status';
     if (mode === 'subscribe') {
-      subscriptionPreference = true;
-      await persistSubscriptionPreference(true);
-      return nodeRequest('herdr/subscribe', {}, args.__callId);
+      return enableSubscription(args.__callId);
     }
     if (mode === 'unsubscribe') {
       subscriptionPreference = false;
@@ -653,8 +655,9 @@ const tools = {
   async herdr_automation_setup(args) {
     const wantedName = args.name || 'Herdr 事件处理';
     const scheduleId = await ensureAutomationSchedule(wantedName, args);
-    // 订阅要真的开着，否则事件到了也没人接。
-    await nodeRequest('herdr/subscribe', {}, args.__callId);
+    // 订阅要真的开着，否则事件到了也没人接；同时把偏好改回「订阅」，
+    // 让重启后不会按旧的退订值停摆。
+    await enableSubscription(args.__callId);
     return { schedule_id: scheduleId, name: wantedName, trigger: 'event-only' };
   },
 
@@ -894,6 +897,14 @@ async function persistSubscriptionPreference(wanted) {
   } catch (error) {
     void error;
   }
+}
+
+// 打开订阅并记住这次的意图（setup 与 subscribe 共用，
+// 否则 setup 成功后重启仍会按旧的退订偏好停摆）。
+async function enableSubscription(callId) {
+  subscriptionPreference = true;
+  await persistSubscriptionPreference(true);
+  return nodeRequest('herdr/subscribe', {}, callId);
 }
 
 // Keep the event subscription alive for panel and webhook users ——

@@ -167,9 +167,10 @@ let selectedTarget = null;
 // 每次读取带一个序号：晚到的旧结果不能盖掉用户已经选中的另一个 pane。
 let readToken = 0;
 
-// 面板请求要等得起后端最慢的路径：快照最长 30 秒，tmux_state 是三连调用
-// （每个 8 秒上限），所以留 45 秒，否则长操作会被误报成「插件未响应」。
-const PANEL_REQUEST_TIMEOUT_MS = 45000;
+// 面板这一层必须晚于后端：普通写请求的 worker 预算是 45 秒、宿主是 70 秒，
+// 面板若也是 45 秒就会先报「插件未响应」并丢掉稍后到达的「结果未知」，
+// 用户重试可能把命令执行两次。快照的宿主预算是 45 秒，也一起覆盖。
+const PANEL_REQUEST_TIMEOUT_MS = 80000;
 
 function request(action, payload) {
   return new Promise(function (resolve, reject) {

@@ -187,10 +187,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'readKv must fail loudly instead of returning an empty config'
   );
 
-  // 宿主回执要同时看外层 isError 和正文里的 ok。
+  // 宿主回执要同时看外层 isError 和正文：只有解析成功且 ok===true 才算成功。
   assert.match(
     mainSource,
-    /function hostBody[\s\S]*?body\.ok === false/,
+    /function hostBody[\s\S]*?!parsed \|\| !body \|\| body\.ok !== true/,
     'host results must be checked at both levels'
   );
 
@@ -255,6 +255,27 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     mainSource,
     /mode === 'unsubscribe'[\s\S]*?subscriptionPreference = false/,
     'unsubscribe must record the preference'
+  );
+
+  // 回包必须解析成功且 ok===true，否则按失败处理（不能拿未知结果去新建/删除）。
+  assert.match(
+    mainSource,
+    /if \(!parsed \|\| !body \|\| body\.ok !== true\) return \{ ok: false/,
+    'unparseable host payloads must be treated as failures'
+  );
+
+  // 新建自动化的 silentWhenIdle 要跟工具契约一致（默认静默）。
+  assert.match(
+    mainSource,
+    /silentWhenIdle: args\.silentWhenIdle !== false/,
+    'silentWhenIdle must default to true'
+  );
+
+  // setup 要把订阅偏好改回「订阅」，否则重启后按旧退订值停摆。
+  assert.match(
+    mainSource,
+    /enableSubscription\(args\.__callId\)/,
+    'setup must re-enable the subscription with the recorded preference'
   );
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。

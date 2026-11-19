@@ -640,7 +640,12 @@ const handlers = {
     const method = String(params.method || '');
     if (!method) throw new Error('缺少 method');
     const inner = params.params || {};
-    const innerWait = Number(inner.timeout_ms || 0);
+    // 除 params.timeout_ms 外，agent.prompt 的等待还挂在 wait.timeout_ms 上
+    // （提交提示词 + 等待是一个请求），两处都要算进余量。
+    const innerWait = Math.max(
+      Number(inner.timeout_ms || 0),
+      Number((inner.wait && inner.wait.timeout_ms) || 0)
+    );
     // 外层 = 调用方给的上限，但至少比 Herdr 内层等待多留一点余量。
     const requested = Math.max(
       Number(params.timeout_ms || 0),
