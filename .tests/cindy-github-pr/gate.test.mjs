@@ -724,8 +724,10 @@ test('快照失败先容忍瞬时抖动,连续到阈值才 fail-closed —— �
 test('blocked snapshot reports its underlying cause and scheduled probe', async (t) => {
   for (const [stderr, kind] of [
     ['- To re-authenticate, run: gh auth refresh -h github.com\n- Error: Get "https://api.github.com/": dial tcp: lookup api.github.com: no such host', 'dns'],
+    ['The token in keyring is invalid.\nError: dial tcp: lookup api.github.com on 127.0.0.1:53: i/o timeout', 'dns'],
     ['HTTP 401: Bad credentials', 'auth'],
     ['HTTP 429', 'rate-limit'],
+    ['[gh-rate-limit] retryAt=0\nHTTP 429\ndial tcp: lookup api.github.com: i/o timeout', 'rate-limit'],
     ['dial tcp: i/o timeout', 'timeout'],
     ['unexpected response\n- To re-authenticate, run: gh auth refresh', 'unknown'],
   ]) {
@@ -741,6 +743,82 @@ test('blocked snapshot reports its underlying cause and scheduled probe', async 
     assert.ok(!result.stderr.split('\n')[0].includes('gh auth refresh'));
     assert.ok(result.stderr.includes(stderr));
   }
+});
+
+test('a change to the watched PR retries a network failure without moving the scheduled retry', async (t) => {
+  const fx = createFixture(t);
+  const fail = { FAKE_SNAPSHOT_EXIT: '1', FAKE_SNAPSHOT_STDERR: 'lookup api.github.com: i/o timeout' };
+  const args = ['--max-snapshot-failures', '1'];
+  const watch = { kind: 'watch', source: 'pr-status', detail: PR_URL };
+  fx.setSnapshot(snap());
+  assert.equal((await fx.run(args, fail)).code, 1);
+  const retryAt = fx.readState().snapshotFailureBackoffUntil;
+  fx.advance(1);
+  for (const trigger of [null, { ...watch, detail: PR_URL + '0' }, { ...watch, source: 'other' }]) {
+    fx.setTrigger(trigger);
+    assert.match((await fx.run()).stdout, /snapshot-failure-backoff/);
+  }
+  assert.equal(fx.snapshotRuns(), 1);
+  fx.setTrigger(watch);
+  const early = await fx.run(args, { ...fail, FAKE_SNAPSHOT_STDERR: 'lookup api.github.com: no such host' });
+  assert.equal(fx.snapshotRuns(), 2, 'the change allows one fresh snapshot');
+  assert.equal(early.code, 2, 'the same DNS outage does not notify twice');
+  assert.doesNotMatch(early.stdout, /CINDY_PRECHECK_OK/);
+  assert.equal(fx.readState().snapshotFailureBackoffUntil, retryAt);
+  assert.match((await fx.run()).stdout, /snapshot-failure-backoff/);
+  assert.equal(fx.snapshotRuns(), 2, 'a burst of changes does not repeat a failed read');
+  fx.advance(5);
+  fx.setTrigger(null);
+  assert.match((await fx.run()).stdout, /snapshot-failure-backoff/);
+  fx.setTrigger(watch);
+  assert.match((await fx.run()).stdout, /CINDY_PRECHECK_OK/);
+  assert.equal(fx.snapshotRuns(), 3);
+  assert.equal(fx.readState().consecutiveSnapshotFailures, 0);
+});
+
+test('PR changes leave rate limits, sign-in errors and old unclassified backoff alone', async (t) => {
+  for (const error of ['HTTP 429', 'HTTP 401: Bad credentials', null]) {
+    const fx = createFixture(t);
+    if (error) {
+      assert.equal((await fx.run(['--max-snapshot-failures', '1'], { FAKE_SNAPSHOT_EXIT: '1', FAKE_SNAPSHOT_STDERR: error })).code, 1);
+    } else {
+      fx.writeState({ consecutiveSnapshotFailures: 3, snapshotFailureBackoffUntil: T0 + 30 * MIN });
+    }
+    fx.setTrigger({ kind: 'watch', source: 'pr-status', detail: PR_URL });
+    const reads = fx.snapshotRuns();
+    assert.match((await fx.run()).stdout, /snapshot-failure-backoff/);
+    assert.equal(fx.snapshotRuns(), reads);
+  }
+});
+
+test('recovery requires a complete snapshot even if pacing or an unchanged probe could skip', async (t) => {
+  const fx = createFixture(t);
+  const healthy = snap({ isDraft: true });
+  fx.setSnapshot(healthy);
+  fx.setProbe({ status: 'unchanged', remarks: 'unchanged' });
+  await fx.run();
+  await fx.run(['--ack']);
+  fx.setTrigger({ kind: 'watch', source: 'pr-status', detail: PR_URL });
+  assert.equal((await fx.run(['--max-snapshot-failures', '1'], { FAKE_SNAPSHOT_EXIT: '1', FAKE_SNAPSHOT_STDERR: 'dial tcp: i/o timeout' })).code, 1);
+  fx.advance(1);
+  fx.setSnapshot({ ...healthy, checksSummary: { unavailable: true } });
+  const reads = fx.snapshotRuns();
+  const partial = await fx.run();
+  assert.equal(fx.snapshotRuns(), reads + 1);
+  assert.doesNotMatch(partial.stdout, /CINDY_PRECHECK_OK/);
+  fx.setTrigger(null);
+  assert.match((await fx.run(['--pacing'])).stdout, /snapshot-failure-backoff/);
+  fx.advance(29);
+  assert.doesNotMatch((await fx.run(['--pacing'])).stdout, /CINDY_PRECHECK_OK/);
+  assert.equal(fx.snapshotRuns(), reads + 2);
+  const idle = await fx.run(['--pacing']);
+  assert.match(idle.stdout, /not-due/);
+  assert.doesNotMatch(idle.stdout, /CINDY_PRECHECK_OK/);
+  assert.equal(fx.snapshotRuns(), reads + 2, 'an incomplete read does not introduce extra polling');
+  fx.setSnapshot(healthy);
+  fx.setTrigger({ kind: 'watch', source: 'pr-status', detail: PR_URL });
+  assert.match((await fx.run(['--pacing'])).stdout, /CINDY_PRECHECK_OK/);
+  assert.equal(fx.readState().consecutiveSnapshotFailures, 0);
 });
 
 test('rate limits respect reset, deduplicate the episode, and remind after one day', () => {
