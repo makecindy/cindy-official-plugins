@@ -432,8 +432,6 @@ function schedulePaneRefresh() {
 // 有 31，比 | 分列安全。解析时校验列数，对不上就整行报错而不是错位。
 const { spawn } = require('node:child_process');
 
-let pasteCounter = 0;
-
 const TMUX_FIELD_SEP = String.fromCharCode(31);
 const TMUX_TIMEOUT_MS = 8000;
 const TMUX_CAPTURE_TIMEOUT_MS = 15000;
@@ -741,7 +739,8 @@ async function tmuxSend(target, params) {
   // 文本不走 argv：单独的 ';' 会被 tmux(1) COMMANDS 当命令分隔符（实测会静默丢失）。
   // 改成 load-buffer(stdin) + paste-buffer -d，内容原样粘进目标 pane。
   const text = String(params.text);
-  const buffer = 'herdr-' + (++pasteCounter) + '-' + Date.now().toString(36);
+  // 缓冲区名是交给 tmux 服务的标识：用 crypto 生成，不用计数器/时间戳。
+  const buffer = 'herdr-' + crypto.randomUUID();
   await runTmux(['load-buffer', '-b', buffer, '-'], undefined, text);
   await tmuxWrite(['paste-buffer', '-d', '-t', dest, '-b', buffer], '文本');
   return { target: dest, mode: 'text', text: text };

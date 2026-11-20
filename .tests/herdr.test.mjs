@@ -470,6 +470,23 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.deepEqual(Object.keys(targetBranch.not.anyOf || {}).length ? ['anyOf'] : [],
     ['anyOf'], 'the target branch must exclude the output-match fields');
 
+  // 首次创建也要返回 { schedule_id, note }（不能是裸字符串）。
+  const createBody = /const createdOutcome = await hostWrite\([\s\S]*?schedule_create[\s\S]*?\n  const body = createdOutcome\.body;/.exec(mainSource);
+  assert.ok(createBody, 'the create path must go through hostWrite');
+  assert.match(mainSource, /await persistScheduleId\(scheduleId\);\s*return \{ schedule_id: scheduleId, note: null \};/,
+    'the first create must return the schedule id as an object');
+
+  // 重试只在用户还没表态时采用存储值。
+  const retryBody2 = /function scheduleSubscriptionRetry\(\) \{([\s\S]*?)\n\}/.exec(mainSource);
+  assert.match(retryBody2[1], /subscriptionPreference === null/,
+    'the retry must only adopt the stored value when the user has not decided');
+
+  // tmux 缓冲区名用 crypto 生成。
+  const workerSrc8 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSrc8, /'herdr-' \+ crypto\.randomUUID\(\)/,
+    'the tmux buffer name must come from crypto');
+  assert.ok(!/pasteCounter/.test(workerSrc8), 'no counter-based buffer names');
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,

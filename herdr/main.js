@@ -434,7 +434,7 @@ async function ensureAutomationScheduleUnlocked(name, args) {
   // 先记缓存：即使接下来 KV 失败，本会话的事件唤醒也用得上这条新的。
   cachedScheduleId = scheduleId;
   await persistScheduleId(scheduleId);
-  return scheduleId;
+  return { schedule_id: scheduleId, note: null };
 }
 
 // 自动化已经确定创建了：KV 读或写失败都不能报「请重试」（重试会再建一条），
@@ -1202,12 +1202,16 @@ function scheduleSubscriptionRetry() {
   subscriptionRetryTimer = setTimeout(async function () {
     subscriptionRetryTimer = null;
     const generation = subscriptionGeneration;
-    // 只恢复连接，不替用户改选择：先核对存储里是否已退订（还没读到就读一次）。
+    // 只恢复连接，不替用户改选择：存储值只在「用户还没表态」时才采用，
+    // 读取返回后再复核一次，避免覆盖本次刚做出的选择。
     try {
-      const kv = await readKv();
-      if (kv[SUBSCRIBED_KEY] === false) {
-        subscriptionPreference = false;
-        return;
+      if (subscriptionPreference === null) {
+        const kv = await readKv();
+        if (subscriptionPreference !== null) return;   // 读取期间用户表态了
+        if (kv[SUBSCRIBED_KEY] === false) {
+          subscriptionPreference = false;
+          return;
+        }
       }
     } catch (error) {
       if (subscriptionPreference === false) return;
