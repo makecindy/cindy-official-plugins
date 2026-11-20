@@ -445,6 +445,8 @@ function currentScope() {
 
 // 只补一次回车：文本确认已在终端里时用它，绝不重复粘贴。
 async function sendEnterOnly(scope) {
+  const hadText = pendingEnterOnly && pendingEnterOnly.scope === scope
+    ? pendingEnterOnly.text : null;
   pendingEnterOnly = null;
   terminalHasContent = null;
   const target = selectedTarget;
@@ -454,7 +456,15 @@ async function sendEnterOnly(scope) {
     else await request('send', { pane_id: paneId, keys: ['Enter'] });
     await refreshTerminal();
   } catch (error) {
-    renderOutput(error.message || T.sendFailed);
+    // 回车结果未知：恢复同一目标的待提交记录，否则下一次回车什么都不做，
+    // 终端里已有的命令就再也提交不了；同时提示先核对终端。
+    if (currentScope() === scope) {
+      terminalHasContent = { scope: scope };
+      if (hadText !== null) pendingEnterOnly = { scope: scope, text: hadText };
+    }
+    renderOutput('回车没有确认（'
+      + String(error && error.message ? error.message : T.sendFailed)
+      + '）。请先核对终端内容，再决定是否再按一次回车。');
   }
 }
 

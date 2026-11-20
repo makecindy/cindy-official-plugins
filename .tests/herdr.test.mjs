@@ -608,6 +608,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   // 草稿同步后空输入框的回车可以只补 Enter。
   assert.match(panelSrcPin, /terminalHasContent/,
     'a synced draft must allow an enter-only submit');
+  assert.match(panelSrcPin, /回车没有确认/,
+    'a failed enter-only send must restore the pending record');
   // 面板桥接的 send 动作要支持 text。
   assert.match(mainSource, /tools\.herdr_send\(\{ pane_id: request\.pane_id, keys: request\.keys, text: request\.text \}\)/,
     'the panel send bridge must forward text too');
