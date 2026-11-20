@@ -515,18 +515,28 @@ function enqueueForScope(scope, task) {
 }
 
 // 清掉已经不存在（或同名重建）的分屏的待确认状态。
+// 只清「这次成功拿到完整列表」的那个后端：探测失败（权限、超时）
+// 不代表分屏消失，不能把仍在运行的分屏的记录也删掉。
 function pruneStaleScopeState() {
   const live = {};
-  for (const pane of (tmux && tmux.panes) || []) live['t:' + pane.target] = true;
-  for (const pane of state.panes || []) live['h:' + pane.pane_id] = true;
+  if (view === 'tmux' && tmux && tmux.available === true) {
+    for (const pane of tmux.panes || []) live['t:' + pane.target] = true;
+  }
+  if (view !== 'tmux') {
+    for (const pane of state.panes || []) live['h:' + pane.pane_id] = true;
+  }
+  const covers = function (scope) {
+    return scope.charAt(0) === 't' ? Boolean(tmux && tmux.available === true) && view === 'tmux'
+      : view !== 'tmux';
+  };
   for (const scope of Object.keys(pendingEnterOnly)) {
-    if (!live[scope]) delete pendingEnterOnly[scope];
+    if (covers(scope) && !live[scope]) delete pendingEnterOnly[scope];
   }
   for (const scope of Object.keys(terminalHasContent)) {
-    if (!live[scope]) delete terminalHasContent[scope];
+    if (covers(scope) && !live[scope]) delete terminalHasContent[scope];
   }
   for (const scope of Object.keys(scopeHolds)) {
-    if (!live[scope]) delete scopeHolds[scope];
+    if (covers(scope) && !live[scope]) delete scopeHolds[scope];
   }
 }
 

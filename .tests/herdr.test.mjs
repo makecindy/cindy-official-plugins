@@ -708,6 +708,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'switching panes must not release per-scope holds');
   assert.match(panelSrcHold, /function pruneStaleScopeState\(\)/,
     'records of panes that no longer exist must be pruned on refresh');
+  assert.match(panelSrcHold, /tmux\.available === true/,
+    'a failed tmux probe must not prune live pane records');
   assert.match(panelSrcHold, /pruneStaleScopeState\(\);/,
     'the refresh path must prune stale scope state');
   assert.match(panelSrcHold, /scopeHolds\[scope\] = 'unknown';[\s\S]{0,80}renderOutput/,
