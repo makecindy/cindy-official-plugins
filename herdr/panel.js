@@ -397,10 +397,14 @@ function forwardKey(event) {
   if (pinnedView === 'tmux' && !target) return true;
   if (pinnedView !== 'tmux' && !paneId) return true;
   const scope = (pinnedView === 'tmux' ? 't:' + target : 'h:' + paneId);
-  // 草稿连同归属在按键这一刻捕获：排队执行时读到的可能是
-  // 另一个分屏的输入框，绝不能把那里的文字发给这个终端。
+  // 草稿连同归属在按键这一刻捕获并取走：不取走的话，连按两次 Tab
+  // 会让两个队列项带着同一份草稿，出队后重复发送。
   const draftField = $('#term-input');
-  const draft = draftField ? draftField.value : '';
+  let draft = '';
+  if (draftField && !PENDING_ENTER_KEEP_KEYS[key] && draftField.value) {
+    draft = draftField.value;
+    consumeFromInput(draftField, draft);
+  }
   // 同一终端的操作排队执行：草稿同步、改行按键不能与正在进行的提交交错。
   enqueueForScope(scope, function () {
     return forwardKeyQueued(key, pinnedView, target, paneId, scope, draft);
@@ -422,6 +426,11 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
         if (pinnedView === 'tmux') await request('tmux_send', { target: target, text: draft });
         else await request('send', { pane_id: paneId, text: draft });
       } catch (error) {
+        // 同步没成功：草稿按归属放回（框里已有新内容就不覆盖）。
+        if (currentScope() === scope) {
+          const box = $('#term-input');
+          if (box && !box.value) box.value = draft;
+        }
         renderOutput(error.message || T.sendFailed);
         return true;
       }
@@ -429,9 +438,7 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
       // 注意不是 pendingEnterOnly——随后的改行按键会改变这行内容，
       // 同一文本恢复粘贴的去重记录不能假装它还原样存在。
       terminalHasContent = { scope: scope };
-      // 只有还停在这个分屏时才动输入框，且只按前缀去掉已同步的那段：
-      // 等待期间切了目标、或用户又接着输入了，都不能误删。
-      if (currentScope() === scope) consumeFromInput($('#term-input'), draft);
+      // 草稿在捕获时已从输入框取走，这里不需要再动它。
     }
   }
   try {
@@ -542,7 +549,8 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
   // 同步过去），同一目标同一文本的提交只补 Enter，不再粘一遍。
   if (pendingEnterOnly && pendingEnterOnly.scope === scope && pendingEnterOnly.text === text) {
     pendingEnterOnly = null;
-    if (currentScope() === scope) consumeFromInput(field, text);
+    // 输入框在入队时已消费过这段文字，这里不能再扣：
+    // 框里可能是用户刚输入的、带相同前缀的新命令。
     try {
       if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
       else await request('send', { pane_id: paneId, keys: ['Enter'] });

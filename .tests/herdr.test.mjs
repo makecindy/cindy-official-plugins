@@ -666,6 +666,12 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the draft must leave the box at submit time, not at dequeue time');
   assert.match(panelSrcTimeout, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft\)/,
     'the draft must be captured with its ownership at keypress time');
+  assert.match(panelSrcTimeout, /捕获并取走/,
+    'a line-altering key must consume the draft at keypress time');
+  assert.match(panelSrcTimeout, /草稿按归属放回/,
+    'a failed draft sync must restore the draft by ownership');
+  assert.match(panelSrcTimeout, /不能再扣/,
+    'a resumed submit must not consume the box a second time');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
