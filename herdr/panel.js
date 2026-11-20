@@ -456,10 +456,12 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
     if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: [key] });
     else await request('send', { pane_id: paneId, keys: [key] });
     // 取消/改行已送达：未确认的那一行不存在了，记录与冻结才解除。
-    // 记录只有一条且可能属于别的分屏：只清本 scope 的。
+    // 改行键可能已经在终端行里留下内容（Up 调出历史、Tab 补全）：
+    // 即便没有本地草稿也记下来，空回车才能把这行提交。
     if (!PENDING_ENTER_KEEP_KEYS[key]) {
       delete pendingEnterOnly[scope];
       scopeHolds[scope] = false;
+      terminalHasContent[scope] = true;
     }
     await refreshTerminal();
   } catch (error) {
@@ -486,7 +488,11 @@ const terminalHasContent = {};
 // 后失败的片段要接在前一个恢复后面，保持输入顺序，不能逐次前置。
 let restoredDraft = null;
 // 不改变终端行内容的直达按键：这些键之后恢复记录仍然有效。
-const PENDING_ENTER_KEEP_KEYS = { 'C-l': true, 'C-a': true, 'C-e': true, PPage: true, NPage: true };
+// 两种后端的键名都要列：tmux 是 C-l/PPage，Herdr 是 ctrl+l（没确认翻页键）。
+const PENDING_ENTER_KEEP_KEYS = {
+  'C-l': true, 'C-a': true, 'C-e': true, PPage: true, NPage: true,
+  'ctrl+l': true, 'ctrl+a': true, 'ctrl+e': true
+};
 
 // 同一终端的提交/按键串行执行：两条 submitLine 并行时，第二次 paste 可能
 // 排在第一次 Enter 前，把两条命令拼成一行或颠倒顺序。按 scope 排队。
@@ -562,10 +568,10 @@ async function sendEnterOnly(scope, pinnedView, target, paneId) {
     // 回车结果未知：恢复同一目标的待提交记录，否则下一次回车什么都不做，
     // 终端里已有的命令就再也提交不了；同时提示先核对终端。
     scopeHolds[scope] = true;
-    if (currentScope() === scope) {
-      terminalHasContent[scope] = true;
-      if (hadText !== null) pendingEnterOnly[scope] = hadText;
-    }
+    // map 记录按 scope 存：无论现在选中哪个分屏都要恢复，
+    // 否则回到该终端后既没有可补发的记录、新文本又被冻结拦住。
+    terminalHasContent[scope] = true;
+    if (hadText !== null) pendingEnterOnly[scope] = hadText;
     renderOutput('回车没有确认（'
       + String(error && error.message ? error.message : T.sendFailed)
       + '）。请先核对终端内容，再决定是否再按一次回车。');

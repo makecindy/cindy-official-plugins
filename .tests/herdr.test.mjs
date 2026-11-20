@@ -750,6 +750,20 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(mainSource, /loadRuntimeLocale\(\)\.then\(function \(\) \{ ensureSubscription\(\); \}/,
     'the first subscription must wait for the runtime locale');
 
+  // Herdr 的保留键名也要识别。
+  const panelSrcKeys = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcKeys, /'ctrl\+l': true/,
+    'the Herdr keep-keys must be recognised too');
+  // 改行键送达后记终端有内容。
+  assert.match(panelSrcKeys, /terminalHasContent\[scope\] = true;[\s\S]{0,60}\n    \}\n    await refreshTerminal/,
+    'a delivered line-key must record remote content');
+  // sendEnterOnly 失败无条件恢复 map。
+  assert.match(panelSrcKeys, /map 记录按 scope 存：无论现在选中哪个分屏都要恢复/,
+    'a failed enter-only must restore the per-scope records');
+  // 对账绑定订阅代次。
+  assert.match(workerSrc13, /stillCurrent/,
+    'the reconcile must stop when the subscription is no longer current');
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,

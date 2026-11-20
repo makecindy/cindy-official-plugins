@@ -396,14 +396,19 @@ async function openSubscription() {
   }
   // 对账：握手与去抖期间新建的 pane，可能已经把 blocked/done 错过了
   // （旧连接的订阅项里没有它）。只核对这次新出现的 pane。
-  reconcileNewPanes(paneIds, previousPaneIds);
+  reconcileNewPanes(paneIds, previousPaneIds, socket);
 }
 
 // 只对「这次订阅里新出现」的 pane 查一次当前状态：旧 pane 的状态
 // 旧连接一直在收，重发会重复通知；新 pane 的变化在间隙里没人收。
-async function reconcileNewPanes(paneIds, previousPaneIds) {
+async function reconcileNewPanes(paneIds, previousPaneIds, socket) {
   const fresh = paneIds.filter(function (id) { return previousPaneIds.indexOf(id) < 0; });
   const since = Date.now();
+  // 对账是 fire-and-forget：agent.get 返回前用户可能已退订或换了订阅，
+  // 那时补发事件会在退订后再触发一次通知与自动化。
+  const stillCurrent = function () {
+    return subscription.desired && subscription.socket === socket;
+  };
   // 补查期间到达的实时事件优先：已经在缓冲里的就不再补发，
   // 否则同一次 blocked/done 会通知两遍、自动化也可能多跑一次。
   const liveArrived = function (paneId) {
@@ -417,6 +422,7 @@ async function reconcileNewPanes(paneIds, previousPaneIds) {
     try {
       const agent = await callOnce('agent.get', { pane_id: paneId }, 15000);
       const status = agent && (agent.status || agent.agent_status);
+      if (!stillCurrent()) return;
       if ((status === 'blocked' || status === 'done') && !liveArrived(paneId)) {
         // 字段名与正常状态事件一致（agent_status）：主脚本只认这个键。
         handleEvent({
