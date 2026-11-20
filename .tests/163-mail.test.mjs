@@ -622,3 +622,166 @@ test('Worker 将认证、网络与频控错误转换成可行动文案', () => {
 // Shared common-mail-card adapter, exercised end to end with Cindy's SDK.
 import { runImapComposeSuite } from './imap-mail-compose.test.mjs';
 runImapComposeSuite('163-mail', { email: 'user@163.com', kv: { credentialSlot: 'a' }, secretKeys: ['mail_163_authorization_code'], providerName: '163 邮箱' });
+
+// Regression tests for issue #277: 163 IMAP silently returns an empty result for
+// any criteria-based SEARCH. The worker must fall back to a bounded SEARCH ALL
+// scan with client-side filtering, without changing the no-filter path.
+
+function createSearchHarness(messages, searchImpl, harnessOptions = {}) {
+  const searchCalls = [];
+  const fetchCalls = [];
+  class FakeImap {
+    async connect() {}
+    async logout() {}
+    close() {}
+    async getMailboxLock() { return { release() {} }; }
+    async search(criteria, options) {
+      searchCalls.push({ criteria, options });
+      return searchImpl(criteria, options);
+    }
+    async fetchAll(uids) {
+      fetchCalls.push(uids);
+      const wanted = new Set(uids);
+      const found = messages.filter((message) => wanted.has(message.uid));
+      return harnessOptions.shuffleFetch ? found.slice().reverse() : found;
+    }
+  }
+  return {
+    searchCalls,
+    fetchCalls,
+    deps: {
+      createImap() { return new FakeImap(); },
+      createSmtp() { throw new Error('unexpected SMTP'); },
+      createComposer() { throw new Error('unexpected composer'); },
+      parseMessage() { throw new Error('unexpected parser'); },
+    },
+  };
+}
+
+// fixture 邮箱一律使用保留域名 example.test；登录账号因 worker 强制校验
+// @163.com，沿用仓库既有测试里的 user@163.com。
+const SENT_AT = new Date('2026-07-24T08:00:00Z');
+const RECEIVED_AT = new Date('2026-07-25T09:00:00Z');
+
+function mailFixture(uid, subject, overrides = {}) {
+  return {
+    uid,
+    envelope: {
+      from: [{ name: 'Alice', address: overrides.from || 'alice@example.test' }],
+      to: [{ address: 'recipient@example.test' }],
+      subject,
+      date: overrides.sentDate || SENT_AT,
+      messageId: `<${uid}@example.test>`,
+    },
+    flags: new Set(['\\Seen']),
+    size: 1024,
+    internalDate: overrides.internalDate || RECEIVED_AT,
+  };
+}
+
+function callSearch(deps, filters) {
+  return worker.handleRequest({
+    method: 'mail/action-a',
+    params: {
+      email: 'user@163.com',
+      credentialSlot: 'a',
+      action: { action: 'search', folder: '已发送', max_results: 10, ...filters },
+    },
+    cindy: { secrets: { mail_163_authorization_code: 'abcdefghijklmnop' } },
+  }, deps);
+}
+
+const fallbackMessages = [
+  mailFixture(1, '周报'),
+  mailFixture(2, 'BH016 邮件预览测试'),
+  mailFixture(3, 'BH016 长邮件滚动测试', { from: 'sender@example.test' }),
+  mailFixture(4, '无关邮件'),
+];
+const allUids = fallbackMessages.map((message) => message.uid);
+const emptyOnCriteria = (criteria) => (criteria.all ? allUids : []);
+
+test('163-mail: 条件型 SEARCH 返回空时回退 SEARCH ALL 并按 envelope 过滤', async () => {
+  const h = createSearchHarness(fallbackMessages, emptyOnCriteria);
+  const result = await callSearch(h.deps, { subject: 'BH016' });
+  assert.equal(result.folder, '已发送');
+  assert.equal(result.total, 2);
+  assert.deepEqual(result.messages.map((message) => message.uid), [3, 2]);
+  assert.equal(h.searchCalls.length, 2);
+  assert.deepEqual(h.searchCalls[0].criteria, { subject: 'BH016' });
+  assert.deepEqual(h.searchCalls[0].options, { uid: true });
+  assert.deepEqual(h.searchCalls[1].criteria, { all: true });
+});
+
+test('163-mail: 回退路径同样覆盖 from 与 text 条件', async () => {
+  const h1 = createSearchHarness(fallbackMessages, emptyOnCriteria);
+  const r1 = await callSearch(h1.deps, { from: 'sender' });
+  assert.equal(r1.total, 1);
+  assert.equal(r1.messages[0].uid, 3);
+
+  const h2 = createSearchHarness(fallbackMessages, emptyOnCriteria);
+  const r2 = await callSearch(h2.deps, { text: 'BH016' });
+  assert.equal(r2.total, 2);
+});
+
+test('163-mail: 服务端正常命中与无条件搜索都不触发回退', async () => {
+  const hit = createSearchHarness(fallbackMessages, () => [2, 3]);
+  const r1 = await callSearch(hit.deps, { subject: 'BH016' });
+  assert.equal(r1.total, 2);
+  assert.equal(hit.searchCalls.length, 1);
+
+  const plain = createSearchHarness(fallbackMessages, () => allUids);
+  const r2 = await callSearch(plain.deps, {});
+  assert.equal(r2.total, 4);
+  assert.equal(plain.searchCalls.length, 1);
+  assert.deepEqual(plain.searchCalls[0].criteria, { all: true });
+});
+
+test('163-mail: 回退后仍不匹配时返回 0，不产生假阳性', async () => {
+  const h = createSearchHarness(fallbackMessages, emptyOnCriteria);
+  const r = await callSearch(h.deps, { subject: 'NOT-PRESENT' });
+  assert.equal(r.total, 0);
+  assert.deepEqual(r.messages, []);
+  assert.equal(h.searchCalls.length, 2);
+});
+
+// 审查反馈：发信日与收信日不同、BEFORE 边界、以及 FETCH 乱序返回。
+const dateMessages = [
+  mailFixture(11, 'BH016 发信日早于收信日', {
+    sentDate: new Date('2026-07-24T08:00:00Z'),
+    internalDate: new Date('2026-07-25T10:00:00Z'),
+  }),
+  mailFixture(12, 'BH016 收信日落在截止日', {
+    internalDate: new Date('2026-07-26T00:00:00Z'),
+  }),
+];
+const emptyOnDateCriteria = (criteria) => (criteria.all ? [11, 12] : []);
+
+test('163-mail: 回退的 SINCE 按收信日而非邮件头发信日比较', async () => {
+  const h = createSearchHarness(dateMessages, emptyOnDateCriteria);
+  const r = await callSearch(h.deps, { since: '2026-07-25' });
+  assert.equal(r.total, 2);
+  assert.deepEqual(r.messages.map((message) => message.uid), [12, 11]);
+});
+
+test('163-mail: 回退的 BEFORE 不含截止当天，带时刻时按 imapflow 顺延一天', async () => {
+  const h1 = createSearchHarness(dateMessages, emptyOnDateCriteria);
+  const r1 = await callSearch(h1.deps, { before: '2026-07-26' });
+  assert.equal(r1.total, 1);
+  assert.equal(r1.messages[0].uid, 11);
+
+  const h2 = createSearchHarness(dateMessages, emptyOnDateCriteria);
+  const r2 = await callSearch(h2.deps, { before: '2026-07-25T12:00:00Z' });
+  assert.equal(r2.total, 1);
+  assert.equal(r2.messages[0].uid, 11);
+
+  const h3 = createSearchHarness(dateMessages, emptyOnDateCriteria);
+  const r3 = await callSearch(h3.deps, { before: '2026-07-25' });
+  assert.equal(r3.total, 0);
+});
+
+test('163-mail: fetchAll 乱序返回时仍按 UID 取最近的匹配项', async () => {
+  const h = createSearchHarness(fallbackMessages, emptyOnCriteria, { shuffleFetch: true });
+  const r = await callSearch(h.deps, { subject: 'BH016' });
+  assert.equal(r.total, 2);
+  assert.deepEqual(r.messages.map((message) => message.uid), [3, 2]);
+});
