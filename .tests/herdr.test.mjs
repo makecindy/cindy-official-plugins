@@ -706,6 +706,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a held scope must still let the resume through');
   assert.ok(!/for \(const held of Object\.keys\(scopeHolds\)\)/.test(panelSrcHold),
     'switching panes must not release per-scope holds');
+  assert.match(panelSrcHold, /function pruneStaleScopeState\(\)/,
+    'records of panes that no longer exist must be pruned on refresh');
+  assert.match(panelSrcHold, /pruneStaleScopeState\(\);/,
+    'the refresh path must prune stale scope state');
   assert.match(panelSrcHold, /scopeHolds\[scope\] = 'unknown';[\s\S]{0,80}renderOutput/,
     'an unknown line-key outcome must hold the scope');
   assert.match(panelSrcHold, /取消\/改行已送达/,

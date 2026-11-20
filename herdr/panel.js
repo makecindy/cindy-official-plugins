@@ -514,6 +514,22 @@ function enqueueForScope(scope, task) {
   return run;
 }
 
+// 清掉已经不存在（或同名重建）的分屏的待确认状态。
+function pruneStaleScopeState() {
+  const live = {};
+  for (const pane of (tmux && tmux.panes) || []) live['t:' + pane.target] = true;
+  for (const pane of state.panes || []) live['h:' + pane.pane_id] = true;
+  for (const scope of Object.keys(pendingEnterOnly)) {
+    if (!live[scope]) delete pendingEnterOnly[scope];
+  }
+  for (const scope of Object.keys(terminalHasContent)) {
+    if (!live[scope]) delete terminalHasContent[scope];
+  }
+  for (const scope of Object.keys(scopeHolds)) {
+    if (!live[scope]) delete scopeHolds[scope];
+  }
+}
+
 // 当前选中目标的标识：tmux 用 target，Herdr 用 pane_id。
 function currentScope() {
   if (view === 'tmux') return selectedTarget ? 't:' + selectedTarget : null;
@@ -917,6 +933,10 @@ async function refresh(force) {
     if (view === 'tmux') await refreshTmux(token);
     else await refreshHerdr(token);
     if (stale()) return;
+    // 清理已消失分屏的待确认状态：tmux 的 target 只是位置
+    // （session:window.pane），同名重建不能继承旧分屏的恢复记录，
+    // 否则新分屏的同文本提交会被误判成「只补回车」。
+    pruneStaleScopeState();
     // 详情卡开着的时候，先按 id 把选中对象换成最新的一份并刷新头部，
     // 再重读正文：否则列表显示新状态、详情卡还是旧值。
     if (view === 'tmux') {
