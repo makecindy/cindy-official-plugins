@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { runGate, stateFilePath, ciRetryFilePath, ciRetryDataDir } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
 
@@ -49,7 +49,7 @@ function guideArguments(values) {
   const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
   const source = guide.match(/```js\n(\/\/ Argument lists for the existing task execution tool\.[\s\S]*?)\n```/)?.[1];
   assert.ok(source, 'the recovery guide must define argument lists, not shell command templates');
-  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs })', values);
+  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, shallowStateArgs: typeof shallowStateArgs === "undefined" ? undefined : shallowStateArgs, shallowPathArgs: typeof shallowPathArgs === "undefined" ? undefined : shallowPathArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs })', values);
 }
 
 test('recovery guide passes dynamic refs, remotes and paths as literal argument data', () => {
@@ -76,6 +76,8 @@ test('recovery guide passes dynamic refs, remotes and paths as literal argument 
       hooksPathArgs: ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'hooks'],
       graftPathArgs: ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'info/grafts'],
       replaceRefsArgs: ['--no-replace-objects', 'for-each-ref', '--format=%(refname)', 'refs/replace/'],
+      shallowStateArgs: ['--no-replace-objects', 'rev-parse', '--is-shallow-repository'],
+      shallowPathArgs: ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'shallow'],
       originalObjectArgs: ['--no-replace-objects', 'cat-file', 'commit', oldHead],
       replacementObjectArgs: ['--no-replace-objects', 'cat-file', 'commit', newHead],
       amendArgs: ['--no-replace-objects', 'commit', '--amend', '--no-edit'],
@@ -807,5 +809,53 @@ test('CI recovery uses raw objects and excludes replace refs and legacy grafts',
     const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
     assert.ok(/Any replace ref or legacy graft makes this checkout ineligible before quota/.test(guide), 'history overlays must be excluded before quota');
     assert.equal(fs.existsSync(fx.retryDir), false);
+  });
+});
+
+// Scope-policy assertions plus native counterexamples, not an executable Agent
+// refusal guard or a real Cindy/GitHub recovery. All clones/remotes are private.
+test('CI recovery excludes shallow head and ancestor boundaries before quota or amend', async t => {
+  for (const depth of [1, 2, null]) await t.test(depth === null ? 'complete history control' : 'depth ' + depth, t => {
+    const fx = fixture(t), source = path.join(fx.root, 'source'), remote = path.join(fx.root, 'remote.git'), work = path.join(fx.root, 'work');
+    fs.mkdirSync(source);
+    const global = path.join(fx.root, 'isolated-global'); fs.writeFileSync(global, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
+    const git = (cwd, args, vars = {}) => execFileSync('git', args, { cwd, env: { ...env, ...vars }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const configure = cwd => {
+      for (const [key, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false']]) git(cwd, ['config', key, value]);
+    };
+    const parents = raw => [...raw.split('\n\n', 1)[0].matchAll(/^parent (.+)$/gm)].map(m => m[1]);
+    git(source, ['init', '-b', 'main']); configure(source);
+    for (const n of [1, 2, 3]) {
+      fs.writeFileSync(path.join(source, 'code.txt'), 'revision ' + n + '\n'); git(source, ['add', 'code.txt']);
+      git(source, ['commit', '-s', '-m', 'revision ' + n], { GIT_COMMITTER_DATE: '2026-01-01T00:00:0' + n + 'Z' });
+    }
+    const original = git(source, ['rev-parse', 'HEAD']);
+    const rawBefore = git(source, ['--no-replace-objects', 'cat-file', 'commit', original]);
+    assert.equal(parents(rawBefore).length, 1);
+    git(fx.root, ['clone', '--bare', source, remote]);
+    // A file URL is necessary: --depth is ignored for ordinary local-path clones.
+    git(fx.root, ['clone', ...(depth === null ? [] : ['--depth', String(depth)]), '--', pathToFileURL(remote).href, work]); configure(work);
+    const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    const state = git(work, plan.shallowStateArgs ?? ['rev-parse', '--is-shallow-repository']);
+    const shallowPath = git(work, plan.shallowPathArgs ?? ['rev-parse', '--path-format=absolute', '--git-path', 'shallow']);
+    assert.equal(state, depth === null ? 'false' : 'true');
+    assert.equal(fs.existsSync(shallowPath), depth !== null);
+    const boundary = depth === null ? null : fs.readFileSync(shallowPath, 'utf8');
+    assert.equal(git(work, ['rev-parse', 'HEAD']), original);
+    assert.equal(git(work, ['status', '--porcelain']), '');
+    assert.equal(git(work, plan.originalObjectArgs), rawBefore, 'raw payload still contains the true parent');
+    // Demonstrate the old ineligible amend in this disposable clone only. At
+    // depth 1 even --no-replace-objects drops the stored parent; the later raw
+    // check is too late to prevent local mutation/quota consumption in recovery.
+    git(work, plan.amendArgs, { GIT_COMMITTER_DATE: '2026-01-02T00:00:00Z' });
+    const rawAfter = git(work, ['--no-replace-objects', 'cat-file', 'commit', 'HEAD']);
+    assert.deepEqual(parents(rawAfter), depth === 1 ? [] : parents(rawBefore));
+    assert.equal(git(remote, ['rev-parse', 'refs/heads/main']), original, 'no fixture push occurred');
+    if (boundary !== null) assert.equal(fs.readFileSync(shallowPath, 'utf8'), boundary, 'never remove or rewrite a shallow boundary');
+    assert.equal(fs.existsSync(fx.retryDir), false);
+    const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    if (depth !== null) assert.ok(/Any shallow checkout makes this checkout ineligible before quota or amend/.test(guide), 'all shallow histories must be rejected before mutation');
   });
 });

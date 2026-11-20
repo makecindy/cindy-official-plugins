@@ -53,6 +53,8 @@ const statusArgs = [gatePath, prUrl, '--state-dir', observationStateDir, '--ci-r
 const hooksPathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'hooks'];
 const graftPathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'info/grafts'];
 const replaceRefsArgs = ['--no-replace-objects', 'for-each-ref', '--format=%(refname)', 'refs/replace/'];
+const shallowStateArgs = ['--no-replace-objects', 'rev-parse', '--is-shallow-repository'];
+const shallowPathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'shallow'];
 const originalObjectArgs = ['--no-replace-objects', 'cat-file', 'commit', originalRemoteSha];
 const replacementObjectArgs = ['--no-replace-objects', 'cat-file', 'commit', newSha];
 const amendArgs = ['--no-replace-objects', 'commit', '--amend', '--no-edit'];
@@ -124,14 +126,28 @@ restriction is for the optional CI-only recovery, not normal contribution.
 Any replace ref or legacy graft makes this checkout ineligible before quota.
 Require `replaceRefsArgs` to return no entries and the file at `graftPathArgs`
 to be absent, including empty or unreadable graft files. A nonstandard history
-namespace/file environment (including `GIT_REPLACE_REF_BASE` or `GIT_GRAFT_FILE`)
+namespace/file environment (including `GIT_REPLACE_REF_BASE`, `GIT_GRAFT_FILE` or `GIT_SHALLOW_FILE`)
 or unknown resolution also stops recovery; do not delete/convert overlays,
 change their namespace, or unset user environment to gain eligibility.
+
+Any shallow checkout makes this checkout ineligible before quota or amend.
+Require `shallowStateArgs` to succeed with exactly `false` and the Git-resolved
+file at `shallowPathArgs` to be absent. `true`, missing/failed/ambiguous output,
+an existing/empty/unreadable boundary file or alternate `GIT_SHALLOW_FILE`
+environment all stop recovery. This excludes boundaries at HEAD **and at an
+ancestor**; do not infer eligibility from one visible parent or clean status.
+Recheck this same condition before any budget operation, amend and push.
+`--no-replace-objects` does not disable shallow grafts: a shallow HEAD can become
+a root after amend, before the later raw-parent check can stop a push. Do not
+consume quota first or attempt the amend as a probe. Do not deepen/unshallow,
+fetch extra history, remove/rewrite boundary files or unset the user's history
+environment to qualify through this CI-only route. Ordinary authorized work
+uses its normal repository workflow; this option does not repair shallow clones.
 
 All object reads, signature checks and amend use `--no-replace-objects` with
 the pinned full SHA: use the shared original/replacement object and signature
 arrays and `amendArgs`. The prefix alone is not a legacy-graft bypass; absence
-of both kinds of overlays is still required. The baseline is the original raw
+of all overlays and shallow boundaries is still required. The baseline is the original raw
 commit payload. Parse only its header block before the first blank line,
 respect continuations, and record tree, the **ordered complete parent list**,
 author and message/trailers from that payload. After amend compare the raw new
@@ -140,9 +156,9 @@ or `%P`/symbolic lookups. Signature identity checks remain mandatory.
 
 | Event | Action |
 | --- | --- |
-| Any effective hook, overlay or unknown inspection before budget | Stop without budget, amend or push |
+| Any effective hook, overlay, shallow state or unknown inspection before budget | Stop without budget, amend or push |
 | Hook/configuration/history facts change before amend | Stop; keep any consumed receipt, no refund |
-| Raw tree/parents/author differ, or an overlay/hook appears after amend | Leave the new local commit unpushed and report; never reset user work |
+| Raw tree/parents/author differ, or a history boundary/hook appears after amend | Leave the new local commit unpushed and report; never reset user work |
 | Earlier hook may already have written externally | Reconcile all suspected destinations read-only; unknown is not unexecuted |
 
 These are Agent checks in an exclusive checkout, not an atomic filesystem lock
