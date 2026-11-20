@@ -540,10 +540,11 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a resumed submit must only send Enter, not paste the text again');
   assert.match(panelSrcAtomic, /PENDING_ENTER_KEEP_KEYS/,
     'line-preserving keys must keep the pending-enter record');
-  assert.match(panelSrcAtomic, /if \(!PENDING_ENTER_KEEP_KEYS\[key\]\) \{\s*if \(pendingEnterOnly && pendingEnterOnly\.scope === scope\) pendingEnterOnly = null;/,
+  assert.match(panelSrcAtomic, /if \(!PENDING_ENTER_KEEP_KEYS\[key\]\) \{\s*delete pendingEnterOnly\[scope\];/,
     'line-altering keys must invalidate the pending-enter record for their scope');
-  assert.match(panelSrcAtomic, /closeDetail[\s\S]{0,200}?pendingEnterOnly = null/,
-    'closing the detail must invalidate the pending-enter record');
+  // 记录按 scope 保留：关闭详情不等于取消终端里待提交的行。
+  assert.ok(!/closeDetail[\s\S]{0,300}?delete pendingEnterOnly/.test(panelSrcAtomic),
+    'closing the detail must not drop another scope state');
 
   // herdr_wait 输出分支也要排除 until。
   const waitTool3 = manifest.tools.find((tool) => tool.name === 'herdr_wait');
@@ -703,12 +704,14 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the host notification path must read agent_status');
   assert.match(panelSrcHold, /const isResume = !text/,
     'a held scope must still let the resume through');
-  assert.match(panelSrcHold, /for \(const held of Object\.keys\(scopeHolds\)\)/,
-    'switching panes or closing the detail must release the holds');
+  assert.ok(!/for \(const held of Object\.keys\(scopeHolds\)\)/.test(panelSrcHold),
+    'switching panes must not release per-scope holds');
+  assert.match(panelSrcHold, /scopeHolds\[scope\] = 'unknown';[\s\S]{0,80}renderOutput/,
+    'an unknown line-key outcome must hold the scope');
   assert.match(panelSrcHold, /取消\/改行已送达/,
     'the hold must only clear after the cancelling key lands');
-  const guarded = (panelSrcHold.match(/if \(pendingEnterOnly && pendingEnterOnly\.scope === scope\) pendingEnterOnly = null;/g) || []).length;
-  assert.ok(guarded >= 3, 'clearing the single record must be scope-guarded');
+  const scopedDeletes = (panelSrcHold.match(/delete pendingEnterOnly\[scope\];/g) || []).length;
+  assert.ok(scopedDeletes >= 3, 'records must be deleted per scope');
 
   // 首段结果未知也冻结；恢复用钉住的目标；Herdr 回车是小写。
   const panelSrcResume = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
@@ -720,8 +723,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'an unknown hold must let the checked resend through as a full submit');
   assert.match(panelSrcResume, /sendEnterOnly\(scope, pinnedView, target, paneId\)/,
     'the enter-only resume must use the pinned target');
-  const guardedWrites = (panelSrcResume.match(/单槽记录/g) || []).length;
-  assert.ok(guardedWrites >= 4, 'single-slot records must not overwrite another scope');
+  assert.match(panelSrcResume, /const pendingEnterOnly = \{\};/,
+    'pending-enter records must be stored per scope');
+  assert.match(panelSrcResume, /const terminalHasContent = \{\};/,
+    'terminal-content records must be stored per scope');
   assert.match(panelSrcResume, /keys: \['enter'\]/,
     'the Herdr resume must send a lowercase enter');
 
