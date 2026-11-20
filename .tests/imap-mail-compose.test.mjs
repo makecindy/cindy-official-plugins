@@ -183,6 +183,7 @@ export function runImapComposeSuite(plugin, options) {
     assert.equal(values.bcc, '');
     assert.equal(values.subject, 'Re: Plan');
     assert.equal(values.body, 'Thanks, all.');
+    assert.equal(result.result.readBack.headers['in-reply-to'], '<source-1@example.test>');
     assert.match(values.quote, /^\n\nOn .+ Alice <alice@example\.test> wrote:\n> Hello team/);
     const source = t.draftSource();
     assert.match(source, /^In-Reply-To: <source-1@example\.test>\r?$/m);
