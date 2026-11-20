@@ -603,7 +603,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const panelSrcPin = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSrcPin, /const target = selectedTarget;[\s\S]{0,1200}?tmux_send', \{ target: target, text: draft \}/,
     'the draft sync must use the pinned target');
-  assert.match(panelSrcPin, /if \(currentScope\(\) === scope\) field\.value = text;/,
+  assert.match(panelSrcPin, /if \(currentScope\(\) === scope && !field\.value\) field\.value = text;/,
     'the draft restore must only touch the box of the same target');
   // 草稿同步后空输入框的回车可以只补 Enter。
   assert.match(panelSrcPin, /terminalHasContent/,
@@ -649,6 +649,21 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const panelSrcLoc = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSrcLoc, /loadLocale\(\)\.then\(function \(\) \{ refresh\(\); \}/,
     'the first refresh must wait for the locale');
+
+  // 写请求超时要报结果未知。
+  const panelSrcTimeout = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcTimeout, /PANEL_WRITE_ACTIONS/,
+    'write actions must be marked for unknown-outcome timeouts');
+  assert.match(panelSrcTimeout, /HERDR_OUTCOME_UNKNOWN: 面板请求超时/,
+    'a write timeout must be reported as unknown, not a plain failure');
+
+  // 同一终端的提交串行化 + 按键时钉住视图。
+  assert.match(panelSrcTimeout, /enqueueForScope\(scope, function \(\) \{\s*return submitLineQueued/,
+    'submits must be serialized per scope');
+  assert.match(panelSrcTimeout, /forwardKeyQueued\(key, pinnedView, target, paneId, scope\)/,
+    'the forwarded key must keep the view pinned at keypress time');
+  assert.match(panelSrcTimeout, /consumeFromInput/,
+    'queued submits must only consume the sent prefix');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(

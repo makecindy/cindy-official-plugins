@@ -244,10 +244,13 @@ test('the wrap toggle keeps its icon and the refresh button names its action', a
 
 test('submitting a line pins one target for both tmux sends', () => {
   const source = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
-  const body = /async function submitLine\(\) \{([\s\S]*?)\n\}/.exec(source);
-  assert.ok(body, 'submitLine must exist');
+  const wrapper = /function submitLine\(\) \{([\s\S]*?)\n\}/.exec(source);
+  assert.ok(wrapper, 'submitLine must exist');
+  assert.match(wrapper[1], /const target = selectedTarget;/, 'target must be captured at submit time');
+  assert.match(wrapper[1], /enqueueForScope\(scope/, 'submits must be serialized per scope');
+  const body = /async function submitLineQueued\(text, pinnedView, target, paneId, scope\) \{([\s\S]*?)\n\}/.exec(source);
+  assert.ok(body, 'submitLineQueued must exist');
   const text = body[1];
-  assert.match(text, /const target = selectedTarget;/, 'target must be captured before awaiting');
   assert.match(text, /target: target, text: text[\s\S]*?target: target, keys:/,
     'both the text and the Enter must use the captured target');
   // Herdr 的提交走 submit 动作（pane.send_input），不是只打字的 send。

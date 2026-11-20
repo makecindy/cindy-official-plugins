@@ -179,6 +179,9 @@ let readToken = 0;
 // 面板若也是 45 秒就会先报「插件未响应」并丢掉稍后到达的「结果未知」，
 // 用户重试可能把命令执行两次。快照的宿主预算是 45 秒，也一起覆盖。
 const PANEL_REQUEST_TIMEOUT_MS = 80000;
+// 这些动作会把内容写进终端/后端：80 秒超时只代表「没收到回包」，
+// 不代表「没执行」，必须按结果未知处理，不能报普通失败让人直接重试。
+const PANEL_WRITE_ACTIONS = { tmux_send: true, submit: true, send: true, prompt: true };
 
 function request(action, payload) {
   return new Promise(function (resolve, reject) {
@@ -194,7 +197,10 @@ function request(action, payload) {
       if (settled) return;
       settled = true;
       cleanup();
-      reject(new Error('插件未响应'));
+      reject(new Error(PANEL_WRITE_ACTIONS[action]
+        ? 'HERDR_OUTCOME_UNKNOWN: 面板请求超时（' + action + '）：请求可能已执行，'
+          + '请先在终端里核对实际状态，再决定是否重试。'
+        : '插件未响应'));
     }, PANEL_REQUEST_TIMEOUT_MS);
     function onMessage(event) {
       const message = event.data;
@@ -379,17 +385,26 @@ function specialKey(event) {
   return lib.specialKey ? lib.specialKey(view, event) : null;
 }
 
-async function forwardKey(event) {
+function forwardKey(event) {
   const key = specialKey(event);
   if (!key) return false;
   event.preventDefault();
-  // 先把目标钉死：等待期间用户可能切到别的分屏，草稿同步和按键
-  // 都必须打到发起时的目标上，也不能改写别的分屏的输入框。
+  // 视图与目标在按键这一刻钉住：排队等待期间切了分屏或视图，
+  // 按键也必须打到发起时的目标上。
+  const pinnedView = view;
   const target = selectedTarget;
   const paneId = selectedPane ? selectedPane.pane_id : null;
-  if (view === 'tmux' && !target) return true;
-  if (view !== 'tmux' && !paneId) return true;
-  const scope = (view === 'tmux' ? 't:' + target : 'h:' + paneId);
+  if (pinnedView === 'tmux' && !target) return true;
+  if (pinnedView !== 'tmux' && !paneId) return true;
+  const scope = (pinnedView === 'tmux' ? 't:' + target : 'h:' + paneId);
+  // 同一终端的操作排队执行：草稿同步、改行按键不能与正在进行的提交交错。
+  enqueueForScope(scope, function () {
+    return forwardKeyQueued(key, pinnedView, target, paneId, scope);
+  });
+  return true;
+}
+
+async function forwardKeyQueued(key, pinnedView, target, paneId, scope) {
   // 会改动终端里那行内容的按键（取消 C-c、历史 Up/Down、补全 Tab、
   // 删除 C-u/C-w/C-k/C-d、Esc、M-* 宏等）让恢复记录失效；
   // 但清屏 C-l、移动光标 C-a/C-e、翻滚动条 PPage/NPage 不改内容，
@@ -402,7 +417,7 @@ async function forwardKey(event) {
     const draft = draftField ? draftField.value : '';
     if (draft) {
       try {
-        if (view === 'tmux') await request('tmux_send', { target: target, text: draft });
+        if (pinnedView === 'tmux') await request('tmux_send', { target: target, text: draft });
         else await request('send', { pane_id: paneId, text: draft });
       } catch (error) {
         renderOutput(error.message || T.sendFailed);
@@ -412,13 +427,13 @@ async function forwardKey(event) {
       // 注意不是 pendingEnterOnly——随后的改行按键会改变这行内容，
       // 同一文本恢复粘贴的去重记录不能假装它还原样存在。
       terminalHasContent = { scope: scope };
-      // 只有还停在这个分屏时才清输入框：等待期间切了目标，
-      // 现在框里的是另一个分屏的新草稿，不能动。
-      if (currentScope() === scope) draftField.value = '';
+      // 只有还停在这个分屏时才动输入框，且只去掉已同步的那段：
+      // 等待期间切了目标、或用户又接着输入了，都不能误删。
+      if (currentScope() === scope) consumeFromInput(draftField, draft);
     }
   }
   try {
-    if (view === 'tmux') await request('tmux_send', { target: target, keys: [key] });
+    if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: [key] });
     else await request('send', { pane_id: paneId, keys: [key] });
     await refreshTerminal();
   } catch (error) {
@@ -437,6 +452,27 @@ let terminalHasContent = null;
 // 不改变终端行内容的直达按键：这些键之后恢复记录仍然有效。
 const PENDING_ENTER_KEEP_KEYS = { 'C-l': true, 'C-a': true, 'C-e': true, PPage: true, NPage: true };
 
+// 同一终端的提交/按键串行执行：两条 submitLine 并行时，第二次 paste 可能
+// 排在第一次 Enter 前，把两条命令拼成一行或颠倒顺序。按 scope 排队。
+const scopeQueues = {};
+
+// 排队执行时输入框可能已追加新内容：只去掉已发送的那段前缀，
+// 不能把用户排队期间新打的部分也清掉。
+function consumeFromInput(field, sent) {
+  if (!field) return;
+  if (field.value === sent) {
+    field.value = '';
+  } else if (field.value.indexOf(sent) === 0) {
+    field.value = field.value.slice(sent.length);
+  }
+}
+
+function enqueueForScope(scope, task) {
+  const run = (scopeQueues[scope] || Promise.resolve()).then(task, task);
+  scopeQueues[scope] = run.then(function () {}, function () {});
+  return run;
+}
+
 // 当前选中目标的标识：tmux 用 target，Herdr 用 pane_id。
 function currentScope() {
   if (view === 'tmux') return selectedTarget ? 't:' + selectedTarget : null;
@@ -444,7 +480,7 @@ function currentScope() {
 }
 
 // 只补一次回车：文本确认已在终端里时用它，绝不重复粘贴。
-async function sendEnterOnly(scope) {
+async function sendEnterOnly(scope, pinnedView) {
   const hadText = pendingEnterOnly && pendingEnterOnly.scope === scope
     ? pendingEnterOnly.text : null;
   pendingEnterOnly = null;
@@ -452,7 +488,7 @@ async function sendEnterOnly(scope) {
   const target = selectedTarget;
   const paneId = selectedPane ? selectedPane.pane_id : null;
   try {
-    if (view === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
+    if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
     else await request('send', { pane_id: paneId, keys: ['Enter'] });
     await refreshTerminal();
   } catch (error) {
@@ -468,22 +504,32 @@ async function sendEnterOnly(scope) {
   }
 }
 
-async function submitLine() {
+function submitLine() {
   const field = $('#term-input');
   const text = field.value;
-  // 先把目标钉死：两条请求之间用户可能已经切到别的分屏，
-  // 不能把 Enter 发到新目标上。
+  // 目标与文本在这一刻钉死：排队/请求期间切了分屏或又输入了内容，
+  // 这次提交的内容与目标都不能变。
+  const pinnedView = view;
   const target = selectedTarget;
   const paneId = selectedPane ? selectedPane.pane_id : null;
-  if (view === 'tmux' && !target) return;
-  if (view !== 'tmux' && !paneId) return;
-  const scope = (view === 'tmux' ? 't:' + target : 'h:' + paneId);
+  if (pinnedView === 'tmux' && !target) return;
+  if (pinnedView !== 'tmux' && !paneId) return;
+  const scope = (pinnedView === 'tmux' ? 't:' + target : 'h:' + paneId);
+  // 同一终端的「文本 + Enter」串行执行：两条提交并行时，第二次 paste
+  // 可能排在第一次 Enter 前，把两条命令拼成一行或颠倒顺序。
+  enqueueForScope(scope, function () {
+    return submitLineQueued(text, pinnedView, target, paneId, scope);
+  });
+}
+
+async function submitLineQueued(text, pinnedView, target, paneId, scope) {
+  const field = $('#term-input');
   // 空输入框但终端里有内容（草稿刚同步、或粘贴后回车未确认）：
   // 这次回车只补 Enter。
   if (!text) {
     if ((pendingEnterOnly && pendingEnterOnly.scope === scope)
         || (terminalHasContent && terminalHasContent.scope === scope)) {
-      await sendEnterOnly(scope);
+      await sendEnterOnly(scope, pinnedView);
     }
     return;
   }
@@ -491,24 +537,24 @@ async function submitLine() {
   // 同步过去），同一目标同一文本的提交只补 Enter，不再粘一遍。
   if (pendingEnterOnly && pendingEnterOnly.scope === scope && pendingEnterOnly.text === text) {
     pendingEnterOnly = null;
-    field.value = '';
+    consumeFromInput(field, text);
     try {
-      if (view === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
+      if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
       else await request('send', { pane_id: paneId, keys: ['Enter'] });
       await refreshTerminal();
     } catch (error) {
       pendingEnterOnly = { scope: scope, text: text };
       // 只在仍选中同一目标时补回输入框，别把 A 的命令写进 B 的框。
-      if (currentScope() === scope) field.value = text;
+      if (currentScope() === scope && !field.value) field.value = text;
       renderOutput(error.message || T.sendFailed);
     }
     return;
   }
   pendingEnterOnly = null;
   terminalHasContent = null;
-  field.value = '';
+  consumeFromInput(field, text);
   try {
-    if (view === 'tmux') {
+    if (pinnedView === 'tmux') {
       await request('tmux_send', { target: target, text: text });
       try {
         await request('tmux_send', { target: target, keys: ['Enter'] });
@@ -517,7 +563,7 @@ async function submitLine() {
         // 不能断言。恢复草稿并记住这次粘贴，下一次同一文本只补回车；
         // 用户也可以先在终端里核对内容再决定。
         pendingEnterOnly = { scope: scope, text: text };
-        if (currentScope() === scope) field.value = text;
+        if (currentScope() === scope && !field.value) field.value = text;
         renderOutput('文本已输入到终端，但回车没有确认（'
           + String(error && error.message ? error.message : T.sendFailed)
           + '）。请先在终端里核对内容：若命令尚未执行，直接再按一次回车即可（只会补发回车，不会重复粘贴文本）。');
@@ -533,7 +579,7 @@ async function submitLine() {
     // 第一段的失败走这里：终端多半没收到内容，把草稿放回输入框，
     // 别让用户丢命令；错误文案本身（含「结果未知」）会提示先核对终端。
     // 但只在仍选中同一目标时回填：框里可能已是另一个分屏的内容。
-    if (currentScope() === scope) field.value = text;
+    if (currentScope() === scope && !field.value) field.value = text;
     renderOutput(error.message || T.sendFailed);
   }
 }
