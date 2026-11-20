@@ -2106,3 +2106,58 @@ test('the 2026.11.16 sync keeps recovery, image metadata and card plans on the p
   assert.match(handoff, /回执里的 `h5VersionId`/, 'the privacy version id source is named');
 });
 
+test('the 2026.11.19 reservation milestone sync keeps its gates on the plugin path', () => {
+  // Upstream added taptap-reserve-milestone: a separate domain with its own
+  // state machine (current vs submit), a no-draft rule, a hard three-tier
+  // ceiling, a real readiness check before submission, and a withdrawal that
+  // still reads back as rejected. None of those bindings may be lost while
+  // adapting the skill into a bundled manual.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const suite = read('taptap-suite/MANUAL.md');
+  const routing = read('taptap-suite/references/business-routing.md');
+  const manual = read('taptap-suite/references/taptap-reserve-milestone/MANUAL.md');
+  const runbook = read('taptap-suite/references/taptap-reserve-milestone/references/reserve-milestone-runbook.md');
+  const guide = read('taptap-suite/references/taptap-reserve-milestone/references/reserve-milestone-guide.md');
+
+  assert.match(
+    suite,
+    /taptap-suite\/references\/taptap-reserve-milestone\/MANUAL\.md/,
+    'the suite entry must route to the reservation milestone manual',
+  );
+  assert.match(suite, /\| 预约里程碑[^|]*\| `reserve-milestone`/, 'the routing table must reach the domain');
+  assert.match(routing, /预约里程碑 ≠ 签到/, 'milestones are not check-in rewards');
+  assert.match(workerSource, /'reserve-milestone':/, 'the catalogue drill-down needs a display description');
+
+  assert.match(manual, /没有单独保存服务端草稿/, 'there is no server-side draft');
+  assert.match(manual, /最多 3 档/, 'the three-tier ceiling must be explicit');
+  for (const command of ['get', 'list-history', 'upload-reward-image', 'check-readiness', 'submit-review', 'withdraw-review']) {
+    assert.ok(
+      manual.includes('reserve-milestone ' + command),
+      `the manual must name reserve-milestone ${command}`,
+    );
+  }
+
+  assert.match(runbook, /MILESTONE_STATUS_APPROVED/, 'approval must be judged by the status enum');
+  assert.match(runbook, /MILESTONE_STATUS_REJECTED/, 'withdrawal still reads back as rejected');
+  assert.match(runbook, /withdrawn_as_rejected/, 'the withdrawal receipt must be named');
+  assert.match(runbook, /404 not_found/, 'a missing specified submission is not a retry prompt');
+  assert.match(runbook, /is_active=true/, 'approval alone is not activation');
+  assert.match(guide, /灰图/, 'the user guide explains the grayscale reward image');
+
+  // The bundled copy is an adaptation, not a verbatim skill: running the CLI
+  // directly would bypass the write gate and the failure three-state.
+  assert.doesNotMatch(manual + runbook + guide, /taptap-cli reserve-milestone/, 'manuals stay on call_tool');
+
+  for (const locale of ['zh-CN', 'en', 'ja', 'ko']) {
+    const resource = JSON.parse(
+      fs.readFileSync(path.join(root, 'taptap-cli', 'locales', `${locale}.json`), 'utf8'),
+    );
+    assert.match(
+      resource.description + resource.whenToUse,
+      /预约里程碑|reservation-milestone|予約マイルストーン|예약 마일스톤/,
+      `${locale} metadata must mention the milestone domain`,
+    );
+  }
+});
+

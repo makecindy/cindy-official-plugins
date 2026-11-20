@@ -17,6 +17,7 @@
 > | `taptap-qualification` | `taptap-suite/references/taptap-qualification` |
 > | `taptap-package-management` | `taptap-suite/references/taptap-package-management` |
 > | `taptap-test-plan` | `taptap-suite/references/taptap-test-plan` |
+> | `taptap-reserve-milestone` | `taptap-suite/references/taptap-reserve-milestone/MANUAL.md` |
 > | `taptap-dashboard-stats` | `taptap-suite/references/taptap-dashboard-stats` |
 > | `taptap-player-feedback` | `taptap-suite/references/taptap-player-feedback` |
 > | `taptap-community-management` | `taptap-suite/references/taptap-community-management/MANUAL.md` |
@@ -83,6 +84,7 @@
 | 查论坛帖子、子版块、帖子正文、一级回复和子回复,或发帖/回帖 | `community-management` | 先确认帖子意图、子版块和时间范围;发帖先给预览再发布 |
 | 把本地图片或视频传成帖子素材,或给一级回复配图 | `community-management`(帖子素材上传) | 帖子:图片 `+upload-image`、视频 `+upload-video`;一级回复只用图片 `+upload-image`;子回复只支持文字,回复都不支持视频;别走素材库 `upload` / `upload-video` |
 | 管理测试计划、资格批次、用户资格、激活码 | `test-plan` | 先区分状态层级 |
+| 预约里程碑、预约档位奖励、奖励图、提审/撤回 | `reserve-milestone` | 先读现状;已生效档位不可改 |
 | 活动/公告位、置顶、排期、上下线、失效巡检 | `whats-new` | 先看容量与置顶占用 |
 | 推送额度、预览、创建/取消官方消息推送 | `push` | 创建前重读额度+预览 |
 | 签到主体、奖励、集卡、兑换码、提审/撤回 | `sign` | 提审前跑 readiness |
