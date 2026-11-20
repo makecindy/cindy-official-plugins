@@ -532,6 +532,7 @@ const SERVICE_DESCRIPTIONS = {
   developer: '开发者账号与厂商列表',
   'package-management': '包体库、线上/待处理包、自测入口与小游戏能力',
   qualification: '上架资质分析、非敏感材料草稿、资质增量审核',
+  'reserve-milestone': '预约里程碑档位、奖励图、提交审核与撤回',
   'test-plan': 'CBT/OBT 测试计划、招募、资格批次与激活码',
 };
 
