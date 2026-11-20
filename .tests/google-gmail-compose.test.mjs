@@ -546,11 +546,35 @@ test('body-only tool edits preserve the saved quote once, and an explicit remova
     assert.equal(r.result.readBack.editor.quoteHtml, quoteHtml);
     assert.doesNotMatch(r.result.readBack.editor.bodyHtml, /Original context/);
   }
+  const removed = await edit({ quote: false });
+  assert.equal(removed.ok, true, removed.message);
+  assert.equal(removed.result.readBack.editor.body, 'Edited');
+  assert.equal(removed.result.readBack.editor.bodyHtml, '<p>Edited</p>');
+  assert.equal(removed.result.readBack.editor.quote, '');
+  assert.equal(removed.result.readBack.editor.quoteHtml, '');
   for (const options of [{ body: 'No history', quote: false }, { body: 'Last edit' }]) {
     const r = await edit(options);
     assert.equal(r.ok, true, r.message);
     assert.equal(r.result.readBack.editor.quote, '');
     assert.equal(r.result.readBack.editor.quoteHtml, '');
+  }
+});
+
+test('editing a plain-only reply keeps both the answer and original in the first HTML alternative', async t => {
+  const quote = '\r\n\r\nSender wrote:\r\n> Use <notes> & keep this line';
+  for (const body of [undefined, 'Updated']) {
+    const original = copy(payload);
+    original.parts[0].parts[0].body.data = Buffer.from('My answer' + quote).toString('base64url');
+    original.parts[0].parts[1].body.data = '';
+    const f = editableMailbox(t, undefined, original);
+    const result = await f.run({ command: ['drafts', 'update'], arguments: ['draft-test'],
+      options: { to: 'updated@example.test', subject: 'Example', ...(body ? { body } : {}) } });
+    assert.equal(result.ok, true, result.message);
+    const saved = result.result.readBack;
+    assert.equal(saved.bodyText, (body || 'My answer') + quote);
+    assert.ok(saved.editor.bodyHtml.includes(body || 'My answer'));
+    assert.ok(saved.editor.quoteHtml.includes('Use &lt;notes&gt; &amp; keep this line'));
+    assert.equal(saved.bodyHtml, saved.editor.bodyHtml + saved.editor.quoteHtml);
   }
 });
 

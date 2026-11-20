@@ -107,6 +107,22 @@ test('rich quote edits and removals supersede stale HTML while untouched quotes 
     assert.equal(f.calls.some(c => /send/.test(c.url)), false);
   }
 });
+test('a recipient edit on a plain-only reply writes the same history into both MIME alternatives', async t => {
+  const f = workerFixture(t, false);
+  const parts = f.draft.message.payload.parts;
+  parts[0].body.data = Buffer.from('Answer\n\nSender wrote:\n> Keep <notes>').toString('base64url');
+  parts[1].body.data = '';
+  const before = f.draftReadBack({ draft: f.draft }, f.draft.id);
+  assert.equal(before.bodyHtml, '');
+  const fields = { ...f.fields, to: 'another@example.test', subject: before.headers.subject, body: before.editor.body,
+    bodyHtml: f.ctx.mailBodyHtml(before.editor.body), quote: before.editor.quote, quoteHtml: before.editor.quoteHtml };
+  const result = await f.handle({ method: 'compose', cindy: { secrets: { gog_access_token: 'fixture-token' } },
+    params: { draftId: f.draft.id, fingerprint: before.fingerprint, fields, send: false } }, {});
+  assert.equal(result.ok, true, result.message);
+  assert.equal(result.data.readBack.bodyText, 'Answer\n\nSender wrote:\n> Keep <notes>');
+  assert.match(result.data.readBack.bodyHtml, /Answer[\s\S]*Keep &lt;notes&gt;/);
+  assert.equal(f.calls.filter(c => c.init.method === 'PUT').length, 1);
+});
 test('removing an attachment preserves the body and removes its bytes', async t => {
   const f = fixture(t); f.fields.bodyHtml = '<p>Only text</p>'; f.fields.attachmentItems = '[]';
   assert.equal((await f.run()).files.length, 0);

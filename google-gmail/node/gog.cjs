@@ -244,8 +244,17 @@ function draftEditor(draft) {
   // the outgoing draft (which is the user's own address).
   const attribution = quote.trimStart().split(/\r?\n/, 1)[0].replace(/^On (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), [A-Za-z]+ \d+, \d+ at \d+:\d+ [AP]M, /, '');
   const sender = /^([^<>,\r\n]+?)\s*<[^<>\s]+@[^<>\s]+> wrote:$/.exec(attribution)?.[1].trim().replace(/^"|"$/g, '');
+  let quoteHtml = splitHtml ? draft.bodyHtml.slice(htmlAt) : '';
+  if (splitText && !draft.bodyHtml) {
+    // The first rich edit of a plain-only reply creates a new MIME alternative.
+    // Quote the same original in that alternative without interpreting its markup.
+    const [who, ...lines] = quote.trimStart().split(/\r?\n/);
+    quoteHtml = '<br><br><div class="gmail_quote"><div class="gmail_attr">' + escapeHtml(who) +
+      '</div><blockquote class="gmail_quote">' + lines.map(line => escapeHtml(line.replace(/^> ?/, ''))).join('<br>') +
+      '</blockquote></div>';
+  }
   return { format: !html || html === mailBodyHtml(body) ? 'text' : 'html', body, quote,
-    bodyHtml: html, quoteHtml: splitHtml ? draft.bodyHtml.slice(htmlAt) : '',
+    bodyHtml: html, quoteHtml,
     ...(sender && sender.length <= 80 ? { quoteSender: sender } : {}),
     // Foreign/partially recognized layouts stay in the body. Never append a
     // second original or advertise a missing quote merely because it can't be split.
@@ -303,7 +312,7 @@ async function composeDraft(message, execution) {
     if (!rich && before.attachments.some(item => item.contentId || /^inline\b/i.test(item.disposition)))
       return { ...failure(text('inlineImagesNotPreserved')), readBack: before };
     const bodyHtml = rich && (before.editor.format === 'html' || fields.bodyHtml !== original.bodyHtml || fields.body === original.body) ? fields.bodyHtml
-      : fields.body === original.body ? before.editor.bodyHtml : mailBodyHtml(fields.body);
+      : fields.body === original.body && before.editor.bodyHtml ? before.editor.bodyHtml : mailBodyHtml(fields.body);
     // The quote is a separately editable plain field, even in an HTML draft.
     // Only an explicit HTML quote edit or unchanged plain quote keeps its HTML.
     const quoteHtml = rich && (fields.quoteHtml !== original.quoteHtml || fields.quote === original.quote) ? fields.quoteHtml
@@ -360,8 +369,11 @@ async function composeDraft(message, execution) {
 
 // Plain text is not Markdown. A Gmail-style HTML alternative keeps paragraph
 // breaks and the signature proportional, separate from the quoted history.
+function escapeHtml(text) {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 function mailBodyHtml(text) {
-  const escaped = text.replace(/\r\n?/g, '\n').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const escaped = escapeHtml(text.replace(/\r\n?/g, '\n'));
   return '<div dir="ltr" style="font-family:Arial,Helvetica,sans-serif;font-size:small">'
     + escaped.split('\n').map(line => '<div>' + (line || '<br>') + '</div>').join('') + '</div>';
 }
@@ -524,6 +536,12 @@ async function handle(message, execution) {
       return suffix && normalized.endsWith(suffix) ? normalized.slice(0, -suffix.length) : value;
     };
     const hasInline = checked.attachments.some(a => a.contentId || /^inline\b/i.test(a.disposition));
+    // Removing just the quote must leave the new reply text in both alternatives.
+    if (!hasInline && options.quote === false && (checked.editor.quote || checked.editor.quoteHtml) &&
+        ['body', 'body-file', 'body-html', 'body-html-file'].every(key => options[key] === undefined)) {
+      options.body = checked.editor.body;
+      options['body-html'] = checked.editor.bodyHtml || mailBodyHtml(checked.editor.body);
+    }
     if (!hasInline && !hasReplyTarget && options.quote === undefined && !options['clear-reply-context'] &&
         (checked.editor.quote || checked.editor.quoteHtml)) {
       // A native update replaces both alternatives. Preserve the saved quote,
@@ -531,7 +549,7 @@ async function handle(message, execution) {
       const htmlOnly = options.body === undefined && options['body-file'] === undefined &&
         (options['body-html'] !== undefined || options['body-html-file'] !== undefined) && checked.editor.quoteHtml;
       const body = withoutSuffix(textOption('body', htmlOnly ? '' : checked.editor.body), checked.editor.quote);
-      const html = textOption('body-html', body === checked.editor.body ? checked.editor.bodyHtml : mailBodyHtml(body));
+      const html = textOption('body-html', body === checked.editor.body && checked.editor.bodyHtml ? checked.editor.bodyHtml : mailBodyHtml(body));
       // An HTML-only replacement supersedes the old plain reply too. The SDK
       // derives the matching text alternative from the new HTML on read-back.
       options.body = htmlOnly ? '' : body + checked.editor.quote;
