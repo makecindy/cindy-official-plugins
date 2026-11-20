@@ -80,6 +80,7 @@ const mail = cindyMail.register({
   storageLock: 'my-plugin-settings',
   async selectAccount(accountId) { /* {ok:true, accountId, accountEmail} or failure */ },
   async readDraft({record, sourceCallId}) { /* normalized read result */ },
+  async readReplyQuote({record, readBack}) { /* optional: resolve the exact original */ },
   async writeDraft({record, account, fields, send, sourceCallId}) { /* save OR send */ },
   async deleteDraft({record, account, sourceCallId}) { /* optional: delete stored draft */ },
 });
@@ -140,6 +141,10 @@ from a truncated body. Text fields allow 16,000 characters; HTML fields allow
 64,000 characters, with 1 MiB for the host-owned card (ordinary plugin HTML stays
 at 32 KiB). Mail content is kept in the adapter's draft store and
 ordinary Host card history, not in common KV records.
+
+For replies, include the stored RFC `In-Reply-To` in `headers['in-reply-to']`. Return the actual stored quote in `editor.quote` and/or `editor.quoteHtml`. The optional `editor.quoteSender` names the quoted sender. Set `editor.quoteInBody: true` for a recognizable quote that cannot be separated safely. The card can then point to history in the body. Set `replyQuoteExpected: true` on the result of a write that requested a quote. Omit it on ordinary reads and explicit omissions.
+
+Adapters can implement `readReplyQuote({record, readBack})` to return `{quote, quoteHtml}` for the exact parent in the same account. Return `null` when that original contains no quotable body, and throw if identity cannot be verified. Cindy calls it when a requested quote is missing or the user chooses to add the original. Recovery follows the normal save and read-back path. Opening an existing draft preserves intentional omissions.
 
 ## Rich content and attachments
 

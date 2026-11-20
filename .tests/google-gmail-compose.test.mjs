@@ -72,8 +72,8 @@ function fixture(t, overrides = {}) {
     } } : name === '../vendor/gog/binaries.json' ? {} : name === 'node:fs' && overrides.workerFs ? overrides.workerFs : require(name) });
   runInContext(worker, ctx);
   ctx.initialize = () => ({ directory: workdir });
-  const leaf = (name, flags = []) => ({ name, flags: flags.map(name => ({ name, type: name === 'quote' ? 'bool' : 'string' })), subcommands: [] });
-  const composeFlags = ['attach', 'from', 'to', 'cc', 'bcc', 'subject', 'reply-to', 'body', 'body-html', 'body-file', 'reply-to-message-id', 'quote', 'raw-file', 'thread-id'];
+  const leaf = (name, flags = []) => ({ name, flags: flags.map(name => ({ name, type: ['quote', 'reply-all'].includes(name) ? 'bool' : 'string' })), subcommands: [] });
+  const composeFlags = ['attach', 'from', 'to', 'cc', 'bcc', 'subject', 'reply-to', 'body', 'body-html', 'body-file', 'reply-to-message-id', 'reply-all', 'quote', 'raw-file', 'thread-id'];
   ctx.schema = async () => ({ name: 'gmail', flags: [], subcommands: [leaf('send', composeFlags), leaf('search', ['page', 'max', 'all']),
     { name: 'drafts', flags: [], subcommands: ['create', 'update', 'reply', 'reply-all', 'forward', 'get', 'send', 'delete'].map(name => leaf(name, composeFlags)) }] });
   ctx.execute = async (...args) => {
@@ -273,6 +273,7 @@ test('inline draft creation builds one raw RFC822 message and keeps the thread i
     'thread-id': 'thread-original', 'in-reply-to': '<original@example.test>', references: '<original@example.test>', 'inline-images': [hash],
   } });
   assert.equal(result.ok, true);
+  assert.equal(result.result.readBack.replyQuoteExpected, true);
   assert.equal(f.httpCalls.length, 1);
   assert.equal(f.httpCalls[0].resource, 'drafts');
   assert.equal(f.httpCalls[0].init.method, 'POST');
@@ -508,6 +509,73 @@ test('pagination and all-results flags pass through without a ten-message cap', 
   assert.ok(f.calls[0][0].includes('--max=50'));
   assert.ok(f.calls[1][0].includes('--all=true'));
   assert.equal(f.calls.length, 2);
+});
+
+test('generic draft creation quotes the selected reply, honours opt-out and leaves a standalone message alone', async t => {
+  for (const [target, extra, expected] of [
+    [{ 'reply-to-message-id': 'original', 'reply-all': true }, {}, true],
+    [{ 'thread-id': 'thread' }, { to: 'exact@example.test' }, true],
+    [{ 'reply-to-message-id': 'original' }, { quote: false }, false],
+    [{}, { subject: 'Re: subject alone is not a reply' }, undefined],
+  ]) {
+    const f = fixture(t);
+    const result = await f.run({ command: ['drafts', 'create'], arguments: [], options: {
+      body: 'Approved', 'body-html': '<p>Approved</p>', ...target, ...extra } });
+    assert.equal(result.ok, true, result.message);
+    const argv = f.calls[0][0];
+    assert.deepEqual(copy(argv.filter(x => x.startsWith('--quote='))), expected === undefined ? [] : ['--quote=' + expected]);
+    for (const [flag, value] of Object.entries({ ...target, ...extra })) assert.ok(argv.includes('--' + flag + '=' + value));
+    assert.equal(!!result.result.readBack.replyQuoteExpected, expected === true);
+  }
+});
+
+test('body-only tool edits preserve the saved quote once, and an explicit removal survives later edits', async t => {
+  const initial = copy(payload);
+  const quote = '\r\n\r\nOn Monday, Sender wrote:\r\n> Original context';
+  const quoteHtml = '<br><br><div class="gmail_quote"><blockquote>Original <b>context</b></blockquote></div>';
+  initial.parts[0].parts[0].body.data = Buffer.from('Old' + quote).toString('base64url');
+  initial.parts[0].parts[1].body.data = Buffer.from('<p>Old</p>' + quoteHtml).toString('base64url');
+  const f = editableMailbox(t, undefined, initial);
+  const edit = options => f.run({ command: ['drafts','update'], arguments: ['draft-test'],
+    options: { to: 'recipient@example.test', subject: 'Re: Example', ...options } });
+  for (const replacement of [{ body: 'Edited' }, { body: 'Edited' + quote.replace(/\r\n/g, '\n'), 'body-html': '<p>Edited</p>' + quoteHtml }]) {
+    const r = await edit(replacement);
+    assert.equal(r.ok, true, r.message);
+    assert.equal(r.result.readBack.editor.body, 'Edited');
+    assert.equal(r.result.readBack.editor.quote, quote);
+    assert.equal(r.result.readBack.editor.quoteHtml, quoteHtml);
+    assert.doesNotMatch(r.result.readBack.editor.bodyHtml, /Original context/);
+  }
+  const removed = await edit({ quote: false });
+  assert.equal(removed.ok, true, removed.message);
+  assert.equal(removed.result.readBack.editor.body, 'Edited');
+  assert.equal(removed.result.readBack.editor.bodyHtml, '<p>Edited</p>');
+  assert.equal(removed.result.readBack.editor.quote, '');
+  assert.equal(removed.result.readBack.editor.quoteHtml, '');
+  for (const options of [{ body: 'No history', quote: false }, { body: 'Last edit' }]) {
+    const r = await edit(options);
+    assert.equal(r.ok, true, r.message);
+    assert.equal(r.result.readBack.editor.quote, '');
+    assert.equal(r.result.readBack.editor.quoteHtml, '');
+  }
+});
+
+test('editing a plain-only reply keeps both the answer and original in the first HTML alternative', async t => {
+  const quote = '\r\n\r\nSender wrote:\r\n> Use <notes> & keep this line';
+  for (const body of [undefined, 'Updated']) {
+    const original = copy(payload);
+    original.parts[0].parts[0].body.data = Buffer.from('My answer' + quote).toString('base64url');
+    original.parts[0].parts[1].body.data = '';
+    const f = editableMailbox(t, undefined, original);
+    const result = await f.run({ command: ['drafts', 'update'], arguments: ['draft-test'],
+      options: { to: 'updated@example.test', subject: 'Example', ...(body ? { body } : {}) } });
+    assert.equal(result.ok, true, result.message);
+    const saved = result.result.readBack;
+    assert.equal(saved.bodyText, (body || 'My answer') + quote);
+    assert.ok(saved.editor.bodyHtml.includes(body || 'My answer'));
+    assert.ok(saved.editor.quoteHtml.includes('Use &lt;notes&gt; &amp; keep this line'));
+    assert.equal(saved.bodyHtml, saved.editor.bodyHtml + saved.editor.quoteHtml);
+  }
 });
 
 test('reply defaults to all; explicit sender-only and plain HTML paragraph formatting are deterministic', async t => {
