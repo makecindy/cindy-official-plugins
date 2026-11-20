@@ -19,7 +19,7 @@ const { WIDE_CHAR, graphemes, isWideGrapheme, specialKey, dirName } = lib;
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 function key(overrides) {
-  return Object.assign({ key: '', ctrlKey: false, metaKey: false }, overrides);
+  return Object.assign({ key: '', ctrlKey: false, metaKey: false, shiftKey: false }, overrides);
 }
 
 test('wide characters occupy two cells, and combined emoji stay one unit', () => {
@@ -46,6 +46,10 @@ test('special keys are forwarded, editing keys stay in the draft', () => {
   assert.equal(specialKey('herdr', key({ key: 'c', ctrlKey: true })), 'ctrl+c');
   assert.equal(specialKey('tmux', key({ key: 'c', ctrlKey: true })), 'C-c');
   assert.equal(specialKey('tmux', key({ key: 'd', metaKey: true })), 'C-d');
+
+  // Shift+Tab 的 key 仍是 'Tab'，修饰必须保留。
+  assert.equal(specialKey('tmux', key({ key: 'Tab', shiftKey: true })), 'BTab');
+  assert.equal(specialKey('herdr', key({ key: 'Tab', shiftKey: true })), 'shift+tab');
 
   // 终端行为键转发，按键名按后端方言。
   assert.equal(specialKey('herdr', key({ key: 'ArrowUp' })), 'up');
@@ -327,8 +331,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   // 创建成功但 KV 没落盘：要带 id 报「已创建、需对账」，不能让人重试重复创建。
   assert.match(mainSource, /自动化已创建（id=/,
     'a create that could not be persisted must report the created id');
-  assert.match(mainSource, /cachedScheduleId = scheduleId;\s*\n\s*const saved = await writeKv/,
+  assert.match(mainSource, /cachedScheduleId = scheduleId;\s*\n\s*await persistScheduleId\(scheduleId\)/,
     'the cache must be updated before the KV write so events still find the schedule');
+  assert.match(mainSource, /await persistScheduleId\(scheduleId\);\s*\n\s*if \(isOurAutomation/,
+    'the replace path must persist through the same helper');
 
   // Node 传输层断开时，写路径要报「结果未知」。
   assert.match(mainSource, /function isPotentiallyMutating[\s\S]*?tmux\/send/,
@@ -387,6 +393,17 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a clamped line count must be reported as truncated');
   assert.match(workerSource3, /max_lines: 5000/,
     'the response must expose the line cap');
+
+  // herdr_read 的目标必须二选一（schema 层面）。
+  const manifest = JSON.parse(readFileSync(path.join(root, 'herdr', 'ghost.json'), 'utf8'));
+  const readTool = manifest.tools.find((tool) => tool.name === 'herdr_read');
+  assert.ok(readTool && readTool.parameters.oneOf, 'herdr_read must constrain its target');
+  assert.equal(readTool.parameters.oneOf.length, 2, 'oneOf must cover both single-target shapes');
+
+  // tmux 的命令分隔符必须拒绝（tmux(1) COMMANDS 用分号分隔命令）。
+  const workerSource4 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSource4, /if \(value\.indexOf\(';\'\) >= 0\) return false;/,
+    'semicolon keys must be rejected');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(

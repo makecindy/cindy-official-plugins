@@ -458,13 +458,7 @@ async function replaceUnboundSchedule(storedId, oldItem, name, args) {
   const scheduleId = body && body.data && body.data.id;
   if (!scheduleId) throw new Error(runtime.automationNoId);
   cachedScheduleId = scheduleId;
-  const saved = await writeKv({ [SCHEDULE_ID_KEY]: scheduleId });
-  if (saved[SCHEDULE_ID_KEY] !== scheduleId) {
-    throw new Error(
-      'HERDR_OUTCOME_UNKNOWN: 自动化已创建（id=' + scheduleId + '），但 id 没保存成功。'
-      + '请先核对自动化列表，不要直接重试重复创建。'
-    );
-  }
+  await persistScheduleId(scheduleId);
   if (isOurAutomation(oldItem, name, args)) {
     await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_delete', { id: storedId }));
   }
@@ -822,11 +816,16 @@ const tools = {
     // worker 已经记下 desired 并排了重连，Herdr 可用后会自己恢复。
     let subscribed = true;
     let subscriptionError = null;
+    let transportFailed = false;
     try {
       await enableSubscription(args.__callId);
     } catch (error) {
       subscribed = false;
       subscriptionError = error && error.message ? error.message : String(error);
+      // 传输层失败 = 请求根本没到 worker：worker 没有 desired、也不会重连，
+      // 这时主进程自己排重试，不能只承诺「worker 已排好重连」。
+      transportFailed = /与插件工作进程的连接中断/.test(subscriptionError);
+      if (transportFailed) scheduleSubscriptionRetry();
     }
     return {
       schedule_id: scheduleId,
@@ -835,8 +834,11 @@ const tools = {
       subscribed: subscribed,
       subscription_note: subscribed
         ? null
-        : '自动化已创建并保存，但当前没能打开事件订阅（' + subscriptionError
-          + '）。worker 已排好重连，Herdr 可用后会自动恢复订阅。'
+        : (transportFailed
+          ? '自动化已创建并保存，但订阅请求没送到插件工作进程（' + subscriptionError
+            + '）。已安排自动重试；也可以用 herdr_events 的 subscribe 立即重试。'
+          : '自动化已创建并保存，但当前没能打开事件订阅（' + subscriptionError
+            + '）。worker 已排好重连，Herdr 可用后会自动恢复订阅。')
     };
   },
 
@@ -1127,6 +1129,31 @@ async function ensureSubscription() {
   } catch (error) {
     void error;
   }
+}
+
+// 订阅请求没送到 worker 时（worker 崩了、stdio 断了），主进程自己重试，
+// 否则「已排好重连」是句空话。
+let subscriptionRetryTimer = null;
+let subscriptionRetries = 0;
+
+function scheduleSubscriptionRetry() {
+  if (subscriptionRetryTimer) return;
+  if (subscriptionPreference === false) return;   // 用户已退订就不再重试
+  subscriptionRetries += 1;
+  if (subscriptionRetries > 5) return;
+  subscriptionRetryTimer = setTimeout(async function () {
+    subscriptionRetryTimer = null;
+    if (subscriptionPreference === false) return;
+    try {
+      await nodeRequest('herdr/subscribe', {}, undefined, SUBSCRIBE_HOST_TIMEOUT_MS);
+      subscriptionPreference = true;
+      await persistSubscriptionPreference(true);
+      subscriptionRetries = 0;
+    } catch (error) {
+      scheduleSubscriptionRetry();
+    }
+  }, 15000 * subscriptionRetries);
+  if (subscriptionRetryTimer.unref) subscriptionRetryTimer.unref();
 }
 
 // 存储恢复后重新核对退订偏好；仍然读不到就继续排下一次（定时器不占着进程）。

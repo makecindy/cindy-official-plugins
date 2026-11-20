@@ -57,6 +57,11 @@
       if (String(event.key).length !== 1) return null;
       return (view === 'tmux' ? 'C-' : 'ctrl+') + String(event.key).toLowerCase();
     }
+    // 浏览器给 Shift+Tab 的 key 仍是 'Tab'：修饰要单独认，
+    // 否则反向补全既不发生也没被转发。
+    if (event.key === 'Tab' && event.shiftKey) {
+      return view === 'tmux' ? 'BTab' : 'shift+tab';
+    }
     if (!FORWARDABLE_KEYS[event.key]) return null;
     const table = view === 'tmux' ? TMUX_KEYS : HERDR_KEYS;
     return table[event.key] || null;
