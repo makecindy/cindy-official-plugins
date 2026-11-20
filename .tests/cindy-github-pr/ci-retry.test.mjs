@@ -6,7 +6,7 @@ import test from 'node:test';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
-import { runGate, stateFilePath, ciRetryFilePath, ciRetryDataDir } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
+import { parseArgs, runGate, stateFilePath, ciRetryFilePath, ciRetryDataDir } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
 
 const gate = fileURLToPath(new URL('../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs', import.meta.url));
 const url = 'https://github.com/example/repo/pull/42';
@@ -25,6 +25,82 @@ const nativeDirectorySync = (() => {
 })();
 const quotaTest = nativeDirectorySync.supported ? test
   : (name, fn) => test(name, { skip: `native directory sync unavailable: ${nativeDirectorySync.code}` }, fn);
+
+test('every parsed CI-only parameter requests evidence preservation, including missing mode and values', () => {
+  for (const flags of [
+    ['--ci-retry-id', prNodeId], ['--ci-retry-failure', 'diagnosis.json'],
+    ['--ci-retry-id'], ['--ci-retry-failure'],
+    ['--ci-retry-id', '', '--ci-retry-failure', ''],
+    ['--ci-retry-id', prNodeId, '--ci-retry-failure', 'diagnosis.json'],
+    ['--ci-retry-failure', 'diagnosis.json', '--ci-retry-id', prNodeId, '--ack'],
+  ]) {
+    const parsed = parseArgs([url, ...flags, '--state-dir', '/example/final-state']);
+    assert.equal(parsed.ciRetryRequested, true, JSON.stringify(flags));
+    assert.equal(parsed.stateDir, '/example/final-state');
+    assert.equal(parsed.ciRetryStatus, false, 'do not invent a status mode');
+    assert.equal(parsed.reserveCiRetry, undefined, 'do not invent a reservation');
+  }
+  assert.equal(parseArgs([url, '--last-result']).ciRetryRequested, false);
+});
+
+test('CI requests reject absent or empty observation directories without falling back or consuming flags', async t => {
+  for (const mode of ['--ci-retry-status', '--reserve-ci-retry']) {
+    const fx = fixture(t);
+    fs.mkdirSync(fx.stateDir);
+    const cached = stateFilePath(fx.stateDir, 'example/repo', 42) + '.ci-retry';
+    fs.writeFileSync(cached, '{original unknown receipt');
+    const flags = [mode, ...(mode === '--reserve-ci-retry' ? [oldHead] : []), '--ci-retry-id', prNodeId, '--ci-retry-failure', fx.diagnosis];
+    const env = { ...fx.env, CINDY_PR_STATE_DIR: fx.stateDir };
+    for (const directory of [[], ['--state-dir', ''], ['--state-dir', '   '], ['--state-dir']]) {
+      for (const argv of [[url, ...directory, ...flags], [url, ...flags, ...directory]]) {
+        let stderr = '', stdout = '';
+        assert.equal(await runGate(argv, {
+          env, out: s => { stdout += s; }, err: s => { stderr += s; },
+          runSnapshot: async () => { throw new Error('must not observe'); },
+          runProbe: async () => { throw new Error('must not probe'); },
+        }), 1);
+        assert.match(stderr, /requires an explicit non-empty --state-dir/);
+        assert.equal(stdout, '');
+        assert.equal(fs.existsSync(fx.retryDir), false);
+        assert.equal(fs.readFileSync(cached, 'utf8'), '{original unknown receipt');
+        assert.deepEqual(fs.readdirSync(fx.stateDir), [path.basename(cached)]);
+      }
+    }
+    assert.equal(parseArgs([url, '--state-dir', '--state-dir', fx.stateDir, ...flags], env).stateDir, fx.stateDir,
+      'a missing value cannot swallow a later explicit directory');
+  }
+});
+
+test('orphan CI parameters preserve before validation and never dispatch an implicit status or observer', async t => {
+  for (const flags of [
+    ['--ci-retry-id', prNodeId], ['--ci-retry-failure'],
+    ['--ci-retry-id', prNodeId, '--ci-retry-failure', 'diagnosis.json'],
+  ]) {
+    const fx = fixture(t);
+    fs.mkdirSync(fx.stateDir);
+    const cached = stateFilePath(fx.stateDir, 'example/repo', 42) + '.ci-retry';
+    const bytes = '{unknown original evidence';
+    fs.writeFileSync(cached, bytes);
+    const rejected = await fx.run(flags);
+    assert.equal(rejected.code, 1);
+    assert.equal(rejected.stdout, '');
+    if (nativeDirectorySync.supported) {
+      assert.equal(fs.readFileSync(path.join(fx.retryDir, path.basename(cached)), 'utf8'), bytes);
+      assert.match(rejected.stderr, /requires --ci-retry-|requires exactly one mode|expects|separate command/);
+    } else {
+      assert.match(rejected.stderr, /durability could not be confirmed/);
+      assert.equal(fs.existsSync(fx.retryDir), false);
+    }
+    assert.equal(fs.readFileSync(cached, 'utf8'), bytes);
+    assert.deepEqual(fs.readdirSync(fx.stateDir), [path.basename(cached)]);
+  }
+  const fx = fixture(t);
+  const rejected = await fx.run(['--ci-retry-id', prNodeId, '--ci-retry-failure', fx.diagnosis]);
+  assert.equal(rejected.code, 1);
+  assert.match(rejected.stderr, /requires exactly one mode/);
+  assert.equal(fs.existsSync(fx.stateDir), false);
+  assert.equal(fs.existsSync(fx.retryDir), false);
+});
 
 test('unsupported native directory sync refuses status, reservation and raw migration without quota success', {
   skip: nativeDirectorySync.supported ? 'this host supports native directory sync' : false,
@@ -376,9 +452,12 @@ quotaTest('legacy evidence survives invalid current diagnoses, cache cleanup and
 });
 
 quotaTest('legacy evidence survives rejected budget arguments before cache cleanup and restart', async t => {
-  for (const mode of ['status', 'reserve']) {
-    const command = mode === 'status' ? ['--ci-retry-status'] : ['--reserve-ci-retry', oldHead];
+  for (const mode of ['status', 'reserve', 'missing mode']) {
+    const command = mode === 'status' ? ['--ci-retry-status'] : mode === 'reserve' ? ['--reserve-ci-retry', oldHead] : [];
     const cases = [
+      ...(mode === 'missing mode' ? [
+        ['complete identity and diagnosis', (fx) => ['--ci-retry-id', prNodeId, '--ci-retry-failure', fx.diagnosis]],
+      ] : []),
       ['omitted failure', (fx) => [...command, '--ci-retry-id', prNodeId]],
       ['empty failure at end', (fx) => [...command, '--ci-retry-id', prNodeId, '--ci-retry-failure']],
       ['empty failure before directory', (fx) => [...command, '--ci-retry-id', prNodeId, '--ci-retry-failure', '--state-dir', fx.stateDir]],

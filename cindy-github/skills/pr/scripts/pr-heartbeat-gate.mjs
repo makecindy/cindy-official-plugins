@@ -298,7 +298,8 @@ function usage(err = (text) => process.stderr.write(text)) {
     'Usage: node pr-heartbeat-gate.mjs <PR_URL|number> [--repo owner/name] ' +
       '[--ack | --resume <reason> | --wait <plan.json>] [--defer <minutes>] [--last-result] [--ci-retry-status | --reserve-ci-retry <SHA>] [--ci-retry-id <PR-node-ID>] [--ci-retry-failure <diagnosis.json>] [--snapshot <path>] [--state-dir <dir>] ' +
       '[--max-snapshot-failures <n>] [--max-pass-attempts <n>] ' +
-      '[--retry-backoff-minutes <n>] [--max-silence-hours <n>] [--json]\n',
+      '[--retry-backoff-minutes <n>] [--max-silence-hours <n>] [--json]\n' +
+      'CI retry commands require an explicit non-empty --state-dir <dir>; no environment/default fallback.\n',
   );
 }
 
@@ -318,6 +319,7 @@ export function parseArgs(argv, env = process.env) {
   let ciRetryFailure;
   let snapshot = env.PR_SNAPSHOT_SCRIPT?.trim() || DEFAULT_SNAPSHOT;
   let stateDir = env.CINDY_PR_STATE_DIR?.trim() || '';
+  let stateDirProvided = false;
   let maxSnapshotFailures = DEFAULT_MAX_SNAPSHOT_FAILURES;
   let maxPassAttempts = DEFAULT_MAX_PASS_ATTEMPTS;
   let retryBackoffMinutes = DEFAULT_RETRY_BACKOFF_MINUTES;
@@ -392,7 +394,8 @@ export function parseArgs(argv, env = process.env) {
       continue;
     }
     if (arg === '--state-dir') {
-      stateDir = argv[++i];
+      stateDirProvided = true;
+      stateDir = argv[i + 1]?.startsWith('--') ? '' : (argv[++i] ?? '');
       continue;
     }
     if (arg === '--wait') {
@@ -461,6 +464,12 @@ export function parseArgs(argv, env = process.env) {
 
   if (!spec) throw new Error('missing PR url or number');
   const target = parseTarget(spec, repo);
+  const ciRetryRequested = ciRetryStatus || reserveCiRetry !== undefined || ciRetryId !== undefined || ciRetryFailure !== undefined;
+  // An unknown observation directory cannot identify the history to preserve.
+  // Do not turn a broken custom-directory argument into fresh default quota.
+  if (ciRetryRequested && (!stateDirProvided || !stateDir.trim())) {
+    throw new Error('CI retry status/reservation requires an explicit non-empty --state-dir for the current follow-up; do not fall back to another cache');
+  }
   return {
     help: false,
     spec,
@@ -472,7 +481,7 @@ export function parseArgs(argv, env = process.env) {
     ack,
     suggest,
     lastResult,
-    ciRetryRequested: ciRetryStatus || reserveCiRetry !== undefined,
+    ciRetryRequested,
     ciRetryStatus,
     reserveCiRetry,
     ciRetryId,
@@ -496,6 +505,9 @@ export function parseArgs(argv, env = process.env) {
 function validateArgs(args) {
   const { ciRetryRequested, ciRetryStatus, reserveCiRetry, ciRetryId, ciRetryFailure,
     ack, suggest, lastResult, waitFile, resumeReason, deferMinutes } = args;
+  if (ciRetryRequested && !ciRetryStatus && reserveCiRetry === undefined) {
+    throw new Error('CI retry status/reservation requires exactly one mode: --ci-retry-status or --reserve-ci-retry');
+  }
   if (ciRetryId !== undefined && !validCiRetryId(ciRetryId)) {
     throw new Error('--ci-retry-id expects the immutable node_id read from the current GitHub PR');
   }

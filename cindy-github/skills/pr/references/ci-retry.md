@@ -354,6 +354,15 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    count toward the two slots, even when querying another diagnosis. Migration
    retains the originals and never overwrites durable evidence. It preserves old
    evidence before validating this parsed budget request or reading its diagnosis.
+   Any recognized CI-only parameter (status, reservation, identity or diagnosis),
+   including an empty value or identity/diagnosis without a mode, selects this
+   preservation path. Exactly one explicit status/reservation mode is required;
+   omitted modes never fall through to ordinary observation or implicit status.
+   Budget commands require an explicit, non-empty `--state-dir` for this
+   follow-up. If it is absent/empty, its history cannot be located reliably:
+   reject before storage access, with no environment/default-cache fallback or
+   claim of successful preservation. A missing value never consumes the next
+   option. Ordinary observation keeps its existing environment/default path.
    A missing diagnosis option/value, missing/invalid ID or source SHA, conflicting
    budget mode, or missing/damaged/invalid diagnosis cannot leave old outcomes
    vulnerable to cache cleanup. The existing entry point uses one completed
