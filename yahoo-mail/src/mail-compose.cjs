@@ -280,6 +280,7 @@ function createMailCompose(env) {
         cc: addressList(headerAddresses(parsed, 'cc')),
         bcc: addressList(headerAddresses(parsed, 'bcc')),
         subject: parsed.subject || '',
+        ...(DRAFT_ID_RE.test(parsed.inReplyTo || '') ? { 'in-reply-to': parsed.inReplyTo } : {}),
       },
       editor: draftEditor(bodyText, bodyHtml, supported),
       attachments: snapshotAttachments(parsed),
