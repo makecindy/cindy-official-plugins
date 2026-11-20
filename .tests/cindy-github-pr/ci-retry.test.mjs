@@ -76,7 +76,7 @@ test('recovery guide passes dynamic refs, remotes and paths as literal argument 
       verifyArgs: ['verify-commit', newHead],
       originalSignatureArgs: ['show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', oldHead],
       signatureArgs: ['show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', newHead],
-      pushArgs: ['push', '--force-with-lease=' + exactRef + ':' + oldHead, '--no-follow-tags', '--', values.verifiedRemote, values.newSha + ':' + exactRef],
+      pushArgs: ['push', '--force-with-lease=' + exactRef + ':' + oldHead, '--no-follow-tags', '--recurse-submodules=no', '--', values.verifiedRemote, values.newSha + ':' + exactRef],
     };
     // Git accepts these refs; its format check cannot make a shell interpolation safe.
     execFileSync('git', plan.checkRefArgs, { stdio: 'pipe' });
@@ -598,6 +598,78 @@ test('recovery push never follows annotated tags, including when the branch leas
     assert.equal(git(work, ['config', '--get', 'push.followTags']), 'true', 'do not change user/repository defaults');
     assert.equal(git(work, ['tag', '--list']).split('\n').length, 2, 'keep local tags');
   });
+});
+
+// A parent lease protects neither a child repository nor its earlier recursive push.
+// Use real Git and separate disposable remotes; never call a live GitHub recovery.
+// A changed Gitlink makes the child a candidate for transfer: this tests the push
+// argument boundary, not the separate unchanged-tree/CI-recovery eligibility gate.
+test('recovery push limits writes to the parent ref despite inherited submodule recursion', async t => {
+  for (const mode of ['on-demand', 'only', 'check']) for (const stale of [false, true]) {
+    await t.test(mode + (stale ? ': stale lease' : ': successful parent push'), t => {
+      const fx = fixture(t), remote = path.join(fx.root, 'parent.git'), work = path.join(fx.root, 'parent');
+      const childRemote = path.join(fx.root, 'child.git'), seed = path.join(fx.root, 'child-seed');
+      // No access to or mutation of the user's global Git configuration.
+      const globalConfig = path.join(fx.root, 'global-config');
+      fs.writeFileSync(globalConfig, '[push]\n\trecurseSubmodules = ' + mode + '\n');
+      const env = { ...process.env, GIT_CONFIG_GLOBAL: globalConfig, GIT_CONFIG_NOSYSTEM: '1' };
+      const git = (cwd, args, extra = {}) => execFileSync('git', args, { cwd,
+        env: { ...env, ...extra }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+      const configure = cwd => {
+        for (const [key, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'],
+          ['commit.gpgsign', 'false'], ['tag.gpgsign', 'false']]) git(cwd, ['config', key, value]);
+      };
+      const pushSetup = (cwd, sha) => git(cwd, ['push', '--no-follow-tags', '--recurse-submodules=no', '--', 'origin', sha + ':refs/heads/main']);
+      const refs = cwd => git(cwd, ['for-each-ref', '--format=%(refname) %(objectname)']);
+      git(fx.root, ['init', '--bare', '-b', 'main', childRemote]);
+      git(fx.root, ['clone', childRemote, seed]); configure(seed);
+      fs.writeFileSync(path.join(seed, 'lib.txt'), 'published child\n');
+      git(seed, ['add', 'lib.txt']); git(seed, ['commit', '-s', '-m', 'published child']);
+      const childOriginal = git(seed, ['rev-parse', 'HEAD']); pushSetup(seed, childOriginal);
+      git(fx.root, ['init', '--bare', '-b', 'main', remote]);
+      git(fx.root, ['clone', remote, work]); configure(work);
+      git(work, ['-c', 'protocol.file.allow=always', 'submodule', 'add', childRemote, 'lib']);
+      const child = path.join(work, 'lib'); configure(child);
+      git(work, ['add', '.gitmodules', 'lib']);
+      git(work, ['commit', '-s', '-m', 'original']);
+      const original = git(work, ['rev-parse', 'HEAD']); pushSetup(work, original);
+      fs.writeFileSync(path.join(child, 'lib.txt'), 'unpublished child\n');
+      git(child, ['add', 'lib.txt']); git(child, ['commit', '-s', '-m', 'must remain local']);
+      const childLocal = git(child, ['rev-parse', 'HEAD']);
+      git(work, ['add', 'lib']);
+      git(work, ['commit', '-s', '-m', 'verified transport object']);
+      git(work, ['tag', '-a', 'unpublished', '-m', 'keep tag local']);
+      git(work, ['config', 'push.followTags', 'true']);
+      git(work, ['config', 'submodule.recurse', 'true']);
+      if (stale) git(work, ['config', 'push.recurseSubmodules', mode]);
+      git(work, ['config', 'push.default', 'matching']);
+      git(work, ['config', 'remote.origin.push', 'refs/heads/unrelated:refs/heads/unrelated']);
+      git(work, ['branch', 'unrelated']);
+      const verified = git(work, ['rev-parse', 'HEAD']);
+      if (stale) {
+        git(work, ['checkout', '--no-recurse-submodules', '-b', 'independent', original]);
+        fs.writeFileSync(path.join(work, 'other.txt'), 'independent remote change\n');
+        git(work, ['add', 'other.txt']); git(work, ['commit', '-s', '-m', 'independent']);
+        pushSetup(work, 'HEAD');
+      }
+      const beforeParent = refs(remote), beforeChild = refs(childRemote);
+      const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin',
+        originalRemoteSha: original, newSha: verified, gatePath: gate, prUrl: url,
+        prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+      // Gather both inventories even on failure: a parent error must not hide child writes.
+      const result = spawnSync('git', plan.pushArgs, { cwd: work, env, encoding: 'utf8' });
+      assert.equal(refs(childRemote), beforeChild, 'child remote must stay untouched even if parent lease fails');
+      assert.equal(result.status, stale ? 1 : 0, result.stderr);
+      if (stale) assert.match(result.stderr, /stale info|rejected/);
+      assert.equal(refs(remote), stale ? beforeParent : 'refs/heads/main ' + verified);
+      assert.equal(git(childRemote, ['rev-parse', 'refs/heads/main']), childOriginal);
+      assert.equal(git(child, ['rev-parse', 'HEAD']), childLocal, 'keep unpublished child work');
+      assert.equal(git(work, ['config', '--get', 'push.recurseSubmodules']), mode);
+      assert.equal(git(work, ['config', '--get', 'submodule.recurse']), 'true');
+      assert.equal(git(work, ['config', '--get', 'push.followTags']), 'true');
+      assert.equal(git(work, ['tag', '--list']), 'unpublished');
+    });
+  }
 });
 
 test('recovery binds signature identity even when two different SSH keys both verify', async t => {
