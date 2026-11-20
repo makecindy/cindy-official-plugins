@@ -712,8 +712,12 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
 
   // 首段结果未知也冻结；恢复用钉住的目标；Herdr 回车是小写。
   const panelSrcResume = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
-  assert.match(panelSrcResume, /if \(\/HERDR_OUTCOME_UNKNOWN\/\.test\(detail\)\) \{\s*pendingEnterOnly = \{ scope: scope, text: text \};/,
-    'an unknown first-stage outcome must hold the scope too');
+  assert.match(panelSrcResume, /scopeHolds\[scope\] = 'unknown';/,
+    'an unknown first-stage outcome must hold the scope as unknown');
+  assert.ok(!/HERDR_OUTCOME_UNKNOWN[\s\S]{0,200}?pendingEnterOnly = \{ scope: scope, text: text \};\s*\n\s*scopeHolds/.test(panelSrcResume),
+    'an unknown first stage must not claim the text is in the terminal');
+  assert.match(panelSrcResume, /if \(scopeHolds\[scope\] === 'unknown'\) scopeHolds\[scope\] = false;/,
+    'an unknown hold must let the checked resend through as a full submit');
   assert.match(panelSrcResume, /sendEnterOnly\(scope, pinnedView, target, paneId\)/,
     'the enter-only resume must use the pinned target');
   assert.match(panelSrcResume, /keys: \['enter'\]/,

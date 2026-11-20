@@ -560,6 +560,8 @@ function submitLine() {
   // 和同一文本的恢复必须放行，否则永远无法补发。草稿放回输入框。
   const isResume = !text
     || (pendingEnterOnly && pendingEnterOnly.scope === scope && pendingEnterOnly.text === text);
+  // 'unknown' 冻结：失败时已提示先核对终端，这次提交按完整重发放行。
+  if (scopeHolds[scope] === 'unknown') scopeHolds[scope] = false;
   if (scopeHolds[scope] && !isResume) {
     if (currentScope() === scope) {
       const box = $('#term-input');
@@ -619,7 +621,7 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
         // 不能断言。恢复草稿并记住这次粘贴，下一次同一文本只补回车；
         // 用户也可以先在终端里核对内容再决定。
         pendingEnterOnly = { scope: scope, text: text };
-        scopeHolds[scope] = true;
+        scopeHolds[scope] = 'enter';
         if (currentScope() === scope && !field.value) field.value = text;
         renderOutput('文本已输入到终端，但回车没有确认（'
           + String(error && error.message ? error.message : T.sendFailed)
@@ -640,8 +642,12 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
     // 确定失败才只是恢复草稿。只在仍选中同一目标时回填。
     const detail = String(error && error.message ? error.message : error);
     if (/HERDR_OUTCOME_UNKNOWN/.test(detail)) {
-      pendingEnterOnly = { scope: scope, text: text };
-      scopeHolds[scope] = true;
+      // 结果未知 ≠ 文字已在终端里：不能建「只补回车」的记录
+      // （否则核对后发现没输入，重发同一段文字却只发了 Enter）。
+      // 记「终端可能有内容」供空框回车补发，并冻结为 unknown：
+      // 用户核对后再提交会按完整重发放行（见 submitLine 的闸门）。
+      terminalHasContent = { scope: scope };
+      scopeHolds[scope] = 'unknown';
     }
     if (currentScope() === scope && !field.value) field.value = text;
     renderOutput(error.message || T.sendFailed);
