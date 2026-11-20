@@ -808,6 +808,51 @@ remain unverified. Comment 7005560347 still requires actual recovery evidence
 and a review of the then-current head; green old-head CI is not acceptance and
 must not be inherited by this new head.
 
+## Review round 27 — 2026-11-20 (source 1.5.35, not installed)
+
+Two confirmed families were consolidated without new persistence, locks, queues,
+Git execution or retry machinery. Default-off permission, fixed two-slot budget,
+approval/queue protection and the existing source follower remain unchanged.
+
+| Event / invariant | Result |
+| --- | --- |
+| Another task owns follow-up; retry consent is On | Reference card directly offers Off with the existing shared-scope label |
+| Reference receives On or a follow-management action | Existing ownership gate still refuses it |
+| A stale Off is clicked | Same existing queued writer sets false, never toggles; owner record is untouched |
+| KV read fails / write result is uncertain | Unknown plus read-only refresh, or actual read-back; no blind write retry or handoff |
+| Reference state changes / ownership ends | One render result supplies its HTML and declared height; local full-panel open state is retained |
+| Original key A, automatic signer B; both trusted | Resolve original format/full fingerprint/principal and effective signer before quota; mismatch/unknown stops |
+| Signer changes before amend / replacement verifies with B | Stop before amend, or leave the new object unpushed; full verified identity must match A |
+| Crash loses original signature identity | Existing task record is insufficient; report unknown, never infer equality or repush |
+
+Off is handled for ordinary and reference cards by the same early action path,
+inside the existing PR queue and after card/session checks. Other reference
+controls remain read-only. The same existing final settings read-back is used.
+No global permission was changed in this task. Four-language labels are reused;
+no new localization contract is introduced. The signing guide binds metadata
+reads to exact original/new objects; matching author/email or two successful
+verifications is not proof of matching provenance. This is an Agent workflow,
+not mechanical key/configuration or remote-race enforcement.
+
+New checks failed on 695eb64 before the fix (missing reference revocation/unknown
+content and missing original/replacement signature identity reads). Final focused
+checks passed **11 tests in 5.22 seconds**. The disposable SSH fixture creates
+and cleans two test keys under its own temporary directory: original A and
+replacement B both verify, but their full fingerprints differ; same-key A
+matches. No real credential, Git configuration, permission or quota was changed.
+This is local Git evidence, not eligible 403 recovery. OpenPGP/X.509 identity
+resolution and all live signed/unsigned recovery acceptance remain unverified.
+
+Required four suites plus plugin: **418 passed, 19 Windows platform skips, zero
+failures in 118.9 seconds**. Manifest and in-memory official archive/content checks
+passed: staged tree `98e89ec67e1e88f8b976a2427f4070be113bab4f`, 32 files,
+239292 compressed bytes, 665398 expanded bytes, all files match Git blobs;
+no package artifact retained. Source 1.5.35 exceeds main 1.5.33. No plugin was
+installed; last tested local runtime remains 97d540e / 1.5.19. Reference-card
+revocation/unknown display/height, current UI/read order, inherited integrations
+and genuine denied-rerun recovery still require real runtime evidence and then
+maintainer review. No merge/queue/auto-merge/publication or blocked cleanup retry.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected

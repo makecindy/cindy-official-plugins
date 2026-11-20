@@ -87,7 +87,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.34');
+  assert.equal(manifest.version, '1.5.35');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -2013,7 +2013,7 @@ test('unknown settings use a compact declared height and restore it on refresh f
   }
 });
 
-test('read-only reference cards omit open settings height and restore it when ownership ends', async (t) => {
+test('reference cards reserve only visible revocation or unknown content height and restore open settings', async (t) => {
   for (const unreadable of [false, true]) {
     await t.test(unreadable ? 'unknown settings' : 'known settings', async () => {
       let fail = false, writes = 0;
@@ -2032,11 +2032,13 @@ test('read-only reference cards omit open settings height and restore it when ow
       fail = unreadable;
       const refresh = await runtime.tool({ card_id: viewer.callId });
       assert.equal(refresh.reply.result.disposition, 'existing_task');
-      assert.equal(runtime.lastCard(viewer.callId).height, collapsed, 'reference renderer has no settings panel');
-      assert.doesNotMatch(runtime.lastCard(viewer.callId).html, /data-ghost-action="(?:prset:|prui:settings)/);
+      const referenceHeight = collapsed + (unreadable ? 120 : 0);
+      assert.equal(runtime.lastCard(viewer.callId).height, referenceHeight, 'no full settings panel on references');
+      assert.doesNotMatch(runtime.lastCard(viewer.callId).html, /data-ghost-action="(?:prset:|prui:settings")/);
+      if (unreadable) assert.match(runtime.lastCard(viewer.callId).html, /prui:settingsRefresh/);
       assert.equal(JSON.parse(runtime.files.get(`pr-cards/${viewer.callId}.json`)).settingsOpen, true);
       await runtime.click(viewer.callId, 'prui:settingsRefresh');
-      assert.equal(runtime.lastCard(viewer.callId).height, collapsed);
+      assert.equal(runtime.lastCard(viewer.callId).height, referenceHeight);
       await runtime.tool({ card_id: owner.callId, following: false, session_context: { session_id: 'other-task' } });
       await runtime.tool({ card_id: viewer.callId });
       const restored = runtime.lastCard(viewer.callId).height;
@@ -2046,6 +2048,67 @@ test('read-only reference cards omit open settings height and restore it when ow
       assert.equal(writes, 0);
       assert.equal(runtime.agentRuns.length, 0);
     });
+  }
+});
+
+test('a reference card revokes global retry consent without changing follow ownership', async () => {
+  let kv = { unrelated: { keep: true }, prCard: { ciRetryRepush: true } }, writes = 0;
+  const runtime = createPrRuntime({ github: prGraphql(), preferences: async (_, init) => {
+    if (init.method === 'PUT') { writes++; kv = JSON.parse(init.body); }
+    return { ok: true, json: async () => structuredClone(kv) };
+  } });
+  const owner = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true,
+    session_context: { session_id: 'other-task' } });
+  const ownerPath = `pr-cards/${owner.callId}.json`;
+  const ownerBefore = runtime.files.get(ownerPath);
+  const viewer = await runtime.tool({ repo: 'octo/repo', pr: 42 });
+  assert.equal(viewer.reply.result.disposition, 'existing_task');
+  assert.match(runtime.lastCard(viewer.callId).html, /prset:ciRetry:off" data-ghost-toggle="on"/);
+  assert.doesNotMatch(runtime.lastCard(viewer.callId).html, /prset:ciRetry:on|prset:follow|pr:stop"/);
+  const onHeight = runtime.lastCard(viewer.callId).height;
+  await runtime.click(viewer.callId, 'prset:ciRetry:on');
+  assert.equal(writes, 0, 'reference cannot grant permission');
+  await runtime.click(viewer.callId, 'prset:ciRetry:off');
+  assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, false);
+  assert.deepEqual(kv.unrelated, { keep: true });
+  assert.ok(runtime.lastCard(viewer.callId).height < onHeight);
+  kv.prCard.ciRetryRepush = true; // Another card changed the shared value; stale Off still means Off.
+  await runtime.click(viewer.callId, 'prset:ciRetry:off');
+  assert.equal(kv.prCard.ciRetryRepush, undefined);
+  assert.equal(writes, 2);
+  assert.equal(runtime.files.get(ownerPath), ownerBefore);
+  assert.equal(runtime.agentRuns.length, 0);
+});
+
+test('reference revocation reconciles uncertain writes and unknown reads without replay or handoff', async () => {
+  for (const unavailable of [false, true]) {
+    let kv = { prCard: { ciRetryRepush: true } }, writes = 0, failRead = false;
+    const runtime = createPrRuntime({ github: prGraphql(), preferences: async (_, init) => {
+      if (init.method === 'PUT') {
+        writes++; kv = JSON.parse(init.body); failRead = unavailable;
+        throw new Error('write receipt lost');
+      }
+      return failRead ? { ok: false } : { ok: true, json: async () => structuredClone(kv) };
+    } });
+    const owner = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true,
+      session_context: { session_id: 'other-task' } });
+    const before = runtime.files.get(`pr-cards/${owner.callId}.json`);
+    const viewer = await runtime.tool({ repo: 'octo/repo', pr: 42 });
+    await runtime.click(viewer.callId, 'prset:ciRetry:off');
+    const html = runtime.lastCard(viewer.callId).html;
+    assert.ok(visibleText(html).includes(zhCopy.prSettingFailed));
+    assert.doesNotMatch(html, /prset:ciRetry:on|prset:ciRetry:off/);
+    if (unavailable) {
+      assert.ok(visibleText(html).includes(zhCopy.prSettingsUnknown));
+      await runtime.click(viewer.callId, 'prset:ciRetry:off');
+      assert.equal(writes, 1, 'unreadable KV cannot be overwritten by another Off');
+    }
+    failRead = false;
+    await runtime.click(viewer.callId, 'prui:settingsRefresh');
+    assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, false);
+    assert.equal(writes, 1);
+    assert.equal(runtime.files.get(`pr-cards/${owner.callId}.json`), before);
+    assert.equal(runtime.agentRuns.length, 0);
   }
 });
 

@@ -51,6 +51,8 @@ const reserveArgs = [gatePath, prUrl, '--state-dir', observationStateDir,
 const statusArgs = [gatePath, prUrl, '--state-dir', observationStateDir, '--ci-retry-status',
   '--ci-retry-id', prNodeId, '--ci-retry-failure', diagnosisPath, '--json'];
 const verifyArgs = ['verify-commit', newSha];
+const originalSignatureArgs = ['show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', originalRemoteSha];
+const signatureArgs = ['show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', newSha];
 const pushArgs = ['push', '--force-with-lease=' + exactRef + ':' + originalRemoteSha,
   '--', verifiedRemote, newSha + ':' + exactRef];
 ```
@@ -175,9 +177,20 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    Inspect `git cat-file commit HEAD` for a `gpgsig` / `gpgsig-sha256` header.
    Before consuming budget, a signed head requires its original signature to
    verify (`git verify-commit HEAD`) and the existing effective signing setup
-   to sign the replacement noninteractively with an authorized identity.
+   to sign the replacement noninteractively with the same signature identity.
+   Record the verified original format, full signing-key fingerprint and signer
+   principal (`%GF` and `%GS`, plus `%GP` for formats with a primary key) using
+   `originalSignatureArgs` bound to that exact original object. Verification
+   must establish the original payload's format, not infer it from today's config.
+   Verification success alone is insufficient: two trusted keys can both verify.
    Require `git config --type=bool --get commit.gpgsign` to be `true` and inspect
-   the effective signer/key configuration and availability. An original created
+   the effective signer/key configuration and availability. Resolve the existing
+   automatic signer's actual full fingerprint and principal, not just its key
+   alias, email or file path, and require the same signature identity **before
+   consuming budget**. An original made with one-off key A while automatic
+   signing selects trusted key B is ineligible even when both signatures verify.
+   If resolution is ambiguous or unavailable, stop without signing a probe,
+   changing configuration or choosing a replacement key. An original created
    only with a one-off `git commit -S`, without effective automatic signing,
    is ineligible. Unknown readiness, unavailable keys, required user interaction
    or failed original verification stops recovery before reserve/amend; do not
@@ -235,7 +248,9 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    recovery; migration never grants two fresh attempts on top of old history.
 4. Recheck eligibility 6 (no approval, queue or auto-merge; all states known),
    the PR is open, the preference is enabled, and local/index/remote
-   facts still match before `git commit --amend --no-edit`. Preserve the code
+   facts still match before `git commit --amend --no-edit`. For a signed head,
+   recheck that the effective automatic signer still resolves to the recorded
+   signature identity; a changed or unknown signer stops the amend. Preserve the code
    tree, parents, author, commit intent and existing trailers; never use
    `--reset-author`, `--allow-empty`, identity overrides or disable hooks. Follow
    repository DCO rules: preserve matching sign-offs; add `-s` only with the
@@ -244,8 +259,12 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    unchanged tree, parents and author; compare the message (only required DCO
    additions may differ). If hooks changed the tree or SHA is unchanged, stop.
    If the old head was signed, require a signature header on the new commit and
-   successful `git` verification with `verifyArgs` and the authorized signer before
-   any push. A missing, invalid or unknown signature means leave it unpushed
+   successful `git` verification with `verifyArgs`, then read `signatureArgs`
+   for the exact `newSha`. Require the same format, full signing-key fingerprint,
+   signer principal and applicable primary fingerprint as the recorded original
+   signature identity before any push. A valid signature from another trusted
+   key still fails this equality check; never infer equality from author/email,
+   a valid status or GitHub's badge. A missing, invalid, changed or unknown signature means leave it unpushed
    and report the result; never discard the old provenance silently. Local
    verification is not evidence that GitHub's Verified badge was preserved.
 5. Read live `pr_follow_settings` immediately before pushing, and refresh PR
@@ -273,6 +292,9 @@ GitHub Actions/check suites for that SHA and this PR event; a new SHA alone does
 not prove CI started (fork workflow rules/path filters may prevent it). Record
 old/new SHA, stable diagnosis, failed run and permission-denied evidence, consumed budget, push
 outcome and observed CI run/check identifiers in this task's follow-up record.
+For a signed recovery, include the original/replacement signature identities
+in that same record; do not add a second receipt store. Missing original identity
+after a crash means unknown provenance, never permission to infer equality or repush.
 Read back review/queue state too. These checks are not an atomic GitHub lock;
 if a concurrent change or uncertain push affected approvals or queue state,
 report the actual/unknown side effect and stop, without trying to restore,

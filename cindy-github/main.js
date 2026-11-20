@@ -3261,7 +3261,19 @@ function prStatsParts(card) {
   return parts;
 }
 
-function renderPrReference(card, owner) {
+function prReferenceRetry(settings) {
+  if (settings.unreadable) return {
+    html: '<div role="status" style="padding:8px;color:var(--text-secondary)">' + prEsc(t('prSettingsUnknown')) + '</div>' +
+      prPillButton('prui:settingsRefresh', t('prRefreshSettings')),
+    height: 120,
+  };
+  return settings.ciRetryRepush ? {
+    html: prSettingRow('prset:ciRetry:off', t('prCiRetry'), t('prCiRetryHint'), true, t('prCiRetryScope')),
+    height: 100,
+  } : { html: '', height: 0 };
+}
+
+function renderPrReference(card, owner, settings) {
   owner = owner || card;
   var pr = card.pr;
   var title = pr ? '#' + pr.number + ' ' + (pr.title || card.repo) : t('prAskTitle');
@@ -3277,7 +3289,7 @@ function renderPrReference(card, owner) {
     prEsc(t('prOpenTask')) + ' ↗</button>';
   return '<style>' + PR_BASE_CSS + '</style><div data-ghost-width="full" style="overflow:hidden;border:1px solid var(--border-default);border-radius:12px;' +
     'background:var(--surface-elevated);color:var(--text-primary);font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5">' +
-    prHeader(tile, prEsc(title), [prEsc(card.repo), prEsc(owner.pending === 'follow' ? t('prOtherStarting') : owner.pending === 'stop' ? t('prOtherStopping') : t('prReadOnly'))], pr) + prFooter(status, taskLink, '', '') + '</div>';
+    prHeader(tile, prEsc(title), [prEsc(card.repo), prEsc(owner.pending === 'follow' ? t('prOtherStarting') : owner.pending === 'stop' ? t('prOtherStopping') : t('prReadOnly'))], pr) + prFooter(status, taskLink, '', '') + prReferenceRetry(settings).html + '</div>';
 }
 
 function prHasSettings(card) {
@@ -3358,6 +3370,7 @@ function renderPrCard(card, settings) {
 function prCardHeight(card, settings, reference) {
   var h = 120;
   if (card.note) h += 22;
+  if (reference) h += prReferenceRetry(settings).height;
   if (!reference && card.settingsOpen && prHasSettings(card)) h += settings && settings.unreadable ? 120 : 400;
   return Math.min(900, h);
 }
@@ -3374,7 +3387,7 @@ async function deliverPrCard(card, settings, sourceCallId, other) {
     // Agent 用 pr_card 更新结果时换回 done。
     type: 'card-update', callId: prAnchor(card), v: 2,
     state: !other && (card.stage === 'publishing' || card.pending) ? 'working' : 'done',
-    html: other ? renderPrReference(card, other) : renderPrCard(card, settings), height: prCardHeight(card, settings, other),
+    html: other ? renderPrReference(card, other, settings) : renderPrCard(card, settings), height: prCardHeight(card, settings, other),
   };
   // 后续工具调用改的是之前那张卡片:带上当前调用作凭证,宿主才会重开旧卡片。
   if (sourceCallId) msg.sourceCallId = sourceCallId;
@@ -3895,6 +3908,17 @@ async function prCardAction(msg) {
   if (card.sessionId && card.sessionId !== msg.sessionId) return;
   var action = String(msg.actionId || '');
   var settings = await readPrSettings();
+  // Revoking this computer-wide permission never needs ownership of a PR follow-up.
+  // Use the same queued write and read-back as ordinary cards; a stale Off stays Off.
+  if (action === 'prset:ciRetry:off') {
+    card.note = null;
+    try { await writePrSettings(function (next) { next.ciRetryRepush = false; }); }
+    catch (e) { card.note = t('prSettingFailed'); }
+    settings = await readPrSettings();
+    await savePrCard(card);
+    await sendPrCard(card, settings, null);
+    return;
+  }
   var active = await findPrCardOwner(card.repo, card.pr && card.pr.number, card.head, card.id, card.sessionId);
   if (active && prFollowActive(active) && active.sessionId !== card.sessionId) {
     // Legacy clients use the existing click handoff to provide a normal task link.
@@ -3926,9 +3950,9 @@ async function prCardAction(msg) {
   } else if (action === 'prui:settingsRefresh' && prHasSettings(card)) {
     // The settings were read at entry. Refresh is read-only, not a retry of a save.
     card.settingsOpen = true;
-  } else if (action === 'prset:ciRetry:on' || action === 'prset:ciRetry:off') {
+  } else if (action === 'prset:ciRetry:on') {
     try {
-      settings = await writePrSettings(function (next) { next.ciRetryRepush = action === 'prset:ciRetry:on'; });
+      settings = await writePrSettings(function (next) { next.ciRetryRepush = true; });
     } catch (e) {
       card.note = t('prSettingFailed');
     }

@@ -18,7 +18,7 @@ function guideArguments(values) {
   const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
   const source = guide.match(/```js\n(\/\/ Argument lists for the existing task execution tool\.[\s\S]*?)\n```/)?.[1];
   assert.ok(source, 'the recovery guide must define argument lists, not shell command templates');
-  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs })', values);
+  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs })', values);
 }
 
 test('recovery guide passes dynamic refs, remotes and paths as literal argument data', () => {
@@ -43,6 +43,8 @@ test('recovery guide passes dynamic refs, remotes and paths as literal argument 
       reserveArgs: [values.gatePath, values.prUrl, '--state-dir', values.observationStateDir, '--reserve-ci-retry', oldHead, '--ci-retry-id', values.prNodeId, '--ci-retry-failure', values.diagnosisPath, '--json'],
       statusArgs: [values.gatePath, values.prUrl, '--state-dir', values.observationStateDir, '--ci-retry-status', '--ci-retry-id', values.prNodeId, '--ci-retry-failure', values.diagnosisPath, '--json'],
       verifyArgs: ['verify-commit', newHead],
+      originalSignatureArgs: ['show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', oldHead],
+      signatureArgs: ['show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', newHead],
       pushArgs: ['push', '--force-with-lease=' + exactRef + ':' + oldHead, '--', values.verifiedRemote, values.newSha + ':' + exactRef],
     };
     // Git accepts these refs; its format check cannot make a shell interpolation safe.
@@ -525,4 +527,46 @@ test('signed Git fixture verifies one-off signing, configured amend and unavaila
   git(['config', 'user.signingkey', path.join(fx.root, 'unavailable-key')]);
   assert.throws(() => git(['commit', '--amend', '--no-edit']));
   assert.equal(git(['rev-parse', 'HEAD']), amended);
+});
+
+test('recovery binds signature identity even when two different SSH keys both verify', async t => {
+  const fx = fixture(t);
+  const work = path.join(fx.root, 'two-signers');
+  fs.mkdirSync(work);
+  const git = (args, env = {}) => execFileSync('git', args, { cwd: work,
+    env: { ...process.env, ...env }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const keys = ['a', 'b'].map(name => path.join(fx.root, 'key-' + name));
+  for (const key of keys) execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', 'ada@example.test', '-f', key], { stdio: 'pipe' });
+  const allowed = path.join(fx.root, 'both-trusted');
+  fs.writeFileSync(allowed, keys.map(key => 'ada@example.test ' + fs.readFileSync(key + '.pub', 'utf8')).join(''));
+  git(['init', '-b', 'main']);
+  for (const [name, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'],
+    ['gpg.format', 'ssh'], ['gpg.ssh.allowedSignersFile', allowed], ['user.signingkey', keys[1]], ['commit.gpgsign', 'true']]) git(['config', name, value]);
+  fs.writeFileSync(path.join(work, 'code.txt'), 'two trusted signers\n');
+  git(['add', 'code.txt']);
+  git(['commit', '-S' + keys[0], '-s', '-m', 'original A'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' });
+  const original = git(['rev-parse', 'HEAD']);
+  git(['verify-commit', original]);
+  const values = { verifiedBranch: 'feature', verifiedRemote: work, gatePath: gate, prUrl: url,
+    observationStateDir: fx.stateDir, originalRemoteSha: original, prNodeId, diagnosisPath: fx.diagnosis, newSha: original };
+  const plan = guideArguments(values);
+  assert.ok(plan.originalSignatureArgs && plan.signatureArgs, 'record original and replacement identities using exact object arguments');
+  const oldIdentity = git(plan.originalSignatureArgs);
+  const configuredFingerprint = execFileSync('ssh-keygen', ['-lf', keys[1] + '.pub'], { encoding: 'utf8' }).split(/\s+/)[1];
+  assert.ok(!oldIdentity.includes(configuredFingerprint), 'configured signer B must stop before quota, even with automatic signing enabled');
+  assert.equal(fs.existsSync(fx.retryDir), false);
+  // Separate disposable reproduction of the rejected path, not an authorized recovery.
+  git(['commit', '--amend', '--no-edit'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:01Z' });
+  const replacement = git(['rev-parse', 'HEAD']);
+  git(['verify-commit', replacement]);
+  const next = guideArguments({ ...values, newSha: replacement });
+  assert.notEqual(git(next.signatureArgs), oldIdentity, 'valid signature B cannot preserve signer A');
+  git(['config', 'user.signingkey', keys[0]]);
+  git(['commit', '--amend', '--no-edit'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:02Z' });
+  const same = git(['rev-parse', 'HEAD']);
+  git(['verify-commit', same]);
+  assert.equal(git(guideArguments({ ...values, newSha: same }).signatureArgs), oldIdentity);
+  const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
+  assert.match(guide, /full signing-key fingerprint/);
+  assert.match(guide.replace(/\*\*/g, '').replace(/\s+/g, ' '), /same signature identity before consuming budget/);
 });
