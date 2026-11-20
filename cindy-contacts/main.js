@@ -1569,7 +1569,24 @@ function automationPrompt(profile) {
   ].join('\n');
 }
 
+async function automationStatus(choice) {
+  if (typeof cindy.deviceSync !== 'function') return { available: false, code: 'UNSUPPORTED_CAPABILITY' };
+  try {
+    const r = await cindy.deviceSync(choice ? { op: 'selectAutomationHost', revision: choice.revision, useThisDevice: choice.useThisDevice } : { op: 'automationHost' });
+    if (!r?.ok || !Number.isSafeInteger(r.revision) || typeof r.selected !== 'boolean' || typeof r.isPrimary !== 'boolean' ||
+        !['active', 'paused', 'expired', 'none'].includes(r.localSchedule)) {
+      return { available: false, code: r?.errorCode || 'UNSUPPORTED_CAPABILITY' };
+    }
+    return { available: true, revision: r.revision, selected: r.selected, isPrimary: r.isPrimary, deviceName: r.deviceName, localSchedule: r.localSchedule };
+  } catch (_) {
+    return { available: false, code: 'AUTOMATION_HOST_UNAVAILABLE' };
+  }
+}
+
 async function requestAutomation() {
+  const role = await automationStatus();
+  if (!role.available || !role.isPrimary) throw fail('PRIMARY_REQUIRED', '请先在通讯录设置中选择自动整理主机。');
+  if (role.localSchedule !== 'none') return { existing: true };
   const settings = await getSettings();
   const p = PROFILES[settings.profile] || PROFILES.colleagues;
   if (!cindy.agent || typeof cindy.agent.requestSchedule !== 'function') {
@@ -1579,11 +1596,10 @@ async function requestAutomation() {
     name: (await taskNames()).schedule,
     prompt: automationPrompt(settings.profile),
     intervalMs: p.intervalHours * 3600 * 1000,
+    primaryDeviceOnly: true,
   });
   if (!r || r.ok === false) throw fail((r && r.errorCode) || 'SCHEDULE_FAILED', (r && r.message) || '没有打开自动化面板');
-  const requested = { at: nowIso(), profile: settings.profile };
-  await batch([setMetaStmt('automation_requested', requested)]);
-  return requested;
+  return { opened: true };
 }
 
 /**
@@ -1850,6 +1866,7 @@ async function maintenance(input) {
       }
       await batch([setMetaStmt('sources_status', { ...prev, items })]);
     }
+    if (input.runId && result.scope === 'recent') await rewriteIntrosDuringMaintenance();
     return result;
   }
   throw fail('INVALID_PARAMS', 'action must be begin, sources or end');
@@ -2437,12 +2454,10 @@ async function rewriteIntro(c) {
   return text && text.length <= 400 && !NOISY_OUTPUT.test(text) ? text : '';
 }
 
-let introRewriting = false;
-async function rewriteIntrosInBackground() {
-  if (introRewriting || !cindy.send) return;
-  introRewriting = true;
+async function rewriteIntrosDuringMaintenance() {
+  if (!cindy.send) return;
   try {
-    // 升级整理（含备份）没成功就不改写介绍，原文留到下次启动再处理
+    // 升级整理（含备份）没成功就不改写介绍，原文留到下次整理再处理
     const cleaned = await getMeta('profile_cleanup');
     if (!cleaned || cleaned.version < PROFILE_CLEANUP_VERSION) return;
     const meta = (await getMeta('intro_rewrite')) || {};
@@ -2451,8 +2466,11 @@ async function rewriteIntrosInBackground() {
     const tries = meta.tries && typeof meta.tries === 'object' ? meta.tries : {};
     const rows = await qAll("SELECT id, display_name, summary, narrative, facts FROM contacts WHERE narrative <> '' ORDER BY id");
     let stopped = false;
+    let attempted = 0;
     for (const c of rows) {
       if (!looksNoisy(c.narrative) || (tries[c.id] || 0) >= 2) continue;
+      if (attempted >= 3) { stopped = true; break; }
+      attempted++;
       let text = '';
       try {
         text = await rewriteIntro(c);
@@ -2460,21 +2478,18 @@ async function rewriteIntrosInBackground() {
         if (e.code === 'NO_QUICK_MODEL') { stopped = true; break; }
       }
       tries[c.id] = (tries[c.id] || 0) + 1;
-      // 请求失败、还有机会的人留到下次启动再试，这一轮不算完成
+      // 请求失败、还有机会的人留到下次整理再试，这一轮不算完成
       if (!text && tries[c.id] < 2) stopped = true;
-      await serial(async () => {
-        const [cur] = await q('SELECT narrative FROM contacts WHERE id = ?', [c.id]);
-        // 期间被整理或用户改过就不覆盖
-        const write = text && cur && cur.narrative === c.narrative;
-        await batch([...(write ? [{ sql: 'UPDATE contacts SET narrative = ? WHERE id = ?', params: [text, c.id] }] : []), setMetaStmt('intro_rewrite', { version: INTRO_REWRITE_VERSION, tries })]);
-        if (write) notifyChanged();
-      });
+      const [cur] = await q('SELECT narrative FROM contacts WHERE id = ?', [c.id]);
+      // 期间被整理或用户改过就不覆盖
+      const write = text && cur && cur.narrative === c.narrative;
+      await batch([...(write ? [{ sql: 'UPDATE contacts SET narrative = ? WHERE id = ?', params: [text, c.id] }] : []), setMetaStmt('intro_rewrite', { version: INTRO_REWRITE_VERSION, tries })]);
+      if (write) notifyChanged();
     }
-    if (!stopped) await serial(() => batch([setMetaStmt('intro_rewrite', { version: INTRO_REWRITE_VERSION, tries, finished: true, at: nowIso() })]));
+    if (!stopped) await batch([setMetaStmt('intro_rewrite', { version: INTRO_REWRITE_VERSION, tries, finished: true, at: nowIso() })]);
   } catch (_) {
-    /* 下次启动再试 */
-  } finally {
-    introRewriting = false;
+    /* 下次整理再试 */
+
   }
 }
 
@@ -2776,7 +2791,6 @@ async function viewState() {
     schedule: !!(cindy.agent && typeof cindy.agent.requestSchedule === 'function'),
     settings: state.ready ? await getSettings() : null,
     maintenance: state.ready ? await getMeta('maintenance') : null,
-    automationRequested: state.ready ? await getMeta('automation_requested') : null,
     coverage: state.ready ? await getMeta('coverage') : null,
     sourcesStatus: state.ready ? await getMeta('sources_status') : null,
     autoAccess: state.ready ? await getMeta('auto_access') : null,
@@ -2821,6 +2835,8 @@ const VIEW_METHODS = {
   pin: (p) => setPin(p),
   opened: () => opened(),
   settings: (p) => setSettings(p || {}),
+  automationStatus: () => automationStatus(),
+  chooseAutomationHost: (p) => automationStatus(p),
   requestAutomation: () => requestAutomation(),
 };
 const MUTATING = new Set(['save', 'logEvent', 'deleteEvent', 'relate', 'organize', 'merge', 'delete', 'groups', 'importSystem', 'importLegacy', 'unmerge', 'loop', 'pin']);
@@ -2849,9 +2865,9 @@ function startViewChannel() {
       // 状态查询不排队：导入进行中时页面要靠它显示进度。
       if (msg.method === 'state') {
         if (!state.ready) ensureReady().catch(() => {});
-        else if (!pendingImport) maybeAutoSyncMac();
         return handler(msg.params || {});
       }
+      if (['automationStatus', 'chooseAutomationHost', 'requestAutomation'].includes(msg.method)) return handler(msg.params || {});
       await ensureReady();
       if (pendingImport) await pendingImport;
       return serial(() => handler(msg.params || {}));
@@ -3026,7 +3042,6 @@ function startLegacyImportOnce() {
       pendingImport = null;
       broadcast({ kind: 'event', name: 'legacy', data: r });
       notifyChanged();
-      rewriteIntrosInBackground();
     });
 }
 
@@ -3448,7 +3463,9 @@ async function syncIncoming(peer, data) {
       await batch(syncStateStmts(s));
       have = data.seq;
     }
-    return { digest: current.digest, want: current.digest !== data.digest, have };
+    const pending = syncTransfers.get(peer);
+    return { digest: current.digest, want: current.digest !== data.digest, have,
+      ...(pending ? { resume: { digest: pending.digest, total: pending.total, next: pending.chunks.length } } : {}) };
   }
   if (data.kind !== 'chunk' || typeof data.digest !== 'string' || !/^[a-f0-9]{64}$/.test(data.digest) || !Number.isInteger(data.total) || data.total < 1 || data.total > Math.ceil(SYNC_MAX / SYNC_CHUNK) || !Number.isInteger(data.index) || data.index < 0 || data.index >= data.total || typeof data.text !== 'string' || data.text.length > SYNC_CHUNK) return { error: 'SYNC_INVALID' };
   let transfer = syncTransfers.get(peer);
@@ -3463,9 +3480,11 @@ async function syncIncoming(peer, data) {
   const text = transfer.chunks.join('');
   const digest = await syncDigest(text);
   if (text.length > SYNC_MAX || digest !== data.digest) { syncTransfers.delete(peer); return { error: 'SYNC_INVALID' }; }
-  await syncApply(JSON.parse(text), peer, { node: data.node, base: data.base, upTo: data.upTo });
-  syncTransfers.delete(peer);
-  syncStatus.lastAt = nowIso(); syncStatus.error = null;
+  try {
+    await syncApply(JSON.parse(text), peer, { node: data.node, base: data.base, upTo: data.upTo });
+  } finally {
+    syncTransfers.delete(peer);
+  }
   return { applied: true };
 }
 
@@ -3485,13 +3504,22 @@ async function syncNow() {
     syncStatus.enabled = !!await getMeta('device_sync_enabled');
     if (!syncStatus.enabled) { syncStatus.phase = 'off'; return syncStatus; }
     if (!syncStatus.supported) { syncStatus.phase = 'unsupported'; return syncStatus; }
+    syncStatus.peers = [];
+    syncStatus.progress = null;
+    syncStatus.error = null;
     const status = await cindy.deviceSync({ op: 'status' });
     if (!status?.ok) throw fail(status?.errorCode || 'SYNC_UNAVAILABLE', '当前无法连接设备同步，请检查 Cindy 登录状态和插件权限。');
-    syncStatus.peers = status.peers || []; syncStatus.error = null;
-    syncStatus.phase = syncStatus.peers.length ? 'syncing' : 'waiting';
+    syncStatus.peers = (status.peers || []).map(peer => ({ ...peer, phase: 'waiting', error: null }));
+    if (!syncStatus.peers.length) {
+      syncStatus.phase = status.online === false ? 'offline' : 'waiting';
+      return syncStatus;
+    }
+    syncStatus.phase = 'syncing';
+    broadcast({ kind: 'event', name: 'sync' });
     const snapshot = await serial(syncSnapshot);
-    let success = syncStatus.peers.length > 0;
     for (const peer of syncStatus.peers) {
+      if (!syncStatus.enabled) break;
+      peer.phase = 'syncing';
       try {
         const hello = await syncRequest(peer.deviceId, { kind: 'hello', digest: snapshot.digest, node: snapshot.node, seq: snapshot.seq });
         if (!hello || typeof hello.want !== 'boolean' || typeof hello.digest !== 'string' || !/^[a-f0-9]{64}$/.test(hello.digest)) throw fail('SYNC_INVALID', '对方返回的同步状态无效，资料已保存在本机。');
@@ -3501,23 +3529,45 @@ async function syncNow() {
           const payload = await serial(() => syncPayload(peer.deviceId, have));
           if (payload.full || payload.count) {
             const total = Math.ceil(payload.text.length / SYNC_CHUNK);
-            syncStatus.progress = total > 1 ? { done: 0, total } : null;
-            for (let index = 0; index < total; index++) {
+            const resume = hello.resume;
+            const first = resume?.digest === payload.digest && resume.total === total &&
+              Number.isInteger(resume.next) && resume.next > 0 && resume.next < total ? resume.next : 0;
+            syncStatus.progress = total > 1 ? { done: first, total } : null;
+            broadcast({ kind: 'event', name: 'sync' });
+            let lastProgress = Date.now();
+            for (let index = first; index < total; index++) {
               if (!await getMeta('device_sync_enabled')) { syncStatus.phase = 'off'; syncStatus.progress = null; return syncStatus; }
               const reply = await syncRequest(peer.deviceId, { kind: 'chunk', digest: payload.digest, index, total, text: payload.text.slice(index * SYNC_CHUNK, (index + 1) * SYNC_CHUNK), node: payload.node, base: payload.base, upTo: payload.upTo });
               if (index === total - 1 && !reply?.applied) throw fail('SYNC_UNCONFIRMED', '对方尚未确认保存。');
-              if (syncStatus.progress && (index % 50 === 49 || index === total - 1)) { syncStatus.progress.done = index + 1; broadcast({ kind: 'event', name: 'sync' }); }
+              if (syncStatus.progress) {
+                syncStatus.progress.done = index + 1;
+                if (Date.now() - lastProgress >= 1000) {
+                  broadcast({ kind: 'event', name: 'sync' });
+                  lastProgress = Date.now();
+                }
+              }
             }
             syncStatus.progress = null;
           }
         }
-        if (hello.digest !== snapshot.digest) success = false;
-      } catch (e) { success = false; syncStatus.progress = null; syncStatus.error = { code: e.code || 'SYNC_UNAVAILABLE', message: e.message }; }
+        peer.phase = hello.digest === snapshot.digest ? 'synced' : 'confirming';
+      } catch (e) {
+        peer.phase = 'error';
+        peer.error = { code: e.code || 'SYNC_UNAVAILABLE', message: e.message };
+        syncStatus.progress = null;
+      }
     }
-    if (success && (await serial(syncSnapshot)).digest !== snapshot.digest) success = false;
-    if (success) syncStatus.lastAt = nowIso();
-    syncStatus.phase = !syncStatus.enabled ? 'off' : syncStatus.error || !syncStatus.peers.length ? 'waiting' : success ? 'synced' : 'syncing';
-  } catch (e) { syncStatus.phase = 'error'; syncStatus.error = { code: e.code || 'SYNC_UNAVAILABLE', message: e.message }; }
+    if (!syncStatus.enabled) { syncStatus.phase = 'off'; return syncStatus; }
+    if (syncStatus.peers.some(peer => peer.phase === 'synced') && (await serial(syncSnapshot)).digest !== snapshot.digest) {
+      for (const peer of syncStatus.peers) if (peer.phase === 'synced') peer.phase = 'confirming';
+    }
+    const confirmed = syncStatus.peers.filter(peer => peer.phase === 'synced').length;
+    syncStatus.error = syncStatus.peers.find(peer => peer.error)?.error || null;
+    syncStatus.phase = confirmed === syncStatus.peers.length ? 'synced' : confirmed ? 'partial' : syncStatus.error ? 'error' : 'confirming';
+    if (syncStatus.phase === 'synced') syncStatus.lastAt = nowIso();
+  } catch (e) {
+    if (syncStatus.enabled) { syncStatus.phase = 'error'; syncStatus.error = { code: e.code || 'SYNC_UNAVAILABLE', message: e.message }; }
+  }
   finally { syncBusy = false; broadcast({ kind: 'event', name: 'sync' }); }
   return syncStatus;
 }
@@ -3540,9 +3590,13 @@ cindy.onHostMessage(async (msg) => {
 
 VIEW_METHODS.deviceSync = async (p) => {
   if (typeof p.enabled === 'boolean') {
+    if (p.enabled && !syncStatus.enabled) await syncCapture();
     await batch([setMetaStmt('device_sync_enabled', p.enabled)]);
     syncStatus.enabled = p.enabled;
-    if (!p.enabled) { clearTimeout(syncTimer); syncTimer = null; syncTransfers.clear(); syncStatus.phase = 'off'; }
+    if (!p.enabled) {
+      clearTimeout(syncTimer); syncTimer = null; syncTransfers.clear();
+      Object.assign(syncStatus, { phase: 'off', peers: [], error: null, progress: null });
+    }
   }
   scheduleDeviceSync(0);
   return syncStatus;

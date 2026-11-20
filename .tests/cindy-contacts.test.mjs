@@ -148,7 +148,7 @@ function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSy
   const channels = [];
   class Channel extends BroadcastChannel {
     constructor(name) {
-      super(name);
+      super(libDir + ':' + name);
       channels.push(this);
     }
   }
@@ -228,7 +228,7 @@ function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSy
     });
   const view = (method, params = {}) =>
     new Promise((resolve) => {
-      const ch = new BroadcastChannel('cindy-contacts');
+      const ch = new BroadcastChannel(libDir + ':cindy-contacts');
       const id = `req-${++n}`;
       ch.onmessage = (ev) => {
         if (ev.data && ev.data.kind === 'res' && ev.data.id === id) {
@@ -621,7 +621,8 @@ test('主视图请求通道：列表、详情与修改后的变更通知', async
 
 test('按时间段整理：第一次只看最近两周；之后从上次整理接着往后；回补所有人或一个人都往前推进覆盖范围', async () => {
   const dir = tmp();
-  const a = boot({ libDir: dir, locale: 'zh-CN' });
+  const a = boot({ libDir: dir, locale: 'zh-CN', deviceSync: async ({ op }) => op === 'automationHost'
+    ? { ok: true, selected: true, isPrimary: true, revision: 1, localSchedule: 'none' } : { ok: true, peers: [] } });
   try {
     const DAY = 86400000;
     const b1 = ok(await a.call('maintenance', { action: 'begin' }));
@@ -738,6 +739,7 @@ test('按时间段整理：第一次只看最近两周；之后从上次整理�
 
     const req = await a.view('requestAutomation');
     assert.equal(req.ok, true);
+    assert.equal(a.schedules[0].primaryDeviceOnly, true);
     assert.equal(a.schedules[0].intervalMs, 6 * 3600 * 1000);
     assert.match(a.schedules[0].prompt, /run_id/);
     assert.ok(a.schedules[0].prompt.length <= 2000);
@@ -928,18 +930,16 @@ test('升级后自动收拾旧档案：先备份，再收起跟踪备注、删�
   }
 });
 
-/** 等启动时那一轮后台介绍改写结束，免得它和测试随后写入的介绍抢先后。 */
-async function introRewriteIdle(a) {
-  await a.call('stats');
-  const db = a.library.db('contacts.sqlite');
-  for (let i = 0; i < 100 && !db.prepare("SELECT value FROM plugin_meta WHERE key = 'intro_rewrite'").get()?.value.includes('finished'); i++) await new Promise((r) => setTimeout(r, 20));
+async function completeTidy(a) {
+  const run = ok(await a.call('maintenance', { action: 'begin' }));
+  ok(await a.call('maintenance', { action: 'end', run_id: run.run_id, coverage: run.sources.map(({ source }) => ({ source, coverage: 'complete' })) }));
 }
 
-test('升级后在后台把笔记式的介绍改写成人话：干净的不动，改写结果仍像笔记就不采用', async () => {
+test('打开资料不调用模型；明确整理后把笔记式的介绍改写成人话：干净的不动，改写结果仍像笔记就不采用', async () => {
   const dir = tmp();
   let a = boot({ libDir: dir });
   try {
-    await introRewriteIdle(a);
+    await a.call('stats');
     const noisy = ok(await a.call('save', { name: '示例同事', narrative: '示例同事（GitHub example-dev，邮箱 dev@example.test）已核实。#101 已合并，#102 待审。' }));
     const kept = ok(await a.call('save', { name: '另一位', narrative: '另一位是做设计的朋友，常一起讨论界面。' }));
     const bad = ok(await a.call('save', { name: '第三位', narrative: '第三位 GitHub third-dev，2026-10-01 已核实。' }));
@@ -953,7 +953,9 @@ test('升级后在后台把笔记式的介绍改写成人话：干净的不动�
     const origSend = a.ctx.cindy.send;
     a.ctx.cindy.send = async (m) => (m && m.kind === 'oneshot_text' && m.prompt.includes('third-dev') ? (n++, { ok: true, text: '第三位，邮箱 third@example.test。' }) : origSend(m));
     await a.call('stats');
-    for (let i = 0; i < 100 && !db().prepare("SELECT value FROM plugin_meta WHERE key = 'intro_rewrite'").get()?.value.includes(bad.id); i++) await new Promise((r) => setTimeout(r, 20));
+    await a.view('state');
+    assert.equal(a.oneshots.length, 0);
+    await completeTidy(a);
     const story = (id) => db().prepare('SELECT narrative FROM contacts WHERE id = ?').get(id).narrative;
     assert.equal(story(noisy.id), '做桌面端的同事，在 GitHub 上一起改文件树。', '可以提到 GitHub，但不带账号');
     assert.equal(story(kept.id), '另一位是做设计的朋友，常一起讨论界面。', '干净的介绍不动');
@@ -1037,7 +1039,7 @@ test('备份不成功时后台也不改写介绍，原文留到下次', async ()
   const dir = tmp();
   let a = boot({ libDir: dir });
   try {
-    await introRewriteIdle(a);
+    await a.call('stats');
     const p = ok(await a.call('save', { name: '示例同事', narrative: '示例同事（GitHub example-dev，邮箱 dev@example.test）已核实。#101 已合并，#102 待审。' }));
     const db = () => a.library.db('contacts.sqlite');
     db().prepare("DELETE FROM plugin_meta WHERE key IN ('profile_cleanup', 'intro_rewrite')").run();
@@ -1047,7 +1049,7 @@ test('备份不成功时后台也不改写介绍，原文留到下次', async ()
     const origSend = a.ctx.cindy.send;
     a.ctx.cindy.send = async (m) => (m && m.kind === 'oneshot_text' ? (asked++, { ok: true, text: '做桌面端的同事。' }) : origSend(m));
     await a.call('stats');
-    await new Promise((r) => setTimeout(r, 300));
+    await completeTidy(a);
     assert.equal(asked, 0);
     assert.match(db().prepare('SELECT narrative FROM contacts WHERE id = ?').get(p.id).narrative, /已核实/);
   } finally {
@@ -1072,11 +1074,11 @@ test('备份不成功时，整理结束也不顺手删资料', async () => {
   }
 });
 
-test('介绍改写请求失败的人，下次启动再试一次', async () => {
+test('介绍改写请求失败的人，下次整理再试一次', async () => {
   const dir = tmp();
   let a = boot({ libDir: dir });
   try {
-    await introRewriteIdle(a);
+    await a.call('stats');
     const p = ok(await a.call('save', { name: '示例同事', narrative: '示例同事（GitHub example-dev，邮箱 dev@example.test）已核实。#101 已合并，#102 待审。' }));
     const db = () => a.library.db('contacts.sqlite');
     const meta = () => JSON.parse(db().prepare("SELECT value FROM plugin_meta WHERE key = 'intro_rewrite'").get()?.value || '{}');
@@ -1086,13 +1088,13 @@ test('介绍改写请求失败的人，下次启动再试一次', async () => {
     const origSend = a.ctx.cindy.send;
     a.ctx.cindy.send = async (m) => { if (m && m.kind === 'oneshot_text') throw Object.assign(new Error('network down'), { code: 'NETWORK' }); return origSend(m); };
     await a.call('stats');
-    for (let i = 0; i < 100 && !(meta().tries || {})[p.id]; i++) await new Promise((r) => setTimeout(r, 20));
+    await completeTidy(a);
     assert.equal(meta().finished, undefined, '失败的人还有机会，这一轮不算完成');
     a.close();
     a = boot({ libDir: dir });
     a.tasks.quick = { ok: true, text: '做桌面端的同事，常一起改文件树。' };
     await a.call('stats');
-    for (let i = 0; i < 100 && !meta().finished; i++) await new Promise((r) => setTimeout(r, 20));
+    await completeTidy(a);
     assert.equal(db().prepare('SELECT narrative FROM contacts WHERE id = ?').get(p.id).narrative, '做桌面端的同事，常一起改文件树。');
   } finally {
     a.close();
@@ -1718,12 +1720,13 @@ test('device sync transfers multiple chunks through the plugin request/reply ent
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'contacts-wire-'));
   for (const name of ['a', 'b']) fs.mkdirSync(path.join(dir, name));
   const apps = {}, pending = new Map(); let chunks = 0, drop = false, online = true, incompatible = false;
+  const sentIndices = [];
   const transport = name => async req => {
-    if (req.op === 'status') return { ok: true, peers: online ? [{ deviceId: name === 'a' ? 'b' : 'a' }] : [] };
+    if (req.op === 'status') return { ok: true, online, peers: online ? [{ deviceId: name === 'a' ? 'b' : 'a' }] : [] };
     if (req.op === 'reply') { pending.get(req.requestId)?.(req.data); return { ok: true }; }
     if (req.op === 'request') {
       if (incompatible) return { ok: true, data: { error: 'SYNC_VERSION' } };
-      if (req.data.kind === 'chunk') { chunks++; if (drop && req.data.index === 1) return { ok: false, errorCode: 'SYNC_RESULT_UNKNOWN' }; }
+      if (req.data.kind === 'chunk') { sentIndices.push(req.data.index); chunks++; if (drop && req.data.index === 1) return { ok: false, errorCode: 'SYNC_RESULT_UNKNOWN' }; }
       const id = crypto.randomUUID(); let reply;
       pending.set(id, value => { reply = structuredClone(value); });
       await apps[req.peer].deliver({ type: 'device-sync-request', requestId: id, peer: name, data: structuredClone(req.data) });
@@ -1739,8 +1742,11 @@ test('device sync transfers multiple chunks through the plugin request/reply ent
   drop = true;
   await vm.runInContext('syncNow()', apps.a.ctx);
   assert.equal(ok(await apps.b.call('stats')).people, 0, 'no partial rows committed');
+  assert.deepEqual(sentIndices, [0, 1]);
+  sentIndices.length = 0;
   drop = false;
   await vm.runInContext('syncNow()', apps.a.ctx);
+  assert.equal(sentIndices[0], 1, 'the acknowledged first chunk is not retransmitted');
   assert.equal(ok(await apps.b.call('stats')).people, 35);
   assert.ok(chunks > 2);
   await vm.runInContext('syncNow()', apps.b.ctx);
@@ -1758,7 +1764,7 @@ test('device sync transfers multiple chunks through the plugin request/reply ent
   assert.match(vm.runInContext('syncStatus.error.message', apps.a.ctx), /更新两台电脑上的通讯录插件/);
   online = false;
   await vm.runInContext('syncNow()', apps.a.ctx);
-  assert.equal(vm.runInContext('syncStatus.phase', apps.a.ctx), 'waiting');
+  assert.equal(vm.runInContext('syncStatus.phase', apps.a.ctx), 'offline');
 });
 
 
@@ -1955,4 +1961,63 @@ test('device sync stays idle until enabled and stops polling when disabled', asy
     ok(await app.call('save', { name: 'Still local' }));
     assert.equal(polls().length, 0);
   }
+});
+
+test('one disabled peer does not hide another computer’s confirmed sync', async t => {
+  let disconnected = false;
+  const app = boot({ libDir: tmp(), deviceSync: async req => {
+    if (req.op === 'status') {
+      if (disconnected) throw Error('offline');
+      return { ok: true, peers: [{ deviceId: 'home' }, { deviceId: 'laptop' }] };
+    }
+    if (req.op === 'request') return req.peer === 'home'
+      ? { ok: true, data: { want: false, digest: req.data.digest } } : { ok: true, data: { disabled: true } };
+  } });
+  t.after(() => app.close());
+  await app.call('stats');
+  await vm.runInContext("serial(() => batch([setMetaStmt('device_sync_enabled', true)]))", app.ctx);
+  const first = await vm.runInContext('syncNow()', app.ctx);
+  assert.equal(first.phase, 'partial');
+  assert.deepEqual(Array.from(first.peers, p => [p.deviceId, p.phase]), [['home', 'synced'], ['laptop', 'error']]);
+  disconnected = true;
+  const next = await vm.runInContext('syncNow()', app.ctx);
+  assert.equal(next.phase, 'error');
+  assert.equal(next.peers.length, 0);
+  assert.equal(app.oneshots.length, 0);
+});
+
+test('new installs stay passive, only the chosen computer may open a draft and paused schedules stay paused', async t => {
+  let primary = null, revision = 0, connected = true;
+  const make = (name, schedule) => boot({ libDir: tmp(), deviceSync: async req => {
+    if (!connected) return { ok: false, errorCode: 'SYNC_OFFLINE' };
+    if (req.op === 'status') return { ok: true, peers: [] };
+    if (req.op === 'selectAutomationHost') {
+      if (revision !== req.revision) return { ok: false, errorCode: 'HOST_CHOICE_CHANGED' };
+      primary = req.useThisDevice ? name : null;
+      revision++;
+    }
+    return { ok: true, revision, selected: !!primary, isPrimary: primary === name, deviceName: primary, localSchedule: schedule };
+  } });
+  const home = make('家中测试机', 'paused'), laptop = make('便携测试机', 'none');
+  const old = boot({ libDir: tmp() });
+  t.after(() => { home.close(); laptop.close(); old.close(); });
+  for (const app of [home, laptop, old]) {
+    await app.view('state');
+    assert.equal((await app.view('requestAutomation')).ok, false);
+    assert.equal(app.schedules.length, 0);
+    assert.equal(app.oneshots.length, 0);
+  }
+  assert.equal(ok(await home.view('chooseAutomationHost', { revision, useThisDevice: true })).localSchedule, 'paused');
+  assert.equal(ok(await home.view('requestAutomation')).existing, true);
+  assert.equal((await laptop.view('requestAutomation')).ok, false);
+  assert.equal(ok(await laptop.view('chooseAutomationHost', { revision: 0, useThisDevice: true })).code, 'HOST_CHOICE_CHANGED');
+  assert.equal(home.schedules.length, 0);
+  assert.equal(ok(await laptop.view('chooseAutomationHost', { revision, useThisDevice: true })).isPrimary, true);
+  assert.equal(ok(await laptop.view('requestAutomation')).opened, true);
+  assert.equal(laptop.schedules[0].primaryDeviceOnly, true);
+  connected = false;
+  assert.equal((await laptop.view('requestAutomation')).ok, false);
+  connected = true;
+  assert.equal(ok(await home.view('automationStatus')).isPrimary, false);
+  assert.equal((await home.view('requestAutomation')).ok, false);
 });
