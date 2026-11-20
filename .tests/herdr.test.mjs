@@ -402,8 +402,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
 
   // tmux 的命令分隔符必须拒绝（tmux(1) COMMANDS 用分号分隔命令）。
   const workerSource4 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
-  assert.match(workerSource4, /if \(value\.indexOf\(';\'\) >= 0\) return false;/,
-    'semicolon keys must be rejected');
+  const rejectsSemicolon = workerSource4.indexOf("indexOf(';')") >= 0 || workerSource4.indexOf('[;\\s]') >= 0;
+  assert.ok(rejectsSemicolon, 'semicolon and newline keys must be rejected');
 
   // 两种等待模式、text/keys 都要在 schema 层二选一。
   const waitTool = manifest.tools.find((tool) => tool.name === 'herdr_wait');
@@ -499,6 +499,20 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const workerSrc9 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
   assert.match(workerSrc9, /'delete-buffer', '-b', buffer/,
     'a failed paste must clean up the buffer');
+
+  // IME 组字中的回车不能当提交。
+  const panelSrcIme = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcIme, /event\.isComposing \|\| event\.keyCode === 229/,
+    'the panel must ignore Enter while an IME is composing');
+
+  // 订阅握手失败但 worker 已排重连时返回 pending。
+  assert.match(mainSource, /pending: true/,
+    'a queued reconnect must be reported as pending, not as a failed subscribe');
+  // 成功的订阅路径要重置重试额度。
+  assert.match(mainSource, /function resetSubscriptionRetries\(\)[\s\S]*?subscriptionRetries = 0;/,
+    'a successful subscribe must reset the retry budget');
+  assert.match(mainSource, /nodeRequest\('herdr\/subscribe', \{\}, callId, SUBSCRIBE_HOST_TIMEOUT_MS\);\s*\n\s*resetSubscriptionRetries\(\);/,
+    'enableSubscription must reset the budget on success');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
@@ -776,10 +790,12 @@ test('tmux key names are validated against the keys tmux recognises', async () =
 
   try {
     // 拼错的键名必须被拒绝：tmux 会把它当字面文本发出去。
-    const typo = await call('tmux/send', { target: 'x:0.0', keys: ['Entter'] });
-    assert.ok(typo.error, `expected an error for a misspelled key, got ${JSON.stringify(typo)}`);
-    assert.match(typo.error.message, /TMUX_BAD_KEY|不支持的按键/,
-      `expected a key rejection, got ${typo.error.message}`);
+    for (const bad of ['Entter', '\n', ';', 'C-;', 'a b']) {
+      const typo = await call('tmux/send', { target: 'x:0.0', keys: [bad] });
+      assert.ok(typo.error, `expected an error for ${JSON.stringify(bad)}, got ${JSON.stringify(typo)}`);
+      assert.match(typo.error.message, /TMUX_BAD_KEY|不支持的按键/,
+        `expected a key rejection for ${JSON.stringify(bad)}, got ${typo.error.message}`);
+    }
 
     // 跨层一致性：面板能发出的每一个 tmux 键名，都必须通过 worker 的白名单。
     const panelNames = Object.values(lib.TMUX_KEYS);

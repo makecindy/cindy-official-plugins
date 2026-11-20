@@ -812,7 +812,22 @@ const tools = {
   async herdr_events(args) {
     const mode = args.mode || 'status';
     if (mode === 'subscribe') {
-      const result = await enableSubscription(args.__callId);
+      let result;
+      try {
+        result = await enableSubscription(args.__callId);
+      } catch (error) {
+        // 请求已经到 worker、worker 排好了重连（desired=true）：
+        // 这不是「订阅没发生」，如实返回 pending + 说明。
+        if (!(error && error.transportFailure)) {
+          const detail = error && error.message ? error.message : String(error);
+          return {
+            subscribed: false,
+            pending: true,
+            note: '订阅握手暂时失败（' + detail + '），但 worker 已排好重连，Herdr 可用后会自动订阅。'
+          };
+        }
+        throw error;
+      }
       if (!result.persisted) {
         // 订阅已开，但偏好没存上：如实告诉调用方，别让重启后静默失效。
         return { subscribed: true, preference_saved: false, note: runtime.preferenceSaveFailed };
@@ -1153,6 +1168,16 @@ const SUBSCRIBE_HOST_TIMEOUT_MS = 45000;
 
 // 打开订阅并记住这次的意图（setup 与 subscribe 共用，
 // 否则 setup 成功后重启仍会按旧的退订偏好停摆）。
+// 任何一次订阅成功都要把主进程的重试额度与旧定时器清掉，
+// 否则额度用尽后下一次故障会被直接放弃却仍声称「已安排重试」。
+function resetSubscriptionRetries() {
+  subscriptionRetries = 0;
+  if (subscriptionRetryTimer) {
+    clearTimeout(subscriptionRetryTimer);
+    subscriptionRetryTimer = null;
+  }
+}
+
 async function enableSubscription(callId) {
   subscriptionPreference = true;
   subscriptionGeneration += 1;
@@ -1166,6 +1191,7 @@ async function enableSubscription(callId) {
   // worker 的握手是 pane.list(15s) + 订阅确认(15s)，宿主要留出余量，
   // 否则宿主先超时，setup 会在自动化已创建后报普通失败。
   await nodeRequest('herdr/subscribe', {}, callId, SUBSCRIBE_HOST_TIMEOUT_MS);
+  resetSubscriptionRetries();
   return { persisted: persisted };
 }
 
@@ -1192,6 +1218,7 @@ async function ensureSubscription() {
       }
     }
     await nodeRequest('herdr/subscribe', {}, undefined, SUBSCRIBE_HOST_TIMEOUT_MS);
+    resetSubscriptionRetries();
   } catch (error) {
     // 启动/wake 时的传输失败也要排重试：否则 worker 的 desired 还是 false，
     // 通知和自动化会一直停到下一次 wake 或手工订阅。

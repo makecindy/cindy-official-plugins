@@ -792,6 +792,9 @@ $('#detail-wrap').addEventListener('click', function () {
   syncWrapButton();
 });
 $('#term-input').addEventListener('keydown', function (event) {
+  // 中文/日文/韩文输入法组字时的回车是确认候选词，不能当成提交；
+  // keyCode 229 兼容仍在用它的浏览器。
+  if (event.isComposing || event.keyCode === 229) return;
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     submitLine();

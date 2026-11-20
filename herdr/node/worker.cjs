@@ -675,9 +675,10 @@ async function tmuxCapture(target, lines) {
 const TMUX_NAMED_KEY = /^(Escape|BSpace|BTab|DC|Down|End|F[1-9]|F1[0-2]|Home|IC|Left|NPage|PPage|Right|Up|Tab|Enter|Space)$/;
 
 function isTmuxKeyName(value) {
-  // tmux 的命令列表用分号分隔（tmux(1) COMMANDS）：`--` 只结束选项解析，
-  // 挡不住它。含分号的键一律拒绝，避免把后续 argv 变成另一条 tmux 命令。
-  if (value.indexOf(';') >= 0) return false;
+  // tmux 的命令列表用分号或换行分隔（tmux(1) COMMANDS）：`--` 只结束选项解析，
+  // 挡不住它们。含分号、换行或空白控制字符的键一律拒绝，
+  // 避免把后续 argv 变成另一条 tmux 命令。
+  if (/[;\s]/.test(value)) return false;
   if (value.length === 1) return true;               // 单字符（含标点、'-'）
   const parts = value.split('-');
   let index = 0;
