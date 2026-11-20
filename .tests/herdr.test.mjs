@@ -763,6 +763,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   // 对账绑定订阅代次。
   assert.match(workerSrc13, /stillCurrent/,
     'the reconcile must stop when the subscription is no longer current');
+  assert.match(workerSrc13, /reconcileBacklog/,
+    'an interrupted reconcile must hand the remaining panes to the next subscription');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
