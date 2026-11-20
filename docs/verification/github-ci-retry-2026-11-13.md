@@ -763,6 +763,51 @@ inherited native follow-up and client diagnosis presentation remain unverified.
 Maintainer comment 7005560347 still requires genuine recovery evidence and then
 a review of the current head; green CI and resolved threads do not supply it.
 
+## Main #354 synchronization — 2026-11-20 (source 1.5.34, not installed)
+
+Merged main `095aa54e07831d6e3573c495a53892471c5df410` from
+[PR #354](https://github.com/makecindy/cindy-official-plugins/pull/354), whose
+GitHub receipt identifies zqchris as the merger. Main is 1.5.33; this branch
+retains 1.5.34, strictly greater than main, under the existing version decision.
+The original feature checkout and source hook remain in use.
+
+The merge retains upstream's explicit local `status_watch` and resident launch,
+its bounded polling, account/object checks, failure classification, notification
+receipt handling and Node bootstrap correction. The watch implementation block
+and Node entry match main byte for byte. The new launch declaration, Node,
+agent host tools, network and minimum Cindy version match main; this PR adds
+no grant beyond that baseline and does not start a real watch or new follower.
+Four locales keep both the inherited watch contract and this PR's default-off
+CI-repush contract. Shared KV reads retain this PR's strict non-object rejection
+for both watch and preference callers, so malformed storage cannot be replaced
+by an empty object or presented as confirmed-off authorization. Existing PR
+queue/read ordering is preserved. Recovery scripts, guide, slots and settings
+page are unchanged from 4ff249b; no new recovery storage, locks or retries.
+
+The focused merge checks passed 28 tests with one platform skip (0.60 seconds).
+The required four repository suites plus plugin passed **415 tests, 19 Windows
+platform skips, 0 failures in 119.9 seconds**. Manifest validation and the official
+Git-archive packaging method, normalized and inspected entirely in memory,
+passed: staged tree `f84394ca02adc0df550171521f39ee6a4470b5cc`, 32 files,
+238445 compressed bytes, 662453 expanded bytes; every file matches its Git blob.
+No package file was created or retained.
+
+Upstream #354 reports Linux/Cindy 0.1.141 local 1.5.22 plugin-instance recovery
+and normal Actions-change notification, with further revisions/fixture results
+and remaining limitations in its body. This is upstream-reported evidence for
+that candidate, not a fresh test of this merged source or a real CI-recovery
+acceptance result. Its whole-app restart, minimum-version, live PR/Issue notice,
+real PAT fallback and host-refused notification scenarios remain as documented
+there. The new shared-KV combination has only local regression evidence here.
+
+No live plugin/client installation, preference/credential/permission/quota change,
+CI-only rewrite, PR merge or publication was performed. Last actually tested
+local runtime remains 97d540e / 1.5.19. Genuine denied-rerun recovery, current
+UI/read ordering, inherited native follow-up and client diagnosis presentation
+remain unverified. Comment 7005560347 still requires actual recovery evidence
+and a review of the then-current head; green old-head CI is not acceptance and
+must not be inherited by this new head.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected

@@ -80,6 +80,11 @@ function ensureLocale() {
 
 var MESSAGES = {
   'zh-CN': {
+    watchUnavailable: "GitHub 关注配置或状态暂不可用。",
+    watchInvalid: "请选择关注操作和有效的 GitHub 仓库、对象类型和编号。",
+    watchRebind: "此对象的账号或身份已变化。请先移除旧关注，再明确添加。",
+    watchLimit: "本机最多关注 5 个对象。",
+    watchChanged: "GitHub 关注状态有变化（{targets}）。打开关注列表查看。",
     status401: 'GitHub 授权未配置或已失效，请到「插件」→「GitHub」详情页重新连接账号，或更换备用 Token',
     status403RateLimit: 'GitHub 接口限流(HTTP 403 rate limit),请稍后重试',
     status403: '此操作没有权限(HTTP 403)，请检查仓库访问权及授权范围；账号的其他功能可能仍可使用：{detail}',
@@ -227,6 +232,11 @@ var MESSAGES = {
     prClickStop: '用户在 PR 卡片上点了「停止」跟进。删除 {url} 的跟进定时任务，再用 card_id 调用 pr_card，following=false。',
   },
   en: {
+    watchUnavailable: "GitHub watches or status are temporarily unavailable.",
+    watchInvalid: "Choose an operation and a valid GitHub repository, target type and ID.",
+    watchRebind: "The account or object identity changed. Remove the old watch before adding it again.",
+    watchLimit: "This device can watch up to five targets.",
+    watchChanged: "GitHub watch changes ({targets}). Open the watch list for details.",
     status401: 'GitHub authorization is missing or expired. Open Plugins > GitHub details to reconnect your account, or replace the fallback token.',
     status403RateLimit: 'GitHub API rate limit hit (HTTP 403 rate limit). Try again later.',
     status403: 'No permission for this operation (HTTP 403). Check repository access and authorization scopes; other features of the account may still work: {detail}',
@@ -374,6 +384,11 @@ var MESSAGES = {
     prClickStop: 'The user clicked "Stop" following on the PR card. Delete the follow-up schedule for {url}, then call pr_card with card_id and following=false.',
   },
   ja: {
+    watchUnavailable: "GitHub の監視設定または状態を取得できません。",
+    watchInvalid: "操作と有効な GitHub リポジトリ、対象の種類と番号を指定してください。",
+    watchRebind: "アカウントまたは対象が変わりました。以前の監視を削除してから再追加してください。",
+    watchLimit: "この端末では最大 5 件まで監視できます。",
+    watchChanged: "GitHub の監視対象に変更があります（{targets}）。一覧で確認できます。",
     status401: 'GitHub の認証が未設定か期限切れです。「プラグイン」→「GitHub」の詳細ページでアカウントを再接続するか、予備トークンを差し替えてください。',
     status403RateLimit: 'GitHub API のレート制限に達しました(HTTP 403 rate limit)。しばらくしてから再試行してください。',
     status403: 'この操作の権限がありません(HTTP 403)。リポジトリへのアクセス権と認可スコープを確認してください。アカウントのほかの機能は引き続き使える場合があります: {detail}',
@@ -521,6 +536,11 @@ var MESSAGES = {
     prClickStop: 'ユーザーが PR カードの「フォロー停止」を押しました。{url} のフォロー用スケジュールを削除し、card_id と following=false を付けて pr_card を呼んでください。',
   },
   ko: {
+    watchUnavailable: "GitHub 구독 설정 또는 상태를 가져올 수 없습니다.",
+    watchInvalid: "작업과 유효한 GitHub 저장소, 대상 유형 및 번호를 지정하세요.",
+    watchRebind: "계정이나 대상이 변경되었습니다. 기존 구독을 삭제한 후 다시 추가하세요.",
+    watchLimit: "이 기기에서 최대 5개 대상을 구독할 수 있습니다.",
+    watchChanged: "GitHub 구독 상태가 변경되었습니다({targets}). 구독 목록에서 확인하세요.",
     status401: 'GitHub 인증이 설정되지 않았거나 만료되었습니다. ‘플러그인’ > ‘GitHub’ 상세 페이지에서 계정을 다시 연결하거나 예비 토큰을 교체하세요.',
     status403RateLimit: 'GitHub API 요청 한도에 도달했습니다(HTTP 403 rate limit). 잠시 후 다시 시도하세요.',
     status403: '이 작업에 대한 권한이 없습니다(HTTP 403). 저장소 접근 권한과 인증 범위를 확인하세요. 계정의 다른 기능은 계속 사용할 수 있을 수 있습니다: {detail}',
@@ -760,7 +780,8 @@ async function api(opts) {
   }
   if (r.status < 200 || r.status >= 300) {
     var snippet = typeof r.body === 'string' ? r.body.slice(0, 300) : '';
-    return { err: classifyStatus(r.status, snippet) };
+    return { err: classifyStatus(r.status, snippet), status: r.status,
+      rateLimited: r.status === 403 && /rate limit/i.test(snippet) };
   }
   return { data: data, status: r.status, headers: r.headers || {} };
 }
@@ -4061,6 +4082,321 @@ bc.onmessage = function (ev) {
   })();
 };
 
+/* ── Explicit, local GitHub status watches ─────────────────────────── */
+var WATCH_INTERVAL = 5 * 60 * 1000;
+var WATCH_LIMIT = 5;
+var watchTimerAt;
+var watchTimerToken;
+var watchTimerSoonerAt;
+var WATCH_PATH = { pr: 'pulls', issue: 'issues', run: 'actions/runs' };
+var WATCH_RUN_STATES = ['queued', 'requested', 'waiting', 'pending', 'in_progress', 'completed'];
+var WATCH_CONCLUSIONS = ['success', 'failure', 'cancelled', 'neutral', 'skipped', 'timed_out',
+  'action_required', 'stale', 'startup_failure'];
+
+function watchTarget(args) {
+  if (!Object.hasOwn(WATCH_PATH, args.kind) || typeof args.repo !== 'string' ||
+      !/^[a-z\d-]{1,39}\/[a-z\d_.-]{1,100}$/i.test(args.repo) ||
+      /\/\.{1,2}$/.test(args.repo) || !Number.isSafeInteger(args.id) || args.id < 1) return null;
+  return { kind: args.kind, repo: args.repo.toLowerCase(), id: args.id };
+}
+
+function sameWatch(a, b) {
+  return a.kind === b.kind && a.repo === b.repo && a.id === b.id;
+}
+
+// Instance marker for each add: a removed-and-re-added target must not receive
+// an in-flight round's observations for the previous instance.
+var watchCreated = 0;
+
+function nextWatchCreated() {
+  watchCreated = Math.max(Date.now(), watchCreated + 1);
+  return watchCreated;
+}
+
+function sameWatchIdentity(row, observed) {
+  return sameWatch(row, observed) && row.account === observed.account &&
+    row.objectId === observed.objectId && row.created === observed.created;
+}
+
+function readWatches(kv) {
+  var watches = kv.githubStatusWatches;
+  if (watches === undefined) return [];
+  if (!Array.isArray(watches) || watches.length > WATCH_LIMIT || watches.some(function (watch) {
+    return !watch || !watchTarget(watch) || !Number.isSafeInteger(watch.account) || watch.account < 1 ||
+      !Number.isSafeInteger(watch.objectId) || watch.objectId < 1 ||
+      typeof watch.snapshot !== 'string' || !/^[a-z0-9_:]{1,120}$/.test(watch.snapshot);
+  })) throw new Error(t('watchUnavailable'));
+  return watches;
+}
+
+async function saveWatches(kv, watches) {
+  kv.githubStatusWatches = watches;
+  var r = await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
+  if (!r || !r.ok) throw new Error(t('watchUnavailable'));
+}
+
+async function watchRead(path, callId) {
+  var result = await api({ url: API + path, callId: callId });
+  if (result.err) {
+    var error = new Error(result.err);
+    error.rateLimited = result.status === 429 || result.rateLimited;
+    error.status = result.status;
+    throw error;
+  }
+  return result.data;
+}
+
+// Keep the failure class so the list can tell the user what to fix.
+// Matrix: 401 auth, 403 permission, 404/410 target gone or inaccessible, everything
+// transient (rate limit, 5xx, network, 422) unavailable; one cleanup path clears any
+// of them on the watch's next successful read.
+function watchProblemOf(error) {
+  if (error && error.rateLimited) return 'unavailable';
+  if (error && error.status === 401) return 'auth_required';
+  if (error && error.status === 403) return 'forbidden';
+  if (error && (error.status === 404 || error.status === 410)) return 'gone';
+  return 'unavailable';
+}
+
+async function watchAccount(callId) {
+  var user = await watchRead('/user', callId);
+  if (!Number.isSafeInteger(user?.id) || user.id < 1) throw new Error(t('watchUnavailable'));
+  return user.id;
+}
+
+async function watchSnapshot(target, callId) {
+  var repoPath = target.repo.split('/').map(encodeURIComponent).join('/');
+  var data = await watchRead('/repos/' + repoPath + '/' + WATCH_PATH[target.kind] + '/' + target.id, callId);
+  var snapshot;
+  if (target.kind === 'run') {
+    if (data?.id === target.id && WATCH_RUN_STATES.includes(data.status) &&
+        Number.isSafeInteger(data.run_attempt) && data.run_attempt > 0) {
+      var conclusion = WATCH_CONCLUSIONS.includes(data.conclusion) ? data.conclusion : 'unknown';
+      snapshot = data.status + ':' + (data.status === 'completed' ? conclusion : 'none') + ':' + data.run_attempt;
+    }
+  } else if (data?.number === target.id && ['open', 'closed'].includes(data.state) &&
+      Number.isSafeInteger(data.comments) && data.comments >= 0 &&
+      !(target.kind === 'issue' && data.pull_request)) {
+    var state = target.kind === 'pr' && data.merged === true ? 'merged' : data.state;
+    var draft = target.kind === 'pr' && data.draft === true ? 'draft' : 'ready';
+    snapshot = state + ':' + draft + ':' + data.comments;
+  }
+  if (!snapshot || !Number.isSafeInteger(data.id) || data.id < 1) throw new Error(t('watchUnavailable'));
+  return { snapshot: snapshot, objectId: data.id };
+}
+
+function armWatchTimer(delay, replaceLater) {
+  var at = Date.now() + delay;
+  if (watchTimerToken !== undefined) {
+    if (watchTimerAt !== undefined) {
+      // Keep an earlier deadline; only a successful add supersedes a later backoff.
+      if (watchTimerAt <= at) return;
+      if (!replaceLater) return;
+    } else {
+      // A round is in flight: remember the earliest add deadline for its finally.
+      if (!replaceLater) return;
+      if (watchTimerSoonerAt === undefined || at < watchTimerSoonerAt) watchTimerSoonerAt = at;
+      return;
+    }
+  }
+  var token = {};
+  watchTimerToken = token;
+  watchTimerAt = at;
+  setTimeout(async function () {
+    if (watchTimerToken !== token) return;
+    watchTimerAt = undefined;
+    var next = WATCH_INTERVAL;
+    try {
+      next = await pollWatches();
+    } catch (_) {
+      // Failed store, credential or transport reads must never replace the baseline.
+      next = WATCH_INTERVAL * 3;
+    } finally {
+      var soonerAt = watchTimerSoonerAt;
+      watchTimerSoonerAt = undefined;
+      if (watchTimerToken === token) {
+        watchTimerToken = undefined;
+        watchTimerAt = undefined;
+        var delay;
+        if (next) delay = next;
+        if (soonerAt !== undefined) {
+          var remaining = Math.max(0, soonerAt - Date.now());
+          if (delay === undefined || remaining < delay) delay = remaining;
+        }
+        // An empty round stops itself, but never drops a concurrent add's request.
+        if (delay !== undefined) armWatchTimer(delay);
+      }
+    }
+  }, delay);
+}
+
+async function markWatchProblems(problem, eligible) {
+  await enqueuePr(async function () {
+    var kv = await readKv(true);
+    var current = readWatches(kv);
+    var changed = false;
+    for (var row of current) {
+      if (eligible && !eligible(row)) continue;
+      // The newest failed read always wins; older states re-form on the next read.
+      if (row.problem === problem) continue;
+      row.problem = problem;
+      changed = true;
+    }
+    if (changed) await saveWatches(kv, current);
+  });
+}
+
+async function pollWatches() {
+  var watches = readWatches(await readKv(true));
+  if (!watches.length) return 0;
+  // Rows created after this snapshot keep their fresh baseline and are never marked here.
+  var existedAtStart = function (row) {
+    return watches.some(function (item) { return sameWatchIdentity(row, item); });
+  };
+  var account;
+  try {
+    account = await watchAccount();
+  } catch (error) {
+    // No target was read this round: surface the stall instead of claiming healthy polling.
+    await markWatchProblems(watchProblemOf(error), existedAtStart);
+    return WATCH_INTERVAL * 3;
+  }
+  var updates = [];
+  var failures = [];
+  var rateLimited = false;
+  for (var watch of watches) {
+    if (watch.account !== account) {
+      // Keep the saved target but stop reading it under the new account until it matches again.
+      if (watch.problem !== 'account_changed') failures.push({ watch: watch, problem: 'account_changed' });
+      continue;
+    }
+    try {
+      var result = await watchSnapshot(watch);
+      if (result.objectId !== watch.objectId) {
+        if (watch.problem !== 'target_changed') failures.push({ watch: watch, problem: 'target_changed' });
+      } else if (result.snapshot !== watch.snapshot || watch.problem) {
+        updates.push({ watch: watch, snapshot: result.snapshot });
+      }
+    } catch (error) {
+      var problem = watchProblemOf(error);
+      if (watch.problem !== problem) failures.push({ watch: watch, problem: problem });
+      if (error.rateLimited) {
+        rateLimited = true;
+        // Targets after this one are not read this round; keep their existing states,
+        // but never leave a healthy-looking row behind a rate-limit break.
+        for (var rest = watches.indexOf(watch) + 1; rest < watches.length; rest++) {
+          var skipped = watches[rest];
+          if (skipped.problem) continue;
+          failures.push({ watch: skipped, problem: skipped.account === account ? 'unavailable' : 'account_changed' });
+        }
+        break;
+      }
+    }
+  }
+  var hasPendingNotice = watches.some(function (watch) {
+    return watch.account === account && watch.noticePending === true;
+  });
+  var hasWork = updates.length > 0 || failures.length > 0 || hasPendingNotice;
+  if (!hasWork && !rateLimited) return WATCH_INTERVAL;
+  var confirmProblem = null;
+  if (hasWork) {
+    if (!rateLimited) {
+      var confirmed;
+      try {
+        confirmed = await watchAccount();
+      } catch (error) {
+        // Persist this round's observations, then the failed check's class, before backing off.
+        confirmProblem = watchProblemOf(error);
+      }
+      if (confirmed !== undefined && confirmed !== account) {
+        // The login switched mid-round: pause the old account's watches instead of
+        // leaving list to claim healthy polling through the backoff.
+        await markWatchProblems('account_changed', function (row) { return row.account !== confirmed; });
+        return WATCH_INTERVAL * 3;
+      }
+    }
+    await applyWatchRound(account, updates, failures);
+    if (confirmProblem) await markWatchProblems(confirmProblem, existedAtStart);
+  }
+  return rateLimited || confirmProblem ? WATCH_INTERVAL * 3 : WATCH_INTERVAL;
+}
+
+async function applyWatchRound(account, updates, failures) {
+  await enqueuePr(async function () {
+    var kv = await readKv(true);
+    var current = readWatches(kv);
+    // Merge only rows whose identity still matches the observation: a concurrent
+    // add/remove of any target must not discard work for the rows that survived,
+    // and a re-added target must not receive the previous instance's results.
+    for (var row of current) {
+      var update = updates.find(function (item) { return sameWatchIdentity(row, item.watch); });
+      var failure = failures.find(function (item) { return sameWatchIdentity(row, item.watch); });
+      if (update) {
+        if (row.snapshot !== update.snapshot) row.noticePending = true;
+        row.snapshot = update.snapshot;
+        delete row.problem;
+      } else if (failure) {
+        row.problem = failure.problem;
+      }
+    }
+    if (updates.length || failures.length) await saveWatches(kv, current);
+    var pending = current.filter(function (row) {
+      return row.account === account && row.noticePending === true;
+    });
+    if (!pending.length) return;
+    var first = pending[0];
+    var targets = pending.length === 1 ? first.repo + ' ' + first.kind + ' #' + first.id : String(pending.length);
+    await ensureLocale();
+    // Keep the change durable until Host confirms delivery. If the receipt or
+    // the subsequent KV write is lost, the next round may show it again.
+    var receipt = await cindy.send({ type: 'notify', text: t('watchChanged', { targets: targets }).slice(0, 200) });
+    if (!receipt || receipt.ok !== true) return;
+    for (var delivered of pending) delete delivered.noticePending;
+    await saveWatches(kv, current);
+  });
+}
+
+async function watchTool(args, callId) {
+  var action = args.action;
+  if (action === 'list') {
+    var watches = readWatches(await readKv(true));
+    if (watches.length) armWatchTimer(WATCH_INTERVAL);
+    return { ok: true, result: { mode: 'polling', interval_seconds: WATCH_INTERVAL / 1000, watches: watches.map(function (watch) {
+      return Object.assign(watchTarget(watch), { status: watch.snapshot, problem: watch.problem || null });
+    }) } };
+  }
+  var target = watchTarget(args);
+  if (!target || !['add', 'remove'].includes(action)) return fail(t('watchInvalid'));
+  // Enter the queue before the baseline reads so add/remove run in call arrival
+  // order; a later remove must overwrite an add still reading its baseline.
+  return enqueuePr(async function () {
+    var account;
+    var baseline;
+    if (action === 'add') {
+      account = await watchAccount(callId);
+      baseline = await watchSnapshot(target, callId);
+      if (await watchAccount(callId) !== account) return fail(t('watchUnavailable'));
+    }
+    var kv = await readKv(true);
+    var watches = readWatches(kv);
+    var index = watches.findIndex(function (item) { return sameWatch(item, target); });
+    if (action === 'remove') {
+      if (index >= 0) watches.splice(index, 1);
+    } else {
+      if (index >= 0 && watches[index].account === account && watches[index].objectId === baseline.objectId) {
+        armWatchTimer(WATCH_INTERVAL, true);
+        return { ok: true, result: { mode: 'polling', target: target } };
+      }
+      if (index >= 0) return fail(t('watchRebind'));
+      if (watches.length >= WATCH_LIMIT) return fail(t('watchLimit'));
+      watches.push(Object.assign({}, target, baseline, { account: account, created: nextWatchCreated() }));
+    }
+    await saveWatches(kv, watches);
+    if (watches.length) armWatchTimer(WATCH_INTERVAL, action === 'add');
+    return { ok: true, result: { mode: 'polling', target: target } };
+  });
+}
+
 /* ── 派单 ──────────────────────────────────────────────────────────── */
 
 cindy.onHostMessage(async function (msg) {
@@ -4084,6 +4420,8 @@ cindy.onHostMessage(async function (msg) {
       r = listTools(msg.args || {});
     } else if (msg.tool === 'call_tool') {
       r = await callTool(msg.args || {}, msg.callId);
+    } else if (msg.tool === 'status_watch') {
+      r = await watchTool(msg.args || {}, msg.callId);
     } else if (msg.tool === 'pr_follow_settings') {
       var settings = await enqueuePr(readPrSettings);
       r = settings.unreadable
@@ -4107,4 +4445,11 @@ cindy.onHostMessage(async function (msg) {
       message: t('toolFailed', { detail: err && err.message ? err.message : String(err) }),
     });
   }
+});
+
+// On wake, restore only explicit watches. Empty installations make no GitHub requests.
+void readKv(true).then(function (kv) {
+  if (readWatches(kv).length) armWatchTimer(WATCH_INTERVAL);
+}).catch(function () {
+  armWatchTimer(WATCH_INTERVAL * 3);
 });
