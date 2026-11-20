@@ -456,8 +456,9 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
     if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: [key] });
     else await request('send', { pane_id: paneId, keys: [key] });
     // 取消/改行已送达：未确认的那一行不存在了，记录与冻结才解除。
+    // 记录只有一条且可能属于别的分屏：只清本 scope 的。
     if (!PENDING_ENTER_KEEP_KEYS[key]) {
-      pendingEnterOnly = null;
+      if (pendingEnterOnly && pendingEnterOnly.scope === scope) pendingEnterOnly = null;
       scopeHolds[scope] = false;
     }
     await refreshTerminal();
@@ -517,8 +518,8 @@ function currentScope() {
 async function sendEnterOnly(scope, pinnedView) {
   const hadText = pendingEnterOnly && pendingEnterOnly.scope === scope
     ? pendingEnterOnly.text : null;
-  pendingEnterOnly = null;
-  terminalHasContent = null;
+  if (pendingEnterOnly && pendingEnterOnly.scope === scope) pendingEnterOnly = null;
+  if (terminalHasContent && terminalHasContent.scope === scope) terminalHasContent = null;
   const target = selectedTarget;
   const paneId = selectedPane ? selectedPane.pane_id : null;
   try {
@@ -599,15 +600,15 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
     } catch (error) {
       scopeHolds[scope] = true;
       pendingEnterOnly = { scope: scope, text: text };
-      scopeHolds[scope] = true;
       // 只在仍选中同一目标时补回输入框，别把 A 的命令写进 B 的框。
       if (currentScope() === scope && !field.value) field.value = text;
       renderOutput(error.message || T.sendFailed);
     }
     return;
   }
-  pendingEnterOnly = null;
-  terminalHasContent = null;
+  // 记录可能属于另一个分屏：只清本 scope 的。
+  if (pendingEnterOnly && pendingEnterOnly.scope === scope) pendingEnterOnly = null;
+  if (terminalHasContent && terminalHasContent.scope === scope) terminalHasContent = null;
   try {
     if (pinnedView === 'tmux') {
       await request('tmux_send', { target: target, text: text });

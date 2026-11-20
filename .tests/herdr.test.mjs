@@ -538,8 +538,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a resumed submit must only send Enter, not paste the text again');
   assert.match(panelSrcAtomic, /PENDING_ENTER_KEEP_KEYS/,
     'line-preserving keys must keep the pending-enter record');
-  assert.match(panelSrcAtomic, /if \(!PENDING_ENTER_KEEP_KEYS\[key\]\) \{\s*pendingEnterOnly = null;/,
-    'line-altering keys must invalidate the pending-enter record');
+  assert.match(panelSrcAtomic, /if \(!PENDING_ENTER_KEEP_KEYS\[key\]\) \{\s*if \(pendingEnterOnly && pendingEnterOnly\.scope === scope\) pendingEnterOnly = null;/,
+    'line-altering keys must invalidate the pending-enter record for their scope');
   assert.match(panelSrcAtomic, /closeDetail[\s\S]{0,200}?pendingEnterOnly = null/,
     'closing the detail must invalidate the pending-enter record');
 
@@ -705,6 +705,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'switching panes or closing the detail must release the holds');
   assert.match(panelSrcHold, /取消\/改行已送达/,
     'the hold must only clear after the cancelling key lands');
+  const guarded = (panelSrcHold.match(/if \(pendingEnterOnly && pendingEnterOnly\.scope === scope\) pendingEnterOnly = null;/g) || []).length;
+  assert.ok(guarded >= 3, 'clearing the single record must be scope-guarded');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
