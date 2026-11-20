@@ -49,7 +49,7 @@ function guideArguments(values) {
   const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
   const source = guide.match(/```js\n(\/\/ Argument lists for the existing task execution tool\.[\s\S]*?)\n```/)?.[1];
   assert.ok(source, 'the recovery guide must define argument lists, not shell command templates');
-  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs })', values);
+  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs })', values);
 }
 
 test('recovery guide passes dynamic refs, remotes and paths as literal argument data', () => {
@@ -73,9 +73,15 @@ test('recovery guide passes dynamic refs, remotes and paths as literal argument 
       remoteArgs: ['ls-remote', '--heads', '--', values.verifiedRemote, exactRef],
       reserveArgs: [values.gatePath, values.prUrl, '--state-dir', values.observationStateDir, '--reserve-ci-retry', oldHead, '--ci-retry-id', values.prNodeId, '--ci-retry-failure', values.diagnosisPath, '--json'],
       statusArgs: [values.gatePath, values.prUrl, '--state-dir', values.observationStateDir, '--ci-retry-status', '--ci-retry-id', values.prNodeId, '--ci-retry-failure', values.diagnosisPath, '--json'],
-      verifyArgs: ['verify-commit', newHead],
-      originalSignatureArgs: ['show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', oldHead],
-      signatureArgs: ['show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', newHead],
+      hooksPathArgs: ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'hooks'],
+      graftPathArgs: ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'info/grafts'],
+      replaceRefsArgs: ['--no-replace-objects', 'for-each-ref', '--format=%(refname)', 'refs/replace/'],
+      originalObjectArgs: ['--no-replace-objects', 'cat-file', 'commit', oldHead],
+      replacementObjectArgs: ['--no-replace-objects', 'cat-file', 'commit', newHead],
+      amendArgs: ['--no-replace-objects', 'commit', '--amend', '--no-edit'],
+      verifyArgs: ['--no-replace-objects', 'verify-commit', newHead],
+      originalSignatureArgs: ['--no-replace-objects', 'show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', oldHead],
+      signatureArgs: ['--no-replace-objects', 'show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', newHead],
       pushArgs: ['push', '--force-with-lease=' + exactRef + ':' + oldHead, '--no-follow-tags', '--recurse-submodules=no', '--', values.verifiedRemote, values.newSha + ':' + exactRef],
     };
     // Git accepts these refs; its format check cannot make a shell interpolation safe.
@@ -712,4 +718,94 @@ test('recovery binds signature identity even when two different SSH keys both ve
   const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
   assert.match(guide, /full signing-key fingerprint/);
   assert.match(guide.replace(/\*\*/g, '').replace(/\s+/g, ' '), /same signature identity before consuming budget/);
+});
+
+// These are native demonstrations of excluded configurations, not recovery
+// execution or a mechanical implementation of the Agent's eligibility judgment.
+test('CI recovery excludes active default/custom commit hooks before quota and amend', async t => {
+  for (const custom of [false, true]) for (const hook of ['post-commit', 'post-rewrite']) {
+    await t.test((custom ? 'custom' : 'default') + '/' + hook, t => {
+      const fx = fixture(t), work = path.join(fx.root, 'work'), parent = path.join(fx.root, 'parent.git'), extra = path.join(fx.root, 'extra.git');
+      const global = path.join(fx.root, 'isolated-global'); fs.writeFileSync(global, '');
+      const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
+      const git = (cwd, args, vars = {}) => execFileSync('git', args, { cwd, env: { ...env, ...vars }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+      for (const remote of [parent, extra]) git(fx.root, ['init', '--bare', '-b', 'main', remote]);
+      git(fx.root, ['clone', parent, work]);
+      for (const [key, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false']]) git(work, ['config', key, value]);
+      git(work, ['remote', 'add', 'hook-sink', extra]);
+      fs.writeFileSync(path.join(work, 'code.txt'), 'unchanged tree\n'); git(work, ['add', 'code.txt']);
+      git(work, ['commit', '-s', '-m', 'original'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' });
+      const original = git(work, ['rev-parse', 'HEAD']);
+      git(work, ['push', '--no-follow-tags', '--recurse-submodules=no', '--', 'origin', original + ':refs/heads/main']);
+      if (custom) git(work, ['config', 'core.hooksPath', '../custom-hooks']);
+      const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+        gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+      const hookDir = git(work, plan.hooksPathArgs ?? ['rev-parse', '--path-format=absolute', '--git-path', 'hooks']);
+      assert.equal(path.resolve(hookDir), custom ? path.join(fx.root, 'custom-hooks') : path.join(work, '.git/hooks'));
+      fs.mkdirSync(hookDir, { recursive: true });
+      const hookPath = path.join(hookDir, hook);
+      fs.writeFileSync(hookPath, '#!/bin/sh\ngit push --no-follow-tags --recurse-submodules=no hook-sink HEAD:refs/heads/hook-effect\n');
+      fs.chmodSync(hookPath, 0o755);
+      const hookBytes = fs.readFileSync(hookPath);
+      // Deliberately run the old, ineligible sequence ONLY in this disposable
+      // fixture: either post hook writes before any final recovery push exists.
+      git(work, ['commit', '--amend', '--no-edit'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:01Z' });
+      assert.equal(git(extra, ['rev-parse', 'refs/heads/hook-effect']), git(work, ['rev-parse', 'HEAD']));
+      assert.equal(git(parent, ['rev-parse', 'refs/heads/main']), original);
+      assert.deepEqual(fs.readFileSync(hookPath), hookBytes, 'never disable or rewrite a user hook');
+      assert.equal(fs.existsSync(fx.retryDir), false, 'demonstration must not consume real or simulated recovery quota');
+      const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+      assert.ok(/Any active hook makes this checkout ineligible before quota or amend/.test(guide), 'all active hooks must be excluded before quota/amend');
+      assert.ok(/post-commit.*post-rewrite.*reference-transaction/.test(guide), 'scope must include all amend/ref hooks');
+    });
+  }
+});
+
+test('CI recovery uses raw objects and excludes replace refs and legacy grafts', async t => {
+  for (const kind of ['replace', 'legacy graft']) await t.test(kind, t => {
+    const fx = fixture(t), work = path.join(fx.root, 'work'); fs.mkdirSync(work);
+    const global = path.join(fx.root, 'isolated-global'); fs.writeFileSync(global, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
+    const git = (args, vars = {}) => execFileSync('git', args, { cwd: work, env: { ...env, ...vars }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    git(['init', '-b', 'main']);
+    for (const [key, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false']]) git(['config', key, value]);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'base\n'); git(['add', 'code.txt']); git(['commit', '-s', '-m', 'base']);
+    const base = git(['rev-parse', 'HEAD']);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'original\n'); git(['add', 'code.txt']);
+    git(['commit', '-s', '-m', 'original'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' });
+    const original = git(['rev-parse', 'HEAD']), rawBefore = git(['--no-replace-objects', 'cat-file', 'commit', original]);
+    const tree = rawBefore.match(/^tree (.+)$/m)[1];
+    const alternative = git(['commit-tree', git(['rev-parse', base + '^{tree}']), '-m', 'different root']);
+    const parents = raw => [...raw.split('\n\n', 1)[0].matchAll(/^parent (.+)$/gm)].map(m => m[1]);
+    assert.deepEqual(parents(rawBefore), [base]);
+    if (kind === 'replace') git(['replace', '--graft', original, alternative]);
+    else {
+      const graft = git(['rev-parse', '--path-format=absolute', '--git-path', 'info/grafts']);
+      fs.mkdirSync(path.dirname(graft), { recursive: true }); fs.writeFileSync(graft, original + ' ' + alternative + '\n');
+    }
+    assert.equal(git(['status', '--porcelain']), '', 'ordinary status cannot detect this history overlay');
+    assert.equal(git(['show', '-s', '--format=%P', original]), alternative);
+    const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    if (kind === 'replace') {
+      assert.equal(git(plan.originalObjectArgs ?? ['cat-file', 'commit', original]), rawBefore, 'baseline must be the raw object, not a replacement');
+      // Raw-view defense is demonstrated counterfactually even though this
+      // checkout is excluded by policy; no remote or quota is involved.
+      git(plan.amendArgs ?? ['commit', '--amend', '--no-edit'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:01Z' });
+      const next = git(['rev-parse', 'HEAD']);
+      const nextPlan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: next,
+        gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+      const rawAfter = git(nextPlan.replacementObjectArgs ?? ['cat-file', 'commit', next]);
+      assert.equal(rawAfter, git(['--no-replace-objects', 'cat-file', 'commit', next]));
+      assert.deepEqual(parents(rawAfter), parents(rawBefore));
+    } else {
+      // Legacy grafts are rejected, never repaired/converted to make recovery
+      // eligible. Ordinary amend shows why raw payload comparison is necessary.
+      git(['commit', '--amend', '--no-edit'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:01Z' });
+      assert.deepEqual(parents(git(['--no-replace-objects', 'cat-file', 'commit', 'HEAD'])), [alternative]);
+    }
+    const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    assert.ok(/Any replace ref or legacy graft makes this checkout ineligible before quota/.test(guide), 'history overlays must be excluded before quota');
+    assert.equal(fs.existsSync(fx.retryDir), false);
+  });
 });

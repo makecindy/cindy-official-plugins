@@ -50,9 +50,15 @@ const reserveArgs = [gatePath, prUrl, '--state-dir', observationStateDir,
   '--ci-retry-id', prNodeId, '--ci-retry-failure', diagnosisPath, '--json'];
 const statusArgs = [gatePath, prUrl, '--state-dir', observationStateDir, '--ci-retry-status',
   '--ci-retry-id', prNodeId, '--ci-retry-failure', diagnosisPath, '--json'];
-const verifyArgs = ['verify-commit', newSha];
-const originalSignatureArgs = ['show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', originalRemoteSha];
-const signatureArgs = ['show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', newSha];
+const hooksPathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'hooks'];
+const graftPathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'info/grafts'];
+const replaceRefsArgs = ['--no-replace-objects', 'for-each-ref', '--format=%(refname)', 'refs/replace/'];
+const originalObjectArgs = ['--no-replace-objects', 'cat-file', 'commit', originalRemoteSha];
+const replacementObjectArgs = ['--no-replace-objects', 'cat-file', 'commit', newSha];
+const amendArgs = ['--no-replace-objects', 'commit', '--amend', '--no-edit'];
+const verifyArgs = ['--no-replace-objects', 'verify-commit', newSha];
+const originalSignatureArgs = ['--no-replace-objects', 'show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', originalRemoteSha];
+const signatureArgs = ['--no-replace-objects', 'show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', newSha];
 const pushArgs = ['push', '--force-with-lease=' + exactRef + ':' + originalRemoteSha,
   '--no-follow-tags', '--recurse-submodules=no', '--', verifiedRemote, newSha + ':' + exactRef];
 ```
@@ -88,12 +94,60 @@ arguments also avoid default destination/ref selection (`push.default` and
 `remote.<name>.push`); require the verified single push URL as below.
 
 This is a bounded Agent workflow, not a sandbox for arbitrary Git extensions.
-Before reserving quota, inspect the effective push configuration and existing
-pre-push hooks for this exact checkout/remote. A mirrored remote, nonempty
-`push.pushOption`, custom receive program or hook that can write outside the
-parent ref, or unknown behavior stops recovery. Do not disable hooks, change
-configuration or replace a helper to make it eligible. The existing task tool
-is still the only executor; no new resolver, hook runner or storage is added.
+Before budget status/reservation, inspect the effective push configuration. A
+mirrored remote, nonempty `push.pushOption`, custom receive program capable of
+extra writes or unknown behavior stops recovery. Do not change configuration
+or replace a helper to make it eligible. The existing task tool remains the
+only executor; no resolver, hook runner or storage is added.
+
+### Supported checkout: no hooks or history overlays
+
+The same eligibility boundary applies before **any Git status/object work or
+budget operation**, immediately before amend, and immediately before push.
+First use read-only configuration/path inspection, not a trial commit or hook.
+An executable extension or object-view override outside this supported checkout,
+or unknown execution effects, stops CI-only recovery; do not run it as a probe.
+Any active hook makes this checkout ineligible before quota or amend.
+Require the effective hooks directory to be absent or contain only inactive
+Git `*.sample` files. Any non-sample entry, dispatcher, symlink, unreadable
+path or uncertain activation stops this CI-only route; do not attempt to prove
+arbitrary scripts harmless by running them. This covers pre-commit,
+prepare-commit-msg, commit-msg, post-commit, post-rewrite, reference-transaction,
+pre-push and other hooks, not just the final push hook. Use `hooksPathArgs` to
+resolve Git's effective directory, including `core.hooksPath` and linked
+worktrees; never assume `.git` is a directory. Require `core.fsmonitor` unset
+or false too: a status/monitor command with unknown effects is not supported.
+Do not disable, rename, chmod, rewrite or bypass hooks to become eligible.
+Ordinary authorized fixes remain governed by their repository rules; this
+restriction is for the optional CI-only recovery, not normal contribution.
+
+Any replace ref or legacy graft makes this checkout ineligible before quota.
+Require `replaceRefsArgs` to return no entries and the file at `graftPathArgs`
+to be absent, including empty or unreadable graft files. A nonstandard history
+namespace/file environment (including `GIT_REPLACE_REF_BASE` or `GIT_GRAFT_FILE`)
+or unknown resolution also stops recovery; do not delete/convert overlays,
+change their namespace, or unset user environment to gain eligibility.
+
+All object reads, signature checks and amend use `--no-replace-objects` with
+the pinned full SHA: use the shared original/replacement object and signature
+arrays and `amendArgs`. The prefix alone is not a legacy-graft bypass; absence
+of both kinds of overlays is still required. The baseline is the original raw
+commit payload. Parse only its header block before the first blank line,
+respect continuations, and record tree, the **ordered complete parent list**,
+author and message/trailers from that payload. After amend compare the raw new
+payload against this same original baseline, not two replacement-aware views
+or `%P`/symbolic lookups. Signature identity checks remain mandatory.
+
+| Event | Action |
+| --- | --- |
+| Any effective hook, overlay or unknown inspection before budget | Stop without budget, amend or push |
+| Hook/configuration/history facts change before amend | Stop; keep any consumed receipt, no refund |
+| Raw tree/parents/author differ, or an overlay/hook appears after amend | Leave the new local commit unpushed and report; never reset user work |
+| Earlier hook may already have written externally | Reconcile all suspected destinations read-only; unknown is not unexecuted |
+
+These are Agent checks in an exclusive checkout, not an atomic filesystem lock
+or protection against concurrent adversarial configuration changes. Unknown or
+changed facts stop the workflow; no monitor, sandbox or automatic repair is added.
 
 ## Eligibility
 
@@ -218,13 +272,15 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    ongoing merge/rebase/cherry-pick state. Require a clean task checkout. Any WIP
    stops this route; do not stage, stash, reset or overwrite it. Read repository
    rules, `git remote -v`, the actual push URL(s), `git branch --show-current`,
-   `git rev-parse HEAD`, and the head commit's tree, parents, author and message.
+   `git rev-parse HEAD`, and the pinned head's raw tree, parents, author and message
+   using `originalObjectArgs`, after the supported-checkout checks above.
    Require a single verified push destination matching the PR head repository.
    Never infer `origin` is the PR's head remote. Use the explicit target ref
    `refs/heads/<PR-head-branch>` throughout; verify it with `git check-ref-format`.
-   Inspect `git cat-file commit HEAD` for a `gpgsig` / `gpgsig-sha256` header.
+   Inspect that raw payload for a `gpgsig` / `gpgsig-sha256` header.
    Before consuming budget, a signed head requires its original signature to
-   verify (`git verify-commit HEAD`) and the existing effective signing setup
+   verify (`git --no-replace-objects verify-commit` with the pinned original SHA)
+   and the existing effective signing setup
    to sign the replacement noninteractively with the same signature identity.
    Record the verified original format, full signing-key fingerprint and signer
    principal (`%GF` and `%GS`, plus `%GP` for formats with a primary key) using
@@ -296,16 +352,19 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    recovery; migration never grants two fresh attempts on top of old history.
 4. Recheck eligibility 6 (no approval, queue or auto-merge; all states known),
    the PR is open, the preference is enabled, and local/index/remote
-   facts still match before `git commit --amend --no-edit`. For a signed head,
+   facts still match, including absence of every effective hook/history overlay.
+   Use `git` with `amendArgs` only after those checks. For a signed head,
    recheck that the effective automatic signer still resolves to the recorded
    signature identity; a changed or unknown signer stops the amend. Preserve the code
    tree, parents, author, commit intent and existing trailers; never use
    `--reset-author`, `--allow-empty`, identity overrides or disable hooks. Follow
    repository DCO rules: preserve matching sign-offs; add `-s` only with the
    configured identity and when valid for this author. If a matching sign-off
-   cannot legitimately be supplied, stop. After amend verify a **new** SHA and
-   unchanged tree, parents and author; compare the message (only required DCO
-   additions may differ). If hooks changed the tree or SHA is unchanged, stop.
+   cannot legitimately be supplied, stop. After amend verify a **new** SHA.
+   Read `replacementObjectArgs` and compare raw tree, ordered parents and author
+   against the recorded original raw payload; compare the message (only required
+   DCO additions may differ). A differing raw payload invariant or unchanged SHA
+   stops pushing. Recheck hooks/overlays without invoking them.
    If the old head was signed, require a signature header on the new commit and
    successful `git` verification with `verifyArgs`, then read `signatureArgs`
    for the exact `newSha`. Require the same format, full signing-key fingerprint,
@@ -317,7 +376,7 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    verification is not evidence that GitHub's Verified badge was preserved.
 5. Read live `pr_follow_settings` immediately before pushing, and refresh PR
    state, complete reviews, queue entry, auto-merge, head, clean worktree and exact
-   remote ref, plus the transfer-scope configuration/hook assumptions above.
+   remote ref, plus all supported-checkout/transfer-scope assumptions above.
    Eligibility 6 must still hold immediately before push. If an
    approval/queue/auto-merge appears or any read becomes unknown, stop; do not
    push or alter the merge workflow. All must still match the
@@ -351,6 +410,12 @@ Read back review/queue state too. These checks are not an atomic GitHub lock;
 if a concurrent change or uncertain push affected approvals or queue state,
 report the actual/unknown side effect and stop, without trying to restore,
 dismiss, dequeue or re-enqueue anything automatically.
+If a prior amend may have invoked a hook, its external effects precede the final
+push and cannot be settled by the parent ref/lease alone. Identify suspected
+destinations from the original hook/configuration and read them back without
+executing the hook again. Report unknown destinations/effects as unknown; do not
+replay, refund, delete refs or claim that no final push means no external write.
+
 Report separately: not executed, executed and verified, or unknown pending
 read-back. Never call CI passed until its actual results pass. If checks do not
 start, investigate/report and wait, without another amend, empty commit or push.

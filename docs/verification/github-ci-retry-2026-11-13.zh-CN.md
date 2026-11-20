@@ -679,3 +679,15 @@ Windows 10.0.26100 / Node 22.22.3 / Git 2.54.0.windows.1 的回归先在 4d71bcd
 定向 argv/标签/子模块检查 **11 通过、0 失败（40.79 秒）**；规定四套加插件 **428 通过、36 跳过、0 失败（125.61 秒）**。17 项本机不支持目录同步的原生正向及 19 项原有 Windows 跳过不变，不增加正向持久性证据。清单及官方方式内存归档/逐文件检查通过：暂存树 `8576b918d809a87c45b4d98898d1b1b7d0ce7bdd`，33 文件、243141 压缩 bytes、676125 展开 bytes，内容匹配 Git，未留包。源码 1.5.39 高于 main 1.5.34，未安装。main UI/settings/locales、Node 入口及全部恢复/心跳/回执脚本与 4d71bcd 逐字相同；包内只改指南及版本/发布说明。
 
 最后实测 local 插件仍为 97d540e / 1.5.19。本轮 local 身份查询返回 namespace mismatch，重推偏好未知，不构成改写授权。真实拒绝 rerun 恢复、恢复中关闭、当前 UI/读取顺序/继承集成缺口及按当时 head 的维护者复审仍是前提。未改真实设置、额度、凭证、权限或安装；未执行恢复改写、合并/队列操作、重建退役资源或重试被阻断清理。
+
+## 第 32 轮受支持检出/原始对象范围 — 2026-11-20（源码 1.5.40）
+
+将 discussion_r4642978713、discussion_r4642978736 合并为恢复执行/来源边界问题。CI-only 恢复排除全部活动 hook、replace ref 和 legacy graft，不审计或运行任意扩展。status/对象操作或 budget status/预留前，以及 amend/push 前，解析 Git 的有效 hook 目录（含 core.hooksPath/linked worktree）：只接受目录缺失或仅有不执行的 Git *.sample。非 sample 项、dispatcher、symlink、不可读/未知激活或执行扩展均停止；core.fsmonitor 须未设/false。不关闭、改名、chmod 或绕过 hook。只读参数解析 canonical replace refs 与 graft 路径；任何 replace/graft（含空或不可读 graft 文件）、非标准历史环境/命名空间或未知解析在额度前停止。不删除/转换覆盖，也不 unset 用户环境来取得资格；正常授权贡献继续按仓库规则执行。
+
+共享对象/签名/amend 参数改用 --no-replace-objects 和绑定完整 SHA。原、新 cat-file commit payload 是唯一原始基线：只解析 header，保留有序完整 parents、tree、author 及消息/必要 trailers，始终与原始 baseline 比较；两次 replacement-aware 读取或 %P 不证明不变。该 flag 不是 legacy graft 绕过，覆盖拒绝仍必需。相关边界复查 hook/历史/配置；已消费或 amend 后发现未知则停止，不退款/reset/push。旧 hook 可能外发时须只读核对全部可疑目标，不能因尚无最终 push 就声称无外部副作用。未新增执行器、沙箱、hook 解释器、监听、锁、存储或重试；这是 Agent 检查，不是抵御并发恶意配置更改的原子执行保证。
+
+Windows 10.0.26100 / Node 22.22.3 / Git 2.54.0.windows.1 的原生隔离回归先在 393c567 失败。默认/自定义目录的 post-commit/post-rewrite 四个反例在普通 amend 时向独立 bare 远端写入，父 ref 仍不变；这是故意执行隔离旧不合格流程以证明问题，不是生产恢复。replace ref 掩盖原始 parent 基线，legacy graft 把不同 parent 物化进 amend 后的原始对象。新增 raw 参数即便在反事实 replacement 下也保留原始 parents；指南仍在额度前拒绝两种覆盖。hook 文案断言验证 Agent 契约，不是机械拒绝实现。测试自清理私有夹具/配置/远端，未使用真实 GitHub 资源或恢复额度。
+
+hook/raw 对象及既有字面参数/签名初验 **10 通过（15.78 秒）**。补齐全部新只读/raw 参数逐项回传后的规定四套加插件 **436 通过、36 跳过、0 失败（127.40 秒）**。17 项本机不支持目录同步的原生正向及 19 项原有 Windows 跳过不变。清单及官方方式内存归档/内容检查通过：暂存树 `9208dfcf76552fe317738dbf47bcae6439b163e4`，33 文件、244723 压缩 bytes、680928 展开 bytes，逐文件匹配 Git，未留包。源码 1.5.40 高于 main 1.5.34，未安装。包内只改指南及版本/发布说明；main UI/settings/locales、Node 入口及心跳/恢复/回执脚本与 393c567 逐字相同。本任务检出只读回查为仅有不激活的 sample hooks、无 replace refs/graft 文件，这不代表全部恢复资格满足。
+
+最后实测 local 插件仍为 97d540e / 1.5.19；当前 local 身份不可用，偏好未知，不构成改写授权。真实拒绝 rerun 恢复、恢复中关闭、当前 UI/读取顺序/继承集成缺口及随后按当时 head 的维护者复审仍是前提。未安装、改真实偏好/额度/凭证/权限、执行 CI-only 改写、合并/队列操作、重建退役资源或重试被阻断清理。
