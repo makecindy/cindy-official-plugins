@@ -24,6 +24,7 @@
       chooseHint: '选择哪台电脑自动整理通讯录。其他电脑只同步，主机暂停或离线时会等它恢复。',
       localOnly: '本机只同步', localIdle: '本机不自动整理，设备同步未开启', roleLoading: '正在读取主机设置…', offlineRole: '暂时无法确认主机。请检查 Cindy 账号和网络连接。',
       servicePending: '当前账号服务尚未提供自动整理主机。', updateRole: '请更新 Cindy 后选择自动整理主机。', retry: '重新读取', conflict: '主机选择已变化，或原主机正在整理。请核对后再试。',
+      savedActive: '本机保留了整理任务，只有设为主机后才会运行。',
       localState: { active: '本机自动化已启用', paused: '本机自动化已暂停', expired: '本机自动化已到期', none: '本机还没有整理自动化' },
       autoBtn: '设置整理自动化', autoHint: '在主机的 Cindy 桌面端选择模型和频率并保存。每次整理会使用 AI 额度。',
       autoOpened: '已在主机桌面打开自动化页，保存后生效。', autoStop: '在 Cindy「自动化」中可以管理已有的整理任务。',
@@ -58,6 +59,7 @@
       chooseHint: 'Choose one computer to tidy up contacts. The others only sync, even when the host is paused or offline.',
       localOnly: 'This computer only syncs', localIdle: 'Automatic tidy-up and device sync are off on this computer', roleLoading: 'Checking the selected computer…', offlineRole: 'Could not confirm the host. Check your Cindy account and network connection.',
       servicePending: 'Your account service does not support tidy-up hosts yet.', updateRole: 'Update Cindy to choose a tidy-up host.', retry: 'Check again', conflict: 'The selection changed or the previous computer is tidying up. Check the current selection and try again.',
+      savedActive: 'The saved tidy-up will run only if you choose this computer as the host.',
       localState: { active: 'Local automation enabled', paused: 'Local automation paused', expired: 'Local automation expired', none: 'No local tidy-up automation' },
       autoBtn: 'Set up tidy-up', autoHint: 'On the host computer, choose a model and frequency in Automations, then save. Each tidy-up uses AI quota.',
       autoOpened: 'Automations is open on the host computer. Save to enable the schedule.', autoStop: 'Manage the existing tidy-up in Cindy Automations.',
@@ -149,7 +151,7 @@
         } else if (role.localSchedule !== 'none') h += `<p class="hint">${esc(T.autoStop)}</p>`;
       } else {
         if (role.selected) h += `<p class="status">${esc(m.deviceSync?.enabled ? T.localOnly : T.localIdle)}</p>`;
-        if (role.localSchedule !== 'none') h += `<p class="hint">${esc(T.localState[role.localSchedule])}</p>`;
+        if (role.localSchedule !== 'none') h += `<p class="hint">${esc(role.localSchedule === 'active' ? T.savedActive : T.localState[role.localSchedule])}</p>`;
       }
       h += `<button class="pill${role.isPrimary ? ' secondary' : ''}" type="button" id="chooseHost"${S.choosing ? ' disabled' : ''}>${esc(role.isPrimary ? T.clearHost : T.choose)}</button>`;
     } else {
