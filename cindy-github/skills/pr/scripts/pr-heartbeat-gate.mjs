@@ -1367,12 +1367,13 @@ function emit(args, payload, out = (text) => process.stdout.write(text)) {
 
 // gh auth status prints recovery suggestions even when it cannot reach GitHub.
 function snapshotDiagnosis(stderr) {
+  const explicitRateLimit = /\[gh-rate-limit\]|HTTP 429\b/i.test(stderr);
   const dns = /\blookup ([\w.-]+)(?::\d+)?[^\n]*(?:no such host|server misbehaving|i\/o timeout|context deadline exceeded)|\b(?:ENOTFOUND|EAI_AGAIN) ([\w.-]+)/i.exec(stderr);
-  if (dns) {
+  if (dns && !explicitRateLimit) {
     const host = dns[1] || dns[2];
     return { kind: 'dns', host, summary: `DNS lookup failed for ${host}` };
   }
-  if (/rate limit|\[gh-rate-limit\]|HTTP 429\b/i.test(stderr)) {
+  if (explicitRateLimit || /rate limit/i.test(stderr)) {
     return { kind: 'rate-limit', summary: 'GitHub API rate limit reached' };
   }
   if (/i\/o timeout|timed? ?out|context deadline exceeded/i.test(stderr)) {

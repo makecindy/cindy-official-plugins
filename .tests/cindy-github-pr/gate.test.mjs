@@ -727,6 +727,7 @@ test('blocked snapshot reports its underlying cause and scheduled probe', async 
     ['The token in keyring is invalid.\nError: dial tcp: lookup api.github.com on 127.0.0.1:53: i/o timeout', 'dns'],
     ['HTTP 401: Bad credentials', 'auth'],
     ['HTTP 429', 'rate-limit'],
+    ['[gh-rate-limit] retryAt=0\nHTTP 429\ndial tcp: lookup api.github.com: i/o timeout', 'rate-limit'],
     ['dial tcp: i/o timeout', 'timeout'],
     ['unexpected response\n- To re-authenticate, run: gh auth refresh', 'unknown'],
   ]) {
