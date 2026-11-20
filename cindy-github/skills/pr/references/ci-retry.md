@@ -125,7 +125,23 @@ auto-merge, queue operations, direct main pushes, permission changes or bypasses
 ## Verify, consume the budget, amend and push
 
 Use the current `<skill-dir>` and this PR's existing observation-cache directory
-for the gate. Retry receipts are stored separately in durable user data, never
+for the gate. Both budget status and reservation require confirmed filesystem
+durability. The single receipt I/O owner syncs file contents and every parent
+directory through the filesystem root, including newly created ancestors,
+before returning success. New slots, raw exclusive legacy copies, migration
+and re-read receipts share this boundary. Only an absent file at open means
+unused: a later ENOENT, failed/unsupported sync or unknown outcome stops recovery.
+There is no fallback to file-only sync, refund, removal, alternate directory or
+automatic retry. Keep observation cache and all receipts on any error; an
+unsupported store cannot confirm migration or grant available quota.
+
+The Windows/Node 22.22.3 environment tested here returns EPERM for directory
+fsync, so this CI-only recovery is refused there, including budget status;
+ordinary PR follow-up remains available. Other platforms/filesystems must
+actually support these operations; an OS name alone is not support evidence.
+Successful sync calls are OS acknowledgements, not a hardware power-loss test.
+
+Retry receipts are stored separately in durable user data, never
 in that cache: `$XDG_STATE_HOME/cindy-pr/ci-retry` when set to an absolute path;
 otherwise Windows uses `%LOCALAPPDATA%/Cindy/pr-recovery`, macOS uses
 `~/Library/Application Support/Cindy/pr-recovery`, and other systems use
@@ -146,6 +162,9 @@ GitHub node IDs are opaque: use the exact verified value, including legacy
 base64 IDs; a `PR_` prefix is not required. Do not substitute a URL or number.
 Earlier evidence already deleted before migration cannot be reconstructed;
 an uncertain prior outcome still stops recovery.
+This upgrade cannot reconstruct receipts lost before it. Known power loss or
+an uncertain earlier recovery outcome requires reconciliation; absent files
+are not authorization for another attempt.
 
 Each PR has a hard total of **two CI-only repush attempts per computer**, with
 at most one per diagnosed failure. At two, stop and report regardless of a new

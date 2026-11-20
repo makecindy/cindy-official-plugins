@@ -14,6 +14,37 @@ const prNodeId = 'PR_exampleImmutableId';
 const oldHead = 'a'.repeat(40), newHead = 'b'.repeat(40);
 const failure = { workflow: '.github/workflows/verify.yml', job: 'verify', step: 'install dependencies', cause: 'package store unavailable' };
 
+// Native integration tests must not pretend directory sync works on this host.
+// Supported CI hosts run the existing real-filesystem quota/process cases.
+const nativeDirectorySync = (() => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-receipt-capability-'));
+  let fd;
+  try { fd = fs.openSync(dir, 'r'); fs.fsyncSync(fd); return { supported: true }; }
+  catch (error) { return { supported: false, code: error.code }; }
+  finally { if (fd !== undefined) fs.closeSync(fd); fs.rmdirSync(dir); }
+})();
+const quotaTest = nativeDirectorySync.supported ? test
+  : (name, fn) => test(name, { skip: `native directory sync unavailable: ${nativeDirectorySync.code}` }, fn);
+
+test('unsupported native directory sync refuses status, reservation and raw migration without quota success', {
+  skip: nativeDirectorySync.supported ? 'this host supports native directory sync' : false,
+}, t => {
+  for (const mode of ['--ci-retry-status', '--reserve-ci-retry', 'legacy']) {
+    const fx = fixture(t);
+    if (mode === 'legacy') {
+      fs.mkdirSync(fx.stateDir);
+      fs.writeFileSync(stateFilePath(fx.stateDir, 'example/repo', 42) + '.ci-retry', '{unknown raw bytes');
+    }
+    const flags = mode === '--reserve-ci-retry' ? [mode, oldHead] : ['--ci-retry-status'];
+    const result = spawnSync(process.execPath, [gate, ...fx.args(flags)], { env: fx.env, encoding: 'utf8' });
+    assert.equal(result.status, 1, mode + ': must refuse recovery');
+    assert.match(result.stderr, /durability could not be confirmed/);
+    assert.doesNotMatch(result.stdout, /ci-retry-reserved|"available":true/);
+    assert.equal(fs.existsSync(fx.retryDir), false, 'do not create receipts on an unsupported filesystem');
+    if (mode === 'legacy') assert.equal(fs.readFileSync(stateFilePath(fx.stateDir, 'example/repo', 42) + '.ci-retry', 'utf8'), '{unknown raw bytes');
+  }
+});
+
 function guideArguments(values) {
   const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
   const source = guide.match(/```js\n(\/\/ Argument lists for the existing task execution tool\.[\s\S]*?)\n```/)?.[1];
@@ -58,7 +89,7 @@ test('recovery guide passes dynamic refs, remotes and paths as literal argument 
   assert.doesNotMatch(guide, /git (?:ls-remote|push|verify-commit)[^\n]*<(?:branch|verified|exact|new-SHA)/);
 });
 
-test('recovery guide preserves the follower observation directory for reserve and status', t => {
+quotaTest('recovery guide preserves the follower observation directory for reserve and status', t => {
   for (const command of ['statusArgs', 'reserveArgs']) {
     const fx = fixture(t);
     const observationStateDir = path.join(fx.root, "custom state's $(id);&");
@@ -94,7 +125,7 @@ function fixture(t) {
   fs.writeFileSync(diagnosis, JSON.stringify(failure));
   const args = (flags, target = url) => [target, '--state-dir', stateDir, '--json', ...(flags.includes('--ci-retry-status') || flags.includes('--reserve-ci-retry') ? ['--ci-retry-id', prNodeId, '--ci-retry-failure', diagnosis] : []), ...flags];
   return {
-    root, stateDir, retryDir, diagnosis, env,
+    root, stateDir, retryDir, diagnosis, env, args,
     sentinel: ciRetryFilePath(retryDir, prNodeId, failure),
     async run(flags, target) {
       let stdout = '', stderr = '';
@@ -115,7 +146,7 @@ function fixture(t) {
   };
 }
 
-test('same failure budget survives changed SHAs, observation resets, casing and follow-up restarts', async t => {
+quotaTest('same failure budget survives changed SHAs, observation resets, casing and follow-up restarts', async t => {
   const fx = fixture(t);
   assert.equal((await fx.run(['--ci-retry-status'])).result.available, true);
   assert.equal(fs.existsSync(fx.stateDir), false, 'status is read-only');
@@ -140,7 +171,7 @@ test('same failure budget survives changed SHAs, observation resets, casing and 
   assert.notEqual(ciRetryFilePath(fx.stateDir, prNodeId, failure), ciRetryFilePath(fx.stateDir, 'PR_anotherImmutableId', failure));
 });
 
-test('two distinct failures consume the PR total and a third stops regardless of diagnosis', async t => {
+quotaTest('two distinct failures consume the PR total and a third stops regardless of diagnosis', async t => {
   const fx = fixture(t);
   assert.equal((await fx.process(['--reserve-ci-retry', oldHead])).code, 0);
   fs.writeFileSync(fx.diagnosis, JSON.stringify({ ...failure, cause: 'runner network unavailable' }));
@@ -164,7 +195,7 @@ test('two distinct failures consume the PR total and a third stops regardless of
   assert.equal((await fx.run(['--ci-retry-status'], 'https://github.com/new-owner/transferred/pull/42')).result.available, false);
 });
 
-test('concurrent distinct failures cannot exceed two total reservations across processes', async t => {
+quotaTest('concurrent distinct failures cannot exceed two total reservations across processes', async t => {
   const fx = fixture(t);
   const results = await Promise.all(Array.from({ length: 6 }, (_, i) => {
     const diagnosis = path.join(fx.root, `fault-${i}.json`);
@@ -175,7 +206,7 @@ test('concurrent distinct failures cannot exceed two total reservations across p
   assert.equal((await fx.run(['--ci-retry-status'])).result.available, false);
 });
 
-test('earlier different-failure receipts count toward the total even when querying a new failure', async t => {
+quotaTest('earlier different-failure receipts count toward the total even when querying a new failure', async t => {
   const fx = fixture(t);
   fs.mkdirSync(fx.stateDir, { recursive: true });
   fs.mkdirSync(fx.retryDir, { recursive: true });
@@ -191,7 +222,7 @@ test('earlier different-failure receipts count toward the total even when queryi
   assert.equal((await fx.process(['--state-dir', path.join(fx.root, 'new-cache'), '--reserve-ci-retry', newHead])).code, 1);
 });
 
-test('one old receipt leaves only one slot; over-limit legacy history and damaged slots stop recovery', async t => {
+quotaTest('one old receipt leaves only one slot; over-limit legacy history and damaged slots stop recovery', async t => {
   const fx = fixture(t);
   fs.mkdirSync(fx.retryDir, { recursive: true });
   const old = { ...failure, cause: 'old distinct fault' };
@@ -203,7 +234,7 @@ test('one old receipt leaves only one slot; over-limit legacy history and damage
   assert.equal((await fx.run(['--ci-retry-status'])).code, 1, 'partial write/crash cannot restore a slot');
 });
 
-test('legacy history beyond two fails closed and another PR has its own total', async t => {
+quotaTest('legacy history beyond two fails closed and another PR has its own total', async t => {
   const fx = fixture(t);
   fs.mkdirSync(fx.retryDir, { recursive: true });
   for (let i = 0; i < 3; i++) {
@@ -217,7 +248,7 @@ test('legacy history beyond two fails closed and another PR has its own total', 
   assert.equal(other.code, 0, 'separate immutable PR IDs have separate totals');
 });
 
-test('missing, invalid and legacy diagnosis evidence cannot start a new retry', async t => {
+quotaTest('missing, invalid and legacy diagnosis evidence cannot start a new retry', async t => {
   const fx = fixture(t);
   let error = '';
   assert.equal(await runGate([url, '--state-dir', fx.stateDir, '--ci-retry-id', prNodeId, '--reserve-ci-retry', oldHead], { env: fx.env, out() {}, err: text => { error += text; } }), 1);
@@ -238,7 +269,7 @@ test('missing, invalid and legacy diagnosis evidence cannot start a new retry', 
   assert.equal((await fx.run(['--reserve-ci-retry', newHead])).code, 1);
 });
 
-test('CI reservation is atomic across processes and never refunded after an interrupted operation', async t => {
+quotaTest('CI reservation is atomic across processes and never refunded after an interrupted operation', async t => {
   const fx = fixture(t);
   const results = await Promise.all([fx.process(['--reserve-ci-retry', oldHead]), fx.process(['--reserve-ci-retry', newHead])]);
   assert.deepEqual(results.map(r => r.code).sort(), [0, 1]);
@@ -246,7 +277,7 @@ test('CI reservation is atomic across processes and never refunded after an inte
   assert.equal((await fx.run(['--reserve-ci-retry', oldHead])).code, 1);
 });
 
-test('durable quota survives cache deletion and adopts earlier cache evidence without overwriting receipts', async t => {
+quotaTest('durable quota survives cache deletion and adopts earlier cache evidence without overwriting receipts', async t => {
   const fx = fixture(t);
   fs.mkdirSync(fx.stateDir);
   const cached = ciRetryFilePath(fx.stateDir, prNodeId, failure);
@@ -275,7 +306,7 @@ test('CI quota cannot fall back to a mutable URL when the verified PR identity i
   assert.equal(fs.existsSync(fx.stateDir), false);
 });
 
-test('unreconciled old evidence remains fail-closed after cache deletion and restart', async t => {
+quotaTest('unreconciled old evidence remains fail-closed after cache deletion and restart', async t => {
   for (const kind of ['no diagnosis', 'broken JSON', 'invalid diagnosis', 'URL receipt', 'encoded URL receipt', 'broken URL receipt']) await t.test(kind, async t => {
     const fx = fixture(t);
     fs.mkdirSync(fx.stateDir);
@@ -302,7 +333,7 @@ test('unreconciled old evidence remains fail-closed after cache deletion and res
   });
 });
 
-test('legacy evidence survives invalid current diagnoses, cache cleanup and process restart', async t => {
+quotaTest('legacy evidence survives invalid current diagnoses, cache cleanup and process restart', async t => {
   for (const command of [['--ci-retry-status'], ['--reserve-ci-retry', oldHead]]) {
     for (const diagnosis of ['missing file', 'broken JSON', 'invalid fields']) {
       for (const legacy of ['known failure', 'unknown URL receipt']) await t.test(`${command[0]} / ${diagnosis} / ${legacy}`, async t => {
@@ -336,7 +367,7 @@ test('legacy evidence survives invalid current diagnoses, cache cleanup and proc
   }
 });
 
-test('legacy evidence survives rejected budget arguments before cache cleanup and restart', async t => {
+quotaTest('legacy evidence survives rejected budget arguments before cache cleanup and restart', async t => {
   for (const mode of ['status', 'reserve']) {
     const command = mode === 'status' ? ['--ci-retry-status'] : ['--reserve-ci-retry', oldHead];
     const cases = [
@@ -385,7 +416,7 @@ test('legacy evidence survives rejected budget arguments before cache cleanup an
   }
 });
 
-test('opaque legacy GitHub PR IDs work in CLI, old evidence adoption and durable slots', async t => {
+quotaTest('opaque legacy GitHub PR IDs work in CLI, old evidence adoption and durable slots', async t => {
   const fx = fixture(t);
   const legacy = 'MDExOlB1bGxSZXF1ZXN0MQ==';
   const flags = ['--ci-retry-id', legacy];
@@ -404,7 +435,7 @@ test('opaque legacy GitHub PR IDs work in CLI, old evidence adoption and durable
   assert.equal((await fx.run(['--ci-retry-status'])).result.pr_consumed, 0, 'another opaque PR ID has its own quota');
 });
 
-test('invalid, damaged and unwritable CI evidence fails closed without consuming ordinary gate state', async t => {
+quotaTest('invalid, damaged and unwritable CI evidence fails closed without consuming ordinary gate state', async t => {
   const fx = fixture(t);
   for (const flags of [
     ['--reserve-ci-retry', 'not-a-SHA'], ['--reserve-ci-retry', oldHead, '--ack'],
@@ -428,7 +459,7 @@ test('invalid, damaged and unwritable CI evidence fails closed without consuming
 // Real local Git transport; not a simulated GitHub/Cindy end-to-end follow-up.
 // Exercise the documented amend/tree/DCO and explicit lease mechanics without
 // touching a real user's PR, branch, credentials or persisted plugin preference.
-test('isolated Git fixture pins the verified source despite HEAD movement and refuses a stale lease', async t => {
+quotaTest('isolated Git fixture pins the verified source despite HEAD movement and refuses a stale lease', async t => {
   const fx = fixture(t);
   const remote = path.join(fx.root, "remote dir's $(id);&.git"), work = path.join(fx.root, 'work'), other = path.join(fx.root, 'other');
   const branch = "ci$(id);'&", ref = 'refs/heads/' + branch;
@@ -486,7 +517,7 @@ test('isolated Git fixture pins the verified source despite HEAD movement and re
   assert.equal(git(work, plan(after, after).remoteArgs).split(/\s/)[0], intervening);
 });
 
-test('signed Git fixture verifies one-off signing, configured amend and unavailable-key failure', async t => {
+quotaTest('signed Git fixture verifies one-off signing, configured amend and unavailable-key failure', async t => {
   const fx = fixture(t);
   const work = path.join(fx.root, 'signed');
   const key = path.join(fx.root, 'fixture-signing-key');

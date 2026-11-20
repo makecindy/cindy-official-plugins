@@ -8,6 +8,7 @@ import { createContext, Script } from 'node:vm';
 // CI runs only .tests/<plugin>.test.mjs for a changed plugin; the /pr Skill's script tests ride along here.
 import './cindy-github-pr/cleanup-plan.test.mjs';
 import './cindy-github-pr/ci-retry.test.mjs';
+import './cindy-github-pr/receipts.test.mjs';
 import './cindy-github-pr/gate.test.mjs';
 import './cindy-github-pr/preflight.test.mjs';
 import './cindy-github-pr/pacing.test.mjs';
@@ -87,7 +88,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.35');
+  assert.equal(manifest.version, '1.5.36');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',

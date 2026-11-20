@@ -853,6 +853,53 @@ revocation/unknown display/height, current UI/read order, inherited integrations
 and genuine denied-rerun recovery still require real runtime evidence and then
 maintainer review. No merge/queue/auto-merge/publication or blocked cleanup retry.
 
+## Receipt durability convergence — round 28, 2026-11-20 (source 1.5.36)
+
+[Maintainer decision 7032587133](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-7032587133)
+requires file and directory-entry sync for new slots, old raw copies and
+migration, with recovery refused on unsupported/unknown storage. It does not
+waive the two-attempt cap, missing real 403 acceptance, or authorize installation.
+
+One receipt I/O owner now handles exclusive creation/copy and confirmed reads.
+Before success it fsyncs the file and the whole parent chain through the root,
+including recursively created ancestors. Status checks the existing ancestor
+without creating an unused data directory. New reservations, migration and
+raw preservation share this boundary; existing winners are never overwritten.
+Only ENOENT at file open means absent; a later missing directory or any sync
+failure stops. A partially written/uncertain file is retained, never rolled back,
+refunded, deleted or retried in another directory. Observation/trace state and
+all quota names, formats, limits and identity/diagnosis rules are unchanged.
+No native helper, fallback store, lock, retry or new grant was introduced.
+
+The native Windows 10.0.26100 / Node 22.22.3 test first failed on a2c5161 because
+status returned available quota despite directory fsync EPERM. After the fix,
+real isolated CLI status, reserve and raw-migration requests all refuse success;
+no receipt directory is created, and the old raw source survives. This is
+actual Node/Windows refusal evidence, not Cindy/GitHub recovery acceptance.
+A separate supported-filesystem model tests ordering, immutable winners,
+ancestor creation and 62 file/directory sync fault points; simulated sync does
+not count as native supported-platform or power-loss evidence.
+
+Focused receipt/quota tests: 69 passed, 17 skipped, zero failed (5.25 seconds).
+Required four suites plus plugin: **417 passed, 36 skipped, zero failed in
+126.5 seconds**. Of the skips, 17 are existing native positive quota/process
+cases requiring directory sync; supported CI hosts still run their original
+assertions. The other 19 Windows skips are unchanged. No test-only bypass is
+available to the CLI. Native positive filesystem/CI evidence remains pending.
+
+Manifest and in-memory official archive/content checks passed: staged tree
+`f50c578f7421ba9d7fa193eaf1795fd01b94206b`, 33 files, 241415 compressed bytes,
+671027 expanded bytes, every file matches Git; no package artifact retained.
+Source 1.5.36 exceeds live main 1.5.33 and is NOT installed. Main UI, settings
+and Node follow entry remain unchanged from a2c5161; four-language tool hints
+now disclose refusal on unsupported/unknown durability. Known pre-upgrade lost
+receipts cannot be reconstructed and require reconciliation, not fresh quota.
+The last actually tested local plugin remains 97d540e / 1.5.19. No live quota,
+preferences, credentials, permissions, plugin installation, recovery rewrite,
+PR merge/queue operation or blocked cleanup retry occurred. Genuine denied-rerun
+recovery, the existing UI/integration gaps and subsequent maintainer review
+remain prerequisites; OS sync acknowledgement is not a physical power-loss test.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected

@@ -86,6 +86,7 @@ import { mergeQueueFingerprint } from './lib/merge-queue.mjs';
 import { SETTLE_MAX_MS, breaksSettle, expectedBots, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import { createCiRetryReceiptIO } from './lib/ci-retry-receipts.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -624,6 +625,7 @@ function readCiRetryFailure(file) {
 }
 
 const CI_RETRY_PR_LIMIT = 2;
+const ciRetryReceiptIO = createCiRetryReceiptIO();
 
 function ciRetrySlots(retryDir, prNodeId) {
   const prefix = ciRetryFilePath(retryDir, prNodeId);
@@ -638,8 +640,8 @@ function validateCiRetryReservation(value, prNodeId) {
 
 function readCiRetrySlots(retryDir, prNodeId) {
   return ciRetrySlots(retryDir, prNodeId).map(file => {
-    try { return validateCiRetryReservation(JSON.parse(fs.readFileSync(file, 'utf8')), prNodeId); }
-    catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+    const raw = ciRetryReceiptIO.read(file);
+    return raw === null ? null : validateCiRetryReservation(JSON.parse(raw), prNodeId);
   });
 }
 
@@ -652,11 +654,9 @@ function claimCiRetrySlot(retryDir, reservation) {
     if (existing) return { created: false, reservation: existing };
     const index = slots.indexOf(null);
     if (index < 0) throw new Error('CI repush PR total limit of 2 consumed; stop and report, do not amend or push again');
-    fs.mkdirSync(retryDir, { recursive: true });
-    try {
-      fs.writeFileSync(files[index], JSON.stringify(reservation), { flag: 'wx', mode: 0o600 });
+    if (ciRetryReceiptIO.writeExclusive(files[index], JSON.stringify(reservation))) {
       return { created: true, reservation };
-    } catch (error) { if (error.code !== 'EEXIST') throw error; }
+    }
   }
   throw new Error('CI retry evidence changed concurrently; stop and verify, do not repeat the operation');
 }
@@ -674,7 +674,7 @@ function legacyCiRetryEvidence(dir, prNodeId) {
   // different diagnosis cannot hide previous consumption; unreadable data stops.
   return legacyCiRetryFiles(dir).flatMap(file => {
     if (file.endsWith('.json.ci-retry')) throw new Error('Legacy URL CI retry evidence lacks an immutable PR ID and diagnosis; reconcile its previous outcome before any further CI rewrite, do not delete it');
-    const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const value = JSON.parse(ciRetryReceiptIO.read(file));
     if (!validCiRetryId(value?.prNodeId)) throw new Error('invalid legacy CI retry identity');
     if (file !== ciRetryFilePath(dir, value.prNodeId, value.failure)) throw new Error('invalid legacy CI retry identity');
     if (value?.prNodeId !== prNodeId) return [];
@@ -689,9 +689,7 @@ function preserveCiRetryEvidence(stateDir, retryDir) {
   // a cache cleanup can erase an unknown outcome and restore fresh slots.
   for (const file of legacyCiRetryFiles(stateDir)) {
     const target = path.join(retryDir, path.basename(file));
-    fs.mkdirSync(retryDir, { recursive: true });
-    try { fs.copyFileSync(file, target, fs.constants.COPYFILE_EXCL); }
-    catch (error) { if (error.code !== 'EEXIST') throw error; }
+    ciRetryReceiptIO.copyExclusive(file, target);
   }
 }
 
@@ -1592,6 +1590,9 @@ async function gateMain(args, ctx) {
   // This is a budget receipt only; the agent must read live plugin preferences and
   // establish every safety condition in references/ci-retry.md before any Git write.
   if (args.ciRetryRequested) {
+    // A status result must not advertise usable quota on an unsupported store.
+    // Probe the existing ancestor without creating an unused receipt directory.
+    ciRetryReceiptIO.confirmParent(args.ciRetryDir);
     // A PR node_id survives repository renames/transfers and URL aliases.
     // The agent obtains it from the live PR, not from the mutable repository name.
     // Preserve previous outcomes even when this invocation's diagnosis is invalid.
