@@ -300,7 +300,8 @@ async function openSubscription() {
 
   const previousPaneIds = subscription.paneIds.slice();
   const paneIds = await listPaneIds();
-  subscription.paneIds = paneIds;
+  // paneIds 基线要在新订阅确认后再推进：握手失败时旧连接仍在服务，
+  // 提前覆盖会让下一次重试把新 pane 当旧成员、跳过对账。
   const entries = buildEntries(paneIds);
   const id = nextId();
   const socket = net.createConnection(socketPath());
@@ -386,6 +387,8 @@ async function openSubscription() {
   }
   subscription.running = true;
   subscription.attempts = 0;
+  // 确认后才推进 paneIds 基线（见上面的说明）。
+  subscription.paneIds = paneIds;
   // 新连接已经确认，再关旧的（主动关不触发重连，也不清新连接的状态）。
   if (previous && previous !== socket) {
     previous.herdrIntentionalClose = true;

@@ -45,7 +45,9 @@ test('special keys are forwarded, editing keys stay in the draft', () => {
   // Ctrl 组合：任何单字符都可以，Ctrl+C 用来中断终端任务。
   assert.equal(specialKey('herdr', key({ key: 'c', ctrlKey: true })), 'ctrl+c');
   assert.equal(specialKey('tmux', key({ key: 'c', ctrlKey: true })), 'C-c');
-  assert.equal(specialKey('tmux', key({ key: 'd', metaKey: true })), 'C-d');
+  // Command 留给浏览器：⌘D/⌘C/⌘V 不能当终端组合键转发。
+  assert.equal(specialKey('tmux', key({ key: 'd', metaKey: true })), null);
+  assert.equal(specialKey('herdr', key({ key: 'c', metaKey: true })), null);
 
   // Shift+Tab 的 key 仍是 'Tab'，修饰必须保留。
   assert.equal(specialKey('tmux', key({ key: 'Tab', shiftKey: true })), 'BTab');
@@ -574,7 +576,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const panelSrcDraft = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSrcDraft, /即将转发会改动终端行的按键/,
     'line-altering keys must sync the local draft first');
-  assert.match(panelSrcDraft, /别让用户丢命令/,
+  assert.match(panelSrcDraft, /if \(currentScope\(\) === scope && !field\.value\) field\.value = text;/,
     'a failed first-stage send must restore the draft');
 
   // 显式选择时同方向额度也复位。
@@ -707,6 +709,29 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the hold must only clear after the cancelling key lands');
   const guarded = (panelSrcHold.match(/if \(pendingEnterOnly && pendingEnterOnly\.scope === scope\) pendingEnterOnly = null;/g) || []).length;
   assert.ok(guarded >= 3, 'clearing the single record must be scope-guarded');
+
+  // 首段结果未知也冻结；恢复用钉住的目标；Herdr 回车是小写。
+  const panelSrcResume = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcResume, /if \(\/HERDR_OUTCOME_UNKNOWN\/\.test\(detail\)\) \{\s*pendingEnterOnly = \{ scope: scope, text: text \};/,
+    'an unknown first-stage outcome must hold the scope too');
+  assert.match(panelSrcResume, /sendEnterOnly\(scope, pinnedView, target, paneId\)/,
+    'the enter-only resume must use the pinned target');
+  assert.match(panelSrcResume, /keys: \['enter'\]/,
+    'the Herdr resume must send a lowercase enter');
+
+  // Command 键留给浏览器。
+  const libSrc = readFileSync(path.join(root, 'herdr', 'panel-lib.js'), 'utf8');
+  assert.match(libSrc, /if \(event\.metaKey\) return null;/,
+    'Cmd shortcuts must stay with the browser');
+
+  // paneIds 基线在确认后推进。
+  const workerSrc14 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSrc14, /确认后才推进 paneIds 基线/,
+    'the paneIds baseline must advance only after the subscribe confirm');
+
+  // 主进程先加载语言再建立首个订阅。
+  assert.match(mainSource, /loadRuntimeLocale\(\)\.then\(function \(\) \{ ensureSubscription\(\); \}/,
+    'the first subscription must wait for the runtime locale');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(

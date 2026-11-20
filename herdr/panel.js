@@ -515,16 +515,16 @@ function currentScope() {
 }
 
 // 只补一次回车：文本确认已在终端里时用它，绝不重复粘贴。
-async function sendEnterOnly(scope, pinnedView) {
+// 目标用入队时钉住的值：排队期间切了分屏，Enter 不能发到新目标上。
+async function sendEnterOnly(scope, pinnedView, target, paneId) {
   const hadText = pendingEnterOnly && pendingEnterOnly.scope === scope
     ? pendingEnterOnly.text : null;
   if (pendingEnterOnly && pendingEnterOnly.scope === scope) pendingEnterOnly = null;
   if (terminalHasContent && terminalHasContent.scope === scope) terminalHasContent = null;
-  const target = selectedTarget;
-  const paneId = selectedPane ? selectedPane.pane_id : null;
   try {
+    // Herdr 的键名契约是小写（enter/up/esc…），tmux 才是 Enter。
     if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
-    else await request('send', { pane_id: paneId, keys: ['Enter'] });
+    else await request('send', { pane_id: paneId, keys: ['enter'] });
     scopeHolds[scope] = false;
     await refreshTerminal();
   } catch (error) {
@@ -582,7 +582,7 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
   if (!text) {
     if ((pendingEnterOnly && pendingEnterOnly.scope === scope)
         || (terminalHasContent && terminalHasContent.scope === scope)) {
-      await sendEnterOnly(scope, pinnedView);
+      await sendEnterOnly(scope, pinnedView, target, paneId);
     }
     return;
   }
@@ -594,7 +594,7 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
     // 框里可能是用户刚输入的、带相同前缀的新命令。
     try {
       if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
-      else await request('send', { pane_id: paneId, keys: ['Enter'] });
+      else await request('send', { pane_id: paneId, keys: ['enter'] });
       scopeHolds[scope] = false;
       await refreshTerminal();
     } catch (error) {
@@ -635,9 +635,14 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
       await refreshTerminal();
     }
   } catch (error) {
-    // 第一段的失败走这里：终端多半没收到内容，把草稿放回输入框，
-    // 别让用户丢命令；错误文案本身（含「结果未知」）会提示先核对终端。
-    // 但只在仍选中同一目标时回填：框里可能已是另一个分屏的内容。
+    // 第一段的失败走这里。结果未知 = 文本可能已粘进终端：
+    // 和 Enter 未确认一样冻结这个终端，直到用户核对或取消；
+    // 确定失败才只是恢复草稿。只在仍选中同一目标时回填。
+    const detail = String(error && error.message ? error.message : error);
+    if (/HERDR_OUTCOME_UNKNOWN/.test(detail)) {
+      pendingEnterOnly = { scope: scope, text: text };
+      scopeHolds[scope] = true;
+    }
     if (currentScope() === scope && !field.value) field.value = text;
     renderOutput(error.message || T.sendFailed);
   }

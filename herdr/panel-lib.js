@@ -53,7 +53,11 @@
 
   // view: 'herdr' | 'tmux'；返回要发给后端的按键名，或 null（这次不转发）。
   function specialKey(view, event) {
-    if (event.ctrlKey || event.metaKey) {
+    // Command（metaKey）留给浏览器：⌘C/⌘V/⌘X/⌘A 是复制粘贴全选，
+    // 不能当终端组合键转发，否则输入框的编辑快捷键全部失效。
+    // 终端控制键只认真正的 Control。
+    if (event.metaKey) return null;
+    if (event.ctrlKey) {
       if (String(event.key).length !== 1) return null;
       return (view === 'tmux' ? 'C-' : 'ctrl+') + String(event.key).toLowerCase();
     }

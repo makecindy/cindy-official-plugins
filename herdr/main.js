@@ -1406,5 +1406,6 @@ cindy.onHostMessage(function (msg) {
   if (msg.type === 'event' && msg.name === 'wake') ensureSubscription();
 });
 
-loadRuntimeLocale();
-ensureSubscription();
+// 先拿到运行时语言再建立首个订阅：握手快于 /app-context 时，
+// 首批 blocked/done 通知与角标不能用错语言。
+loadRuntimeLocale().then(function () { ensureSubscription(); }, function () { ensureSubscription(); });
