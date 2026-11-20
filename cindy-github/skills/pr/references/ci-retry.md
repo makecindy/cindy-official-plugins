@@ -54,7 +54,7 @@ const verifyArgs = ['verify-commit', newSha];
 const originalSignatureArgs = ['show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', originalRemoteSha];
 const signatureArgs = ['show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', newSha];
 const pushArgs = ['push', '--force-with-lease=' + exactRef + ':' + originalRemoteSha,
-  '--', verifiedRemote, newSha + ':' + exactRef];
+  '--no-follow-tags', '--', verifiedRemote, newSha + ':' + exactRef];
 ```
 
 Bind `newSha` once to the full commit SHA whose tree, parents, author, message
@@ -65,6 +65,12 @@ If local movement is observed before launch, stop and leave that work intact.
 If HEAD advances after the final checks, the bound refspec still sends only
 the verified object. If that object is unavailable, stop on Git's failure;
 do not fall back to a symbolic source or replay the push.
+
+Keep `--no-follow-tags` explicit on this shared signed/unsigned push path.
+An exact branch refspec and lease do not override `push.followTags=true`:
+without this flag, Git can publish reachable annotated tags even when the
+branch update is rejected. Recovery authorizes only `exactRef`, never a tag or
+release; do not alter repository/user defaults or append other refspecs.
 
 ## Eligibility
 
@@ -298,6 +304,7 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    Use `git` with `pushArgs` above: the lease is one complete argument, the remote
    is one argument after `--`, and the complete refspec is one argument with
    the already verified `newSha` as its source and `exactRef` as its destination.
+   Keep `--no-follow-tags` before `--`; do not inherit tag-following configuration.
 
    Never use bare `--force`, implicit lease expectations, or multiple push URLs.
    A lease failure ends recovery. Do not refresh the expected SHA and push again.
@@ -322,6 +329,9 @@ Report separately: not executed, executed and verified, or unknown pending
 read-back. Never call CI passed until its actual results pass. If checks do not
 start, investigate/report and wait, without another amend, empty commit or push.
 Use the ordinary gate finish/wait procedure; do not change schedule cadence.
+If an earlier push omitted the tag guard, a nonzero exit or rejected branch
+does not prove tags were untouched. Inspect suspected remote refs read-only and
+report actual/unknown effects; never delete/move tags or replay a push to repair it.
 
 After a crash or ambiguous outcome, read the current PR's verified `node_id`,
 reuse the recorded diagnosis and use

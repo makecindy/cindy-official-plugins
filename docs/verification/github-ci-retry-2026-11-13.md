@@ -900,6 +900,36 @@ PR merge/queue operation or blocked cleanup retry occurred. Genuine denied-rerun
 recovery, the existing UI/integration gaps and subsequent maintainer review
 remain prerequisites; OS sync acknowledgement is not a physical power-loss test.
 
+## Tag-following boundary — round 29, 2026-11-20 (source 1.5.37)
+
+Confirmed P1 discussion_r4639592715: an exact branch refspec/lease does not
+suppress `push.followTags=true`. Both a successful update and a rejected stale
+lease reproduced an unintended annotated-tag publication with the old guide.
+The shared signed/unsigned `pushArgs` now places `--no-follow-tags` before `--`;
+only the verified branch ref is authorized. No Git executor, retry, configuration
+change or additional permission was introduced. A nonzero historical push exit
+is not proof of no tag side effect; inspect suspected refs read-only and report
+actual/unknown outcomes without deleting/moving tags or replaying a push.
+
+Native isolated bare-Git regressions fail on 7df53d6 and pass after the fix.
+With local followTags still true, success changes only the exact branch; stale
+lease leaves the complete remote ref inventory unchanged. Both local annotated
+tags remain, and no tag reaches the remote in either case. This is local Git
+transport evidence, not a real Cindy/GitHub 403 recovery or release test; every
+temporary repository/tag is fixture-owned and cleaned by the test.
+
+Focused argv/Git checks: 4 passed in 7.23 seconds. Required four suites plus
+plugin: **420 passed, 36 skipped, zero failed in 119.0 seconds**. The same 17
+unsupported native-durability positives and 19 Windows skips remain explicit.
+Manifest and in-memory official archive/content checks passed: staged tree
+`dd8542c9e68ca5b0a38e64238a068082c424f5d3`, 33 files, 241734 compressed bytes,
+671840 expanded bytes, all contents match Git; no package retained. Source
+1.5.37 exceeds main 1.5.33 and is NOT installed. Main/settings/Node entry and
+receipt/gate code are byte-identical to 7df53d6. No real quota, user settings,
+credentials, permissions, plugin installation or recovery rewrite changed;
+no PR merge/queue operation or blocked cleanup retry. Real recovery and existing
+runtime gaps plus later maintainer review remain prerequisites.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected

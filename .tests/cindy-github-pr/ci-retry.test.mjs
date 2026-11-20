@@ -76,7 +76,7 @@ test('recovery guide passes dynamic refs, remotes and paths as literal argument 
       verifyArgs: ['verify-commit', newHead],
       originalSignatureArgs: ['show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', oldHead],
       signatureArgs: ['show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', newHead],
-      pushArgs: ['push', '--force-with-lease=' + exactRef + ':' + oldHead, '--', values.verifiedRemote, values.newSha + ':' + exactRef],
+      pushArgs: ['push', '--force-with-lease=' + exactRef + ':' + oldHead, '--no-follow-tags', '--', values.verifiedRemote, values.newSha + ':' + exactRef],
     };
     // Git accepts these refs; its format check cannot make a shell interpolation safe.
     execFileSync('git', plan.checkRefArgs, { stdio: 'pipe' });
@@ -558,6 +558,46 @@ quotaTest('signed Git fixture verifies one-off signing, configured amend and una
   git(['config', 'user.signingkey', path.join(fx.root, 'unavailable-key')]);
   assert.throws(() => git(['commit', '--amend', '--no-edit']));
   assert.equal(git(['rev-parse', 'HEAD']), amended);
+});
+
+test('recovery push never follows annotated tags, including when the branch lease fails', async t => {
+  for (const stale of [false, true]) await t.test(stale ? 'stale lease' : 'successful branch push', t => {
+    const fx = fixture(t), remote = path.join(fx.root, 'remote.git'), work = path.join(fx.root, 'work');
+    const git = (cwd, args, env = {}) => execFileSync('git', args, { cwd,
+      env: { ...process.env, ...env }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    git(fx.root, ['init', '--bare', '-b', 'main', remote]);
+    git(fx.root, ['clone', remote, work]);
+    for (const [name, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'],
+      ['commit.gpgsign', 'false'], ['tag.gpgsign', 'false'], ['push.followTags', 'true']]) git(work, ['config', name, value]);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'unchanged recovery tree\n');
+    git(work, ['add', 'code.txt']);
+    git(work, ['commit', '-s', '-m', 'original'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' });
+    const original = git(work, ['rev-parse', 'HEAD']);
+    git(work, ['push', '--no-follow-tags', '--', 'origin', original + ':refs/heads/feature']);
+    git(work, ['tag', '-a', 'unpublished', '-m', 'must remain local']);
+    git(work, ['commit', '--amend', '--no-edit'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:01Z' });
+    const verified = git(work, ['rev-parse', 'HEAD']);
+    // Tag the verified object so it is relevant to --follow-tags.
+    git(work, ['tag', '-a', 'reachable-local', '-m', 'must also remain local', verified]);
+    if (stale) {
+      git(work, ['checkout', '-b', 'independent', original]);
+      fs.writeFileSync(path.join(work, 'other.txt'), 'remote advancement\n');
+      git(work, ['add', 'other.txt']);
+      git(work, ['commit', '-s', '-m', 'independent remote change']);
+      git(work, ['push', '--no-follow-tags', '--', 'origin', 'HEAD:refs/heads/feature']);
+    }
+    const before = git(remote, ['for-each-ref', '--format=%(refname) %(objectname)']);
+    const plan = guideArguments({ verifiedBranch: 'feature', verifiedRemote: 'origin',
+      originalRemoteSha: original, newSha: verified, gatePath: gate, prUrl: url,
+      prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    if (stale) assert.throws(() => git(work, plan.pushArgs), /stale info|rejected/);
+    else git(work, plan.pushArgs);
+    const after = git(remote, ['for-each-ref', '--format=%(refname) %(objectname)']);
+    assert.equal(git(remote, ['for-each-ref', 'refs/tags']), '', 'no annotated tag may escape via configuration');
+    assert.equal(after, stale ? before : 'refs/heads/feature ' + verified, 'only the exact authorized branch can change');
+    assert.equal(git(work, ['config', '--get', 'push.followTags']), 'true', 'do not change user/repository defaults');
+    assert.equal(git(work, ['tag', '--list']).split('\n').length, 2, 'keep local tags');
+  });
 });
 
 test('recovery binds signature identity even when two different SSH keys both verify', async t => {
