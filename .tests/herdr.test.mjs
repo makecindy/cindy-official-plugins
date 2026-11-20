@@ -675,6 +675,25 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(panelSrcTimeout, /不能再扣/,
     'a resumed submit must not consume the box a second time');
 
+  // Enter 未确认要冻结同 scope 的后续提交。
+  const panelSrcHold = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcHold, /scopeHolds\[scope\] = true/,
+    'an unconfirmed Enter must hold the scope queue');
+  assert.match(panelSrcHold, /这个终端上一次回车还没有确认/,
+    'a held scope must explain why the submit was not queued');
+
+  // 缺 id 的创建回执 = 结果未知。
+  const noIdCount = (mainSource.match(/HERDR_OUTCOME_UNKNOWN: ' \+ runtime\.automationNoId/g) || []).length;
+  assert.ok(noIdCount >= 2, 'both create paths must report a missing id as unknown-outcome');
+
+  // 跨面板的 tmux 提交在 worker 侧串行。
+  const workerSrc13 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSrc13, /enqueueTmuxSend/,
+    'tmux sends must be serialized in the shared worker');
+  // 订阅建立后对新 pane 对账。
+  assert.match(workerSrc13, /reconcileNewPanes/,
+    'new panes must be reconciled after a resubscribe');
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,

@@ -298,6 +298,7 @@ async function openSubscription() {
   // 新的失败时旧连接继续服务，不会出现没人收事件的空窗。
   const previous = subscription.socket;
 
+  const previousPaneIds = subscription.paneIds.slice();
   const paneIds = await listPaneIds();
   subscription.paneIds = paneIds;
   const entries = buildEntries(paneIds);
@@ -389,6 +390,27 @@ async function openSubscription() {
   if (previous && previous !== socket) {
     previous.herdrIntentionalClose = true;
     try { previous.destroy(); } catch (error) { void error; }
+  }
+  // 对账：握手与去抖期间新建的 pane，可能已经把 blocked/done 错过了
+  // （旧连接的订阅项里没有它）。只核对这次新出现的 pane。
+  reconcileNewPanes(paneIds, previousPaneIds);
+}
+
+// 只对「这次订阅里新出现」的 pane 查一次当前状态：旧 pane 的状态
+// 旧连接一直在收，重发会重复通知；新 pane 的变化在间隙里没人收。
+async function reconcileNewPanes(paneIds, previousPaneIds) {
+  const fresh = paneIds.filter(function (id) { return previousPaneIds.indexOf(id) < 0; });
+  for (const paneId of fresh) {
+    try {
+      const agent = await callOnce('agent.get', { pane_id: paneId }, 15000);
+      const status = agent && (agent.status || agent.agent_status);
+      if (status === 'blocked' || status === 'done') {
+        handleEvent({
+          event: 'pane_agent_status_changed',
+          data: { pane_id: paneId, status: status, reconciled: true }
+        });
+      }
+    } catch (error) { void error; }
   }
 }
 
@@ -933,9 +955,24 @@ const handlers = {
   },
 
   async 'tmux/send'(params) {
-    return tmuxSend(params && params.target, params || {});
+    // 同一目标的「文本 + Enter」要串行：面板队列只在各自实例里，
+    // 两个窗口/面板同时提交时会 paste(A), paste(B), Enter(A)，
+    // 把两条命令拼成一条。锁要放在所有调用方共享的这一层。
+    const dest = String((params && params.target) || '');
+    return enqueueTmuxSend(dest, function () {
+      return tmuxSend(params && params.target, params || {});
+    });
   }
 };
+
+// 每个 tmux 目标一条队列（见上面的说明）。
+const tmuxSendQueues = {};
+
+function enqueueTmuxSend(dest, task) {
+  const run = (tmuxSendQueues[dest] || Promise.resolve()).then(task, task);
+  tmuxSendQueues[dest] = run.then(function () {}, function () {});
+  return run;
+}
 
 readline.createInterface({ input: process.stdin }).on('line', async function (line) {
   let request;

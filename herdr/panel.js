@@ -478,6 +478,11 @@ const PENDING_ENTER_KEEP_KEYS = { 'C-l': true, 'C-a': true, 'C-e': true, PPage: 
 // 排在第一次 Enter 前，把两条命令拼成一行或颠倒顺序。按 scope 排队。
 const scopeQueues = {};
 
+// Enter 未确认的终端要冻结后续提交：队列若立刻放行，下一条会清掉
+// 待核对记录并把文本粘到仍含上一条的终端行上。补发 Enter 成功或
+// 用户切换目标后才解除。
+const scopeHolds = {};
+
 // 排队执行时输入框可能已追加新内容：只去掉已发送的那段前缀，
 // 不能把用户排队期间新打的部分也清掉。
 function consumeFromInput(field, sent) {
@@ -512,10 +517,12 @@ async function sendEnterOnly(scope, pinnedView) {
   try {
     if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
     else await request('send', { pane_id: paneId, keys: ['Enter'] });
+    scopeHolds[scope] = false;
     await refreshTerminal();
   } catch (error) {
     // 回车结果未知：恢复同一目标的待提交记录，否则下一次回车什么都不做，
     // 终端里已有的命令就再也提交不了；同时提示先核对终端。
+    scopeHolds[scope] = true;
     if (currentScope() === scope) {
       terminalHasContent = { scope: scope };
       if (hadText !== null) pendingEnterOnly = { scope: scope, text: hadText };
@@ -541,6 +548,16 @@ function submitLine() {
   // 会和没清掉的第一条拼在一起，被下一次提交重复捕获。
   restoredDraft = null;
   consumeFromInput(field, text);
+  // 这个终端有一次未确认的回车：先冻结，让用户核对或补发，
+  // 不能把新文本粘到仍含上一条的终端行上。草稿放回输入框。
+  if (scopeHolds[scope]) {
+    if (currentScope() === scope) {
+      const box = $('#term-input');
+      if (box && !box.value) box.value = text;
+    }
+    renderOutput('这个终端上一次回车还没有确认。请先在终端里核对，再按一次回车补发或处理后再提交。');
+    return;
+  }
   // 同一终端的「文本 + Enter」串行执行：两条提交并行时，第二次 paste
   // 可能排在第一次 Enter 前，把两条命令拼成一行或颠倒顺序。
   enqueueForScope(scope, function () {
@@ -568,9 +585,12 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
     try {
       if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
       else await request('send', { pane_id: paneId, keys: ['Enter'] });
+      scopeHolds[scope] = false;
       await refreshTerminal();
     } catch (error) {
+      scopeHolds[scope] = true;
       pendingEnterOnly = { scope: scope, text: text };
+      scopeHolds[scope] = true;
       // 只在仍选中同一目标时补回输入框，别把 A 的命令写进 B 的框。
       if (currentScope() === scope && !field.value) field.value = text;
       renderOutput(error.message || T.sendFailed);
@@ -589,16 +609,19 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
         // 不能断言。恢复草稿并记住这次粘贴，下一次同一文本只补回车；
         // 用户也可以先在终端里核对内容再决定。
         pendingEnterOnly = { scope: scope, text: text };
+        scopeHolds[scope] = true;
         if (currentScope() === scope && !field.value) field.value = text;
         renderOutput('文本已输入到终端，但回车没有确认（'
           + String(error && error.message ? error.message : T.sendFailed)
           + '）。请先在终端里核对内容：若命令尚未执行，直接再按一次回车即可（只会补发回车，不会重复粘贴文本）。');
         return;
       }
+      scopeHolds[scope] = false;
       await refreshTerminal();
     } else {
       // submit = pane.send_input，自带回车；pane.send_text 只打字不执行。
       await request('submit', { pane_id: paneId, text: text });
+      scopeHolds[scope] = false;
       await refreshTerminal();
     }
   } catch (error) {

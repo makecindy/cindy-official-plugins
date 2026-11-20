@@ -437,7 +437,11 @@ async function ensureAutomationScheduleUnlocked(name, args) {
   );
   const body = createdOutcome.body;
   const scheduleId = body.data && body.data.id;
-  if (!scheduleId) throw new Error(runtime.automationNoId);
+  if (!scheduleId) {
+    // ok:true 却没有 id：自动化可能已创建，普通失败会让人重试再建一条。
+    throw new Error('HERDR_OUTCOME_UNKNOWN: ' + runtime.automationNoId
+      + '。请先核对自动化列表，不要直接重试。');
+  }
   // 先记缓存：即使接下来 KV 失败，本会话的事件唤醒也用得上这条新的。
   cachedScheduleId = scheduleId;
   await persistScheduleId(scheduleId);
@@ -474,7 +478,11 @@ async function replaceUnboundSchedule(storedId, oldItem, name, args) {
   );
   const body = outcome.body;
   const scheduleId = body && body.data && body.data.id;
-  if (!scheduleId) throw new Error(runtime.automationNoId);
+  if (!scheduleId) {
+    // ok:true 却没有 id：自动化可能已创建，普通失败会让人重试再建一条。
+    throw new Error('HERDR_OUTCOME_UNKNOWN: ' + runtime.automationNoId
+      + '。请先核对自动化列表，不要直接重试。');
+  }
   cachedScheduleId = scheduleId;
   await persistScheduleId(scheduleId);
   let note = null;
