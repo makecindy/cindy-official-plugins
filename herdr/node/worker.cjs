@@ -405,9 +405,10 @@ async function reconcileNewPanes(paneIds, previousPaneIds) {
       const agent = await callOnce('agent.get', { pane_id: paneId }, 15000);
       const status = agent && (agent.status || agent.agent_status);
       if (status === 'blocked' || status === 'done') {
+        // 字段名与正常状态事件一致（agent_status）：主脚本只认这个键。
         handleEvent({
           event: 'pane_agent_status_changed',
-          data: { pane_id: paneId, status: status, reconciled: true }
+          data: { pane_id: paneId, agent_status: status, reconciled: true }
         });
       }
     } catch (error) { void error; }

@@ -601,7 +601,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
 
   // 草稿同步与发送目标绑定：等待期间切分屏不会打到新目标、不改写新目标的输入框。
   const panelSrcPin = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
-  assert.match(panelSrcPin, /const target = selectedTarget;[\s\S]{0,1200}?tmux_send', \{ target: target, text: draft \}/,
+  assert.match(panelSrcPin, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft\) \{[\s\S]{0,1500}?tmux_send', \{ target: target, text: draft \}/,
     'the draft sync must use the pinned target');
   assert.match(panelSrcPin, /if \(currentScope\(\) === scope && !field\.value\) field\.value = text;/,
     'the draft restore must only touch the box of the same target');
@@ -693,6 +693,14 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   // 订阅建立后对新 pane 对账。
   assert.match(workerSrc13, /reconcileNewPanes/,
     'new panes must be reconciled after a resubscribe');
+  assert.match(workerSrc13, /agent_status: status, reconciled: true/,
+    'the reconciled event must use the agent_status key the host reads');
+  assert.match(mainSource, /data\.agent_status/,
+    'the host notification path must read agent_status');
+  assert.match(panelSrcHold, /const isResume = !text/,
+    'a held scope must still let the resume through');
+  assert.match(panelSrcHold, /for \(const held of Object\.keys\(scopeHolds\)\)/,
+    'switching panes or closing the detail must release the holds');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(

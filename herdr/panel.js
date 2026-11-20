@@ -419,6 +419,8 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
   // 这些键若清掉记录，恢复时会把同一文本再粘一遍。
   if (!PENDING_ENTER_KEEP_KEYS[key]) {
     pendingEnterOnly = null;
+    // 取消/改行之后，未确认的那一行已经不存在：解除冻结。
+    scopeHolds[scope] = false;
     // 即将转发会改动终端行的按键：发起时的本地草稿先同步过去，
     // 否则终端行被换掉后旧草稿留着，下一次回车会把它粘到别的内容上。
     if (draft) {
@@ -548,9 +550,11 @@ function submitLine() {
   // 会和没清掉的第一条拼在一起，被下一次提交重复捕获。
   restoredDraft = null;
   consumeFromInput(field, text);
-  // 这个终端有一次未确认的回车：先冻结，让用户核对或补发，
-  // 不能把新文本粘到仍含上一条的终端行上。草稿放回输入框。
-  if (scopeHolds[scope]) {
+  // 这个终端有一次未确认的回车：只拦「新文本」提交——空框回车
+  // 和同一文本的恢复必须放行，否则永远无法补发。草稿放回输入框。
+  const isResume = !text
+    || (pendingEnterOnly && pendingEnterOnly.scope === scope && pendingEnterOnly.text === text);
+  if (scopeHolds[scope] && !isResume) {
     if (currentScope() === scope) {
       const box = $('#term-input');
       if (box && !box.value) box.value = text;
@@ -718,6 +722,7 @@ async function openPane(pane) {
     pendingEnterOnly = null;
     terminalHasContent = null;
     restoredDraft = null;
+    for (const held of Object.keys(scopeHolds)) scopeHolds[held] = false;
   }
   readToken += 1;
   const token = readToken;
@@ -849,6 +854,7 @@ async function openTmuxPane(pane) {
     pendingEnterOnly = null;
     terminalHasContent = null;
     restoredDraft = null;
+    for (const held of Object.keys(scopeHolds)) scopeHolds[held] = false;
   }
   readToken += 1;
   const token = readToken;
@@ -984,6 +990,7 @@ function closeDetail() {
   pendingEnterOnly = null;
   terminalHasContent = null;
   restoredDraft = null;
+  for (const held of Object.keys(scopeHolds)) scopeHolds[held] = false;
   readToken += 1;
   if (view === 'tmux') renderTmux();
   else renderHerdr();
