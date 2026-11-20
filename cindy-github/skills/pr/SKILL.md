@@ -44,8 +44,8 @@ For commits and pull requests you create with AI assistance in this workflow, us
 For a change that will become a pull request (not for a question or a read-only investigation):
 
 - **Already isolated:** if the task already works in a worktree or feature branch made for this same change, keep using it. A branch left over from another change does not count: create a task worktree instead of stacking unrelated commits on it. If it is behind the remote default branch, merge that in before continuing.
-- **Otherwise create a task worktree:** call `cindy_helper` → `create_task_worktree` (category `control`; pass `repo_dir` when the task directory is not the repository itself). Cindy creates a branch from the freshly fetched remote default branch, binds the worktree to this task and removes it when the task is archived. The task itself does not move: run every shell command from the returned `worktree_path`, use absolute paths inside it for edits, and re-read the repository's rules there (the main checkout may be older). Keep using that path after restarts and context compaction.
-- **Fallback** when the tool is unavailable or fails: fetch, then `git worktree add -b <branch> ../<repo-folder>-<slug> origin/<default-branch>` and work there.
+- **Otherwise create a task worktree:** call `cindy_helper` → `create_task_worktree` (category `control`; pass `repo_dir` when the task directory is not the repository itself). Cindy creates a branch from the freshly fetched remote default branch, binds the worktree to this task and removes it when the task is archived. The task itself does not move: run every shell command from the returned `worktree_path`, use absolute paths inside it for edits, and re-read the repository's rules there (the main checkout may be older). Keep using that path after restarts and context compaction. A result with `base_fetched: false` means the fetch failed and the base may be old: tell the user, and merge the remote default branch in before opening the pull request.
+- **Fallback** when the tool is unavailable or fails: fetch the remote of the repository the pull request will target (`upstream` in a fork checkout, otherwise `origin`), then `git worktree add --no-track -b <branch> ../<repo-folder>-<slug> <remote>/<default-branch>` and work there. Without `--no-track` the new branch tracks the default branch, and a plain `git push` may target it.
 
 ## 2. Open the pull request
 
@@ -160,5 +160,6 @@ Run `node "<skill-dir>/scripts/pr-cleanup-plan.mjs" <PR_URL> --worktree <checkou
 
 - Only remove a worktree or local branch the plan says is safe (`canCleanupLocal`). Never delete remote branches or long-lived branches.
 - `cindy_managed_worktree`: the worktree belongs to a Cindy task (including one made by `create_task_worktree`); Cindy removes it when that task is archived. Leave it.
+- `canFastForwardPrimary` without `canCleanupLocal`: the plan's only command fast-forwards the primary checkout, which is clean and already on the base branch. Run it, so the next change does not start from code that lacks this one.
 - A dirty target worktree: list what is uncommitted and let the user decide; never stash or force-delete it.
 - Closed without merging: ask the user before removing anything.

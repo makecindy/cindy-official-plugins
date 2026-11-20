@@ -75,6 +75,17 @@ export function buildCleanupCommands({
 }
 
 /**
+ * The one command left when nothing local may be removed (for example a Cindy-managed worktree) but the
+ * primary checkout already sits clean on the base branch: bring it up to the merged change.
+ */
+export function buildPrimarySyncCommands({ primaryWorktree, baseRef, baseRemote = 'origin' }) {
+  return [command(
+    ['git', '-C', primaryWorktree, 'pull', '--ff-only', baseRemote, baseRef],
+    `Fast-forward ${baseRef}`,
+  )];
+}
+
+/**
  * Decide local cleanup from already-collected facts.
  *
  * `primary_worktree_dirty` / `primary_worktree_status_unavailable` are
@@ -92,6 +103,7 @@ export function planLocalCleanup({
   hasLocalArtifacts,
   cindyManagedWorktree = false,
   localWorkNotInPr = false,
+  primaryOnBase = false,
 }) {
   const blockers = [];
   const notes = [...STATIC_NOTES];
@@ -127,6 +139,8 @@ export function planLocalCleanup({
     && !cannotLeavePrimaryHead;
 
   const canSyncPrimary = primaryReadable && !primaryDirty;
+  // Without a cleanup the primary checkout is never switched: only fast-forward the base branch it is already on.
+  const canFastForwardPrimary = Boolean(terminal) && Boolean(merged) && canSyncPrimary && Boolean(primaryOnBase);
 
   let recommendation = 'do_not_cleanup';
   if (cindyManagedWorktree) recommendation = 'leave_to_cindy_task';
@@ -139,6 +153,7 @@ export function planLocalCleanup({
     canRemoveLocalArtifacts,
     canCleanupLocal: canRemoveLocalArtifacts,
     canSyncPrimary,
+    canFastForwardPrimary,
   };
 }
 
