@@ -432,6 +432,8 @@ function schedulePaneRefresh() {
 // 有 31，比 | 分列安全。解析时校验列数，对不上就整行报错而不是错位。
 const { spawn } = require('node:child_process');
 
+let pasteCounter = 0;
+
 const TMUX_FIELD_SEP = String.fromCharCode(31);
 const TMUX_TIMEOUT_MS = 8000;
 const TMUX_CAPTURE_TIMEOUT_MS = 15000;
@@ -491,11 +493,15 @@ function isMissingTmuxTarget(error) {
   return text.indexOf("can't find session") >= 0 || text.indexOf("can't find window") >= 0;
 }
 
-function runTmux(args, timeoutMs) {
+function runTmux(args, timeoutMs, input) {
   return new Promise(function (resolve, reject) {
     let child;
     try {
-      child = spawn('tmux', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      child = spawn('tmux', args, {
+        // 有 stdin 内容时必须开管道：字面文本经 stdin 进 load-buffer，
+        // 不经过 argv，单独的 ';' 也就不会被 tmux 当成命令分隔符。
+        stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe']
+      });
     } catch (error) {
       reject(error && error.code === 'ENOENT'
         ? tmuxError('这台电脑上没有 tmux（命令未找到）', 'TMUX_NOT_INSTALLED')
@@ -518,6 +524,10 @@ function runTmux(args, timeoutMs) {
       fn(value);
     }
 
+    if (input !== undefined) {
+      child.stdin.on('error', function () { /* tmux 提前退出时忽略 EPIPE */ });
+      child.stdin.end(String(input));
+    }
     child.stdout.on('data', function (chunk) { stdout += chunk.toString('utf8'); });
     child.stderr.on('data', function (chunk) { stderr += chunk.toString('utf8'); });
     child.on('error', function (error) {
@@ -728,9 +738,13 @@ async function tmuxSend(target, params) {
   if (params.text === undefined || params.text === null) {
     throw tmuxError('缺少 text 或 keys', 'TMUX_BAD_TARGET');
   }
-  // -l 让 tmux 把内容当字面量，不解释 C-b / Enter 这类键名；-- 允许以 - 开头的文本。
-  await tmuxWrite(['send-keys', '-t', dest, '-l', '--', String(params.text)], '文本');
-  return { target: dest, mode: 'text', text: String(params.text) };
+  // 文本不走 argv：单独的 ';' 会被 tmux(1) COMMANDS 当命令分隔符（实测会静默丢失）。
+  // 改成 load-buffer(stdin) + paste-buffer -d，内容原样粘进目标 pane。
+  const text = String(params.text);
+  const buffer = 'herdr-' + (++pasteCounter) + '-' + Date.now().toString(36);
+  await runTmux(['load-buffer', '-b', buffer, '-'], undefined, text);
+  await tmuxWrite(['paste-buffer', '-d', '-t', dest, '-b', buffer], '文本');
+  return { target: dest, mode: 'text', text: text };
 }
 
 // --- RPC ----------------------------------------------------------------

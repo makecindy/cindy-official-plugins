@@ -333,7 +333,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a create that could not be persisted must report the created id');
   assert.match(mainSource, /cachedScheduleId = scheduleId;\s*\n\s*await persistScheduleId\(scheduleId\)/,
     'the cache must be updated before the KV write so events still find the schedule');
-  assert.match(mainSource, /await persistScheduleId\(scheduleId\);\s*\n\s*if \(isOurAutomation/,
+  assert.match(mainSource, /await persistScheduleId\(scheduleId\);[\s\S]{0,80}?if \(isOurAutomation/,
     'the replace path must persist through the same helper');
 
   // Node 传输层断开时，写路径要报「结果未知」。
@@ -447,6 +447,29 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(workerSource6, /HERDR_OUTCOME_UNKNOWN: timeout:/,
     'the wait timeout must keep a marker the segmented path recognises');
 
+  // 重试只恢复连接，不替用户改订阅选择；退订失败要有自己的提示。
+  const retryBody = /function scheduleSubscriptionRetry\(\) \{([\s\S]*?)\n\}/.exec(mainSource);
+  assert.ok(retryBody, 'scheduleSubscriptionRetry must exist');
+  assert.ok(!/persistSubscriptionPreference/.test(retryBody[1]),
+    'the retry must not rewrite the subscription preference');
+  assert.match(mainSource, /preferenceSaveFailedUnsubscribe/,
+    'an unsubscribe preference failure needs its own guidance');
+
+  // 解绑替换要沿用旧配置，且旧任务清理失败要带回新 id。
+  const workerSrc7 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSrc7, /load-buffer/,
+    'tmux literal text must go through a paste buffer, not argv');
+  assert.match(mainSource, /schedulePayload\(name, args, oldItem\)/,
+    'the replacement must carry the old schedule config');
+  assert.match(mainSource, /新自动化已生效（id=/,
+    'a failed cleanup must report the new schedule id');
+
+  // 状态等待分支要排除输出匹配字段。
+  const waitTool2 = manifest.tools.find((tool) => tool.name === 'herdr_wait');
+  const targetBranch = waitTool2.parameters.oneOf.find((branch) => branch.required.includes('target'));
+  assert.deepEqual(Object.keys(targetBranch.not.anyOf || {}).length ? ['anyOf'] : [],
+    ['anyOf'], 'the target branch must exclude the output-match fields');
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,
@@ -520,9 +543,9 @@ test('changing only silentWhenIdle updates the existing schedule', async () => {
   vm.createContext(sandbox);
   vm.runInContext(mainSource, sandbox, { filename: 'main.js' });
 
-  const id = await sandbox.ensureAutomationSchedule('Herdr 事件处理', { silentWhenIdle: true });
+  const result = await sandbox.ensureAutomationSchedule('Herdr 事件处理', { silentWhenIdle: true });
 
-  assert.equal(id, 'S1', 'must reuse the recorded schedule');
+  assert.equal(result.schedule_id, 'S1', 'must reuse the recorded schedule');
   const updates = calls.filter((entry) => entry.tool === 'schedule_update');
   assert.equal(updates.length, 1, `expected one schedule_update, got ${JSON.stringify(calls)}`);
   // 跨 realm 的对象不能用 deepStrictEqual（原型不同），逐字段比。

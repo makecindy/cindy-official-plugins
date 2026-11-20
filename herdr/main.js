@@ -11,6 +11,8 @@ const SCHEDULE_ID_KEY = 'herdrScheduleId';
 const SUBSCRIBED_KEY = 'herdrSubscribed';
 // null = 还没表态；true/false = 用户的选择（优先于 KV，因为 KV 可能读不到）。
 let subscriptionPreference = null;
+// 每次用户表态 +1：后台重试在 await 之后用它确认没有覆盖更新的选择。
+let subscriptionGeneration = 0;
 // 同一个 agent 连续进入 blocked/done 时不要反复唤醒自动化。
 const TRIGGER_THROTTLE_MS = 30000;
 // 本插件创建的自动化，prompt 末尾都带这个标记；只有带标记、且 manual 的才复用，
@@ -59,6 +61,7 @@ const runtimeStrings = {
     missingTextOrKeys: '缺少 text 或 keys',
     unknownPanelAction: '未知的面板动作：',
     preferenceSaveFailed: '订阅已打开，但「已订阅」偏好没能写入存储；重启后可能需要重新订阅。',
+    preferenceSaveFailedUnsubscribe: '订阅已停止，但退订偏好没能写入存储；重启后可能会自动恢复订阅，届时请重新退订。',
     herdrNotRunning: '找不到或连不上 Herdr 的 socket。请先启动 Herdr，或用 HERDR_SOCKET_PATH 指定正确路径。',
     herdrSocketDenied: '没有权限访问 Herdr 的 socket。请检查文件权限，或用 HERDR_SOCKET_PATH 指定路径。',
     herdrUnsubscribed: '已经退订事件，无法等待事件；先用 herdr_events 的 subscribe 恢复订阅。',
@@ -82,6 +85,7 @@ const runtimeStrings = {
     missingTextOrKeys: 'text or keys is required',
     unknownPanelAction: 'Unknown panel action: ',
     preferenceSaveFailed: 'Subscribed, but the preference could not be persisted; a restart may need subscribing again.',
+    preferenceSaveFailedUnsubscribe: 'Unsubscribed, but the preference could not be persisted; a restart may resubscribe, so unsubscribe again then.',
     herdrNotRunning: 'The Herdr socket is missing or unreachable. Start Herdr, or point HERDR_SOCKET_PATH at the right socket.',
     herdrSocketDenied: 'No permission to access the Herdr socket. Check its file permissions, or point HERDR_SOCKET_PATH at it.',
     herdrUnsubscribed: 'Events are unsubscribed, so no event can be waited on; subscribe again with herdr_events first.',
@@ -395,30 +399,28 @@ async function ensureAutomationScheduleUnlocked(name, args) {
     if (isOurAutomation(item, name, args)) {
       const wantSession = args.targetSessionId || null;
       const hasSession = Boolean(item.targetSessionId);
-      if (wantSession && (!hasSession || item.targetSessionId !== wantSession)) {
-        // 点名了会话（或换了会话）：直接改绑定。
-        await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_update', {
-          id: storedId,
-          targetSessionId: wantSession
-        }));
-      } else if (!wantSession && hasSession) {
+      if (!wantSession && hasSession) {
         // 没点名会话 = 承诺「每次新开会话」。宿主不接受 null 解绑，
         // 所以新建一条未绑定的，成功后再删掉旧的（先确认旧的确实是我们的）。
         return await replaceUnboundSchedule(storedId, item, name, args);
       }
-      // 常规复用（含会话改绑之后）都要走到这里：silentWhenIdle 只有这一条路径能落下去。
-      // silentWhenIdle 是暴露给用户的工具参数：改了就必须写进 scheduler，
-      // 否则返回旧 id、配置看起来生效了实际没生效。
+      // 会话与静默等差异合并成一次 update：分两次的话，第一次成功、
+      // 第二次被拒时，整个调用会被报成「没执行」，可实际上已经重绑了。
+      const patch = {};
+      if (wantSession && (!hasSession || item.targetSessionId !== wantSession)) {
+        patch.targetSessionId = wantSession;
+      }
       if (args.silentWhenIdle !== undefined
           && Boolean(item.silentWhenIdle) !== Boolean(args.silentWhenIdle)) {
-        await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_update', {
-          id: storedId,
-          silentWhenIdle: Boolean(args.silentWhenIdle)
-        }));
+        patch.silentWhenIdle = Boolean(args.silentWhenIdle);
+      }
+      if (Object.keys(patch).length) {
+        patch.id = storedId;
+        await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_update', patch));
       }
       await persistScheduleId(storedId);
       cachedScheduleId = storedId;
-      return storedId;
+      return { schedule_id: storedId, note: null };
     }
   }
   // 两个创建入口（普通新建、替换解绑）都走 hostWrite：回执丢失 = 结果未知，
@@ -459,18 +461,27 @@ async function persistScheduleId(scheduleId) {
 // targetSessionId:null，所以新建一条未绑定的；只有新条目保存成功后才删旧的，
 // 且删之前再确认旧条目确实带本插件的标记。
 async function replaceUnboundSchedule(storedId, oldItem, name, args) {
+  // 新任务沿用旧任务里没被本次调用覆盖的配置，别把自定义 prompt/agentKind 改回默认。
   const outcome = await hostWrite(
-    cindy.host.call('cindy_scheduler', 'schedule_create', schedulePayload(name, args))
+    cindy.host.call('cindy_scheduler', 'schedule_create', schedulePayload(name, args, oldItem))
   );
   const body = outcome.body;
   const scheduleId = body && body.data && body.data.id;
   if (!scheduleId) throw new Error(runtime.automationNoId);
   cachedScheduleId = scheduleId;
   await persistScheduleId(scheduleId);
+  let note = null;
   if (isOurAutomation(oldItem, name, args)) {
-    await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_delete', { id: storedId }));
+    try {
+      await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_delete', { id: storedId }));
+    } catch (error) {
+      // 新任务已经是事件桥当前配置了：不能因为旧任务清理失败就整体报失败。
+      note = '新自动化已生效（id=' + scheduleId + '），但旧的那条没能删除（'
+        + String(error && error.message ? error.message : error)
+        + '）。请到自动化列表手动删除它，避免重复触发。';
+    }
   }
-  return scheduleId;
+  return { schedule_id: scheduleId, note: note };
 }
 
 // 所有调度器写操作共用的回执处理：抛错 = 结果未知（可能已经生效），
@@ -799,6 +810,7 @@ const tools = {
     }
     if (mode === 'unsubscribe') {
       subscriptionPreference = false;
+      subscriptionGeneration += 1;
       let persisted = true;
       try {
         await persistSubscriptionPreference(false);
@@ -808,7 +820,7 @@ const tools = {
       await nodeRequest('herdr/unsubscribe', {}, args.__callId);
       return persisted
         ? { subscribed: false, preference_saved: true }
-        : { subscribed: false, preference_saved: false, note: runtime.preferenceSaveFailed };
+        : { subscribed: false, preference_saved: false, note: runtime.preferenceSaveFailedUnsubscribe };
     }
     if (mode === 'wait') {
       const timeoutMs = args.timeout_ms === undefined ? 60000 : Number(args.timeout_ms);
@@ -837,7 +849,10 @@ const tools = {
 
   async herdr_automation_setup(args) {
     const wantedName = args.name || 'Herdr 事件处理';
-    const scheduleId = await ensureAutomationSchedule(wantedName, args);
+    const created = await ensureAutomationSchedule(wantedName, args);
+    const scheduleId = created.schedule_id;
+    // 解绑替换时旧任务清理失败：新任务已经生效，这是部分成功，要如实带回 id。
+    const setupNote = created.note || null;
     // 订阅要真的开着，否则事件到了也没人接；同时把偏好改回「订阅」，
     // 让重启后不会按旧的退订值停摆。
     // 订阅失败不能把「自动化已创建并保存」这个事实也报成失败：
@@ -862,6 +877,7 @@ const tools = {
       name: wantedName,
       trigger: 'event-only',
       subscribed: subscribed,
+      setup_note: setupNote,
       subscription_note: !preferencePersisted
         ? '订阅已打开，但「已订阅」这个偏好没能写入存储；重启后可能需要重新调用本工具或 herdr_events 的 subscribe。'
         : (subscribed ? null : (transportFailed
@@ -1128,6 +1144,7 @@ const SUBSCRIBE_HOST_TIMEOUT_MS = 45000;
 // 否则 setup 成功后重启仍会按旧的退订偏好停摆）。
 async function enableSubscription(callId) {
   subscriptionPreference = true;
+  subscriptionGeneration += 1;
   // 保存失败不能悄悄吞掉：调用方要能告诉用户「重启后可能要重新订阅」。
   let persisted = true;
   try {
@@ -1184,12 +1201,27 @@ function scheduleSubscriptionRetry() {
   if (subscriptionRetries > 5) return;
   subscriptionRetryTimer = setTimeout(async function () {
     subscriptionRetryTimer = null;
+    const generation = subscriptionGeneration;
+    // 只恢复连接，不替用户改选择：先核对存储里是否已退订（还没读到就读一次）。
+    try {
+      const kv = await readKv();
+      if (kv[SUBSCRIBED_KEY] === false) {
+        subscriptionPreference = false;
+        return;
+      }
+    } catch (error) {
+      if (subscriptionPreference === false) return;
+    }
     if (subscriptionPreference === false) return;
     try {
       await nodeRequest('herdr/subscribe', {}, undefined, SUBSCRIBE_HOST_TIMEOUT_MS);
-      subscriptionPreference = true;
-      await persistSubscriptionPreference(true);
       subscriptionRetries = 0;
+      // 握手期间用户若表态（尤其退订），把这次重连撤销。
+      if (subscriptionPreference === false || generation !== subscriptionGeneration) {
+        if (subscriptionPreference === false) {
+          await nodeRequest('herdr/unsubscribe', {}, undefined, SUBSCRIBE_HOST_TIMEOUT_MS);
+        }
+      }
     } catch (error) {
       scheduleSubscriptionRetry();
     }
