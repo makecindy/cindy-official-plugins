@@ -621,7 +621,7 @@ var OutlookMail = (() => {
   // and the Host-injected token of the record's account.
   const READER_HOSTS = Object.freeze({ global: ['outlook.office365.com', 'outlook.office.com', 'outlook.live.com', 'outlook.cloud.microsoft'],
     china: ['partner.outlook.cn'] });
-  const DRAFT_SELECT = 'id,subject,from,toRecipients,ccRecipients,bccRecipients,replyTo,body,isDraft,changeKey,conversationId,internetMessageId,webLink';
+  const DRAFT_SELECT = 'id,subject,from,toRecipients,ccRecipients,bccRecipients,replyTo,body,isDraft,changeKey,conversationId,internetMessageId,internetMessageHeaders,webLink';
   const MAX_PREVIEW = 16 * 1024 * 1024, MAX_PREVIEW_TOTAL = 25 * 1024 * 1024, MAX_REWRITE = 3 * 1024 * 1024;
   const fail = (key, execution = 'not_executed', params) => ({ ok: false, execution, message: t(key, params) });
   function raw(code, execution, message, detail) {
@@ -671,12 +671,12 @@ var OutlookMail = (() => {
   const visible = html => decodeEntities(html.replace(/<(style|script|title)\b[\s\S]*?<\/\1\s*>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
   // Size of the plain text Outlook derives from HTML: inline tags vanish without a
-  // space (adjacent spans stay joined), each block end or <br> costs a CRLF. It only
-  // measures, so tags are walked rather than pattern-stripped.
+  // space (adjacent spans stay joined), each block end or <br> costs a CRLF. It also
+  // projects the native HTML quote when Graph omits the text divider.
   const BLOCK_ENDS = new Set(['p', 'div', 'tr', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote']);
-  function plainSize(html) {
+  function plainFragment(html) {
     const lower = html.toLowerCase();
-    let text = '', breaks = 0, index = 0;
+    let text = '', index = 0;
     while (index < html.length) {
       const lt = html.indexOf('<', index);
       if (lt < 0) { text += html.slice(index); break; }
@@ -703,11 +703,12 @@ var OutlookMail = (() => {
         index = end + 1;
         continue;
       }
-      if (tag[1] ? BLOCK_ENDS.has(tag[2]) : tag[2] === 'br') breaks++;
+      if (tag[1] ? BLOCK_ENDS.has(tag[2]) : tag[2] === 'br') text += '\r\n';
       index = gt + 1;
     }
-    return decodeEntities(text).length + 2 * breaks;
+    return decodeEntities(text);
   }
+  const plainSize = html => plainFragment(html).length;
   const cids = html => [...new Set([...html.matchAll(/\bcid:([^"'\s)>]+)/gi)].map(m => decodeEntities(m[1]).toLowerCase()))].sort().join(',');
   const bareCid = v => String(v || '').replace(/^<|>$/g, '');
   // Graph returns a full HTML document. The editor works on the body content;
@@ -731,9 +732,13 @@ var OutlookMail = (() => {
     }
     const doc = splitDocument(stored.content), at = quoteAt(doc.inner);
     const textMark = /(?:\r?\n)+_{10,}\r?\n/.exec(plain);
-    const split = at >= 0 && textMark;
-    return { format: 'html', body: split ? plain.slice(0, textMark.index) : plain, quote: split ? plain.slice(textMark.index) : '',
-      bodyHtml: at >= 0 ? doc.inner.slice(0, at) : doc.inner, quoteHtml: at >= 0 ? doc.inner.slice(at) : '', editable: true };
+    if (at < 0) return { format: 'html', body: plain, quote: '', bodyHtml: doc.inner, quoteHtml: '', editable: true };
+    const bodyHtml = doc.inner.slice(0, at), quoteHtml = doc.inner.slice(at);
+    // Graph does not always include the underscore delimiter in its text
+    // projection. Its native HTML boundary still identifies both fragments.
+    return { format: 'html', body: textMark ? plain.slice(0, textMark.index) : plainFragment(bodyHtml).trim(),
+      quote: textMark ? plain.slice(textMark.index) : '\n\n' + plainFragment(quoteHtml).trim(),
+      bodyHtml, quoteHtml, editable: true };
   }
   const address = r => {
     const e = r && r.emailAddress || {}, a = typeof e.address === 'string' ? e.address : '', n = typeof e.name === 'string' ? e.name.replace(/["\\\r\n]/g, '') : '';
@@ -851,10 +856,13 @@ var OutlookMail = (() => {
     }
     const { attachments, files } = await loadAttachments(ctx, draftId, transport, callId, { bytes: wantBytes });
     const images = attachments.filter(a => a.contentId && a.previewUrl).map(a => ({ cid: a.contentId, url: a.previewUrl }));
+    const parent = (Array.isArray(message.internetMessageHeaders) ? message.internetMessageHeaders : [])
+      .find(h => String(h?.name).toLowerCase() === 'in-reply-to')?.value;
     const snapshot = { status: 'read_back', draftId, messageId: draftId, fingerprint: message.changeKey, locator: { changeKey: message.changeKey },
       conversationId: message.conversationId || null, internetMessageId: message.internetMessageId || null, webLink: webLink(message.webLink, ctx),
       headers: { from: address(message.from), to: addressList(message.toRecipients), cc: addressList(message.ccRecipients), bcc: addressList(message.bccRecipients),
-        subject: typeof message.subject === 'string' ? message.subject : '', 'reply-to': addressList(message.replyTo) },
+        subject: typeof message.subject === 'string' ? message.subject : '', 'reply-to': addressList(message.replyTo),
+        ...(typeof parent === 'string' && /^<[^<>\s]+>$/.test(parent.trim()) ? { 'in-reply-to': parent.trim() } : {}) },
       editor: editorFor(stored, plain), attachments: publicAttachments(attachments), ...(images.length ? { images } : {}) };
     return { snapshot, message, stored, attachments, files };
   }

@@ -134,6 +134,10 @@ function cleanSchema(node, globals, command = []) {
     result.help = 'Reply to all by default. Use reply-mode=sender only when the user explicitly requests sender-only.';
     result.flags.push({ name: 'reply-mode', type: 'string', help: 'all (default) or sender. Bcc is never copied.' });
   }
+  if (['drafts create', 'drafts update'].includes(command.join(' '))) {
+    result.flags = result.flags.map(flag => flag.name === 'quote' ? { ...flag,
+      help: 'Quote the original by default when a reply target is supplied. Set false to omit it. Body edits preserve an existing quote.' } : flag);
+  }
   if (command.join(' ') === 'drafts create') result.flags.push({ name: 'inline-images', type: 'strings', help: 'Granted chat image hashes in CID order: img1@cindy.local, img2@cindy.local. Save only; never sends. Supply body and body-html; to may be empty for preview.' });
   result.subcommands = (node.subcommands || []).filter((child) => allowed([...command, child.name])).map((child) => cleanSchema(child, globals, [...command, child.name]));
   return result;
@@ -231,13 +235,30 @@ function draftEditor(draft) {
   // layouts stay intact; never guess away part of an HTML-only message.
   const htmlAt = draft.bodyHtml.indexOf('<br><br><div class="gmail_quote">');
   const textMatch = /\r?\n\r?\n(?:[^\r\n]+ wrote:|Original message:)\r?\n> /.exec(draft.bodyText);
-  const split = htmlAt >= 0 && textMatch;
-  const body = split ? draft.bodyText.slice(0, textMatch.index) : draft.bodyText;
-  const html = split ? draft.bodyHtml.slice(0, htmlAt) : draft.bodyHtml;
-  return { format: !html || html === mailBodyHtml(body) ? 'text' : 'html', body: split ? draft.bodyText.slice(0, textMatch.index) : draft.bodyText,
-    quote: split ? draft.bodyText.slice(textMatch.index) : '',
-    bodyHtml: split ? draft.bodyHtml.slice(0, htmlAt) : draft.bodyHtml,
-    quoteHtml: split ? draft.bodyHtml.slice(htmlAt) : '',
+  const splitText = textMatch && (htmlAt >= 0 || !draft.bodyHtml);
+  const splitHtml = htmlAt >= 0 && (textMatch || !draft.bodyText);
+  const body = splitText ? draft.bodyText.slice(0, textMatch.index) : draft.bodyText;
+  const html = splitHtml ? draft.bodyHtml.slice(0, htmlAt) : draft.bodyHtml;
+  const quote = splitText ? draft.bodyText.slice(textMatch.index) : '';
+  // Only name a sender for the pinned composer's attribution, never From on
+  // the outgoing draft (which is the user's own address).
+  const attribution = quote.trimStart().split(/\r?\n/, 1)[0].replace(/^On (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), [A-Za-z]+ \d+, \d+ at \d+:\d+ [AP]M, /, '');
+  const sender = /^([^<>,\r\n]+?)\s*<[^<>\s]+@[^<>\s]+> wrote:$/.exec(attribution)?.[1].trim().replace(/^"|"$/g, '');
+  let quoteHtml = splitHtml ? draft.bodyHtml.slice(htmlAt) : '';
+  if (splitText && !draft.bodyHtml) {
+    // The first rich edit of a plain-only reply creates a new MIME alternative.
+    // Quote the same original in that alternative without interpreting its markup.
+    const [who, ...lines] = quote.trimStart().split(/\r?\n/);
+    quoteHtml = '<br><br><div class="gmail_quote"><div class="gmail_attr">' + escapeHtml(who) +
+      '</div><blockquote class="gmail_quote">' + lines.map(line => escapeHtml(line.replace(/^> ?/, ''))).join('<br>') +
+      '</blockquote></div>';
+  }
+  return { format: !html || html === mailBodyHtml(body) ? 'text' : 'html', body, quote,
+    bodyHtml: html, quoteHtml,
+    ...(sender && sender.length <= 80 ? { quoteSender: sender } : {}),
+    // Foreign/partially recognized layouts stay in the body. Never append a
+    // second original or advertise a missing quote merely because it can't be split.
+    ...(!splitText && !splitHtml && (textMatch || /^>/m.test(body) || /<blockquote\b|gmail_quote|divRplyFwdMsg/i.test(html)) ? { quoteInBody: true } : {}),
     editable: Boolean(draft.bodyText || !draft.bodyHtml) };
 }
 
@@ -291,7 +312,7 @@ async function composeDraft(message, execution) {
     if (!rich && before.attachments.some(item => item.contentId || /^inline\b/i.test(item.disposition)))
       return { ...failure(text('inlineImagesNotPreserved')), readBack: before };
     const bodyHtml = rich && (before.editor.format === 'html' || fields.bodyHtml !== original.bodyHtml || fields.body === original.body) ? fields.bodyHtml
-      : fields.body === original.body ? before.editor.bodyHtml : mailBodyHtml(fields.body);
+      : fields.body === original.body && before.editor.bodyHtml ? before.editor.bodyHtml : mailBodyHtml(fields.body);
     // The quote is a separately editable plain field, even in an HTML draft.
     // Only an explicit HTML quote edit or unchanged plain quote keeps its HTML.
     const quoteHtml = rich && (fields.quoteHtml !== original.quoteHtml || fields.quote === original.quote) ? fields.quoteHtml
@@ -311,7 +332,8 @@ async function composeDraft(message, execution) {
     try { updated = rich ? await run(['drafts', 'get']) : await run(['drafts', 'update'], { to: fields.to, cc: fields.cc, bcc: fields.bcc, subject: fields.subject,
       ...(before.headers.from ? { from: from ? from[1] : before.headers.from } : {}),
       ...(before.headers['reply-to'] ? { 'reply-to': before.headers['reply-to'] } : {}),
-      body: fields.body + fields.quote, 'body-html': bodyHtml + quoteHtml }, execution); }
+      // These are already the complete user-edited alternatives, including an intentional removal.
+      quote: false, body: fields.body + fields.quote, 'body-html': bodyHtml + quoteHtml }, execution); }
     catch (_) {
       if (rich) return savedButUnverified(); // The preceding PUT has a successful receipt.
       return failure(text('draftSaveUnconfirmed'), execution.started ? 'unknown' : 'not_executed');
@@ -347,8 +369,11 @@ async function composeDraft(message, execution) {
 
 // Plain text is not Markdown. A Gmail-style HTML alternative keeps paragraph
 // breaks and the signature proportional, separate from the quoted history.
+function escapeHtml(text) {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 function mailBodyHtml(text) {
-  const escaped = text.replace(/\r\n?/g, '\n').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const escaped = escapeHtml(text.replace(/\r\n?/g, '\n'));
   return '<div dir="ltr" style="font-family:Arial,Helvetica,sans-serif;font-size:small">'
     + escaped.split('\n').map(line => '<div>' + (line || '<br>') + '</div>').join('') + '</div>';
 }
@@ -490,27 +515,64 @@ async function handle(message, execution) {
     delete options['reply-mode'];
     if (mode === 'all') { command = [...command.slice(0, -1), 'reply-all']; node = locate(tree, command); }
   }
+  const hasReplyTarget = Boolean(options['reply-to-message-id'] || options['thread-id']);
+  // The raw inline-image builder treats thread-id as placement and accepts
+  // already-authored MIME content. Only gog's reply composers resolve a target.
+  if (command[0] === 'drafts' && ['create', 'update'].includes(command[1]) &&
+      hasReplyTarget && !options['inline-images'] && options.quote === undefined) options.quote = true;
   const cwd = typeof params.workdir === 'string' && path.isAbsolute(params.workdir) ? params.workdir : undefined;
   if (command.join(' ') === 'drafts update' && params.readOnly === false && values[0]) {
     const current = await execute([SERVICE, 'drafts', 'get', values[0], '--readonly'], token, undefined, MAX_OUTPUT, undefined, 10000);
     if (!current.ok) return failure(text('draftAttachmentsUnverified'));
     const checked = await readDraft(current.data, values[0], token, params.locale);
-    if (checked.attachments.some(a => a.contentId || /^inline\b/i.test(a.disposition))) {
+    const textOption = (key, fallback) => {
+      if (options[key] !== undefined && options[key + '-file'] !== undefined) throw new Error('Duplicate body input');
+      const value = options[key + '-file'] !== undefined ? fs.readFileSync(localPath(options[key + '-file'], cwd), 'utf8') : options[key] ?? fallback;
+      if (typeof value !== 'string') throw new Error('Invalid draft field');
+      return value;
+    };
+    const withoutSuffix = (value, quote) => {
+      const normalized = value.replace(/\r\n/g, '\n'), suffix = quote.replace(/\r\n/g, '\n');
+      return suffix && normalized.endsWith(suffix) ? normalized.slice(0, -suffix.length) : value;
+    };
+    const hasInline = checked.attachments.some(a => a.contentId || /^inline\b/i.test(a.disposition));
+    // Removing just the quote must leave the new reply text in both alternatives.
+    if (!hasInline && options.quote === false && (checked.editor.quote || checked.editor.quoteHtml) &&
+        ['body', 'body-file', 'body-html', 'body-html-file'].every(key => options[key] === undefined)) {
+      options.body = checked.editor.body;
+      options['body-html'] = checked.editor.bodyHtml || mailBodyHtml(checked.editor.body);
+    }
+    if (!hasInline && !hasReplyTarget && options.quote === undefined && !options['clear-reply-context'] &&
+        (checked.editor.quote || checked.editor.quoteHtml)) {
+      // A native update replaces both alternatives. Preserve the saved quote,
+      // including edits, without doubling it for callers supplying complete bodies.
+      const htmlOnly = options.body === undefined && options['body-file'] === undefined &&
+        (options['body-html'] !== undefined || options['body-html-file'] !== undefined) && checked.editor.quoteHtml;
+      const body = withoutSuffix(textOption('body', htmlOnly ? '' : checked.editor.body), checked.editor.quote);
+      const html = textOption('body-html', body === checked.editor.body && checked.editor.bodyHtml ? checked.editor.bodyHtml : mailBodyHtml(body));
+      // An HTML-only replacement supersedes the old plain reply too. The SDK
+      // derives the matching text alternative from the new HTML on read-back.
+      options.body = htmlOnly ? '' : body + checked.editor.quote;
+      options['body-html'] = withoutSuffix(html, checked.editor.quoteHtml) + checked.editor.quoteHtml;
+      delete options['body-file'];
+      delete options['body-html-file'];
+    }
+    if (hasInline) {
       // AI uses the same verified MIME writer as the card. The old CLI updater
       // loses Content-ID; never send this draft through it.
       const allowed = new Set(['to', 'cc', 'bcc', 'subject', 'body', 'body-file', 'body-html', 'body-html-file', 'attach', 'clear-attachments']);
+      if (options.quote === false) allowed.add('quote');
       if (values.length !== 1 || Object.keys(options).some(key => !allowed.has(key))) return failure(text('htmlDraftFieldsOnly'));
-      const textOption = (key, fallback) => {
-        if (options[key] !== undefined && options[key + '-file'] !== undefined) throw new Error('Duplicate body input');
-        const value = options[key + '-file'] !== undefined ? fs.readFileSync(localPath(options[key + '-file'], cwd), 'utf8') : options[key] ?? fallback;
-        if (typeof value !== 'string') throw new Error('Invalid draft field');
-        return value;
-      };
+
       const bodyChanged = options.body !== undefined || options['body-file'] !== undefined;
       const htmlChanged = options['body-html'] !== undefined || options['body-html-file'] !== undefined;
       if (bodyChanged !== htmlChanged) return failure(text('richDraftBodyPair'));
       const fields = Object.fromEntries(['to', 'cc', 'bcc', 'subject'].map(name => [name, textOption(name, checked.headers[name])]));
-      const html = textOption('body-html', checked.editor.bodyHtml) + checked.editor.quoteHtml;
+      const quote = options.quote === false ? '' : checked.editor.quote;
+      const quoteHtml = options.quote === false ? '' : checked.editor.quoteHtml;
+      const body = withoutSuffix(textOption('body', checked.editor.body), checked.editor.quote);
+      const bodyHtml = withoutSuffix(textOption('body-html', checked.editor.bodyHtml), checked.editor.quoteHtml);
+      const html = bodyHtml + quoteHtml;
       const referenced = referencedContentIds(html, params.locale);
       // attach replaces ordinary files. Only inline parts still referenced by
       // the replacement body survive implicitly; omission preserves all files.
@@ -519,8 +581,8 @@ async function handle(message, execution) {
           const cid = (a.contentId || '').replace(/^<|>$/g, '');
           return cid && referenced.has(cid);
         });
-      Object.assign(fields, { body: textOption('body', checked.editor.body), bodyHtml: textOption('body-html', checked.editor.bodyHtml),
-        quote: checked.editor.quote, quoteHtml: checked.editor.quoteHtml,
+      Object.assign(fields, { body, bodyHtml,
+        quote, quoteHtml,
         attachmentItems: JSON.stringify(retained.map(a => ({ key: a.key, filename: a.filename, bytes: a.bytes, contentId: a.contentId || '' }))) });
       const inputs = options.attach === undefined ? [] : Array.isArray(options.attach) ? options.attach : [options.attach];
       if (inputs.length > 20) return failure(text('tooManyAttachments'));
@@ -552,6 +614,9 @@ async function handle(message, execution) {
       options[name] = fs.readFileSync(localPath(options[name + '-file'], cwd), 'utf8');
       delete options[name + '-file'];
     }
+    const rawReply = Boolean(options['in-reply-to'] && options['thread-id']);
+    const expectsQuote = rawReply && options.quote !== false;
+    if (rawReply && typeof options.quote === 'boolean') delete options.quote;
     inlineMessage = buildInlineMessage({ from: params.accountEmail, ...options }, cwd, true, params.locale);
     // The pinned CLI has no drafts create --raw-file. Use the same fixed Gmail
     // API transport as rich draft updates, then read the exact saved draft back.
@@ -564,7 +629,9 @@ async function handle(message, execution) {
       execution.started = true;
       const created = await gmailJson(token, 'drafts', { method: 'POST', body: requestBody }, MAX_OUTPUT, params.locale);
       if (typeof created?.id !== 'string' || !created.id) throw Object.assign(new Error('Missing draft receipt'), { execution: 'executed' });
-      return readSavedDraft({ ok: true, execution: 'executed', data: { draftId: created.id } }, command, token, cwd, params.locale);
+      const saved = await readSavedDraft({ ok: true, execution: 'executed', data: { draftId: created.id } }, command, token, cwd, params.locale);
+      if (expectsQuote && saved.data?.readBack?.status === 'read_back') saved.data.readBack.replyQuoteExpected = true;
+      return saved;
     } catch (error) { return draftWriteFailure(error, execution, params.locale); }
   }
   const positionals = [...values];
@@ -617,7 +684,11 @@ async function handle(message, execution) {
   if (result.ok && command.join(' ') === 'drafts get') {
     return { ...result, data: { ...result.data, readBack: await readDraft(result.data, values[0], token, params.locale) } };
   }
-  return readSavedDraft(result, command, token, cwd, params.locale);
+  const saved = await readSavedDraft(result, command, token, cwd, params.locale);
+  const expectsQuote = command[0] === 'drafts' && (['reply', 'reply-all'].includes(command[1]) ? !options['no-quote']
+    : ['create', 'update'].includes(command[1]) && options.quote === true);
+  if (expectsQuote && saved.data?.readBack?.status === 'read_back') saved.data.readBack.replyQuoteExpected = true;
+  return saved;
 }
 const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 input.on('line', (line) => {
