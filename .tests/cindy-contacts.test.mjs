@@ -966,6 +966,38 @@ test('打开资料不调用模型；明确整理后把笔记式的介绍改写�
   }
 });
 
+test('等候简介改写时仍可保存与读取联系人，并保留较新的手动编辑', { timeout: 5000 }, async () => {
+  const a = boot({ libDir: tmp() });
+  let release;
+  const reply = new Promise(resolve => { release = resolve; });
+  let started;
+  const waiting = new Promise(resolve => { started = resolve; });
+  let tidy;
+  try {
+    const { id } = ok(await a.call('save', { name: '示例同事', narrative: '示例同事（GitHub example-dev，邮箱 dev@example.test）已核实。#101 已合并，#102 待审。' }));
+    const send = a.ctx.cindy.send;
+    a.ctx.cindy.send = async message => {
+      if (message.kind !== 'oneshot_text') return send(message);
+      started();
+      return reply;
+    };
+    let finished = false;
+    tidy = completeTidy(a).then(() => { finished = true; });
+    await waiting;
+    const edited = '我刚更新了这位同事的介绍。';
+    ok(await a.call('save', { id, narrative: edited }));
+    assert.equal(ok(await a.call('get', { id })).narrative, edited);
+    assert.equal(finished, false);
+    release({ ok: true, text: '这是过时的介绍。' });
+    await tidy;
+    assert.equal(ok(await a.call('get', { id })).narrative, edited);
+  } finally {
+    release({ ok: false });
+    await tidy;
+    a.close();
+  }
+});
+
 test('从旧版通讯录迁来、已关联 Mac 名片但没在新版导入过的人，也会自动对账补齐', async () => {
   const dir = tmp();
   const fixture = path.join(dir, 'system.json');

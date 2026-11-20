@@ -1866,7 +1866,6 @@ async function maintenance(input) {
       }
       await batch([setMetaStmt('sources_status', { ...prev, items })]);
     }
-    if (input.runId && result.scope === 'recent') await rewriteIntrosDuringMaintenance();
     return result;
   }
   throw fail('INVALID_PARAMS', 'action must be begin, sources or end');
@@ -2454,8 +2453,10 @@ async function rewriteIntro(c) {
   return text && text.length <= 400 && !NOISY_OUTPUT.test(text) ? text : '';
 }
 
+let rewritingIntros = false;
 async function rewriteIntrosDuringMaintenance() {
-  if (!cindy.send) return;
+  if (!cindy.send || rewritingIntros) return;
+  rewritingIntros = true;
   try {
     // 升级整理（含备份）没成功就不改写介绍，原文留到下次整理再处理
     const cleaned = await getMeta('profile_cleanup');
@@ -2480,16 +2481,19 @@ async function rewriteIntrosDuringMaintenance() {
       tries[c.id] = (tries[c.id] || 0) + 1;
       // 请求失败、还有机会的人留到下次整理再试，这一轮不算完成
       if (!text && tries[c.id] < 2) stopped = true;
-      const [cur] = await q('SELECT narrative FROM contacts WHERE id = ?', [c.id]);
-      // 期间被整理或用户改过就不覆盖
-      const write = text && cur && cur.narrative === c.narrative;
-      await batch([...(write ? [{ sql: 'UPDATE contacts SET narrative = ? WHERE id = ?', params: [text, c.id] }] : []), setMetaStmt('intro_rewrite', { version: INTRO_REWRITE_VERSION, tries })]);
-      if (write) notifyChanged();
+      await serial(async () => {
+        const [cur] = await q('SELECT narrative FROM contacts WHERE id = ?', [c.id]);
+        const write = text && cur && cur.narrative === c.narrative;
+        const edits = write ? [{ sql: 'UPDATE contacts SET narrative = ? WHERE id = ? AND narrative = ?', params: [text, c.id, c.narrative] }] : [];
+        await batch([...edits, setMetaStmt('intro_rewrite', { version: INTRO_REWRITE_VERSION, tries })]);
+        if (write) notifyChanged();
+      });
     }
-    if (!stopped) await batch([setMetaStmt('intro_rewrite', { version: INTRO_REWRITE_VERSION, tries, finished: true, at: nowIso() })]);
+    if (!stopped) await serial(() => batch([setMetaStmt('intro_rewrite', { version: INTRO_REWRITE_VERSION, tries, finished: true, at: nowIso() })]));
   } catch (_) {
     /* 下次整理再试 */
-
+  } finally {
+    rewritingIntros = false;
   }
 }
 
@@ -3000,7 +3004,11 @@ cindy.onHostMessage(async (msg) => {
     if (!handler) throw fail('UNKNOWN_TOOL', `unknown tool ${msg.tool}`);
     await ensureReady();
     if (pendingImport) await pendingImport;
-    const result = await serial(() => handler(msg.args || {}));
+    const args = msg.args || {};
+    const result = await serial(() => handler(args));
+    if (msg.tool === 'maintenance' && args.action === 'end' && str(args.run_id) && result.scope === 'recent') {
+      await rewriteIntrosDuringMaintenance();
+    }
     await cindy.send({ type: 'tool-result', callId: msg.callId, ok: true, result });
     if (MUTATING_TOOLS.has(msg.tool) && !(msg.tool === 'import_macos' && result && result.dryRun)) notifyChanged();
   } catch (e) {
