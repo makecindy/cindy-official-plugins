@@ -847,6 +847,8 @@ const tools = {
     if (mode === 'unsubscribe') {
       subscriptionPreference = false;
       subscriptionGeneration += 1;
+      // 用户明确退订：订阅方向的重试额度与定时器也复位。
+      resetSubscriptionRetries();
       let persisted = true;
       try {
         await persistSubscriptionPreference(false);
@@ -1200,6 +1202,13 @@ function resetSubscriptionRetries() {
 async function enableSubscription(callId) {
   subscriptionPreference = true;
   subscriptionGeneration += 1;
+  // 用户重新选择订阅：退订方向的重试额度与定时器一并复位，
+  // 否则旧额度耗尽后，下一次退订投递失败会被立刻放弃。
+  unsubscribeRetries = 0;
+  if (unsubscribeRetryTimer) {
+    clearTimeout(unsubscribeRetryTimer);
+    unsubscribeRetryTimer = null;
+  }
   // 保存失败不能悄悄吞掉：调用方要能告诉用户「重启后可能要重新订阅」。
   let persisted = true;
   try {

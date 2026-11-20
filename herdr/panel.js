@@ -182,7 +182,9 @@ const PANEL_REQUEST_TIMEOUT_MS = 80000;
 
 function request(action, payload) {
   return new Promise(function (resolve, reject) {
-    const reqId = 'p' + Date.now() + Math.random().toString(16).slice(2);
+    // reqId 经 BroadcastChannel 对外可见：用 crypto 生成，
+    // 同毫秒或弱随机碰撞不能让两个面板串回包。
+    const reqId = 'p' + crypto.randomUUID();
     let settled = false;
     function cleanup() {
       clearTimeout(timer);

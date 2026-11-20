@@ -662,7 +662,9 @@ async function tmuxCapture(target, lines) {
     // 「历史只有这么多」和「更早的行没取」。
     truncated: truncated || requested > want,
     requested_lines: requested || null,
-    max_lines: 5000
+    max_lines: 5000,
+    // 字符上限也要披露：行数没超、合计字符超了同样会切掉更早的内容。
+    char_limit: TMUX_CAPTURE_MAX_CHARS
   };
 }
 

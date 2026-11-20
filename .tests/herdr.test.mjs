@@ -549,6 +549,27 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const excluded = (matchBranch.not.anyOf || []).map((entry) => entry.required[0]);
   assert.ok(excluded.includes('until'), 'the output branch must exclude the status condition');
 
+  // 面板请求 id 用 crypto（BroadcastChannel 上不能撞号）。
+  const panelSrcReq = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcReq, /crypto\.randomUUID\(\)/,
+    'the panel request id must come from crypto');
+  assert.ok(!/Math\.random/.test(panelSrcReq), 'no Math.random in the panel');
+
+  // 两个方向的重试额度互相复位。
+  assert.match(mainSource, /unsubscribeRetries = 0;[\s\S]{0,140}?unsubscribeRetryTimer = null;/,
+    'subscribing again must reset the unsubscribe retry budget');
+  const unsubBlock = /mode === 'unsubscribe'\) \{([\s\S]*?)persistSubscriptionPreference/.exec(mainSource);
+  assert.ok(unsubBlock && /resetSubscriptionRetries\(\)/.test(unsubBlock[1]),
+    'unsubscribing must reset the subscribe retry budget');
+
+  // tmux_read 披露字符上限。
+  const workerSrc10 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSrc10, /char_limit: TMUX_CAPTURE_MAX_CHARS/,
+    'tmux_read must report its character limit');
+  const tmuxReadTool = manifest.tools.find((tool) => tool.name === 'tmux_read');
+  assert.match(tmuxReadTool.description, /120000/,
+    'the tmux_read contract must disclose the character limit');
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,
