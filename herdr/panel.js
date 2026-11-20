@@ -418,9 +418,8 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
   // 但清屏 C-l、移动光标 C-a/C-e、翻滚动条 PPage/NPage 不改内容，
   // 这些键若清掉记录，恢复时会把同一文本再粘一遍。
   if (!PENDING_ENTER_KEEP_KEYS[key]) {
-    pendingEnterOnly = null;
-    // 取消/改行之后，未确认的那一行已经不存在：解除冻结。
-    scopeHolds[scope] = false;
+  // 注意：pendingEnterOnly 与 scopeHolds 不在此处清除——取消/改行键
+  // 发送成功之前，未确认的那一行可能还原样在终端里；失败时记录要保留。
     // 即将转发会改动终端行的按键：发起时的本地草稿先同步过去，
     // 否则终端行被换掉后旧草稿留着，下一次回车会把它粘到别的内容上。
     if (draft) {
@@ -456,8 +455,14 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
   try {
     if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: [key] });
     else await request('send', { pane_id: paneId, keys: [key] });
+    // 取消/改行已送达：未确认的那一行不存在了，记录与冻结才解除。
+    if (!PENDING_ENTER_KEEP_KEYS[key]) {
+      pendingEnterOnly = null;
+      scopeHolds[scope] = false;
+    }
     await refreshTerminal();
   } catch (error) {
+    // 失败或结果未知：保留待核对记录与冻结，新文本不会被放行粘到旧命令上。
     renderOutput(error.message || T.sendFailed);
   }
   return true;

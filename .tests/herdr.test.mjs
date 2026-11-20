@@ -695,12 +695,16 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'new panes must be reconciled after a resubscribe');
   assert.match(workerSrc13, /agent_status: status, reconciled: true/,
     'the reconciled event must use the agent_status key the host reads');
+  assert.match(workerSrc13, /liveArrived/,
+    'the reconcile must skip statuses that already arrived live');
   assert.match(mainSource, /data\.agent_status/,
     'the host notification path must read agent_status');
   assert.match(panelSrcHold, /const isResume = !text/,
     'a held scope must still let the resume through');
   assert.match(panelSrcHold, /for \(const held of Object\.keys\(scopeHolds\)\)/,
     'switching panes or closing the detail must release the holds');
+  assert.match(panelSrcHold, /取消\/改行已送达/,
+    'the hold must only clear after the cancelling key lands');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(

@@ -400,11 +400,21 @@ async function openSubscription() {
 // 旧连接一直在收，重发会重复通知；新 pane 的变化在间隙里没人收。
 async function reconcileNewPanes(paneIds, previousPaneIds) {
   const fresh = paneIds.filter(function (id) { return previousPaneIds.indexOf(id) < 0; });
+  const since = Date.now();
+  // 补查期间到达的实时事件优先：已经在缓冲里的就不再补发，
+  // 否则同一次 blocked/done 会通知两遍、自动化也可能多跑一次。
+  const liveArrived = function (paneId) {
+    return recentEvents.some(function (entry) {
+      return entry.t >= since && entry.data && entry.data.pane_id === paneId
+        && isStatusEvent(entry.event);
+    });
+  };
   for (const paneId of fresh) {
+    if (liveArrived(paneId)) continue;
     try {
       const agent = await callOnce('agent.get', { pane_id: paneId }, 15000);
       const status = agent && (agent.status || agent.agent_status);
-      if (status === 'blocked' || status === 'done') {
+      if ((status === 'blocked' || status === 'done') && !liveArrived(paneId)) {
         // 字段名与正常状态事件一致（agent_status）：主脚本只认这个键。
         handleEvent({
           event: 'pane_agent_status_changed',
