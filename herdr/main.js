@@ -507,10 +507,15 @@ async function hostWrite(call) {
 async function runAutomationNow(scheduleId) {
   const called = await cindy.host.call('cindy_scheduler', 'schedule_run_now', { id: scheduleId });
   const outcome = hostBody(called);
-  if (!outcome.ok) {
+  if (outcome.ok) return;
+  if (outcome.explicit) {
+    // 明确失败 = 这次没跑：复位限流，让下个事件立刻重试。
     lastTriggerAt = 0;
     throw new Error(runtime.automationFailed + (outcome.detail || runtime.automationUnknown));
   }
+  // 回执丢了 = 可能已经跑了：报结果未知，且保留限流，
+  // 否则下一条 blocked/done 会立刻把同一条自动化再跑一遍。
+  throw hostWriteFailure(outcome);
 }
 
 // Herdr 报告 agent 进入 blocked/done 时，让宿主调度器跑一次那条自动化。
@@ -794,8 +799,16 @@ const tools = {
     }
     if (mode === 'unsubscribe') {
       subscriptionPreference = false;
-      await persistSubscriptionPreference(false);
-      return nodeRequest('herdr/unsubscribe', {}, args.__callId);
+      let persisted = true;
+      try {
+        await persistSubscriptionPreference(false);
+      } catch (error) {
+        persisted = false;
+      }
+      await nodeRequest('herdr/unsubscribe', {}, args.__callId);
+      return persisted
+        ? { subscribed: false, preference_saved: true }
+        : { subscribed: false, preference_saved: false, note: runtime.preferenceSaveFailed };
     }
     if (mode === 'wait') {
       const timeoutMs = args.timeout_ms === undefined ? 60000 : Number(args.timeout_ms);
@@ -1103,11 +1116,9 @@ cindy.onHostMessage(async function (msg) {
 // 偏好尽量写进 KV（跨重启生效）；写不进去也不影响本次动作——
 // 会话内的 subscriptionPreference 已经记下了。
 async function persistSubscriptionPreference(wanted) {
-  try {
-    await writeKv({ [SUBSCRIBED_KEY]: wanted });
-  } catch (error) {
-    void error;
-  }
+  // 失败要传给调用方：调用方据此返回 preference_saved=false，
+  // 不能在内部吞掉后还报「已保存」。
+  await writeKv({ [SUBSCRIBED_KEY]: wanted });
 }
 
 // worker 握手两段各 15 秒上限，宿主给 45 秒。
@@ -1154,6 +1165,9 @@ async function ensureSubscription() {
     }
     await nodeRequest('herdr/subscribe', {}, undefined, SUBSCRIBE_HOST_TIMEOUT_MS);
   } catch (error) {
+    // 启动/wake 时的传输失败也要排重试：否则 worker 的 desired 还是 false，
+    // 通知和自动化会一直停到下一次 wake 或手工订阅。
+    if (error && error.transportFailure) scheduleSubscriptionRetry();
     void error;
   }
 }

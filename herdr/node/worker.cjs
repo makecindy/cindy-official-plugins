@@ -55,8 +55,10 @@ function fail(id, code, message) {
 // 不要盲目重试（重试可能重复发送输入、任务或关闭操作）。
 // 「写入后等待」的超时：提示词已经发出去了，只是没等到目标状态。
 function outcomeUnknownWait(method) {
+  // 同时带上英文 timeout 标记：专用等待路径（herdr_prompt/wait_until）
+  // 据此继续分段等待；原始 herdr_call 的调用方看到的仍是结果未知。
   const error = new Error(
-    'HERDR_OUTCOME_UNKNOWN: ' + method + ' 已提交，但等待目标状态超时。'
+    'HERDR_OUTCOME_UNKNOWN: timeout: ' + method + ' 已提交，但等待目标状态超时。'
     + '请先读取画面确认实际状态，再决定是否重发，避免重复执行。'
   );
   error.code = 'HERDR_OUTCOME_UNKNOWN';
@@ -126,7 +128,10 @@ function callOnce(method, params, timeoutMs) {
         try {
           message = JSON.parse(line);
         } catch (error) {
-          finish(reject, new Error('herdr 返回了无法解析的响应'));
+          // 请求已经发出去了：回包解析不了不能报「没执行」。
+          finish(reject, sent
+            ? outcomeUnknown(method)
+            : new Error('herdr 返回了无法解析的响应'));
           return;
         }
         if (message.id && message.id !== id) continue;

@@ -424,6 +424,29 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(mainSource, /error && error\.transportFailure/,
     'the subscription note must read the marker');
 
+  // run_now：明确失败才复位限流；回执丢失是结果未知、保留限流。
+  assert.match(mainSource, /if \(outcome\.explicit\) \{[\s\S]{0,120}?lastTriggerAt = 0;/,
+    'only an explicit run_now failure resets the throttle');
+  assert.match(mainSource, /throw hostWriteFailure\(outcome\);[\s\S]{0,80}?\}/,
+    'an unparseable run_now receipt must be outcome-unknown');
+
+  // 偏好保存的失败要传回调用方，不能在 helper 内部吞掉。
+  const persistBody = /async function persistSubscriptionPreference\(wanted\) \{([\s\S]*?)\n\}/.exec(mainSource);
+  assert.ok(persistBody, 'persistSubscriptionPreference must exist');
+  assert.ok(!/try/.test(persistBody[1]), 'the preference write must not swallow failures');
+
+  // 启动/wake 的订阅传输失败也要排重试。
+  assert.match(mainSource, /transportFailure\) scheduleSubscriptionRetry\(\)/,
+    'a startup transport failure must schedule a retry');
+
+  const workerSource6 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  // 已发出的写请求收到损坏回包 = 结果未知。
+  assert.match(workerSource6, /finish\(reject, sent\s*\?\s*outcomeUnknown\(method\)/,
+    'an unparseable reply after send must be outcome-unknown');
+  // 分段等待要能认出「已发送后的等待超时」。
+  assert.match(workerSource6, /HERDR_OUTCOME_UNKNOWN: timeout:/,
+    'the wait timeout must keep a marker the segmented path recognises');
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,
