@@ -448,7 +448,10 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
       // 草稿已转移到终端：记下来，之后空输入框的回车可以只补 Enter。
       // 注意不是 pendingEnterOnly——随后的改行按键会改变这行内容，
       // 同一文本恢复粘贴的去重记录不能假装它还原样存在。
-      terminalHasContent = { scope: scope };
+      // 单槽记录：不覆盖别的分屏更晚的记录。
+      if (!terminalHasContent || terminalHasContent.scope === scope) {
+        terminalHasContent = { scope: scope };
+      }
       // 草稿在捕获时已从输入框取走，这里不需要再动它。
     }
   }
@@ -532,8 +535,12 @@ async function sendEnterOnly(scope, pinnedView, target, paneId) {
     // 终端里已有的命令就再也提交不了；同时提示先核对终端。
     scopeHolds[scope] = true;
     if (currentScope() === scope) {
-      terminalHasContent = { scope: scope };
-      if (hadText !== null) pendingEnterOnly = { scope: scope, text: hadText };
+      if (!terminalHasContent || terminalHasContent.scope === scope) {
+        terminalHasContent = { scope: scope };
+      }
+      if (hadText !== null && (!pendingEnterOnly || pendingEnterOnly.scope === scope)) {
+        pendingEnterOnly = { scope: scope, text: hadText };
+      }
     }
     renderOutput('回车没有确认（'
       + String(error && error.message ? error.message : T.sendFailed)
@@ -601,7 +608,10 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
       await refreshTerminal();
     } catch (error) {
       scopeHolds[scope] = true;
-      pendingEnterOnly = { scope: scope, text: text };
+      // 单槽记录：不覆盖别的分屏更晚的记录。
+      if (!pendingEnterOnly || pendingEnterOnly.scope === scope) {
+        pendingEnterOnly = { scope: scope, text: text };
+      }
       // 只在仍选中同一目标时补回输入框，别把 A 的命令写进 B 的框。
       if (currentScope() === scope && !field.value) field.value = text;
       renderOutput(error.message || T.sendFailed);
@@ -620,7 +630,10 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
         // Enter 的结果可能是「没发出」也可能是「发出了但回执丢了」：
         // 不能断言。恢复草稿并记住这次粘贴，下一次同一文本只补回车；
         // 用户也可以先在终端里核对内容再决定。
-        pendingEnterOnly = { scope: scope, text: text };
+        // 单槽记录：不覆盖别的分屏更晚的记录。
+        if (!pendingEnterOnly || pendingEnterOnly.scope === scope) {
+          pendingEnterOnly = { scope: scope, text: text };
+        }
         scopeHolds[scope] = 'enter';
         if (currentScope() === scope && !field.value) field.value = text;
         renderOutput('文本已输入到终端，但回车没有确认（'
@@ -646,7 +659,11 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
       // （否则核对后发现没输入，重发同一段文字却只发了 Enter）。
       // 记「终端可能有内容」供空框回车补发，并冻结为 unknown：
       // 用户核对后再提交会按完整重发放行（见 submitLine 的闸门）。
-      terminalHasContent = { scope: scope };
+      // 单槽记录：请求返回时用户可能已在另一个分屏操作，
+      // 不能覆盖那个分屏的记录。
+      if (!terminalHasContent || terminalHasContent.scope === scope) {
+        terminalHasContent = { scope: scope };
+      }
       scopeHolds[scope] = 'unknown';
     }
     if (currentScope() === scope && !field.value) field.value = text;

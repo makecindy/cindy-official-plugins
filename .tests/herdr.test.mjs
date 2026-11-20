@@ -720,6 +720,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'an unknown hold must let the checked resend through as a full submit');
   assert.match(panelSrcResume, /sendEnterOnly\(scope, pinnedView, target, paneId\)/,
     'the enter-only resume must use the pinned target');
+  const guardedWrites = (panelSrcResume.match(/单槽记录/g) || []).length;
+  assert.ok(guardedWrites >= 4, 'single-slot records must not overwrite another scope');
   assert.match(panelSrcResume, /keys: \['enter'\]/,
     'the Herdr resume must send a lowercase enter');
 
