@@ -538,7 +538,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a resumed submit must only send Enter, not paste the text again');
   assert.match(panelSrcAtomic, /PENDING_ENTER_KEEP_KEYS/,
     'line-preserving keys must keep the pending-enter record');
-  assert.match(panelSrcAtomic, /if \(!PENDING_ENTER_KEEP_KEYS\[key\]\) pendingEnterOnly = null;/,
+  assert.match(panelSrcAtomic, /if \(!PENDING_ENTER_KEEP_KEYS\[key\]\) \{\s*pendingEnterOnly = null;/,
     'line-altering keys must invalidate the pending-enter record');
   assert.match(panelSrcAtomic, /closeDetail[\s\S]{0,200}?pendingEnterOnly = null/,
     'closing the detail must invalidate the pending-enter record');
@@ -569,6 +569,35 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const tmuxReadTool = manifest.tools.find((tool) => tool.name === 'tmux_read');
   assert.match(tmuxReadTool.description, /120000/,
     'the tmux_read contract must disclose the character limit');
+
+  // 转发改行按键前先同步本地草稿；首段失败恢复草稿。
+  const panelSrcDraft = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcDraft, /即将转发会改动终端行的按键/,
+    'line-altering keys must sync the local draft first');
+  assert.match(panelSrcDraft, /别让用户丢命令/,
+    'a failed first-stage send must restore the draft');
+
+  // 显式选择时同方向额度也复位。
+  const enableBlock = /async function enableSubscription\(callId\) \{([\s\S]*?)persistSubscriptionPreference/.exec(mainSource);
+  assert.ok(enableBlock && /resetSubscriptionRetries\(\)/.test(enableBlock[1]),
+    'an explicit subscribe must reset the same-direction budget too');
+  const unsubBlock2 = /mode === 'unsubscribe'\) \{([\s\S]*?)persistSubscriptionPreference/.exec(mainSource);
+  assert.ok(unsubBlock2 && /unsubscribeRetries = 0/.test(unsubBlock2[1]),
+    'an explicit unsubscribe must reset the same-direction budget too');
+
+  // 流式 UTF-8 解码。
+  const workerSrc11 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.ok(!/chunk\.toString\('utf8'\)/.test(workerSrc11),
+    'streams must decode at character boundaries, not per chunk');
+  assert.ok((workerSrc11.match(/setEncoding\('utf8'\)/g) || []).length >= 4,
+    'sockets and tmux stdio must all use setEncoding');
+
+  // 四个 locale 的 tmux_read 都要披露字符上限。
+  for (const loc of ['en', 'zh-CN', 'ja', 'ko']) {
+    const locData = JSON.parse(readFileSync(path.join(root, 'herdr', 'locales', loc + '.json'), 'utf8'));
+    assert.match(locData.tools.tmux_read.description, /120 ?000|120000/,
+      loc + ' tmux_read must disclose the character limit');
+  }
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(

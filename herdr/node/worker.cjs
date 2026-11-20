@@ -92,6 +92,9 @@ function callOnce(method, params, timeoutMs) {
   return new Promise(function (resolve, reject) {
     const id = nextId();
     const socket = net.createConnection(socketPath());
+    // setEncoding 让流按 UTF-8 字符边界解码：中文/emoji 跨 chunk 时
+    // 逐块 toString 会在边界插入替换字符（「中」变 ���）。
+    socket.setEncoding('utf8');
     let buffer = '';
     let settled = false;
     // sent 表示请求已经写进 socket。写进去之后超时或断线，就不能断言
@@ -118,7 +121,7 @@ function callOnce(method, params, timeoutMs) {
     });
 
     socket.on('data', function (chunk) {
-      buffer += chunk.toString('utf8');
+      buffer += chunk;
       let index;
       while ((index = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, index).trim();
@@ -288,6 +291,7 @@ async function openSubscription() {
   const entries = buildEntries(paneIds);
   const id = nextId();
   const socket = net.createConnection(socketPath());
+  socket.setEncoding('utf8');   // 事件里的中文/emoji 可能跨 chunk
   subscription.socket = socket;
 
   try {
@@ -311,7 +315,7 @@ async function openSubscription() {
       });
     });
     socket.on('data', function (chunk) {
-      buffer += chunk.toString('utf8');
+      buffer += chunk;
       let index;
       while ((index = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, index).trim();
@@ -526,8 +530,11 @@ function runTmux(args, timeoutMs, input) {
       child.stdin.on('error', function () { /* tmux 提前退出时忽略 EPIPE */ });
       child.stdin.end(String(input));
     }
-    child.stdout.on('data', function (chunk) { stdout += chunk.toString('utf8'); });
-    child.stderr.on('data', function (chunk) { stderr += chunk.toString('utf8'); });
+    // 同样按字符边界解码：tmux 输出里的中文也可能跨 chunk。
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', function (chunk) { stdout += chunk; });
+    child.stderr.on('data', function (chunk) { stderr += chunk; });
     child.on('error', function (error) {
       finish(reject, error && error.code === 'ENOENT'
         ? tmuxError('这台电脑上没有 tmux（命令未找到）', 'TMUX_NOT_INSTALLED')

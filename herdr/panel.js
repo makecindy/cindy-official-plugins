@@ -387,7 +387,29 @@ async function forwardKey(event) {
   // 删除 C-u/C-w/C-k/C-d、Esc、M-* 宏等）让恢复记录失效；
   // 但清屏 C-l、移动光标 C-a/C-e、翻滚动条 PPage/NPage 不改内容，
   // 这些键若清掉记录，恢复时会把同一文本再粘一遍。
-  if (!PENDING_ENTER_KEEP_KEYS[key]) pendingEnterOnly = null;
+  if (!PENDING_ENTER_KEEP_KEYS[key]) {
+    pendingEnterOnly = null;
+    // 即将转发会改动终端行的按键（历史/补全/取消等）：输入框里还有
+    // 本地草稿就先同步过去，否则终端行被换掉后，旧草稿留着，
+    // 下一次回车会把它粘到别的内容上执行。
+    const draftField = $('#term-input');
+    const draft = draftField ? draftField.value : '';
+    if (draft) {
+      try {
+        if (view === 'tmux') {
+          if (!selectedTarget) return true;
+          await request('tmux_send', { target: selectedTarget, text: draft });
+        } else {
+          if (!selectedPane) return true;
+          await request('send', { pane_id: selectedPane.pane_id, text: draft });
+        }
+        draftField.value = '';
+      } catch (error) {
+        renderOutput(error.message || T.sendFailed);
+        return true;
+      }
+    }
+  }
   try {
     if (view === 'tmux') {
       if (!selectedTarget) return true;
@@ -462,6 +484,9 @@ async function submitLine() {
       await refreshTerminal();
     }
   } catch (error) {
+    // 第一段的失败走这里：终端多半没收到内容，把草稿放回输入框，
+    // 别让用户丢命令；错误文案本身（含「结果未知」）会提示先核对终端。
+    field.value = text;
     renderOutput(error.message || T.sendFailed);
   }
 }
