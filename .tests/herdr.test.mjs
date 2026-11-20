@@ -532,8 +532,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
 
   // 面板：Enter 失败时把草稿放回输入框。
   const panelSrcAtomic = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
-  assert.match(panelSrcAtomic, /文本已输入到终端，但回车没有发出/,
-    'a failed Enter after a pasted text must restore the draft');
+  assert.match(panelSrcAtomic, /回车没有确认/,
+    'a failed Enter after a pasted text must restore the draft without asserting the outcome');
+  assert.match(panelSrcAtomic, /pendingEnterOnly/,
+    'a resumed submit must only send Enter, not paste the text again');
 
   // herdr_wait 输出分支也要排除 until。
   const waitTool3 = manifest.tools.find((tool) => tool.name === 'herdr_wait');

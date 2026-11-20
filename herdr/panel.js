@@ -399,6 +399,8 @@ async function forwardKey(event) {
 
 // 回车提交这一行：Herdr 的 pane.send_input 本身带回车；tmux 是字面量发送，
 // 需要再补一个 Enter。
+// 文本已粘进 pane、Enter 未确认时记在这里：{target, text}。
+let pendingEnterOnly = null;
 async function submitLine() {
   const field = $('#term-input');
   const text = field.value;
@@ -409,6 +411,24 @@ async function submitLine() {
   const paneId = selectedPane ? selectedPane.pane_id : null;
   if (view === 'tmux' && !target) return;
   if (view !== 'tmux' && !paneId) return;
+  // 文本已粘进 pane、只欠回车时记住它：恢复后再次提交只补 Enter，
+  // 不能把同一段文本再粘一遍；改了内容或换了目标就回到完整提交。
+  if (pendingEnterOnly
+      && pendingEnterOnly.target === target
+      && pendingEnterOnly.text === text) {
+    pendingEnterOnly = null;
+    field.value = '';
+    try {
+      await request('tmux_send', { target: target, keys: ['Enter'] });
+      await refreshTerminal();
+    } catch (error) {
+      field.value = text;
+      pendingEnterOnly = { target: target, text: text };
+      renderOutput(error.message || T.sendFailed);
+    }
+    return;
+  }
+  pendingEnterOnly = null;
   field.value = '';
   try {
     if (view === 'tmux') {
@@ -416,13 +436,14 @@ async function submitLine() {
       try {
         await request('tmux_send', { target: target, keys: ['Enter'] });
       } catch (error) {
-        // 文本已经粘进 pane、只有 Enter 没发出去：把草稿放回输入框，
-        // 让用户看到现状再决定；直接报「发送失败」会让人重试，
-        // 把同一段文本追加到 pane 里已有的草稿后再执行。
+        // Enter 的结果可能是「没发出」也可能是「发出了但回执丢了」：
+        // 不能断言。恢复草稿并记住这次粘贴，下一次同一文本只补回车；
+        // 用户也可以先在终端里核对内容再决定。
         field.value = text;
-        renderOutput('文本已输入到终端，但回车没有发出（'
+        pendingEnterOnly = { target: target, text: text };
+        renderOutput('文本已输入到终端，但回车没有确认（'
           + String(error && error.message ? error.message : T.sendFailed)
-          + '）。请查看终端内容后，再按一次回车或重发。');
+          + '）。请先在终端里核对内容：若命令尚未执行，直接再按一次回车即可（只会补发回车，不会重复粘贴文本）。');
         return;
       }
       await refreshTerminal();
