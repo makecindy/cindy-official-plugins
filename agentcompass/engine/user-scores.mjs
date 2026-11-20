@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/user-scores.js at ef542848af95d2b3278c4ca43a81cf0e0673c5d7 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/user-scores.js at 2edab79daf338d9f18fcb19099a2ab56e164f8de (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Manual capability scores (`user_scores.py`, schema 4): a maintainer layer (`MAINTAINER_SCORES`, from AgentCompass's
@@ -18,7 +18,7 @@
  * Pure ES2022 module with zero external or Node-only dependencies (Bun and Magpie's `moejs`).
  */
 
-import { makerDefault, pyRound } from "./catalog.mjs";
+import { PROVIDER_NAMES, makerDefault, pyRound } from "./catalog.mjs";
 import { LEVEL3_CONVERSIONS } from "./reference-data.mjs";
 import { v070Row } from "./released-names.mjs";
 
@@ -584,17 +584,16 @@ function applyOneLayer(fiveState, entries, targets, fixedEffort = null, effortSt
  * model, not a provider's offer: no provider's declaration is read. A name its maker moved to a newer dated snapshot means what the
  * name means now: the maker's `provider_names` `defaults` declaration is read first (`makerDefault`), so a score keyed by the moved
  * name lands on the snapshot's row. Else the name as a row, an alias, its last `/` segment as a row, that segment as an alias.
+ * `providerNames` is the table of the catalogue `models` belongs to (`providerNamesOf`); a declaration naming a row that catalogue
+ * does not have leaves the key on no row (`model` itself), so the score is ignored, never an exception.
  */
-export function resolveModelKey(model, models, aliases = {}) {
+export function resolveModelKey(model, models, aliases = {}, providerNames = PROVIDER_NAMES) {
   const raw = String(model ?? "").trim();
   if (!raw) throw new Error("Model id must not be empty.");
   const isModel = (name) => Object.prototype.hasOwnProperty.call(models, name) && isRow(models[name]);
   const aliasOf = (name) => (Object.prototype.hasOwnProperty.call(aliases || {}, name) && isModel(aliases[name]) ? aliases[name] : null);
-  const declared = makerDefault(raw);
-  if (declared) {
-    if (!isModel(declared.model)) throw new Error(`provider_names defaults names row ${JSON.stringify(declared.model ?? null)} for ${JSON.stringify(raw)}, which the catalogue does not have`);
-    return declared.model;
-  }
+  const declared = makerDefault(raw, providerNames);
+  if (declared) return isModel(declared.model) ? declared.model : raw;
   if (isModel(raw)) return raw;
   if (aliasOf(raw)) return aliasOf(raw);
   const leaf = raw.split("/").pop();
@@ -608,10 +607,10 @@ export function resolveModelKey(model, models, aliases = {}) {
  * name (`deepseek-v4-pro`) for each target both hold, and other spellings apply in name order, so the result never depends on the
  * order of the keys in the file. A key that lands on no row keeps its own name.
  */
-export function scoreLayer(layer, models, aliases = {}) {
+export function scoreLayer(layer, models, aliases = {}, providerNames = PROVIDER_NAMES) {
   const keyed = Object.entries(layer || {})
     .filter(([, entries]) => isRow(entries) && Object.keys(entries).length > 0)
-    .map(([key, entries]) => [resolveModelKey(key, models, aliases), key, entries]);
+    .map(([key, entries]) => [resolveModelKey(key, models, aliases, providerNames), key, entries]);
   const own = ([row, key]) => (row === key ? 1 : 0);
   keyed.sort((a, b) => own(a) - own(b) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
   const grouped = new Map();
@@ -625,13 +624,13 @@ export function scoreLayer(layer, models, aliases = {}) {
  * `five-axis-scores.json` `effort_steps` (`manualByEffort`). An entry whose name resolves to no row is ignored, never made a row.
  * Facets derived from a larger row then follow a score on that row (`followEffectiveSources`).
  */
-export function applyOverlay(models, targets, { publicScores = null, localScores = null, aliases = {}, effortSteps = null } = {}) {
+export function applyOverlay(models, targets, { publicScores = null, localScores = null, aliases = {}, effortSteps = null, providerNames = PROVIDER_NAMES } = {}) {
   const pub = publicScores || {};
   const loc = localScores || {};
   if (Object.keys(pub).length === 0 && Object.keys(loc).length === 0) return;
   const shipped = Object.fromEntries(Object.entries(models).filter(([, info]) => isRow(info)).map(([name, info]) => [name, facetCurves(info)]));
   for (const layer of [pub, loc]) {
-    for (const [canon, entries] of scoreLayer(layer, models, aliases)) {
+    for (const [canon, entries] of scoreLayer(layer, models, aliases, providerNames)) {
       const info = models[canon];
       if (!isRow(info)) continue;
       info.five_axis ||= {

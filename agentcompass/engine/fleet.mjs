@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/fleet.js at ef542848af95d2b3278c4ca43a81cf0e0673c5d7 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/fleet.js at 2edab79daf338d9f18fcb19099a2ab56e164f8de (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * The fleet the allocator ranks over, built from what the gateway has: a candidate pool and a quota snapshot.
@@ -21,10 +21,12 @@ import {
   DISPATCH_EFFORTS,
   FAMILIES,
   MODEL_ALIASES,
+  PROVIDER_NAMES,
   SCORING_POLICY,
   healthKey,
+  listedPreset,
   nameFixesEffort,
-  resolveModel,
+  resolveListed,
   splitEffortSuffix,
 } from "./catalog.mjs";
 import { PLAN_CAPACITY } from "./reference-data.mjs";
@@ -104,9 +106,9 @@ export function accountFrom(entry, nowMs) {
  * `{ fleet, usage, entries }` for a quota snapshot (already normalized into `entries`) or none. The fleet is the allocator's
  * accounts document: scored models, aliases, family patterns, launch efforts, the scoring policy and the accounts.
  */
-export function buildFleet({ entries = null, nowMs = Date.now(), policy = SCORING_POLICY, models = null, aliases = MODEL_ALIASES, userScores = null } = {}) {
-  const scored = models || (userScores ? scoredModels({ aliases, userScores }) : defaultScoredModels());
-  const fleet = { models: scored, aliases, families: FAMILIES, scoring: policy, dispatch_efforts: DISPATCH_EFFORTS, accounts: {} };
+export function buildFleet({ entries = null, nowMs = Date.now(), policy = SCORING_POLICY, models = null, aliases = MODEL_ALIASES, userScores = null, providerNames = PROVIDER_NAMES } = {}) {
+  const scored = models || (userScores ? scoredModels({ aliases, userScores, providerNames }) : defaultScoredModels());
+  const fleet = { models: scored, aliases, families: FAMILIES, providerNames, scoring: policy, dispatch_efforts: DISPATCH_EFFORTS, accounts: {} };
   const usage = { accounts: {} };
   for (const entry of entries || []) {
     const { spec, usage: row } = accountFrom(entry, nowMs);
@@ -120,7 +122,8 @@ export function buildFleet({ entries = null, nowMs = Date.now(), policy = SCORIN
 // ---------------------------------------------------------------------------- pool entries to bundles
 
 const lc = (v) => String(v).trim().toLowerCase();
-const withoutUnconstrainingTag = (raw) => raw.replace(/:(?:auto|off|default)$/i, "");
+/** A pool name without the tag that constrains no effort (`:auto`, `:off`, `:default`). */
+export const withoutUnconstrainingTag = (raw) => raw.replace(/:(?:auto|off|default)$/i, "");
 
 /** The name of a pool entry: a string, or the object's `model`. */
 export const entryModel = (entry) => (typeof entry === "string" ? entry.trim() : entry && typeof entry === "object" ? String(entry.model || "").trim() : "");
@@ -151,7 +154,7 @@ export function effortRows(entry, fleet) {
   const obj = typeof entry === "object" ? entry : {};
   const stripped = withoutUnconstrainingTag(name);
   const { name: modelName, effort: colon } = splitEffortSuffix(stripped);
-  const resolved = resolveModel(modelName, fleet.models, fleet.aliases, fleet.families);
+  const resolved = resolveListed(modelName, fleet.models, fleet.aliases, fleet.families, fleet.providerNames);
   const suffix = colon || resolved.effort || null;
   const fixedBySuffix = suffix && EFFORTS.includes(suffix);
   const model = fixedBySuffix ? modelName : stripped;
@@ -167,8 +170,12 @@ export function effortRows(entry, fleet) {
   else efforts = bareEfforts(provider, model, fleet);
   const own = listed.length > 0 ? listed : null;
   const split = efforts.length > 1 && obj.id;
+  // A Magpie list id is offered on its preset: the preset id as Magpie gives it, and the catalogs it serves, so a name the user
+  // prefixes with either names this row (`account_fleet.bundle_presets`, `bundle_providers`). Only the Magpie adapter's table has a host.
+  const preset = obj.presets ? null : listedPreset(modelName, fleet.providerNames);
   return efforts.map((effort) => ({
     ...obj,
+    ...(preset ? { presets: [preset.preset], ...(obj.served ? {} : { served: preset.served }) } : {}),
     model,
     effort,
     provider,
@@ -216,7 +223,7 @@ export function expandBundles(poolEntries, fleet, entries) {
 /** An effort the user unchecked on an account and model is no landing for any row of them (a family row is another model). */
 export function attachDisabledEfforts(rows, fleet) {
   const groups = new Map();
-  const keyOf = (c) => JSON.stringify([c.account || "", c.harness || "", healthKey(c.model, fleet.models, fleet.aliases, fleet.families)]);
+  const keyOf = (c) => JSON.stringify([c.account || "", c.harness || "", healthKey(c.model, fleet.models, fleet.aliases, fleet.families, fleet.providerNames)]);
   for (const c of rows) {
     if (!c.disabled || c.disabled_by_default) continue;
     const key = keyOf(c);

@@ -1,6 +1,6 @@
 // The built-in AgentCompass router for Cindy: classifies the task through Cindy's quick-text channel (or uses an explicit caller
 // profile), applies the profile-driven split and self gates, and ranks every route the user's Cindy can actually run (its live
-// `tasks.models()` catalog) with the AgentCompass v0.7.1 allocator, by capability fit and session continuity: the catalog cannot say
+// `tasks.models()` catalog) with the AgentCompass v0.7.3 allocator, by capability fit and session continuity: the catalog cannot say
 // which connection is the user's own sign-in and which is the Cindy gateway, so no quota reading is attached to any of them and every
 // row runs on the engine's built-in gateway account. No keyword/regex task heuristics, no network, no credentials, no third-party modules.
 import fs from 'node:fs';
@@ -12,6 +12,8 @@ import {ROUTES} from './catalog.mjs';
 import {taskKind} from './task-intake.mjs';
 import {GATEWAY_ACCOUNT} from './fleet.mjs';
 
+// The one configuration of a catalog row that lists no efforts (AgentCompass reads `default` as its data declares).
+const ONE_CONFIGURATION = 'default';
 const TASK_COUNT_BUCKETS = new Set(TASK_COUNTS);
 const ACCESS_SET = new Set(ACCESS_LEVELS);
 const PROFILE_INTEGER_ENTRIES = Object.entries(PROFILE_INTEGERS);
@@ -21,7 +23,7 @@ export const HARNESS = {cc: 'claude', codex: 'codex', pi: 'pi'};
 export const routeKey = (harness, providerId, model) => `${harness}\0${providerId}\0${model}`;
 const MODE = {claude: 'bypassPermissions', codex: 'full-access', pi: 'full-access'};
 
-// ---- classifier schema & prompt (AgentCompass v0.7.1: scorer_client.py SCORER_PROMPT, task_intake.py TASK_PROFILE_SCHEMA) -------
+// ---- classifier schema & prompt (AgentCompass v0.7.3: scorer_client.py SCORER_PROMPT, task_intake.py TASK_PROFILE_SCHEMA) -------
 // The 11 work kinds a classifier may name (task_intake.WORK_KINDS); `other_or_mixed` is a route, never an answer.
 export {WORK_KINDS};
 
@@ -163,7 +165,7 @@ export const ONESHOT_PROMPT_LIMIT = 32768;
 // The host answers (or reports TIMEOUT) within 60 s; this only ends the wait on a host that never answers.
 export const DEFAULT_CLASSIFIER_TIMEOUT_MS = 65000;
 export const DEFAULT_CLASSIFIER_CACHE_TTL_MS = 10 * 60 * 1000;
-// 5: the v0.7.0 profile, unchanged in v0.7.1. An entry of an older version is a miss, and ages out of the file within the cache's lifetime.
+// 5: the v0.7.0 profile, unchanged through v0.7.3. An entry of an older version is a miss, and ages out of the file within the cache's lifetime.
 const SCORE_CACHE_VERSION = 5;
 const SCORE_CACHE_MAX = 200;
 
@@ -549,10 +551,12 @@ function harnessRank(kind, harness) {
 
 // The engine's text for a row out of automatic routing ends by telling its caller to name the model, which an engine caller can do
 // (`constraintModel`). A `roll` caller cannot: roll takes only `task` and `profile`. What the caller reads keeps the reason and the
-// missing data and drops that instruction; the engine's own wording is unchanged.
+// missing data and drops that instruction; the engine's own wording is unchanged. A route the plugin marks unavailable is one Cindy
+// recently refused to create a task on, and says so.
 const callerText = line => String(line)
   .replace(/; name the model to dispatch it\)/g, ')')
-  .replace(/ \(name it to dispatch it\)/g, '');
+  .replace(/ \(name it to dispatch it\)/g, '')
+  .replace(/marked unavailable by the parent/g, 'Cindy recently refused to create a task on this route');
 
 // The engine names each row it leaves out with its reason; a catalog of fifty rows would answer with fifty lines of mostly one
 // reason. One line per reason, with the rows it takes out.
@@ -576,7 +580,7 @@ function exclusionsByReason(lines) {
  *   {status:'native', route:{bundle}, decision}  one exact catalog row, effort and fast mode
  *   {status:'blocked', error, decision}  classifier unavailable or nothing in the catalog can run it
  */
-// cooling: {routeKey: {until, code}} routes Cindy recently refused to create; skipped while another route can run.
+// cooling: {routeKey: {until, code}} routes Cindy recently refused to create; marked unavailable while another route can run.
 export function routeTask(task, catalog, {
   now = Date.now(),
   cooling = {},
@@ -596,7 +600,10 @@ export function routeTask(task, catalog, {
   const pinEffort = constraintEffort ? String(constraintEffort).trim().toLowerCase() : null;
   const pinned = pinModel || pinEffort ? {model: pinModel, effort: pinEffort} : null;
   const pinnedInfo = pinned ? {pinned} : {};
-  const offeredEfforts = row => (row.efforts?.length ? row.efforts : [row.route.effort]);
+  // The efforts a catalog row lists. A row that lists none is one configuration: Cindy accepts a task on it only with effort ""
+  // (`appDefaultModelControl.ts`), so the engine scores it once, at `default` (read as the data reads `default`), and it is launched
+  // with "". Which effort Cindy then runs is its own and is not verified.
+  const offeredEfforts = row => (row.efforts || []).filter(Boolean);
 
   const runnable = (catalog?.models || []).filter(row => HARNESS[row?.route?.agentKind] && row.route.providerId && row.route.model);
 
@@ -718,28 +725,36 @@ export function routeTask(task, catalog, {
     return {agentKind: row.route.agentKind, providerId: row.route.providerId, model: row.route.model, code: entry.code,
       minutes_left: Math.ceil((entry.until - now) / 60000)};
   });
-  // Every route refused recently: a cooldown that leaves nothing to run would only block, so route as usual.
+  // Every route refused recently: a cooldown that leaves nothing to run would only block, so route as usual. Otherwise a cooling
+  // route stays in the pool marked unavailable, so a model the caller named is matched over every route Cindy offers: a bare name
+  // goes to another route of the model, a name with a prefix that names only the cooling route is refused, never replaced.
   const allCooling = skipped.length === runnable.length;
-  const rows = allCooling ? runnable : runnable.filter(row => !coolingOf(row));
+  const rows = runnable;
 
-  // One catalog row is one pool entry: the efforts this row offers are the ones it runs at (the engine's shipped launch table removes
-  // none of them), and every row draws on the engine's
+  // One catalog row is one pool entry on its harness (`provider`: the engine reads no provider family from the model's name): the
+  // efforts this row offers are the ones it runs at (the engine's shipped launch table removes none of them), a row that offers none
+  // is its one configuration at `default`, and every row draws on the engine's
   // built-in unmetered gateway account: no quota reading is attached to a connection. Rows of the harness a route kind names first go first: the engine breaks a tie of
   // everything else (one model at one effort on two harnesses) by that order, so it moves no other model.
   const kind = taskKind({profile}, ROUTES);
   const ordered = [...rows].sort((a, b) => harnessRank(kind, HARNESS[a.route.agentKind]) - harnessRank(kind, HARNESS[b.route.agentKind]));
   const rowById = new Map();
+  const unavailable = [];
   const entries = ordered.map(row => {
     const harness = HARNESS[row.route.agentKind];
-    const offered = offeredEfforts(row).filter(Boolean);
+    const offered = offeredEfforts(row);
     const id = `${harness}/${row.route.providerId}/${row.route.model}`;
     rowById.set(id, row);
+    if (!allCooling && coolingOf(row)) unavailable.push(id);
     return {
       id,
       model: row.route.model,
+      provider: harness,
       harness,
       account: GATEWAY_ACCOUNT,
-      ...(offered.length ? {efforts: offered} : {}),
+      // The Cindy provider the route runs on: a model named with its id as the prefix names this row.
+      presets: [row.route.providerId],
+      efforts: offered.length ? offered : [ONE_CONFIGURATION],
     };
   });
   const rowOf = candidate => rowById.get(candidate.id) || rowById.get(String(candidate.id).slice(0, String(candidate.id).lastIndexOf(':')));
@@ -748,6 +763,7 @@ export function routeTask(task, catalog, {
     now,
     constraintModel: pinModel,
     constraintEffort: pinEffort,
+    unavailable,
   });
   const base = {
     work_kind: decision.workKind,
@@ -765,6 +781,8 @@ export function routeTask(task, catalog, {
   }
   const best = decision.ok ? decision.topCandidates[0] : null;
   const bestRow = best ? rowOf(best) : null;
+  // A malformed name (an empty part around `/` or `:`) is the caller's to correct (AgentCompass `model_resolution.check_model_pin`).
+  const malformedPin = decision.error === 'invalid_model_pin';
   if (!best || !bestRow) {
     return {
       status: 'blocked',
@@ -772,21 +790,23 @@ export function routeTask(task, catalog, {
       ...outcome,
       work_kind: decision.workKind,
       decision: {
-        reason: 'no_route',
+        reason: malformedPin ? 'invalid_model_pin' : 'no_route',
         ...base,
         refusal: decision.refusal,
         // The engine's own warning of a blocked route is `excluded` joined into one line, so it is not repeated.
         warnings: decision.warnings.map(callerText),
         excluded: exclusionsByReason(decision.excluded),
       },
-      error: pinned
+      error: malformedPin
+        ? `${decision.refusal} Nothing was started.`
+        : pinned
         ? `No route Cindy offers is what was named (${[pinModel, pinEffort].filter(Boolean).join(', ')}) and can run this task; nothing was started.`
         : 'No model in the Cindy catalog can run this task: each one is out of automatic routing for the reason in `decision.excluded`; nothing was started. Do the task in this session, or make another model available in Cindy and roll again.',
     };
   }
   // Fast mode is never chosen: it needs a quota reading attached to the Codex sign-in's own connection, which the catalog cannot name.
   // `wants_fast` stays in the profile and in the decision as stated.
-  const launchEffort = (candidate, row) => (offeredEfforts(row).filter(Boolean).length ? candidate.effort : (row.route.effort ?? ''));
+  const launchEffort = (candidate, row) => (offeredEfforts(row).length ? candidate.effort : '');
   const route = bestRow.route;
   const harness = HARNESS[route.agentKind];
   const bundle = {provider: harness, harness, account: route.providerId, providerId: route.providerId,

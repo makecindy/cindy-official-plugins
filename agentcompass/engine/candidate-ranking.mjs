@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-ranking.js at ef542848af95d2b3278c4ca43a81cf0e0673c5d7 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-ranking.js at 2edab79daf338d9f18fcb19099a2ab56e164f8de (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Ranking and ordering of evaluated candidates (`candidate_ranking.py`).
@@ -13,7 +13,7 @@
 import { pyRound } from "./catalog.mjs";
 import { fiveAxisConfig, fiveAxisContinuityValue, fiveAxisDemand, fiveAxisTargets } from "./axis-scores.mjs";
 import { FIVE_AXIS_ANCHOR } from "./reference-data.mjs";
-import { evaluateBundle, namedEffortBundles } from "./candidate-eval.mjs";
+import { evaluateBundle, namedEffortBundles, pinMatchedIds } from "./candidate-eval.mjs";
 import { applyFiveAxisEconomy } from "./quota-economy.mjs";
 
 export const FIVE_AXIS_ORDER_KEYS = ["net_score", "wait_hours", "completion_hours", "usd", "axis_level", "harness_place"];
@@ -62,6 +62,8 @@ export function rank(taskIn, ctx) {
   const { policy, fleet } = ctx;
   const poolBundles = { ...ctx.bundles }; // the catalogue, before a task-named effort adds bundles to it
   Object.assign(ctx.bundles, namedEffortBundles(taskIn, ctx));
+  // What the user named, over every bundle the pool offers (named-effort rows included) before any filter.
+  ctx._pin_matched_ids = pinMatchedIds(taskIn, ctx);
   const five = (ctx.five_axis = fiveAxisConfig(policy));
   ctx.targets = FIVE_AXIS_ANCHOR.targets;
   const demand = fiveAxisDemand(taskIn);
@@ -75,7 +77,7 @@ export function rank(taskIn, ctx) {
   // When `--model` is named without `--effort` (and no bundle is pinned), never let an unscored effort beat a scored effort of
   // the same model via a silent 0.0 default. Only when ALL eligible candidates lack trusted scores do they proceed together as
   // an explicit `unscored_named_dispatch` with `fit = null`.
-  if (task.constraint_model && !task.constraint_effort && !task.pinned_bundle) {
+  if (task.constraint_model && !task.constraint_effort && !task.pinned_bundle && !task.constraint_bundle) {
     const eligNow = candidates.filter((c) => c.excluded.length === 0);
     if (eligNow.some((c) => !c._five_blind_msg)) {
       for (const c of eligNow) {
@@ -87,7 +89,7 @@ export function rank(taskIn, ctx) {
           c.data_errors = c.data_errors.filter((e) => e !== msg);
           if (c.data_errors.length === 0) delete c.data_errors;
         }
-        c.excluded.push(`data error: ${msg} (excluded because another effort of ${task.constraint_model} has trusted data)`);
+        c.excluded.push(`data error: ${msg} (excluded because another effort of ${task.constraint_raw_model || task.constraint_model} has trusted data)`);
       }
     }
   }
@@ -108,6 +110,8 @@ export function rank(taskIn, ctx) {
     needs_gui: false,
     wants_fast: false,
     read_only_review: false,
+    constraint_bundle: null,
+    constraint_raw_model: null,
     constraint_model: null,
     constraint_effort: null,
     pinned_bundle: null,

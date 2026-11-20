@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/task-intake.js at ef542848af95d2b3278c4ca43a81cf0e0673c5d7 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/task-intake.js at 2edab79daf338d9f18fcb19099a2ab56e164f8de (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * The task as the allocator sees it (`task_intake.py`): its route kind, modality needs, named pins, hours and chain. The profile
@@ -7,7 +7,8 @@
  * Pure ES2022 module with zero external or Node-only dependencies (Bun and Magpie's `moejs`).
  */
 
-import { DIFFICULTY_ORDER, DIRECT_SOURCES, ROUTES, SCORING_POLICY, resolveModel, splitEffortSuffix } from "./catalog.mjs";
+import { DIFFICULTY_ORDER, DIRECT_SOURCES, FAMILIES, PROVIDER_NAMES, ROUTES, SCORING_POLICY, checkModelPin, resolveListed, splitEffortSuffix } from "./catalog.mjs";
+import { effectivePin } from "./candidate-eval.mjs";
 import { WORK_KINDS, validateProfile } from "./profiler.mjs";
 
 export const COUPLINGS = ["low", "medium", "high"]; // chain.coupling; high is a related task that continues its worker
@@ -94,23 +95,31 @@ export function resolveModalityNeeds(needs, profile, implies) {
   return { visual, local_only: localOnly };
 }
 
+const given = (value) => value !== undefined && value !== null && value !== "";
+
 /**
- * `[model the user named, effort the user named]` from the constraints or the pinned_* request fields. The effort comes from its
- * own field, else from the name (`model:effort`). A name only a family guess could place stays itself: naming gemini-2.5-pro
- * never launches the flagship the family folds to.
+ * `[model the user named, effort the user named]` from the constraints or the pinned_* request fields (`task_intake.named_pin`).
+ * A malformed name is refused here, where the caller hands it over (`checkModelPin`: `invalid_model_pin`). The name is read as the
+ * pool reads it (`effectivePin`: a prefix that names nothing in the pool is dropped). The effort comes from its own field, else
+ * from the name (`model:effort`). A name only a family guess could place stays itself: naming gemini-2.5-pro never launches the
+ * flagship the family folds to.
  */
-export function namedPin(constraints, task, models, aliases) {
+export function namedPin(constraints, task, models, aliases, providerNames = PROVIDER_NAMES, pool = null, fleet = null) {
   let effort = constraints.effort || task.pinned_effort;
   effort = typeof effort === "string" && effort.trim() ? effort.trim().toLowerCase() : null;
-  const raw = constraints.model || task.pinned_model;
-  if (!raw) return [constraints.bundle || null, effort];
-  const resolved = resolveModel(String(raw), models, aliases);
-  const name = DIRECT_SOURCES.includes(resolved.source) ? resolved.key : splitEffortSuffix(String(raw)).name;
+  const fromConstraints = given(constraints.model);
+  if (!fromConstraints && !given(task.pinned_model)) {
+    return [given(constraints.bundle) ? checkModelPin(constraints.bundle, "constraints.bundle") : null, effort];
+  }
+  const raw = fromConstraints ? checkModelPin(constraints.model, "constraints.model") : checkModelPin(task.pinned_model, "pinned_model");
+  const asRead = pool && pool.length > 0 && fleet ? effectivePin(raw, pool, fleet) : raw;
+  const resolved = resolveListed(asRead, models, aliases, FAMILIES, providerNames);
+  const name = DIRECT_SOURCES.includes(resolved.source) ? resolved.key : splitEffortSuffix(asRead).name;
   return [name, effort || resolved.effort || null];
 }
 
 /** The task the allocator works on, from the caller's wrapper (`{ profile, constraints, chain, ... }`). */
-export function normalizeTask(raw, { policy = SCORING_POLICY, routes = ROUTES, models, aliases } = {}) {
+export function normalizeTask(raw, { policy = SCORING_POLICY, routes = ROUTES, models, aliases, providerNames = PROVIDER_NAMES, pinPool = null, fleet = null } = {}) {
   const task = { ...(raw || {}) };
   let profile = task.profile !== undefined && task.profile !== null ? validateCallerProfile(task.profile) : null;
   const needs = task.needs && typeof task.needs === "object" && !Array.isArray(task.needs) ? { ...task.needs } : {};
@@ -147,7 +156,10 @@ export function normalizeTask(raw, { policy = SCORING_POLICY, routes = ROUTES, m
   }
   const hours = Number(task.expected_hours || profile.expected_hours);
   const constraints = task.constraints && typeof task.constraints === "object" ? task.constraints : {};
-  const [constraintModel, constraintEffort] = namedPin(constraints, task, models, aliases);
+  const [constraintModel, constraintEffort] = namedPin(constraints, task, models, aliases, providerNames, pinPool, fleet);
+  // What the user typed, kept beside the resolved name: a pin is matched by it (`candidate-eval.js` `pinMatchedIds`).
+  const rawPin = constraints.model || task.pinned_model;
+  const constraintRawModel = typeof rawPin === "string" && rawPin.trim() ? rawPin.trim() : null;
   const implies = (routes[kind] || {}).implies || {};
   Object.assign(needs, resolveModalityNeeds(needs, profile, implies));
   const worker = chain.worker && typeof chain.worker === "object" ? { ...chain.worker } : null;
@@ -177,6 +189,7 @@ export function normalizeTask(raw, { policy = SCORING_POLICY, routes = ROUTES, m
     file_transfer: Boolean(needs.file_transfer),
     outbound_ok: needs.outbound_ok === undefined ? null : needs.outbound_ok,
     constraint_bundle: typeof constraints.bundle === "string" ? constraints.bundle : null,
+    constraint_raw_model: constraintRawModel,
     constraint_model: constraintModel,
     constraint_effort: constraintEffort,
     metered_ok: Boolean(task.metered_ok),

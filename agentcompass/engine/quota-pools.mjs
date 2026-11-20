@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/quota-pools.js at ef542848af95d2b3278c4ca43a81cf0e0673c5d7 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/quota-pools.js at 2edab79daf338d9f18fcb19099a2ab56e164f8de (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Quota windows and pools (`quota_pools.py`, `window_scope.py`): which windows a bundle draws, their state, and the refusals
@@ -8,7 +8,6 @@
  * Pure ES2022 module with zero external or Node-only dependencies (Bun and Magpie's `moejs`).
  */
 
-import { canonicalModel } from "./catalog.mjs";
 import { capacityUsd } from "./quota-economy.mjs";
 
 const INF = Number.POSITIVE_INFINITY;
@@ -58,14 +57,18 @@ export function bindsAny(names, ...sources) {
 
 // ---------------------------------------------------------------------------- applicable windows and observations
 
-/** `[window id, spec, observed window]` for the windows of an account that bind this model. */
+/**
+ * `[window id, spec, observed window]` for the windows of an account that bind this model. `model` is the name already resolved
+ * (the caller's `canonicalOf`), matched as it is and never read again as a name (`account_fleet.row_spec`); `rawModel` the
+ * bundle's own spelling.
+ */
 export function applicableWindows(accountSpec, model, usageRow, bundle, rawModel) {
   const observed = {};
   for (const w of (usageRow && usageRow.windows) || []) if (w && w.id && !(w.id in observed)) observed[w.id] = w;
   const configured = (accountSpec && accountSpec.windows) || {};
   const windows = { ...configured };
   for (const wid of Object.keys(observed)) if (!(wid in windows)) windows[wid] = {};
-  const names = [canonicalModel(rawModel || model || ""), rawModel || model || ""];
+  const names = [model || rawModel || "", rawModel || model || ""];
   return Object.entries(windows)
     .filter(([wid, wspec]) => bindsAny(names, wspec, observed[wid]))
     .map(([wid, wspec]) => [wid, wspec, observed[wid] || null]);

@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/axis-scores.js at ef542848af95d2b3278c4ca43a81cf0e0673c5d7 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/axis-scores.js at 2edab79daf338d9f18fcb19099a2ab56e164f8de (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Four-category (five-axis) scoring (`axis_scores.py`): the category scores of a model, the demand of a task, the panel targets
@@ -15,7 +15,7 @@
  * Pure ES2022 module with zero external or Node-only dependencies (Bun and Magpie's `moejs`).
  */
 
-import { MODELS, MODEL_ALIASES, SCORING_POLICY, pyRound } from "./catalog.mjs";
+import { MODELS, MODEL_ALIASES, PROVIDER_NAMES, SCORING_POLICY, pyRound } from "./catalog.mjs";
 import { FIVE_AXIS_ANCHOR, FIVE_AXIS_EFFORT_READINGS, FIVE_AXIS_EFFORT_STEPS, FIVE_AXIS_MODELS, FIVE_AXIS_SCHEMA, MAINTAINER_SCORES } from "./reference-data.mjs";
 import { CATEGORIES, TOOL_LEVEL_FACETS, applyOverlay, validateScores } from "./user-scores.mjs";
 
@@ -78,7 +78,7 @@ const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stri
  * image input, fast mode and duration of `five-axis-scores.json`, the cited `usd_per_hour` (an unsourced one is removed, never
  * defaulted), then the maintainer's manual scores and, when given, the operator's own (`userScores`).
  */
-export function scoredModels({ models = MODELS, aliases = MODEL_ALIASES, userScores = null } = {}) {
+export function scoredModels({ models = MODELS, aliases = MODEL_ALIASES, userScores = null, providerNames = PROVIDER_NAMES } = {}) {
   requireCurrentSchema(FIVE_AXIS_SCHEMA);
   const local = validateScores(userScores, "user");
   const out = {};
@@ -105,7 +105,7 @@ export function scoredModels({ models = MODELS, aliases = MODEL_ALIASES, userSco
     else delete info.usd_per_hour;
     out[name] = info;
   }
-  applyOverlay(out, FIVE_AXIS_ANCHOR.targets, { publicScores: MAINTAINER_SCORES, localScores: local, aliases, effortSteps: FIVE_AXIS_EFFORT_STEPS });
+  applyOverlay(out, FIVE_AXIS_ANCHOR.targets, { publicScores: MAINTAINER_SCORES, localScores: local, aliases, effortSteps: FIVE_AXIS_EFFORT_STEPS, providerNames });
   for (const info of Object.values(out)) {
     if (info && info.five_axis) info.five_axis.shares = fiveAxisShares(fiveAxisValues(info.five_axis, "high"), FIVE_AXIS_ANCHOR.targets);
   }

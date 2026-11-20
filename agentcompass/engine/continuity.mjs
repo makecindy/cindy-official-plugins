@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/continuity.js at ef542848af95d2b3278c4ca43a81cf0e0673c5d7 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/continuity.js at 2edab79daf338d9f18fcb19099a2ab56e164f8de (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Session Affinity, Turn-Loop Lock, Cache-Temperature Hold & Monotonic Effort Ratchet.
@@ -20,7 +20,8 @@ import {
   canonicalModel,
   healthKey,
   modelSpec,
-  resolveModel,
+  providerNamesOf,
+  resolveListed,
 } from "./catalog.mjs";
 import { defaultScoredModels } from "./axis-scores.mjs";
 import { dispatchAllowedEfforts } from "./candidate-eval.mjs";
@@ -29,9 +30,11 @@ import { isModelQuotaExhausted } from "./quota.mjs";
 /** The scored models a call reads (the host's own `options.models` when it gives some). */
 const modelsOf = (options) => (options && options.models) || defaultScoredModels();
 const aliasesOf = (options) => (options && options.aliases) || MODEL_ALIASES;
+/** The `provider_names` table of the host catalogue the call reads (`providerNamesOf`, passed in as `options.providerNames`). */
+const namesOf = (options) => (options && options.providerNames) || providerNamesOf({ models: options && options.models });
 
 /** The row of a model a session runs on: its context window and whether the public data says it takes images. */
-const specOf = (model, options) => modelSpec(model, modelsOf(options), aliasesOf(options), FAMILIES);
+const specOf = (model, options) => modelSpec(model, modelsOf(options), aliasesOf(options), FAMILIES, namesOf(options));
 
 /** Whether the public data cites image input for this model (unknown is not yes: a turn that needs images routes again). */
 const takesImages = (spec) => (((spec || {}).five_axis || {}).image_input || {}).status === "yes";
@@ -866,7 +869,7 @@ export function keepsEffort(
     return wantedEffort || "medium";
   }
 
-  const fleet = { models: modelsOf(options), aliases: aliasesOf(options), families: FAMILIES, dispatch_efforts: DISPATCH_EFFORTS };
+  const fleet = { models: modelsOf(options), aliases: aliasesOf(options), families: FAMILIES, providerNames: namesOf(options), dispatch_efforts: DISPATCH_EFFORTS };
   const allowed = dispatchAllowedEfforts({ provider: sessionState.provider || "", model: sessionState.model }, fleet, sessionState.model);
   return ratchetEffort(sessionState.effort, wantedEffort, allowed || undefined);
 }
@@ -905,9 +908,9 @@ function pinOverridesSession(sessionState, pins, options) {
     const models = modelsOf(options);
     const aliases = aliasesOf(options);
     // Each row is its own model (contract R1): a session on a family row is not on the flagship it folds to, nor the other way round.
-    const running = healthKey(sessionState.target || sessionState.model, models, aliases);
-    if (healthKey(String(pins.constraintModel), models, aliases) !== running) return true;
-    effort = effort || resolveModel(String(pins.constraintModel), models, aliases).effort;
+    const running = healthKey(sessionState.target || sessionState.model, models, aliases, FAMILIES, namesOf(options));
+    if (healthKey(String(pins.constraintModel), models, aliases, FAMILIES, namesOf(options)) !== running) return true;
+    effort = effort || resolveListed(String(pins.constraintModel), models, aliases, FAMILIES, namesOf(options)).effort;
   }
   return Boolean(effort && effort !== sessionState.effort);
 }
@@ -934,7 +937,7 @@ export function evaluateProviderContinuation(facts = {}, sessionState = null, op
     };
   }
 
-  const currentModel = canonicalModel(sessionState.model, aliasesOf(options), modelsOf(options));
+  const currentModel = canonicalModel(sessionState.model, aliasesOf(options), modelsOf(options), FAMILIES, [], namesOf(options));
   const spec = specOf(currentModel, options);
 
   // 1. Check 24h session retention expiry
@@ -969,9 +972,9 @@ export function evaluateProviderContinuation(facts = {}, sessionState = null, op
       ? facts.candidateModels
       : [];
   if (candidateList.length > 0) {
-    const running = healthKey(sessionState.target || sessionState.model, options.models, options.aliases);
+    const running = healthKey(sessionState.target || sessionState.model, options.models, options.aliases, FAMILIES, namesOf(options));
     const candidateKeys = candidateList.map((m) =>
-      healthKey(typeof m === "string" ? m : m?.model || m?.id || "", options.models, options.aliases)
+      healthKey(typeof m === "string" ? m : m?.model || m?.id || "", options.models, options.aliases, FAMILIES, namesOf(options))
     );
     if (!candidateKeys.includes(running)) {
       return {
@@ -987,9 +990,9 @@ export function evaluateProviderContinuation(facts = {}, sessionState = null, op
 
   // 3. Check provider/model health
   const runningName = sessionState.target || sessionState.model;
-  const failedModel = healthKey(runningName, options.models, options.aliases);
+  const failedModel = healthKey(runningName, options.models, options.aliases, FAMILIES, namesOf(options));
   const unhealthySet = new Set(
-    (options.unhealthyModels || []).map((m) => healthKey(m, options.models, options.aliases))
+    (options.unhealthyModels || []).map((m) => healthKey(m, options.models, options.aliases, FAMILIES, namesOf(options)))
   );
   const storeHealthy =
     options.store && typeof options.store.isModelHealthy === "function"
