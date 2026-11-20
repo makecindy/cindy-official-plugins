@@ -742,7 +742,14 @@ async function tmuxSend(target, params) {
   // 缓冲区名是交给 tmux 服务的标识：用 crypto 生成，不用计数器/时间戳。
   const buffer = 'herdr-' + crypto.randomUUID();
   await runTmux(['load-buffer', '-b', buffer, '-'], undefined, text);
-  await tmuxWrite(['paste-buffer', '-d', '-t', dest, '-b', buffer], '文本');
+  try {
+    await tmuxWrite(['paste-buffer', '-d', '-t', dest, '-b', buffer], '文本');
+  } catch (error) {
+    // paste 失败（目标消失等）时 -d 不会执行：按名称尽力删掉，
+    // 否则这段文本会永久留在全局 tmux buffer 列表里。
+    try { await runTmux(['delete-buffer', '-b', buffer]); } catch (cleanupError) { void cleanupError; }
+    throw error;
+  }
   return { target: dest, mode: 'text', text: text };
 }
 

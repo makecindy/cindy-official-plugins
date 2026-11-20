@@ -350,19 +350,26 @@ function isOurAutomation(item, name, args) {
 
 // 「只由事件唤醒」的自动化载荷：cronExpr/timezone 是 schema 必填项，
 // manual=true 时它不会真的按时间跑，只是留着，用户以后想恢复定时触发不用重填。
-function schedulePayload(name, args) {
+// base = 被替换掉的旧任务：本次没显式给的字段沿用旧值，
+// 否则解绑替换会把自定义 prompt/agentKind/静默设置悄悄改回默认。
+function schedulePayload(name, args, base) {
+  const source = base || {};
+  const basePrompt = String(source.prompt || '')
+    .replace(/\n\n\[cindy-plugin:herdr\]\s*$/, '');
   return {
     name: name,
-    prompt: (args.prompt || AUTOMATION_PROMPT_DEFAULT) + '\n\n' + AUTOMATION_MARK,
-    cronExpr: '0 9 * * *',
-    timezone: args.timezone || 'Asia/Shanghai',
+    prompt: (args.prompt || basePrompt || AUTOMATION_PROMPT_DEFAULT) + '\n\n' + AUTOMATION_MARK,
+    cronExpr: source.cronExpr || '0 9 * * *',
+    timezone: args.timezone || source.timezone || 'Asia/Shanghai',
     recurring: true,
     manual: true,
-    agentKind: args.agentKind || 'codex',
+    agentKind: args.agentKind || source.agentKind || 'codex',
     targetSessionId: args.targetSessionId || undefined,
-    // 工具契约写的是「默认静默」：省略时按 true，只有显式要求提醒才关掉。
-    silentWhenIdle: args.silentWhenIdle !== false,
-    notify: { desktop: true, feishu: false }
+    // 工具契约写的是「默认静默」：本次没给就沿用旧值，旧值也没有才按 true。
+    silentWhenIdle: args.silentWhenIdle !== undefined
+      ? args.silentWhenIdle !== false
+      : source.silentWhenIdle !== false,
+    notify: source.notify || { desktop: true, feishu: false }
   };
 }
 
@@ -476,9 +483,13 @@ async function replaceUnboundSchedule(storedId, oldItem, name, args) {
       await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_delete', { id: storedId }));
     } catch (error) {
       // 新任务已经是事件桥当前配置了：不能因为旧任务清理失败就整体报失败。
-      note = '新自动化已生效（id=' + scheduleId + '），但旧的那条没能删除（'
-        + String(error && error.message ? error.message : error)
-        + '）。请到自动化列表手动删除它，避免重复触发。';
+      // 但要区分「确定没删掉」和「回执丢了、可能已删」。
+      const detail = String(error && error.message ? error.message : error);
+      note = /HERDR_OUTCOME_UNKNOWN/.test(detail)
+        ? '新自动化已生效（id=' + scheduleId + '），但旧任务的删除结果未知（' + detail
+          + '）。请先到自动化列表核对它是否还在，必要时手动删除。'
+        : '新自动化已生效（id=' + scheduleId + '），但旧的那条没能删除（' + detail
+          + '）。请到自动化列表手动删除它，避免重复触发。';
     }
   }
   return { schedule_id: scheduleId, note: note };

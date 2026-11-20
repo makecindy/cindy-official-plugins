@@ -277,8 +277,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   // 新建自动化的 silentWhenIdle 要跟工具契约一致（默认静默）。
   assert.match(
     mainSource,
-    /silentWhenIdle: args\.silentWhenIdle !== false/,
-    'silentWhenIdle must default to true'
+    /silentWhenIdle: args\.silentWhenIdle !== undefined\s*\n\s*\? args\.silentWhenIdle !== false\s*\n\s*: source\.silentWhenIdle !== false/,
+    'silentWhenIdle must default to true and keep the old value when unspecified'
   );
 
   // setup 要把订阅偏好改回「订阅」，否则重启后按旧退订值停摆。
@@ -486,6 +486,19 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(workerSrc8, /'herdr-' \+ crypto\.randomUUID\(\)/,
     'the tmux buffer name must come from crypto');
   assert.ok(!/pasteCounter/.test(workerSrc8), 'no counter-based buffer names');
+
+  // 解绑替换的载荷要真正沿用旧任务配置。
+  assert.match(mainSource, /function schedulePayload\(name, args, base\)/,
+    'schedulePayload must accept the old schedule as a base');
+  assert.match(mainSource, /const basePrompt = String\(source\.prompt \|\| ''\)/,
+    'the replacement prompt must come from the old schedule');
+  assert.match(mainSource, /新自动化已生效（id=' \+ scheduleId \+ '），但旧任务的删除结果未知/,
+    'an unknown delete outcome must be reported as unknown');
+
+  // paste 失败要删掉残留 buffer。
+  const workerSrc9 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSrc9, /'delete-buffer', '-b', buffer/,
+    'a failed paste must clean up the buffer');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
@@ -786,4 +799,51 @@ test('tmux key names are validated against the keys tmux recognises', async () =
     worker.kill();
     await fsPromises.rm(dir, { recursive: true, force: true });
   }
+});
+
+
+test('a replacement payload keeps the fields the caller did not specify', async () => {
+  const mainSource = readFileSync(path.join(root, 'herdr', 'main.js'), 'utf8');
+  const sandbox = {
+    console,
+    BroadcastChannel: class { addEventListener() {} removeEventListener() {} postMessage() {} },
+    fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
+    setTimeout: () => 0,
+    clearTimeout() {},
+    setInterval: () => 0,
+    clearInterval() {},
+    Date, Math, JSON, Object, Array, String, Number, Boolean, Error, Promise, RegExp, Intl,
+    cindy: {
+      request: () => Promise.resolve({ context: { locale: 'zh-CN' } }),
+      send: () => Promise.resolve(),
+      onHostMessage: () => {},
+      node: { request: () => Promise.resolve({ ok: true, result: {} }) },
+      host: { call: () => Promise.resolve({ isError: false, content: [{ type: 'text', text: '{"ok":true,"data":{}}' }] }) }
+    }
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(mainSource, sandbox, { filename: 'main.js' });
+
+  const oldItem = {
+    name: 'Herdr 事件处理',
+    prompt: '我的自定义提示\n\n[cindy-plugin:herdr]',
+    agentKind: 'claude-code',
+    silentWhenIdle: false,
+    timezone: 'UTC',
+    cronExpr: '0 7 * * *',
+    notify: { desktop: false, feishu: true }
+  };
+  const payload = sandbox.schedulePayload('Herdr 事件处理', {}, oldItem);
+  assert.match(payload.prompt, /^我的自定义提示/,
+    'the custom prompt must be carried over');
+  assert.equal(payload.prompt.split('[cindy-plugin:herdr]').length, 2,
+    'the marker must appear exactly once');
+  assert.equal(payload.agentKind, 'claude-code', 'agent kind must be carried over');
+  assert.equal(payload.silentWhenIdle, false, 'silence must be carried over');
+  assert.equal(payload.timezone, 'UTC', 'timezone must be carried over');
+  assert.equal(payload.cronExpr, '0 7 * * *', 'cron expression must be carried over');
+  assert.equal(payload.targetSessionId, undefined, 'the replacement must stay unbound');
 });
