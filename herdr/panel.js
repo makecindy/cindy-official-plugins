@@ -381,9 +381,11 @@ async function forwardKey(event) {
   const key = specialKey(event);
   if (!key) return false;
   event.preventDefault();
-  // 任何直达按键都可能改变终端里的草稿（Ctrl+C 取消等）：
-  // 「只欠回车」的恢复记录立刻失效，否则会吞掉之后输入的同一条命令。
-  pendingEnterOnly = null;
+  // 会改动终端里那行内容的按键（取消 C-c、历史 Up/Down、补全 Tab、
+  // 删除 C-u/C-w/C-k/C-d、Esc、M-* 宏等）让恢复记录失效；
+  // 但清屏 C-l、移动光标 C-a/C-e、翻滚动条 PPage/NPage 不改内容，
+  // 这些键若清掉记录，恢复时会把同一文本再粘一遍。
+  if (!PENDING_ENTER_KEEP_KEYS[key]) pendingEnterOnly = null;
   try {
     if (view === 'tmux') {
       if (!selectedTarget) return true;
@@ -404,6 +406,8 @@ async function forwardKey(event) {
 // 需要再补一个 Enter。
 // 文本已粘进 pane、Enter 未确认时记在这里：{target, text}。
 let pendingEnterOnly = null;
+// 不改变终端行内容的直达按键：这些键之后恢复记录仍然有效。
+const PENDING_ENTER_KEEP_KEYS = { 'C-l': true, 'C-a': true, 'C-e': true, PPage: true, NPage: true };
 async function submitLine() {
   const field = $('#term-input');
   const text = field.value;

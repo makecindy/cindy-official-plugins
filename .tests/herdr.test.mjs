@@ -536,8 +536,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a failed Enter after a pasted text must restore the draft without asserting the outcome');
   assert.match(panelSrcAtomic, /pendingEnterOnly/,
     'a resumed submit must only send Enter, not paste the text again');
-  assert.match(panelSrcAtomic, /forwardKey[\s\S]{0,200}?pendingEnterOnly = null/,
-    'a forwarded key must invalidate the pending-enter record');
+  assert.match(panelSrcAtomic, /PENDING_ENTER_KEEP_KEYS/,
+    'line-preserving keys must keep the pending-enter record');
+  assert.match(panelSrcAtomic, /if \(!PENDING_ENTER_KEEP_KEYS\[key\]\) pendingEnterOnly = null;/,
+    'line-altering keys must invalidate the pending-enter record');
   assert.match(panelSrcAtomic, /closeDetail[\s\S]{0,200}?pendingEnterOnly = null/,
     'closing the detail must invalidate the pending-enter record');
 
