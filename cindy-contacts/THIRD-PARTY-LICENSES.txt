@@ -7,6 +7,7 @@ belong to their owners.
 
 Summary
 -------
+ - pinyin-pro@3.29.5 — MIT (offline name transliteration)
  - GitHub mark (mark-github-16) from @primer/octicons@19.42.0 — MIT
  - WeChat, Telegram, X, WhatsApp, Discord, Facebook, Sina Weibo, QQ and LINE icons from simple-icons@16.36.0 — CC0-1.0
 
@@ -71,3 +72,31 @@ For these and/or other purposes and motivations, and without any expectation of 
     4. Affirmer understands and acknowledges that Creative Commons is not a party to this document and has no duty or obligation with respect to this CC0 or use of the Work.
 
 For more information, please see <https://creativecommons.org/publicdomain/zero/1.0>.
+
+--------------------------------------------------------------------------------
+pinyin-pro@3.29.5 — MIT
+--------------------------------------------------------------------------------
+Source: https://github.com/zh-lx/pinyin-pro/tree/3.29.5
+Bundled file: dist/index.js from https://registry.npmjs.org/pinyin-pro/-/pinyin-pro-3.29.5.tgz
+
+MIT License
+
+Copyright (c) 2022-present zh-lx
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -416,6 +416,17 @@
   }
   const formalName = (c) => (callName(c) === c.name ? '' : c.name);
 
+  // 列表刷新会换一批联系人对象，旧姓名和别名的拼音也随之失效。
+  const pinyinNames = new WeakMap();
+  function matchesNamePinyin(c, query) {
+    if (!pinyinNames.has(c)) {
+      const names = [c.name, ...c.aliases].filter((name) => /\p{Script=Han}/u.test(name));
+      const options = { toneType: 'none', separator: '', v: true, surname: c.kind === 'org' ? 'off' : 'head' };
+      pinyinNames.set(c, names.map((name) => pinyinPro.pinyin(name, options).toLowerCase()));
+    }
+    return pinyinNames.get(c).some((name) => name.includes(query));
+  }
+
   function scoped() {
     let rows = S.contacts;
     if (S.scope === 'recent') rows = rows.filter((c) => daysSince(c.last) <= 30);
@@ -427,7 +438,13 @@
     else if (S.scope === 'customers' || S.scope === 'community') rows = rows.filter((c) => c.circle === S.scope);
     else if (S.scope.startsWith('g:')) rows = rows.filter((c) => c.groups.includes(S.scope.slice(2)));
     const q = S.query.trim().toLowerCase();
-    if (q) rows = rows.filter((c) => [c.name, c.summary, c.latest, ...c.aliases, ...c.groups].some((v) => String(v || '').toLowerCase().includes(q)));
+    if (q) {
+      const spelling = q.replace(/[üǖǘǚǜ]/g, 'v').normalize('NFD').replace(/[\u0300-\u036f\s'’]/g, '');
+      const isPinyin = /^[a-z]+$/.test(spelling);
+      rows = rows.filter((c) =>
+        [c.name, c.summary, c.latest, ...c.aliases, ...c.groups].some((v) => String(v || '').toLowerCase().includes(q)) ||
+        (isPinyin && matchesNamePinyin(c, spelling)));
+    }
     return rows;
   }
   const byLast = (a, b) => String(b.last || '').localeCompare(String(a.last || '')) || collator.compare(a.name, b.name);
@@ -466,6 +483,12 @@
 
   const listpane = $('#listpane');
   const detailEl = $('#detail');
+  // Keep the native search field mounted, including during background list refreshes.
+  listpane.innerHTML = `<div class="lhead">
+    <button class="scope" id="scopeBtn" aria-haspopup="menu"></button><div class="lsub"></div>
+    <label class="find">${I('search')}<input id="findInput" type="search" autocomplete="off" spellcheck="false"><button type="button" class="clear" id="clearFind" aria-label="clear" hidden>${I('x', 's')}</button></label></div>
+    <div class="lscroll" id="lscroll"></div><button class="lfoot" data-action="auto" hidden></button>`;
+  const findInput = $('#findInput');
 
   function rowHtml(c) {
     const turn = S.scope === 'turn' && c.mineText;
@@ -483,7 +506,6 @@
   }
 
   function renderList() {
-    const { grid, secs, folds } = sections();
     const richCount = S.contacts.filter((c) => c.rich).length;
     const freshCount = S.contacts.filter((c) => c.rich && changedSinceView(c)).length;
     const turnCount = S.contacts.filter(yourTurn).length;
@@ -492,12 +514,17 @@
       const f = (key, label) => `<button data-filter-scope="${key}" aria-pressed="${S.scope === key}">${esc(label)}</button>`;
       sub = [freshCount ? f('fresh', T.freshN(freshCount)) : '', turnCount ? f('turn', T.turnN(turnCount)) : ''].filter(Boolean).join('<span class="sep">·</span>');
     } else sub = esc(T.subCount(richCount));
-    let h = `<div class="lhead">
-      <button class="scope" id="scopeBtn" aria-haspopup="menu">${esc(scopeTitle())}${I('down')}</button>
-      <div class="lsub">${sub}</div>
-      <label class="find">${I('search')}<input id="findInput" type="search" value="${esc(S.query)}" placeholder="${esc(T.search)}" autocomplete="off" spellcheck="false">${S.query ? `<button class="clear" id="clearFind" aria-label="clear">${I('x', 's')}</button>` : ''}</label></div>`;
-    h += '<div class="lscroll" id="lscroll">';
-    if (!S.query) h += legacyNotice();
+    $('#scopeBtn').innerHTML = esc(scopeTitle()) + I('down');
+    $('.lsub', listpane).innerHTML = sub;
+    findInput.placeholder = T.search;
+    renderListResults();
+    renderListFooter();
+  }
+
+  function renderListResults() {
+    $('#clearFind').hidden = !S.query;
+    const { grid, secs, folds } = sections();
+    let h = S.query ? '' : legacyNotice();
     const any = grid.length || secs.some((s) => s.items.length) || folds.length;
     if (!any) h += `<div class="lempty">${esc(S.query ? T.noMatch : T.emptyScope)}</div>`;
     if (grid.length) h += `<div class="lsec"><span>${esc(T.secClose)}</span><span class="n">${grid.length}</span></div><div class="chips">${grid.map(chipHtml).join('')}</div>`;
@@ -514,17 +541,7 @@
       if (open) h += `<div class="folded">${f.items.map(rowHtml).join('')}</div>`;
     }
     if (folds.length) h += '</div>';
-    h += '</div>' + listFooter();
-    const keepScroll = $('#lscroll')?.scrollTop || 0;
-    const hadFocus = document.activeElement?.id === 'findInput';
-    const caret = hadFocus ? document.activeElement.selectionStart : null;
-    listpane.innerHTML = h;
-    $('#lscroll').scrollTop = keepScroll;
-    if (hadFocus) {
-      const inp = $('#findInput');
-      inp.focus();
-      if (caret !== null) inp.setSelectionRange(caret, caret);
-    }
+    $('#lscroll').innerHTML = h;
   }
 
   const tidyRunning = () => [...S.tasks.values()].some((t) => t.key === 'maintain' && t.status === 'running');
@@ -577,8 +594,10 @@
     return h;
   }
 
-  function listFooter() {
-    if (S.boot !== 'ready' || !S.meta) return '';
+  function renderListFooter() {
+    const footer = $('.lfoot', listpane);
+    footer.hidden = S.boot !== 'ready' || !S.meta;
+    if (footer.hidden) return;
     const m = S.meta.maintenance;
     let text;
     const lt = S.meta.lastTidy;
@@ -587,7 +606,7 @@
     else if (tidyStale()) text = `<span class="warnline">${esc(T.footStale)}</span>`;
     else if (m && m.lastRunAt) text = `<span>${esc(T.footLast(fmtWhen(m.lastRunAt)))}</span>`;
     else text = `<span>${esc(T.footNever)}</span>`;
-    return `<button class="lfoot" data-action="auto">${I('spark', 's')}${text}<b>${esc(T.footSettings)}</b></button>`;
+    footer.innerHTML = `${I('spark', 's')}${text}<b>${esc(T.footSettings)}</b>`;
   }
 
   /* ───────── 详情：概览 / 往来 / 资料 ───────── */
@@ -1380,9 +1399,8 @@
       return renderDetail();
     }
     if (c('#clearFind')) {
-      S.query = '';
-      renderList();
-      return $('#findInput').focus();
+      setSearch('');
+      return findInput.focus();
     }
     if ((x = c('.row[data-id], .chip[data-id]'))) return select(x.dataset.id);
     if ((x = c('[data-fold]'))) {
@@ -1400,7 +1418,7 @@
       const id = x.dataset.goto;
       if (!id) return;
       S.scope = 'all';
-      S.query = '';
+      setSearch('');
       // 目标在折叠段里时展开那一段，名单上能看到选中的人
       const fold = sections().folds.find((f) => f.items.some((r) => r.id === id));
       if (fold) S.folds.add(fold.key);
@@ -1608,15 +1626,22 @@
     }
   });
 
-  document.addEventListener('input', (e) => {
-    if (e.target.id === 'findInput') {
-      S.query = e.target.value;
-      renderList();
-    }
+  function setSearch(value) {
+    if (findInput.value !== value) findInput.value = value;
+    if (S.query === value) return;
+    S.query = value;
+    renderListResults();
+  }
+
+  // 取消选词时宿主可能不转发 compositionend；下一次普通输入仍要即时生效。
+  findInput.addEventListener('compositionend', () => setSearch(findInput.value));
+  findInput.addEventListener('input', (e) => {
+    if (!e.isComposing) setSearch(findInput.value);
   });
 
   document.addEventListener('keydown', async (e) => {
     const t = e.target;
+    if (t === findInput && (e.isComposing || e.keyCode === 229)) return;
     if (t.id === 'newGroupInput' && e.key === 'Enter') {
       const name = t.value.trim();
       if (!name) return;
@@ -1630,8 +1655,7 @@
         return render();
       }
       if (t.id === 'findInput' && S.query) {
-        S.query = '';
-        return renderList();
+        return setSearch('');
       }
     }
     const typing = /INPUT|TEXTAREA|SELECT/.test(t.tagName);
