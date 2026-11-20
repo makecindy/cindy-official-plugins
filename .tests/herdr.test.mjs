@@ -536,6 +536,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a failed Enter after a pasted text must restore the draft without asserting the outcome');
   assert.match(panelSrcAtomic, /pendingEnterOnly/,
     'a resumed submit must only send Enter, not paste the text again');
+  assert.match(panelSrcAtomic, /forwardKey[\s\S]{0,200}?pendingEnterOnly = null/,
+    'a forwarded key must invalidate the pending-enter record');
+  assert.match(panelSrcAtomic, /closeDetail[\s\S]{0,200}?pendingEnterOnly = null/,
+    'closing the detail must invalidate the pending-enter record');
 
   // herdr_wait 输出分支也要排除 until。
   const waitTool3 = manifest.tools.find((tool) => tool.name === 'herdr_wait');

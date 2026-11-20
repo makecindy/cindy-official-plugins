@@ -381,6 +381,9 @@ async function forwardKey(event) {
   const key = specialKey(event);
   if (!key) return false;
   event.preventDefault();
+  // 任何直达按键都可能改变终端里的草稿（Ctrl+C 取消等）：
+  // 「只欠回车」的恢复记录立刻失效，否则会吞掉之后输入的同一条命令。
+  pendingEnterOnly = null;
   try {
     if (view === 'tmux') {
       if (!selectedTarget) return true;
@@ -537,7 +540,7 @@ async function openPane(pane) {
   // 换目标就丢掉草稿：A 里没发出去的命令不能在回车时打到 B 上。
   const changed = !selectedPane || selectedPane.pane_id !== pane.pane_id;
   selectedPane = pane;
-  if (changed) $('#term-input').value = '';
+  if (changed) { $('#term-input').value = ''; pendingEnterOnly = null; }
   readToken += 1;
   const token = readToken;
   renderHerdr();
@@ -663,7 +666,7 @@ async function openTmuxPane(pane) {
   // 换目标就丢掉草稿：A 里没发出去的命令不能在回车时打到 B 上。
   const changed = selectedTarget !== pane.target;
   selectedTarget = pane.target;
-  if (changed) $('#term-input').value = '';
+  if (changed) { $('#term-input').value = ''; pendingEnterOnly = null; }
   readToken += 1;
   const token = readToken;
   renderTmux();
@@ -795,6 +798,7 @@ function closeDetail() {
   $('#detail').hidden = true;
   selectedPane = null;
   selectedTarget = null;
+  pendingEnterOnly = null;
   readToken += 1;
   if (view === 'tmux') renderTmux();
   else renderHerdr();
