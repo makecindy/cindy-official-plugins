@@ -8,7 +8,7 @@ import path from 'node:path';
 import {selectBestRoute} from './allocator.mjs';
 import {ACCESS_LEVELS, HOURS_RANGE, PROFILE_INTEGERS, REQUIRED_BOOL_FLAGS, SECONDARY_KINDS, TASK_COUNTS, WORK_KINDS,
   TASK_PROFILE_SCHEMA as ENGINE_PROFILE_SCHEMA, validateProfile} from './profiler.mjs';
-import {ROUTES} from './catalog.mjs';
+import {ROUTES, pinGiven} from './catalog.mjs';
 import {taskKind} from './task-intake.mjs';
 import {GATEWAY_ACCOUNT} from './fleet.mjs';
 
@@ -596,9 +596,10 @@ export function routeTask(task, catalog, {
   const explicitProfile = callerProfile ?? (task && typeof task === 'object' ? task.profile : null);
 
   // A model or effort the caller named: the engine holds every task to it, and dispatches it even when its data has a gap.
-  const pinModel = constraintModel || pinnedModel || null;
+  // Only an absent value, null or "" is no pin: any other value (0, false, a blank) is a pin the engine checks and refuses.
+  const pinModel = pinGiven(constraintModel) ? constraintModel : pinGiven(pinnedModel) ? pinnedModel : null;
   const pinEffort = constraintEffort ? String(constraintEffort).trim().toLowerCase() : null;
-  const pinned = pinModel || pinEffort ? {model: pinModel, effort: pinEffort} : null;
+  const pinned = pinModel !== null || pinEffort ? {model: pinModel, effort: pinEffort} : null;
   const pinnedInfo = pinned ? {pinned} : {};
   // The efforts a catalog row lists. A row that lists none is one configuration: Cindy accepts a task on it only with effort ""
   // (`appDefaultModelControl.ts`), so the engine scores it once, at `default` (read as the data reads `default`), and it is launched

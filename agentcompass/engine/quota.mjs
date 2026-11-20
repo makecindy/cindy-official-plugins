@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/quota.js at 2edab79daf338d9f18fcb19099a2ab56e164f8de (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/quota.js at 7549882db0fb239ba346b5561ecdc5cbcad255ff (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Quota accounts of the gateway: Magpie's quota snapshot normalized into one record per account (its windows, plan, state and
@@ -1233,6 +1233,28 @@ export function shouldSkipQuotaAccount(acct, ctx, quotaAccounts) {
   if (quotaAccounts.some((a) => a.key === "pool/quotas" && a.dispatchable === false)) {
     return true;
   }
+  const { acctProv, exactMatches } = matchQuotaAccount(acct, ctx, quotaAccounts);
+  if (exactMatches.length > 0) {
+    if (exactMatches.some((a) => a.dispatchable === false)) {
+      return true;
+    }
+  } else if (acctProv) {
+    const provMatches = quotaAccounts.filter(
+      (a) => a.key !== "pool/quotas" && providersMatch(acctProv, a.provider)
+    );
+    if (provMatches.length > 0 && provMatches.every((a) => a.dispatchable === false)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** The snapshot's accounts a Magpie account (`onAccount`'s, or `ctx`'s) is: by its full key, else by its name on its provider. */
+export function quotaAccountsMatching(acct, ctx, quotaAccounts) {
+  return Array.isArray(quotaAccounts) ? matchQuotaAccount(acct, ctx, quotaAccounts).exactMatches : [];
+}
+
+function matchQuotaAccount(acct, ctx, quotaAccounts) {
   const rawProv =
     acct.provider ||
     ctx?.provider?.id ||
@@ -1269,17 +1291,5 @@ export function shouldSkipQuotaAccount(acct, ctx, quotaAccounts) {
     if (!provOk) return false;
     return bareNames.has(a.account) || bareNames.has(a.key);
   });
-  if (exactMatches.length > 0) {
-    if (exactMatches.some((a) => a.dispatchable === false)) {
-      return true;
-    }
-  } else if (acctProv) {
-    const provMatches = quotaAccounts.filter(
-      (a) => a.key !== "pool/quotas" && providersMatch(acctProv, a.provider)
-    );
-    if (provMatches.length > 0 && provMatches.every((a) => a.dispatchable === false)) {
-      return true;
-    }
-  }
-  return false;
+  return { acctProv, exactMatches };
 }

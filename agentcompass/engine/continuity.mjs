@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/continuity.js at 2edab79daf338d9f18fcb19099a2ab56e164f8de (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/continuity.js at 7549882db0fb239ba346b5561ecdc5cbcad255ff (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Session Affinity, Turn-Loop Lock, Cache-Temperature Hold & Monotonic Effort Ratchet.
@@ -20,8 +20,8 @@ import {
   canonicalModel,
   healthKey,
   modelSpec,
+  pinGiven,
   providerNamesOf,
-  resolveListed,
 } from "./catalog.mjs";
 import { defaultScoredModels } from "./axis-scores.mjs";
 import { dispatchAllowedEfforts } from "./candidate-eval.mjs";
@@ -898,21 +898,14 @@ export function keepsEffort(
  *   - `"off"`: `affinityMode === "off"`
  */
 /**
- * Whether the user now names something other than what the session runs (contract R3). A hold would hide that.
+ * Whether the request's pins end the session's hold (contract R3): a request that names a model, a bundle or an effort keeps the
+ * hold only when `options.pinKeepsHold(sessionState)` says the held bundle is among those it names in the current pool
+ * (`allocator.js` `pinKeepsHold`); without that judge every pin routes again, so a pin is never held past.
  */
 function pinOverridesSession(sessionState, pins, options) {
-  if (!pins) return false;
-  if (pins.pinnedBundle && pins.pinnedBundle !== sessionState.pinnedBundle) return true;
-  let effort = pins.constraintEffort ? String(pins.constraintEffort).trim().toLowerCase() : null;
-  if (pins.constraintModel) {
-    const models = modelsOf(options);
-    const aliases = aliasesOf(options);
-    // Each row is its own model (contract R1): a session on a family row is not on the flagship it folds to, nor the other way round.
-    const running = healthKey(sessionState.target || sessionState.model, models, aliases, FAMILIES, namesOf(options));
-    if (healthKey(String(pins.constraintModel), models, aliases, FAMILIES, namesOf(options)) !== running) return true;
-    effort = effort || resolveListed(String(pins.constraintModel), models, aliases, FAMILIES, namesOf(options)).effort;
-  }
-  return Boolean(effort && effort !== sessionState.effort);
+  if (!pins || ![pins.constraintModel, pins.pinnedBundle, pins.constraintEffort].some(pinGiven)) return false;
+  if (typeof options.pinKeepsHold !== "function") return true;
+  return !options.pinKeepsHold(sessionState);
 }
 
 export function evaluateProviderContinuation(facts = {}, sessionState = null, options = {}) {

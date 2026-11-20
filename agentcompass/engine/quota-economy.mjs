@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/quota-economy.js at 2edab79daf338d9f18fcb19099a2ab56e164f8de (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/quota-economy.js at 7549882db0fb239ba346b5561ecdc5cbcad255ff (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Quota economy and pricing (`quota_economy.py`, quota economy v3.1): usd rates, the quota price of a window and the

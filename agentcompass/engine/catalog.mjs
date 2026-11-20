@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/catalog.js at 2edab79daf338d9f18fcb19099a2ab56e164f8de (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/catalog.js at 7549882db0fb239ba346b5561ecdc5cbcad255ff (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * AgentCompass catalogue: model rows, aliases, family patterns, launch efforts, route scopes, plan windows, the scoring
@@ -1158,7 +1158,8 @@ export const PLAN_TEMPLATES = {
 
 /** A `:effort` suffix names an effort, not a vendor tag: `claude-opus-5-5:medium` asks for Medium. */
 export const EFFORT_SUFFIXES = ["none", "minimal", "default", "low", "medium", "high", "xhigh", "max", "ultra"];
-const COLON_EFFORT_RE = new RegExp(`^(.+):(${EFFORT_SUFFIXES.join("|")})$`, "i");
+// `[^\n]` is Python's `.`: it matches `\r`, `\u2028` and `\u2029`, which JavaScript's `.` does not.
+const COLON_EFFORT_RE = new RegExp(`^([^\n]+):(${EFFORT_SUFFIXES.join("|")})$`, "i");
 const DASH_EFFORT_RE = new RegExp(`^(.+)-(${EFFORT_SUFFIXES.join("|")})$`);
 const VENDOR_TAG_RE = /(?:@\d{8}|-\d{8}|-\d{4}-\d{2}-\d{2}|:\w+|\[\w+\]|-(?:latest|preview))$/;
 /**
@@ -1172,9 +1173,18 @@ export const DIRECT_SOURCES = ["exact", "alias", "provider", "default"];
  */
 export const PROVIDER_NAME_STATUSES = ["retired", "other_weights"];
 
-/** `("claude-opus-5-5", "medium")` for `claude-opus-5-5:medium`; `(raw, null)` without an effort suffix. */
+/**
+ * The characters Python's `str.strip()` removes (`str.isspace()`), which AgentCompass strips a name with: `String.prototype.trim`
+ * differs (it keeps ``..`` and `` and removes `﻿`).
+ */
+const PY_SPACE = "\t\n\v\f\r\x1c-\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000";
+const PY_STRIP_RE = new RegExp(`^[${PY_SPACE}]+|[${PY_SPACE}]+$`, "g");
+/** `text` stripped as Python's `str.strip()` strips it. */
+export const pyStrip = (text) => String(text).replace(PY_STRIP_RE, "");
+
+/** `("claude-opus-5-5", "medium")` for `claude-opus-5-5:medium`; `(raw, null)` without an effort suffix (`split_model_effort`). */
 export function splitEffortSuffix(rawModel) {
-  const name = String(rawModel ?? "").trim();
+  const name = pyStrip(rawModel ?? "");
   const match = COLON_EFFORT_RE.exec(name);
   return match ? { name: match[1], effort: match[2].toLowerCase() } : { name, effort: null };
 }
@@ -1189,13 +1199,64 @@ export class InvalidModelPin extends Error {
 }
 
 /**
- * Why a model pin is malformed, else `null` (`model_resolution.model_pin_problem`): not a non-blank string, an `auto:` id without
- * its account and harness, or an empty part around a `/` or a `:` (`/gpt-5.5`, `openai/`, `a//b`, a bare `:high`). Never throws.
+ * Whether a pin field holds a value (`task_intake.named_pin`): absent is `undefined`, `null` or `""` only. Any other value is given,
+ * so `0`, `false`, `NaN` or a blank string is a pin, refused as malformed (`modelPinProblem`), never read as no pin.
+ */
+export const pinGiven = (value) => value !== undefined && value !== null && value !== "";
+
+// What Python's `str.isprintable()` refuses: other (control, format, surrogate, private, unassigned), line and paragraph separators,
+// and every space but the space itself.
+const PY_UNPRINTABLE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\p{Zl}\p{Zp}\p{Zs}]/u;
+const hex = (code, width) => code.toString(16).padStart(width, "0");
+
+/** `text` as Python's `repr()` writes a string, so a message quotes the caller's text as the engine quotes it. */
+export function pyRepr(text) {
+  const quote = text.includes("'") && !text.includes('"') ? '"' : "'";
+  let out = quote;
+  for (const ch of text) {
+    const code = ch.codePointAt(0);
+    if (ch === quote || ch === "\\") out += `\\${ch}`;
+    else if (ch === "\t") out += "\\t";
+    else if (ch === "\n") out += "\\n";
+    else if (ch === "\r") out += "\\r";
+    else if (code < 0x20 || code === 0x7f) out += `\\x${hex(code, 2)}`;
+    else if (code < 0x7f || (ch !== " " && !PY_UNPRINTABLE.test(ch))) out += ch;
+    else if (code <= 0xff) out += `\\x${hex(code, 2)}`;
+    else if (code <= 0xffff) out += `\\u${hex(code, 4)}`;
+    else out += `\\U${hex(code, 8)}`;
+  }
+  return out + quote;
+}
+
+/**
+ * A value as the engine's message shows it (`{raw!r}`): a string, a boolean, `null` and a number of a JSON request as Python's
+ * `repr()` of the value Python decodes; anything else without throwing (a bigint, a circular or prototype-less object).
+ */
+function shownValue(raw) {
+  if (raw === undefined || raw === null) return "None";
+  if (typeof raw === "string") return pyRepr(raw);
+  if (typeof raw === "boolean") return raw ? "True" : "False";
+  if (typeof raw === "bigint") return `${raw}`;
+  if (typeof raw === "number") return Number.isNaN(raw) ? "nan" : Number.isFinite(raw) ? `${raw}` : raw > 0 ? "inf" : "-inf";
+  if (Array.isArray(raw) && raw.length === 0) return "[]";
+  try {
+    if (Object.getPrototypeOf(raw) === Object.prototype && Object.keys(raw).length === 0) return "{}";
+    const text = JSON.stringify(raw);
+    if (typeof text === "string") return text;
+  } catch {
+    // shown by its type below
+  }
+  return Object.prototype.toString.call(raw);
+}
+
+/**
+ * Why a model pin is malformed, else `null` (`model_resolution.model_pin_problem`): not a string, a string Python's `strip()` leaves
+ * empty, an `auto:` id without its account and harness, or an empty part around a `/` or a `:` (`/gpt-5.5`, `openai/`, `a//b`, a
+ * bare `:high`). Never throws, whatever the value.
  */
 export function modelPinProblem(raw, field = "model") {
-  const shown = JSON.stringify(raw === undefined ? null : raw);
-  if (typeof raw !== "string" || !raw.trim()) return `invalid_model_pin: ${field} ${shown} must be a non-empty model name.`;
-  const text = raw.trim();
+  if (typeof raw !== "string" || !pyStrip(raw)) return `invalid_model_pin: ${field} ${shownValue(raw)} must be a non-empty model name.`;
+  const text = pyStrip(raw);
   let spelled;
   if (text.startsWith("auto:")) {
     const afterPrefix = text.slice(5);
@@ -1205,24 +1266,24 @@ export function modelPinProblem(raw, field = "model") {
     const at2 = afterAccount.indexOf(":");
     const harness = at2 < 0 ? "" : afterAccount.slice(0, at2);
     const rest = at2 < 0 ? "" : afterAccount.slice(at2 + 1);
-    if (at1 < 0 || at2 < 0 || !account.trim() || !harness.trim() || account.includes("/") || harness.includes("/")) {
-      return `invalid_model_pin: ${field} ${shown} is a malformed auto bundle id; expected 'auto:<account>:<harness>:<model>'.`;
+    if (at1 < 0 || at2 < 0 || !pyStrip(account) || !pyStrip(harness) || account.includes("/") || harness.includes("/")) {
+      return `invalid_model_pin: ${field} ${shownValue(raw)} is a malformed auto bundle id; expected 'auto:<account>:<harness>:<model>'.`;
     }
     spelled = splitEffortSuffix(rest.split("#")[0].split("@")[0]).name;
   } else {
     spelled = splitEffortSuffix(text).name;
   }
-  if (!spelled || spelled.split("/").some((seg) => !seg.trim() || seg.split(":").some((c) => !c.trim()))) {
-    return `invalid_model_pin: ${field} ${shown} is malformed (empty prefix or model segment around '/'); write a bare model name (<model>) or <provider>/<model>.`;
+  if (!spelled || spelled.split("/").some((seg) => !pyStrip(seg) || seg.split(":").some((c) => !pyStrip(c)))) {
+    return `invalid_model_pin: ${field} ${shownValue(raw)} is malformed (empty prefix or model segment around '/'); write a bare model name (<model>) or <provider>/<model>.`;
   }
   return null;
 }
 
-/** `raw` trimmed when it is a well-formed model pin, else throws `InvalidModelPin` (`model_resolution.check_model_pin`). */
+/** `raw` stripped when it is a well-formed model pin, else throws `InvalidModelPin` (`model_resolution.check_model_pin`). */
 export function checkModelPin(raw, field = "model") {
   const problem = modelPinProblem(raw, field);
   if (problem !== null) throw new InvalidModelPin(problem);
-  return raw.trim();
+  return pyStrip(raw);
 }
 
 const isRow = (value) => value && typeof value === "object" && !Array.isArray(value);

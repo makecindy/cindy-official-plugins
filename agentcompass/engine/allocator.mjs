@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/allocator.js at 2edab79daf338d9f18fcb19099a2ab56e164f8de (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/allocator.js at 7549882db0fb239ba346b5561ecdc5cbcad255ff (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * AgentCompass allocator for the Magpie gateway: the port of `allocator.py` (`plan`) onto a gateway's inputs.
@@ -33,6 +33,9 @@ import {
   providerNamesOf,
   resolveModel,
   safeName,
+  modelPinProblem,
+  pinGiven,
+  pyStrip,
   splitEffortSuffix,
 } from "./catalog.mjs";
 import { WORK_KINDS, unroutedDecision } from "./profiler.mjs";
@@ -49,7 +52,8 @@ import {
   canonicalOf,
   dispatchAllowedEfforts,
   pinMatchingBundles,
-  pinNamesBundle,
+  pinMatchesIdentity,
+  pinReading,
   whenFailure,
 } from "./candidate-eval.mjs";
 import { GATEWAY_ACCOUNT, attachDisabledEfforts, buildFleet, effortRows, entryModel, expandBundles } from "./fleet.mjs";
@@ -102,9 +106,12 @@ function splitPinModelAndEffort(normConstraint) {
   return { modelPart: normConstraint, effortPart: KNOWN_EFFORT_SUFFIXES.includes(effort) ? effort : null };
 }
 
+/** The first pin value given (`pinGiven`: `0`, `false` or a blank string is given, and refused as malformed), else `undefined`. */
+const firstGiven = (...vals) => vals.find(pinGiven);
+
 /** The pins of a host's options and a task wrapper, as the allocator's raw task fields. */
 function pinsOf(options, taskOpts) {
-  const pick = (...vals) => vals.find((v) => v !== undefined && v !== null && v !== "") || null;
+  const pick = (...vals) => firstGiven(...vals) ?? null;
   const c = (taskOpts && taskOpts.constraints) || {};
   const oc = options.constraints || {};
   return {
@@ -127,11 +134,11 @@ function rawTaskOf(profileInput, options, nowMs) {
   raw.needs = needs;
   raw.constraints = {
     ...((wrapped && wrapped.constraints) || {}),
-    ...(pins.constraintBundle ? { bundle: pins.constraintBundle } : {}),
-    ...(pins.model ? { model: pins.model } : {}),
+    ...(pinGiven(pins.constraintBundle) ? { bundle: pins.constraintBundle } : {}),
+    ...(pinGiven(pins.model) ? { model: pins.model } : {}),
     ...(pins.effort ? { effort: pins.effort } : {}),
   };
-  if (pins.bundle) raw.pinned_bundle = pins.bundle;
+  if (pinGiven(pins.bundle)) raw.pinned_bundle = pins.bundle;
   if (options.hours !== undefined && options.hours !== null) raw.expected_hours = Number(options.hours);
   if (options.meteredOk !== undefined) raw.metered_ok = Boolean(options.meteredOk);
   const continuity =
@@ -164,13 +171,14 @@ export function rankCandidates(profileInput, options = {}) {
   if (!given) return { task: null, selected: null, ranking: [], allCandidates: [] };
   const { fleet, usage, entries, policy, normalized } = fleetFor(options, nowMs);
   const pins = pinsOf(options, profileInput && profileInput.profile ? profileInput : null);
-  const pinnedKey = pins.model ? canonicalModel(splitPinModelAndEffort(String(pins.model).trim()).modelPart, fleet.aliases, fleet.models, fleet.families, [], fleet.providerNames) : null;
+  // A malformed name is refused by `normalizeTask` below: nothing reads it before that (`modelPinProblem` never throws).
+  const pinnedKey = pinGiven(pins.model) && modelPinProblem(pins.model) === null ? canonicalModel(splitPinModelAndEffort(pins.model.trim()).modelPart, fleet.aliases, fleet.models, fleet.families, [], fleet.providerNames) : null;
   const list = Array.isArray(options.candidateModels) && options.candidateModels.length > 0 ? options.candidateModels : defaultPool(fleet, pinnedKey);
   // Every bundle the pool offers, before any filter: a named model is read (`namedPin`) and matched (`pinPool`) over all of them,
   // and over the rows the host offers elsewhere (`pinOnlyModels`: in `onProvider`, the other presets' rows of `candidateModels`),
   // which never compete here: a prefix that names only those is obeyed and refused here, never dropped and served by this pool.
   const all = expandBundles(list, fleet, entries);
-  const elsewhere = Array.isArray(options.pinOnlyModels) && options.pinOnlyModels.length > 0 ? expandBundles(options.pinOnlyModels, fleet, entries) : {};
+  const elsewhere = pinOnlyBundles(options.pinOnlyModels, fleet, entries);
   const pinSource = { ...elsewhere, ...all };
   let task;
   try {
@@ -199,6 +207,7 @@ export function rankCandidates(profileInput, options = {}) {
   };
   // A named model is matched over every bundle the pool offers, those a `when` keeps out included (`pinPool`).
   ctx.pin_source = pinSource;
+  const pinnedAccounts = pinnedAccountsOf(pins, Object.values(pinSource), fleet);
   // Rows their `when` keeps out never compete, but a blocked route still says why.
   const outOfScope = [];
   for (const [id, b] of Object.entries(all)) {
@@ -262,12 +271,13 @@ export function rankCandidates(profileInput, options = {}) {
       read_only_review: task.read_only_review,
       profile: task.profile,
     },
-    pin: { model: pins.model || null, effort: pins.effort || null, bundle: task.pinned_bundle || task.constraint_bundle || null },
+    pin: { model: pinGiven(pins.model) ? pins.model : null, effort: pins.effort || null, bundle: task.pinned_bundle || task.constraint_bundle || null },
     selected: pinnedCand || ranking[0] || null,
     ranking,
     allCandidates: [...candidates, ...outRows],
     system,
     ...(normalized ? { accounts: listQuotaAccounts(normalized) } : {}),
+    ...(pinnedAccounts ? { pinnedAccounts } : {}),
   };
 }
 
@@ -310,16 +320,16 @@ export function mergePinOptions(...sources) {
   for (const source of sources) {
     if (!source || typeof source !== "object") continue;
     const c = source.constraints && typeof source.constraints === "object" ? source.constraints : {};
-    const model = source.constraintModel || source.constraint_model || source.pinnedModel || source.pinned_model || c.model;
+    const model = firstGiven(source.constraintModel, source.constraint_model, source.pinnedModel, source.pinned_model, c.model);
     const effort = source.constraintEffort || source.constraint_effort || source.pinnedEffort || source.pinned_effort || c.effort;
-    const bundle = source.pinnedBundle || source.pinned_bundle || source.constraintBundle || source.constraint_bundle || c.bundle;
-    if (model) {
+    const bundle = firstGiven(source.pinnedBundle, source.pinned_bundle, source.constraintBundle, source.constraint_bundle, c.bundle);
+    if (model !== undefined) {
       merged.constraintModel = model;
-      // A later `model:effort` replaces an earlier effort rather than contradicting it.
-      if (splitPinModelAndEffort(String(model).trim()).effortPart) delete merged.constraintEffort;
+      // A later `model:effort` replaces an earlier effort rather than contradicting it. A malformed one is refused when routed.
+      if (modelPinProblem(model) === null && splitPinModelAndEffort(model.trim()).effortPart) delete merged.constraintEffort;
     }
     if (effort) merged.constraintEffort = effort;
-    if (bundle) merged.pinnedBundle = bundle;
+    if (bundle !== undefined) merged.pinnedBundle = bundle;
   }
   return merged;
 }
@@ -346,8 +356,76 @@ export function dropPinFields(body) {
  * Whether these pins fix the effort, so nothing may ratchet it afterwards.
  */
 export function pinsFixEffort(pins = {}) {
-  if (pins.pinnedBundle || pins.constraintEffort) return true;
-  return Boolean(pins.constraintModel && splitPinModelAndEffort(String(pins.constraintModel).trim()).effortPart);
+  if (pinGiven(pins.pinnedBundle) || pins.constraintEffort) return true;
+  return Boolean(pinGiven(pins.constraintModel) && modelPinProblem(pins.constraintModel) === null && splitPinModelAndEffort(pins.constraintModel.trim()).effortPart);
+}
+
+/**
+ * The quota seats a pin names by its prefix (`<provider>/<seat>/` or `<seat>/`: a seat's account id or seat name), else `null`:
+ * the accounts `onAccount` lets Magpie try, so a named seat is not served by another seat of its provider. A bare name, a
+ * provider's prefix or a preset's names no seat. Read over `pool`, the bundles a pin is matched over.
+ */
+export function pinnedAccountsOf(pins, pool, fleet) {
+  const model = pins?.constraintModel ?? pins?.model;
+  if (!pinGiven(model) || modelPinProblem(model) !== null) return null;
+  const { named, prefix } = pinReading(model, pool, fleet);
+  if (!prefix) return null;
+  const seats = named.filter((b) => b.account !== GATEWAY_ACCOUNT && (lc(b.account) === prefix || (b.seat && lc(b.seat) === prefix)));
+  return seats.length > 0 ? [...new Set(seats.map((b) => b.account))] : null;
+}
+
+/**
+ * The bundles of the rows the host offers elsewhere (`pinOnlyModels`), each under an id of its own: the same model on another
+ * preset expands to the same `model:effort` id as a row of this pool, and must neither replace that row nor be named with it.
+ */
+function pinOnlyBundles(list, fleet, entries) {
+  if (!Array.isArray(list) || list.length === 0) return {};
+  return Object.fromEntries(Object.values(expandBundles(list, fleet, entries)).map((b, i) => {
+    const id = `~elsewhere:${i}:${b.id}`;
+    const { source_id: _sourceId, ...rest } = b;
+    return [id, { ...rest, id, pin_only: true }];
+  }));
+}
+
+/** The bundles a pin is matched over for a route decided outside `selectBestRoute` (a held session): the pool it would read. */
+function pinPoolOf(options) {
+  const nowMs = Number.isFinite(options.now) ? Number(options.now) : Date.now();
+  const { fleet, entries } = fleetFor(options, nowMs);
+  const list = Array.isArray(options.candidateModels) && options.candidateModels.length > 0 ? options.candidateModels : defaultPool(fleet, null);
+  return { pool: Object.values({ ...pinOnlyBundles(options.pinOnlyModels, fleet, entries), ...expandBundles(list, fleet, entries) }), fleet };
+}
+
+/** `pinnedAccountsOf` for a held session, over the pool `selectBestRoute` would read with these options. */
+export function heldPinnedAccounts(pins, options = {}) {
+  const { pool, fleet } = pinPoolOf(options);
+  return pinnedAccountsOf(pins, pool, fleet);
+}
+
+/**
+ * Whether a session held on `held` (`{ model, effort, pinnedBundle }`: the model as routed, its effort, the bundle it was pinned to)
+ * may stay held under the request's `pins` (contract R3). Yes when the request names nothing; else only when the held bundle is
+ * among the bundles the pin names in the current pool (`pinMatchingBundles`, the pool `selectBestRoute` reads: `candidateModels` or
+ * the catalog's, and `pinOnlyModels`) and a named effort is the held one. A malformed pin never keeps a hold: routing refuses it.
+ */
+export function pinKeepsHold(pins, held, options = {}) {
+  const model = pins?.constraintModel;
+  const bundle = pins?.pinnedBundle;
+  const effortPin = typeof pins?.constraintEffort === "string" && pins.constraintEffort.trim() ? pins.constraintEffort.trim().toLowerCase() : null;
+  if (!pinGiven(model) && !pinGiven(bundle) && !effortPin) return true;
+  if (pinGiven(model) && modelPinProblem(model) !== null) return false;
+  if (pinGiven(bundle) && modelPinProblem(bundle) !== null) return false;
+  const effort = effortPin || (pinGiven(model) ? splitPinModelAndEffort(model.trim()).effortPart : null);
+  if (effort && effort !== lc(held?.effort || "")) return false;
+  if (!pinGiven(model) && !pinGiven(bundle)) return true;
+  const { pool, fleet } = pinPoolOf(options);
+  // The bundles the session runs on: those whose model is the one routed (the text Magpie sends, which is all a held session
+  // keeps: Magpie picks the account), at its effort where a bundle names one.
+  const heldModel = lc(pyStrip(typeof held?.model === "string" ? held.model : ""));
+  const onModel = pool.filter((b) => lc(b.model || "") === heldModel);
+  const atEffort = onModel.filter((b) => lc(b.effort || "") === lc(held?.effort || ""));
+  const heldIds = new Set((atEffort.length > 0 ? atEffort : onModel).map((b) => b.id));
+  if (pinGiven(bundle)) return heldIds.has(bundle) || bundle === held?.pinnedBundle;
+  return pinMatchingBundles(model, pool, fleet).some((b) => heldIds.has(b.id));
 }
 
 /**
@@ -408,21 +486,25 @@ const fleetOfCatalog = (catalog) => fleetFor({ catalog: catalog || {} }, Date.no
  * The rows a candidate list holds for this model name, with what each may run at (contract R2). Used on a route decided
  * elsewhere: a session held from an earlier turn, or a route another provider's list has to take.
  */
-function rowsNaming(list, model, catalog, pins) {
+function rowsNaming(list, model, catalog, pins, pinOnly = []) {
   const fleet = fleetOfCatalog(catalog);
-  const pinnedName = pins?.constraintModel ? splitPinModelAndEffort(String(pins.constraintModel).trim()).modelPart : null;
-  const pinnedEffort = pins?.constraintEffort ? lc(pins.constraintEffort) : pins?.constraintModel ? splitPinModelAndEffort(String(pins.constraintModel).trim()).effortPart : null;
+  const pinModel = pinGiven(pins?.constraintModel) && modelPinProblem(pins.constraintModel) === null ? pins.constraintModel.trim() : null;
+  const pinnedName = pinModel ? splitPinModelAndEffort(pinModel).modelPart : null;
+  const pinnedEffort = pins?.constraintEffort ? lc(pins.constraintEffort) : pinModel ? splitPinModelAndEffort(pinModel).effortPart : null;
   const rows = [];
   for (const entry of list || []) {
     // A bare entry of the pinned model runs at the effort the pin names, table or not: as a new route expands it.
     const obj = typeof entry === "string" ? { model: entry } : entry;
-    const same = pinnedName !== null && pinNamesBundle(pinnedName, { ...obj, model: entryModel(entry) }, fleet);
+    const same = pinnedName !== null && pinMatchesIdentity(pinnedName, { ...obj, model: entryModel(entry) }, fleet);
     const given = same && pinnedEffort && !obj.effort && !Array.isArray(obj.efforts) && !nameFixesEffort(obj.model, fleet.models, fleet.aliases) ? { ...obj, effort: pinnedEffort } : entry;
     rows.push(...effortRows(given, fleet));
   }
   attachDisabledEfforts(rows, fleet);
-  // The rows of the routed model as each reads names (`pinMatchingBundles`), never a row a resolved key is read again into.
-  return { rows: pinMatchingBundles(model, rows, fleet), fleet };
+  // The rows of the routed model as each reads names (`pinMatchingBundles`), never a row a resolved key is read again into; the
+  // rows offered elsewhere (`pinOnly`) are read with them, so a prefix naming only those names none of `list`.
+  const elsewhere = (pinOnly || []).flatMap((entry) => effortRows(typeof entry === "string" ? { model: entry } : entry, fleet));
+  const own = new Set(rows);
+  return { rows: pinMatchingBundles(model, [...rows, ...elsewhere], fleet).filter((row) => own.has(row)), fleet };
 }
 
 /** R2 for one row: its own list when it has one, else the dispatch table, without what the user disabled. A row's own effort is what it runs. */
@@ -443,8 +525,8 @@ function rowOffers(row, effort, fleet) {
  * `m-high`) or lists them (`{ model, efforts }`) offers those only. `{ model, effort }` is one bundle at its scoring effort and
  * may step within the dispatch table, as `allocator.py` has `own_efforts` None for it.
  */
-export function candidateOffers(list, model, effort, catalog, pins) {
-  const { rows, fleet } = rowsNaming(list, model, catalog, pins);
+export function candidateOffers(list, model, effort, catalog, pins, pinOnly = []) {
+  const { rows, fleet } = rowsNaming(list, model, catalog, pins, pinOnly);
   return rows.some((row) => rowOffers(row, effort, fleet));
 }
 
@@ -711,6 +793,7 @@ export function selectBestRoute(taskOrProfile, options = {}) {
     modelWithEffort: top ? `${top.model}:${top.effort || "high"}` : null,
     bundle: top ? top.bundle : null,
     selectedAccount: top ? quotaOf(top)?.account || null : null,
+    ...(result.pinnedAccounts ? { pinnedAccounts: result.pinnedAccounts } : {}),
     quota: top ? quotaOf(top) : null,
     workKind: result.task.kind,
     difficulty: result.task.difficulty,

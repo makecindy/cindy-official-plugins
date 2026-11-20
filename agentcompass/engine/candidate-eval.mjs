@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-eval.js at 2edab79daf338d9f18fcb19099a2ab56e164f8de (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-eval.js at 7549882db0fb239ba346b5561ecdc5cbcad255ff (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Candidate evaluation (`candidate_eval.py`): one bundle against one task, its gates, exclusions (rule B) and breakdown.
@@ -13,7 +13,7 @@
  * Pure ES2022 module with zero external or Node-only dependencies (Bun and Magpie's `moejs`).
  */
 
-import { DIRECT_SOURCES, PROVIDER_NAME_STATUSES, checkModelPin, healthKey, modelLeaf, modelPinProblem, nameFixesEffort, resolveListed, rowKey, canonicalModel, splitEffortSuffix, pyRound } from "./catalog.mjs";
+import { DIRECT_SOURCES, PROVIDER_NAME_STATUSES, checkModelPin, healthKey, modelLeaf, modelPinProblem, pinGiven, pyStrip, nameFixesEffort, resolveListed, rowKey, canonicalModel, splitEffortSuffix, pyRound } from "./catalog.mjs";
 import {
   FIVE_AXES,
   IMAGE_INPUT_LEVEL,
@@ -114,7 +114,7 @@ export function pinPool(ctx, bundleId = null) {
  * pin): `<provider>/<name>` for a pair with no row there, its own leaf for an unmeasured name. No leaf comparison, no comparison
  * of a resolved row id with a raw spelling.
  */
-export function pinNamesBundle(pin, bundle, fleet) {
+export function pinMatchesIdentity(pin, bundle, fleet) {
   const text = String(pin ?? "").trim();
   if (!text || !bundle || typeof bundle !== "object") return false;
   if (isAutoId(text)) return idsOf(bundle).includes(text);
@@ -165,6 +165,8 @@ function bundleHasPrefix(bundle, prefix) {
   const account = String(bundle.account || "").toLowerCase();
   const provider = String(bundle.provider || bundle.account || "").toLowerCase();
   if (prefix === account || sameProvider(provider, prefix)) return true;
+  // A Magpie quota seat is keyed `<provider>/<seat>` (its account id, above) and also named by its seat alone.
+  if (bundle.seat && String(bundle.seat).toLowerCase() === prefix) return true;
   return [...bundleProviders(bundle), ...bundlePresets(bundle)].some((id) => id.toLowerCase() === prefix);
 }
 
@@ -177,7 +179,9 @@ function prefixedBundleMatches(text, spelled, prefix, bundle, fleet) {
   if (advertisesPin(bundle, text, fleet)) return true;
   if (!bundleHasPrefix(bundle, prefix)) return false;
   const own = rowKeyOf(bundle.model || "", fleet);
-  return Boolean(own) && rowKeyOf(text, fleet, bundleProviders(bundle)) === own;
+  // A prefix of one segment is read with the name, as AgentCompass reads `P/name`; a seat's `<provider>/<seat>/` is not a name.
+  const named = prefix.includes("/") ? text.slice(prefix.length + 1) : text;
+  return Boolean(own) && rowKeyOf(named, fleet, bundleProviders(bundle)) === own;
 }
 
 /**
@@ -187,18 +191,23 @@ function prefixedBundleMatches(text, spelled, prefix, bundle, fleet) {
  * names nothing in the pool is dropped and the rest is read again from the start (`unrecognizedPrefixMatches`).
  */
 function readPin(text, items, fleet) {
-  if (items.length === 0 || isAutoId(text)) return [text, items.filter((b) => idsOf(b).includes(text))];
+  if (items.length === 0 || isAutoId(text)) return [text, items.filter((b) => idsOf(b).includes(text)), null];
   const spelled = splitEffortSuffix(text).name;
-  if (!spelled.includes("/")) return [text, items.filter((b) => pinNamesBundle(text, b, fleet))];
-  const prefix = spelled.slice(0, spelled.indexOf("/")).toLowerCase();
-  const named = items.filter((b) => prefixedBundleMatches(text, spelled, prefix, b, fleet));
-  if (named.length > 0 || items.some((b) => bundleHasPrefix(b, prefix))) return [text, named];
+  if (!spelled.includes("/")) return [text, items.filter((b) => pinMatchesIdentity(text, b, fleet)), null];
+  // The prefix is the longest leading part that is an id of a bundle in the pool: a seat's `<provider>/<seat>` before its provider.
+  const segments = spelled.split("/");
+  for (let k = segments.length - 1; k >= 1; k--) {
+    const prefix = segments.slice(0, k).join("/").toLowerCase();
+    if (items.some((b) => bundleHasPrefix(b, prefix))) return [text, items.filter((b) => prefixedBundleMatches(text, spelled, prefix, b, fleet)), prefix];
+  }
+  const named = items.filter((b) => prefixedBundleMatches(text, spelled, segments[0].toLowerCase(), b, fleet));
+  if (named.length > 0) return [text, named, null];
   return unrecognizedPrefixMatches(text, items, fleet);
 }
 
 /**
- * A prefix that names nothing in the pool (no bundle id, no advertised spelling, no account, provider, endpoint or preset of that
- * id) is dropped and the rest is read as the pin from the start (`account_fleet._unrecognized_prefix_matches`; each level of a
+ * A prefix that names nothing in the pool (no bundle id, no advertised spelling, no account, seat, provider, endpoint or preset of
+ * that id) is dropped and the rest is read as the pin from the start (`account_fleet._unrecognized_prefix_matches`; each level of a
  * name with several `/` is decided again): `opencode/deepseek-v4-flash` where nothing is `opencode` is the bare `deepseek-v4-flash`.
  */
 function unrecognizedPrefixMatches(text, items, fleet) {
@@ -212,13 +221,31 @@ const poolItems = (pool) => (pool || []).filter((b) => b && typeof b === "object
  * nothing here: it is refused where the caller hands it over (`checkModelPin` in `task-intake.js`), and a stored one stays inert.
  */
 export function pinMatchingBundles(pin, pool, fleet) {
-  if (pin === null || pin === undefined || pin === "" || modelPinProblem(pin) !== null) return [];
-  return readPin(pin.trim(), poolItems(pool), fleet)[1];
+  if (!pinGiven(pin) || modelPinProblem(pin) !== null) return [];
+  return readPin(pyStrip(pin), poolItems(pool), fleet)[1];
+}
+
+/**
+ * How a pin reads on `pool`: `{ pin, named, prefix }`, the pin as read (`effectivePin`), the bundles it names and the prefix that
+ * named them (lowercase; `null` for a bare name, an id or an advertised spelling). Throws `InvalidModelPin` for a malformed pin.
+ */
+export function pinReading(pin, pool, fleet) {
+  const [asRead, named, prefix] = readPin(checkModelPin(pin), poolItems(pool), fleet);
+  return { pin: asRead, named, prefix };
 }
 
 /** The pin as read on `pool` (`account_fleet.effective_pin`): `P/` kept when `P` names something in the pool, else dropped. */
 export function effectivePin(pin, pool, fleet) {
-  return readPin(checkModelPin(pin), poolItems(pool), fleet)[0];
+  return pinReading(pin, pool, fleet).pin;
+}
+
+/**
+ * Whether `pin` names `bundle` in `pool` (`account_fleet.pin_names_bundle`, `pool` the bundle alone when omitted): read through
+ * `pinMatchingBundles`, so a prefix is obeyed. Identity alone, with no prefix test, is `pinMatchesIdentity`.
+ */
+export function pinNamesBundle(pin, bundle, fleet, pool = [bundle]) {
+  if (!bundle || typeof bundle !== "object") return false;
+  return pinMatchingBundles(pin, pool, fleet).some((b) => b === bundle || (bundle.id && b.id === bundle.id));
 }
 
 /** The pin text a task holds: what the user typed (`constraint_raw_model`), else the resolved name. */
