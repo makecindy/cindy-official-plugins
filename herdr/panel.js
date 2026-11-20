@@ -426,10 +426,11 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
         if (pinnedView === 'tmux') await request('tmux_send', { target: target, text: draft });
         else await request('send', { pane_id: paneId, text: draft });
       } catch (error) {
-        // 同步没成功：草稿按归属放回（框里已有新内容就不覆盖）。
+        // 同步没成功：草稿按归属放回。用户期间继续输入的部分接在后面，
+        // 正好还原「原草稿 + 续打」的完整命令，而不是把原草稿丢掉。
         if (currentScope() === scope) {
           const box = $('#term-input');
-          if (box && !box.value) box.value = draft;
+          if (box) box.value = draft + box.value;
         }
         renderOutput(error.message || T.sendFailed);
         return true;

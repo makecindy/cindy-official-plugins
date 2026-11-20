@@ -668,8 +668,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the draft must be captured with its ownership at keypress time');
   assert.match(panelSrcTimeout, /捕获并取走/,
     'a line-altering key must consume the draft at keypress time');
-  assert.match(panelSrcTimeout, /草稿按归属放回/,
-    'a failed draft sync must restore the draft by ownership');
+  assert.match(panelSrcTimeout, /box\.value = draft \+ box\.value/,
+    'a failed draft sync must prepend the draft, never drop it');
   assert.match(panelSrcTimeout, /不能再扣/,
     'a resumed submit must not consume the box a second time');
 
