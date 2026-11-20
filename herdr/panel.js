@@ -397,24 +397,26 @@ function forwardKey(event) {
   if (pinnedView === 'tmux' && !target) return true;
   if (pinnedView !== 'tmux' && !paneId) return true;
   const scope = (pinnedView === 'tmux' ? 't:' + target : 'h:' + paneId);
+  // 草稿连同归属在按键这一刻捕获：排队执行时读到的可能是
+  // 另一个分屏的输入框，绝不能把那里的文字发给这个终端。
+  const draftField = $('#term-input');
+  const draft = draftField ? draftField.value : '';
   // 同一终端的操作排队执行：草稿同步、改行按键不能与正在进行的提交交错。
   enqueueForScope(scope, function () {
-    return forwardKeyQueued(key, pinnedView, target, paneId, scope);
+    return forwardKeyQueued(key, pinnedView, target, paneId, scope, draft);
   });
   return true;
 }
 
-async function forwardKeyQueued(key, pinnedView, target, paneId, scope) {
+async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
   // 会改动终端里那行内容的按键（取消 C-c、历史 Up/Down、补全 Tab、
   // 删除 C-u/C-w/C-k/C-d、Esc、M-* 宏等）让恢复记录失效；
   // 但清屏 C-l、移动光标 C-a/C-e、翻滚动条 PPage/NPage 不改内容，
   // 这些键若清掉记录，恢复时会把同一文本再粘一遍。
   if (!PENDING_ENTER_KEEP_KEYS[key]) {
     pendingEnterOnly = null;
-    // 即将转发会改动终端行的按键：输入框里还有本地草稿就先同步过去，
+    // 即将转发会改动终端行的按键：发起时的本地草稿先同步过去，
     // 否则终端行被换掉后旧草稿留着，下一次回车会把它粘到别的内容上。
-    const draftField = $('#term-input');
-    const draft = draftField ? draftField.value : '';
     if (draft) {
       try {
         if (pinnedView === 'tmux') await request('tmux_send', { target: target, text: draft });
@@ -427,9 +429,9 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope) {
       // 注意不是 pendingEnterOnly——随后的改行按键会改变这行内容，
       // 同一文本恢复粘贴的去重记录不能假装它还原样存在。
       terminalHasContent = { scope: scope };
-      // 只有还停在这个分屏时才动输入框，且只去掉已同步的那段：
+      // 只有还停在这个分屏时才动输入框，且只按前缀去掉已同步的那段：
       // 等待期间切了目标、或用户又接着输入了，都不能误删。
-      if (currentScope() === scope) consumeFromInput(draftField, draft);
+      if (currentScope() === scope) consumeFromInput($('#term-input'), draft);
     }
   }
   try {
@@ -515,6 +517,9 @@ function submitLine() {
   if (pinnedView === 'tmux' && !target) return;
   if (pinnedView !== 'tmux' && !paneId) return;
   const scope = (pinnedView === 'tmux' ? 't:' + target : 'h:' + paneId);
+  // 按下回车这一刻就把草稿从输入框取走：否则排队期间输入的第二条
+  // 会和没清掉的第一条拼在一起，被下一次提交重复捕获。
+  consumeFromInput(field, text);
   // 同一终端的「文本 + Enter」串行执行：两条提交并行时，第二次 paste
   // 可能排在第一次 Enter 前，把两条命令拼成一行或颠倒顺序。
   enqueueForScope(scope, function () {
@@ -537,7 +542,7 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
   // 同步过去），同一目标同一文本的提交只补 Enter，不再粘一遍。
   if (pendingEnterOnly && pendingEnterOnly.scope === scope && pendingEnterOnly.text === text) {
     pendingEnterOnly = null;
-    consumeFromInput(field, text);
+    if (currentScope() === scope) consumeFromInput(field, text);
     try {
       if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
       else await request('send', { pane_id: paneId, keys: ['Enter'] });
@@ -552,7 +557,6 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
   }
   pendingEnterOnly = null;
   terminalHasContent = null;
-  consumeFromInput(field, text);
   try {
     if (pinnedView === 'tmux') {
       await request('tmux_send', { target: target, text: text });

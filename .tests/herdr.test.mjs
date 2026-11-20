@@ -660,10 +660,12 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   // 同一终端的提交串行化 + 按键时钉住视图。
   assert.match(panelSrcTimeout, /enqueueForScope\(scope, function \(\) \{\s*return submitLineQueued/,
     'submits must be serialized per scope');
-  assert.match(panelSrcTimeout, /forwardKeyQueued\(key, pinnedView, target, paneId, scope\)/,
-    'the forwarded key must keep the view pinned at keypress time');
   assert.match(panelSrcTimeout, /consumeFromInput/,
     'queued submits must only consume the sent prefix');
+  assert.match(panelSrcTimeout, /按下回车这一刻就把草稿从输入框取走/,
+    'the draft must leave the box at submit time, not at dequeue time');
+  assert.match(panelSrcTimeout, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft\)/,
+    'the draft must be captured with its ownership at keypress time');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
