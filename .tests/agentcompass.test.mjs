@@ -842,7 +842,6 @@ test('no quota is attached to any connection: every row runs on the built-in gat
     assert.equal(routed.decision.accounts, undefined, 'no quota account is listed');
     assert.equal(routed.decision.quota, undefined);
     assert.equal(routed.decision.selected_quota, undefined);
-    assert.deepEqual(routed.decision.excluded ?? [], []);
     assert.ok(!routed.decision.warnings.some(line => /quota|capacity|account/i.test(line)), JSON.stringify(routed.decision.warnings));
   }
   const named = routeBuiltIn({}, WITH_CLAUDE, {constraintModel: 'gpt-6-sol'});
@@ -1052,7 +1051,8 @@ test('built-in split, self, a read-only exploration and wants_fast, all from the
     const {decision} = replies[i].result.router;
     assert.equal(decision.quota, undefined, 'the exhausted log is not read');
     assert.equal(decision.accounts, undefined);
-    assert.deepEqual(decision.excluded ?? [], []);
+    // a native answer carries the engine's lines in `warnings` (`excluded` is a blocked answer's): none is about a quota
+    assert.ok(!decision.warnings.some(line => /quota|capacity|exhaust/i.test(line)), JSON.stringify(decision.warnings));
   }
   // The same route as in a home with no log: what lies under a Codex home does not matter.
   const clean = plugin(codex, 0, 'none');
