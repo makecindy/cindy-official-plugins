@@ -413,7 +413,18 @@ async function submitLine() {
   try {
     if (view === 'tmux') {
       await request('tmux_send', { target: target, text: text });
-      await request('tmux_send', { target: target, keys: ['Enter'] });
+      try {
+        await request('tmux_send', { target: target, keys: ['Enter'] });
+      } catch (error) {
+        // 文本已经粘进 pane、只有 Enter 没发出去：把草稿放回输入框，
+        // 让用户看到现状再决定；直接报「发送失败」会让人重试，
+        // 把同一段文本追加到 pane 里已有的草稿后再执行。
+        field.value = text;
+        renderOutput('文本已输入到终端，但回车没有发出（'
+          + String(error && error.message ? error.message : T.sendFailed)
+          + '）。请查看终端内容后，再按一次回车或重发。');
+        return;
+      }
       await refreshTerminal();
     } else {
       // submit = pane.send_input，自带回车；pane.send_text 只打字不执行。

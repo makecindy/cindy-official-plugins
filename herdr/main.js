@@ -716,7 +716,13 @@ const tools = {
           + ' 超时。请先读取画面确认状态，再决定是否重发，避免重复执行。'
         );
       }
-      throw error;
+      // 其余失败（Herdr 重启、agent 消失、socket 权限等）同样不能报「没执行」：
+      // 提示词早已发出，普通失败会让调用方重发、重复驱动 agent。
+      throw new Error(
+        'HERDR_OUTCOME_UNKNOWN: 提示词已发送，但后续状态等待失败（'
+        + String(error && error.message ? error.message : error)
+        + '）。请先读取画面确认 agent 实际状态，再决定是否重发。'
+      );
     }
   },
 
@@ -823,7 +829,11 @@ const tools = {
           return {
             subscribed: false,
             pending: true,
+            preference_saved: error.subscriptionPersisted !== false,
             note: '订阅握手暂时失败（' + detail + '），但 worker 已排好重连，Herdr 可用后会自动订阅。'
+              + (error.subscriptionPersisted === false
+                ? '另外「已订阅」偏好没能写入存储，插件重启后可能需要重新订阅。'
+                : '')
           };
         }
         throw error;
@@ -843,7 +853,14 @@ const tools = {
       } catch (error) {
         persisted = false;
       }
-      await nodeRequest('herdr/unsubscribe', {}, args.__callId);
+      try {
+        await nodeRequest('herdr/unsubscribe', {}, args.__callId);
+      } catch (error) {
+        // 偏好已经记成退订：通知 worker 失败也要单独安排重试，
+        // 否则旧连接还在收事件，用户这次的退订被悄悄违背。
+        scheduleUnsubscribeRetry();
+        throw error;
+      }
       return persisted
         ? { subscribed: false, preference_saved: true }
         : { subscribed: false, preference_saved: false, note: runtime.preferenceSaveFailedUnsubscribe };
@@ -892,6 +909,8 @@ const tools = {
     } catch (error) {
       subscribed = false;
       subscriptionError = error && error.message ? error.message : String(error);
+      // 偏好保存结果随错误带出来：不能沿用初始化的 true 把它瞒掉。
+      preferencePersisted = error.subscriptionPersisted !== false;
       // 传输层失败 = 请求根本没到 worker：worker 没有 desired、也不会重连，
       // 这时主进程自己排重试，不能只承诺「worker 已排好重连」。
       transportFailed = Boolean(error && error.transportFailure)
@@ -1190,7 +1209,13 @@ async function enableSubscription(callId) {
   }
   // worker 的握手是 pane.list(15s) + 订阅确认(15s)，宿主要留出余量，
   // 否则宿主先超时，setup 会在自动化已创建后报普通失败。
-  await nodeRequest('herdr/subscribe', {}, callId, SUBSCRIBE_HOST_TIMEOUT_MS);
+  try {
+    await nodeRequest('herdr/subscribe', {}, callId, SUBSCRIBE_HOST_TIMEOUT_MS);
+  } catch (error) {
+    // 偏好到底写没写上要随错误带出去：pending 回执不能隐瞒「重启后会读回旧值」。
+    error.subscriptionPersisted = persisted;
+    throw error;
+  }
   resetSubscriptionRetries();
   return { persisted: persisted };
 }
@@ -1284,13 +1309,45 @@ function schedulePreferenceRecheck() {
       if (subscriptionPreference !== null) return;
       if (kv[SUBSCRIBED_KEY] === false) {
         subscriptionPreference = false;
-        await nodeRequest('herdr/unsubscribe', {});
+        try {
+          await nodeRequest('herdr/unsubscribe', {});
+        } catch (error) {
+          // 内存偏好已是 false，重检定时器会短路；退订本身要单独重试，
+          // 否则旧 worker 还在收事件，用户的退订被无限期违背。
+          scheduleUnsubscribeRetry();
+        }
       }
     } catch (error) {
       schedulePreferenceRecheck();
     }
   }, 30000);
   if (preferenceRetryTimer.unref) preferenceRetryTimer.unref();
+}
+
+// 只重试「通知 worker 退订」这一件事：与偏好重检分开，
+// 因为它恰恰要在 preference === false 时运行。
+let unsubscribeRetryTimer = null;
+let unsubscribeRetries = 0;
+
+function scheduleUnsubscribeRetry() {
+  if (unsubscribeRetryTimer) return;
+  unsubscribeRetries += 1;
+  if (unsubscribeRetries > 5) return;
+  unsubscribeRetryTimer = setTimeout(async function () {
+    unsubscribeRetryTimer = null;
+    // 用户又订阅了就不用再退订。
+    if (subscriptionPreference !== false) {
+      unsubscribeRetries = 0;
+      return;
+    }
+    try {
+      await nodeRequest('herdr/unsubscribe', {});
+      unsubscribeRetries = 0;
+    } catch (error) {
+      scheduleUnsubscribeRetry();
+    }
+  }, 15000 * unsubscribeRetries);
+  if (unsubscribeRetryTimer.unref) unsubscribeRetryTimer.unref();
 }
 
 cindy.onHostMessage(function (msg) {

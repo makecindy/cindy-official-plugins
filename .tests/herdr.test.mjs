@@ -511,8 +511,35 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   // 成功的订阅路径要重置重试额度。
   assert.match(mainSource, /function resetSubscriptionRetries\(\)[\s\S]*?subscriptionRetries = 0;/,
     'a successful subscribe must reset the retry budget');
-  assert.match(mainSource, /nodeRequest\('herdr\/subscribe', \{\}, callId, SUBSCRIBE_HOST_TIMEOUT_MS\);\s*\n\s*resetSubscriptionRetries\(\);/,
+  assert.match(mainSource, /nodeRequest\('herdr\/subscribe', \{\}, callId, SUBSCRIBE_HOST_TIMEOUT_MS\);[\s\S]{0,220}?resetSubscriptionRetries\(\);/,
     'enableSubscription must reset the budget on success');
+
+  // 提示词发出后的续段等待：任何失败都要保留「已发送/结果未知」。
+  assert.match(mainSource, /HERDR_OUTCOME_UNKNOWN: 提示词已发送，但后续状态等待失败/,
+    'a failed continuation wait must stay unknown-outcome');
+
+  // 握手失败要把 persisted 随错误带出；pending 回执不能隐瞒。
+  assert.match(mainSource, /error\.subscriptionPersisted = persisted;/,
+    'the handshake failure must carry the preference save result');
+  assert.match(mainSource, /preference_saved: error\.subscriptionPersisted !== false/,
+    'the pending receipt must report the preference save result');
+
+  // worker 退订要单独重试（内存已 false 会让偏好重检短路）。
+  assert.match(mainSource, /function scheduleUnsubscribeRetry\(\)/,
+    'a dedicated unsubscribe retry must exist');
+  assert.match(mainSource, /schedulePreferenceRecheck[\s\S]*?scheduleUnsubscribeRetry\(\);/,
+    'the preference recheck must schedule the unsubscribe retry');
+
+  // 面板：Enter 失败时把草稿放回输入框。
+  const panelSrcAtomic = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcAtomic, /文本已输入到终端，但回车没有发出/,
+    'a failed Enter after a pasted text must restore the draft');
+
+  // herdr_wait 输出分支也要排除 until。
+  const waitTool3 = manifest.tools.find((tool) => tool.name === 'herdr_wait');
+  const matchBranch = waitTool3.parameters.oneOf.find((branch) => branch.required.includes('match'));
+  const excluded = (matchBranch.not.anyOf || []).map((entry) => entry.required[0]);
+  assert.ok(excluded.includes('until'), 'the output branch must exclude the status condition');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
