@@ -1055,8 +1055,8 @@ async function handlePanelRequest(request) {
     return tools.herdr_read({ pane_id: request.pane_id, source: request.source, lines: request.lines });
   }
   if (action === 'send') {
-    // 面板的按键转发：只发按键，不动文本。
-    return tools.herdr_send({ pane_id: request.pane_id, keys: request.keys });
+    // 面板转发：改行按键前的草稿同步走 text，纯按键走 keys（二选一）。
+    return tools.herdr_send({ pane_id: request.pane_id, keys: request.keys, text: request.text });
   }
   if (action === 'submit') {
     // 面板回车 = 提交这一行。pane.send_text 只是把字打进输入行、不带回车，

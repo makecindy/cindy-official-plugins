@@ -599,6 +599,19 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
       loc + ' tmux_read must disclose the character limit');
   }
 
+  // 草稿同步与发送目标绑定：等待期间切分屏不会打到新目标、不改写新目标的输入框。
+  const panelSrcPin = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcPin, /const target = selectedTarget;[\s\S]{0,1200}?tmux_send', \{ target: target, text: draft \}/,
+    'the draft sync must use the pinned target');
+  assert.match(panelSrcPin, /if \(currentScope\(\) === scope\) field\.value = text;/,
+    'the draft restore must only touch the box of the same target');
+  // 草稿同步后空输入框的回车可以只补 Enter。
+  assert.match(panelSrcPin, /terminalHasContent/,
+    'a synced draft must allow an enter-only submit');
+  // 面板桥接的 send 动作要支持 text。
+  assert.match(mainSource, /tools\.herdr_send\(\{ pane_id: request\.pane_id, keys: request\.keys, text: request\.text \}\)/,
+    'the panel send bridge must forward text too');
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,

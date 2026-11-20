@@ -383,43 +383,44 @@ async function forwardKey(event) {
   const key = specialKey(event);
   if (!key) return false;
   event.preventDefault();
+  // 先把目标钉死：等待期间用户可能切到别的分屏，草稿同步和按键
+  // 都必须打到发起时的目标上，也不能改写别的分屏的输入框。
+  const target = selectedTarget;
+  const paneId = selectedPane ? selectedPane.pane_id : null;
+  if (view === 'tmux' && !target) return true;
+  if (view !== 'tmux' && !paneId) return true;
+  const scope = (view === 'tmux' ? 't:' + target : 'h:' + paneId);
   // 会改动终端里那行内容的按键（取消 C-c、历史 Up/Down、补全 Tab、
   // 删除 C-u/C-w/C-k/C-d、Esc、M-* 宏等）让恢复记录失效；
   // 但清屏 C-l、移动光标 C-a/C-e、翻滚动条 PPage/NPage 不改内容，
   // 这些键若清掉记录，恢复时会把同一文本再粘一遍。
   if (!PENDING_ENTER_KEEP_KEYS[key]) {
     pendingEnterOnly = null;
-    // 即将转发会改动终端行的按键（历史/补全/取消等）：输入框里还有
-    // 本地草稿就先同步过去，否则终端行被换掉后，旧草稿留着，
-    // 下一次回车会把它粘到别的内容上执行。
+    // 即将转发会改动终端行的按键：输入框里还有本地草稿就先同步过去，
+    // 否则终端行被换掉后旧草稿留着，下一次回车会把它粘到别的内容上。
     const draftField = $('#term-input');
     const draft = draftField ? draftField.value : '';
     if (draft) {
       try {
-        if (view === 'tmux') {
-          if (!selectedTarget) return true;
-          await request('tmux_send', { target: selectedTarget, text: draft });
-        } else {
-          if (!selectedPane) return true;
-          await request('send', { pane_id: selectedPane.pane_id, text: draft });
-        }
-        draftField.value = '';
+        if (view === 'tmux') await request('tmux_send', { target: target, text: draft });
+        else await request('send', { pane_id: paneId, text: draft });
       } catch (error) {
         renderOutput(error.message || T.sendFailed);
         return true;
       }
+      // 草稿已转移到终端：记下来，之后空输入框的回车可以只补 Enter。
+      // 注意不是 pendingEnterOnly——随后的改行按键会改变这行内容，
+      // 同一文本恢复粘贴的去重记录不能假装它还原样存在。
+      terminalHasContent = { scope: scope };
+      // 只有还停在这个分屏时才清输入框：等待期间切了目标，
+      // 现在框里的是另一个分屏的新草稿，不能动。
+      if (currentScope() === scope) draftField.value = '';
     }
   }
   try {
-    if (view === 'tmux') {
-      if (!selectedTarget) return true;
-      await request('tmux_send', { target: selectedTarget, keys: [key] });
-      await refreshTerminal();
-    } else {
-      if (!selectedPane) return true;
-      await request('send', { pane_id: selectedPane.pane_id, keys: [key] });
-      await refreshTerminal();
-    }
+    if (view === 'tmux') await request('tmux_send', { target: target, keys: [key] });
+    else await request('send', { pane_id: paneId, keys: [key] });
+    await refreshTerminal();
   } catch (error) {
     renderOutput(error.message || T.sendFailed);
   }
@@ -428,38 +429,73 @@ async function forwardKey(event) {
 
 // 回车提交这一行：Herdr 的 pane.send_input 本身带回车；tmux 是字面量发送，
 // 需要再补一个 Enter。
-// 文本已粘进 pane、Enter 未确认时记在这里：{target, text}。
+// 文本已在终端、只欠回车时记在这里：{scope, text}。
 let pendingEnterOnly = null;
+// 「终端行里有内容」（草稿刚同步过去、或刚粘过文本）：空输入框的回车
+// 只补 Enter。改行按键之后内容形态未知，但空行补一次回车本身无害。
+let terminalHasContent = null;
 // 不改变终端行内容的直达按键：这些键之后恢复记录仍然有效。
 const PENDING_ENTER_KEEP_KEYS = { 'C-l': true, 'C-a': true, 'C-e': true, PPage: true, NPage: true };
+
+// 当前选中目标的标识：tmux 用 target，Herdr 用 pane_id。
+function currentScope() {
+  if (view === 'tmux') return selectedTarget ? 't:' + selectedTarget : null;
+  return selectedPane ? 'h:' + selectedPane.pane_id : null;
+}
+
+// 只补一次回车：文本确认已在终端里时用它，绝不重复粘贴。
+async function sendEnterOnly(scope) {
+  pendingEnterOnly = null;
+  terminalHasContent = null;
+  const target = selectedTarget;
+  const paneId = selectedPane ? selectedPane.pane_id : null;
+  try {
+    if (view === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
+    else await request('send', { pane_id: paneId, keys: ['Enter'] });
+    await refreshTerminal();
+  } catch (error) {
+    renderOutput(error.message || T.sendFailed);
+  }
+}
+
 async function submitLine() {
   const field = $('#term-input');
   const text = field.value;
-  if (!text) return;
   // 先把目标钉死：两条请求之间用户可能已经切到别的分屏，
   // 不能把 Enter 发到新目标上。
   const target = selectedTarget;
   const paneId = selectedPane ? selectedPane.pane_id : null;
   if (view === 'tmux' && !target) return;
   if (view !== 'tmux' && !paneId) return;
-  // 文本已粘进 pane、只欠回车时记住它：恢复后再次提交只补 Enter，
-  // 不能把同一段文本再粘一遍；改了内容或换了目标就回到完整提交。
-  if (pendingEnterOnly
-      && pendingEnterOnly.target === target
-      && pendingEnterOnly.text === text) {
+  const scope = (view === 'tmux' ? 't:' + target : 'h:' + paneId);
+  // 空输入框但终端里有内容（草稿刚同步、或粘贴后回车未确认）：
+  // 这次回车只补 Enter。
+  if (!text) {
+    if ((pendingEnterOnly && pendingEnterOnly.scope === scope)
+        || (terminalHasContent && terminalHasContent.scope === scope)) {
+      await sendEnterOnly(scope);
+    }
+    return;
+  }
+  // 恢复语义：这段文本已在终端里（上次粘贴后 Enter 未确认，或草稿刚被
+  // 同步过去），同一目标同一文本的提交只补 Enter，不再粘一遍。
+  if (pendingEnterOnly && pendingEnterOnly.scope === scope && pendingEnterOnly.text === text) {
     pendingEnterOnly = null;
     field.value = '';
     try {
-      await request('tmux_send', { target: target, keys: ['Enter'] });
+      if (view === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
+      else await request('send', { pane_id: paneId, keys: ['Enter'] });
       await refreshTerminal();
     } catch (error) {
-      field.value = text;
-      pendingEnterOnly = { target: target, text: text };
+      pendingEnterOnly = { scope: scope, text: text };
+      // 只在仍选中同一目标时补回输入框，别把 A 的命令写进 B 的框。
+      if (currentScope() === scope) field.value = text;
       renderOutput(error.message || T.sendFailed);
     }
     return;
   }
   pendingEnterOnly = null;
+  terminalHasContent = null;
   field.value = '';
   try {
     if (view === 'tmux') {
@@ -470,8 +506,8 @@ async function submitLine() {
         // Enter 的结果可能是「没发出」也可能是「发出了但回执丢了」：
         // 不能断言。恢复草稿并记住这次粘贴，下一次同一文本只补回车；
         // 用户也可以先在终端里核对内容再决定。
-        field.value = text;
-        pendingEnterOnly = { target: target, text: text };
+        pendingEnterOnly = { scope: scope, text: text };
+        if (currentScope() === scope) field.value = text;
         renderOutput('文本已输入到终端，但回车没有确认（'
           + String(error && error.message ? error.message : T.sendFailed)
           + '）。请先在终端里核对内容：若命令尚未执行，直接再按一次回车即可（只会补发回车，不会重复粘贴文本）。');
@@ -486,7 +522,8 @@ async function submitLine() {
   } catch (error) {
     // 第一段的失败走这里：终端多半没收到内容，把草稿放回输入框，
     // 别让用户丢命令；错误文案本身（含「结果未知」）会提示先核对终端。
-    field.value = text;
+    // 但只在仍选中同一目标时回填：框里可能已是另一个分屏的内容。
+    if (currentScope() === scope) field.value = text;
     renderOutput(error.message || T.sendFailed);
   }
 }
@@ -571,7 +608,7 @@ async function openPane(pane) {
   // 换目标就丢掉草稿：A 里没发出去的命令不能在回车时打到 B 上。
   const changed = !selectedPane || selectedPane.pane_id !== pane.pane_id;
   selectedPane = pane;
-  if (changed) { $('#term-input').value = ''; pendingEnterOnly = null; }
+  if (changed) { $('#term-input').value = ''; pendingEnterOnly = null; terminalHasContent = null; }
   readToken += 1;
   const token = readToken;
   renderHerdr();
@@ -697,7 +734,7 @@ async function openTmuxPane(pane) {
   // 换目标就丢掉草稿：A 里没发出去的命令不能在回车时打到 B 上。
   const changed = selectedTarget !== pane.target;
   selectedTarget = pane.target;
-  if (changed) { $('#term-input').value = ''; pendingEnterOnly = null; }
+  if (changed) { $('#term-input').value = ''; pendingEnterOnly = null; terminalHasContent = null; }
   readToken += 1;
   const token = readToken;
   renderTmux();
@@ -830,6 +867,7 @@ function closeDetail() {
   selectedPane = null;
   selectedTarget = null;
   pendingEnterOnly = null;
+  terminalHasContent = null;
   readToken += 1;
   if (view === 'tmux') renderTmux();
   else renderHerdr();
