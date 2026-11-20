@@ -64,7 +64,7 @@ function createGithubHarness(
     createContext({
       cindy,
       BroadcastChannel: FakeBroadcastChannel,
-      fetch: vi.fn(),
+      fetch: vi.fn(async () => ({ ok: true, json: async () => ({}) })),
       setTimeout,
       clearTimeout,
       URL,

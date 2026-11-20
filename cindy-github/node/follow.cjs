@@ -22,7 +22,8 @@ function followSkillDir(installation) {
   return dir;
 }
 
-if (require.main === module) {
+// Cindy loads this entry through its own bootstrap instead of running it as Node main.
+if (require.main === module || globalThis.__CINDY_NODE__) {
   readline.createInterface({ input: process.stdin }).on('line', line => {
     let req;
     try { req = JSON.parse(line); } catch { return; }
