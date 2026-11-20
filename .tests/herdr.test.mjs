@@ -615,8 +615,12 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the panel send bridge must forward text too');
 
   // 删除旧任务前重新核实归属。
-  assert.match(mainSource, /schedule_get', \{ id: storedId \}\)[\s\S]{0,300}?isOurAutomation\(freshItem/,
+  assert.match(mainSource, /schedule_get', \{ id: storedId \}\)[\s\S]{0,500}?isOurAutomation\(freshItem/,
     'the old schedule must be re-fetched before deletion');
+  assert.match(mainSource, /删除旧任务前的核对查询失败/,
+    'a failed ownership re-check must surface a cleanup note');
+  assert.match(mainSource, /不再确认是本插件创建的，所以保留未删/,
+    'a repurposed old schedule must be kept with an explanation');
 
   // 事件等待跨段回放。
   const workerSrc12 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');

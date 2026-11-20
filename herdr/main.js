@@ -485,9 +485,23 @@ async function replaceUnboundSchedule(storedId, oldItem, name, args) {
       const freshOutcome = hostBody(
         await cindy.host.call('cindy_scheduler', 'schedule_get', { id: storedId })
       );
-      const freshItem = freshOutcome.ok && freshOutcome.body ? freshOutcome.body.data : null;
-      if (isOurAutomation(freshItem, name, args)) {
-        await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_delete', { id: storedId }));
+      // 区分三种情况：已不存在 = 不用删；查询失败 = 留着但要提示核对；
+      // 归属已变化 = 不能删，也要说明为什么留着。
+      if (freshOutcome.ok && freshOutcome.body && freshOutcome.body.data) {
+        const freshItem = freshOutcome.body.data;
+        if (isOurAutomation(freshItem, name, args)) {
+          await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_delete', { id: storedId }));
+        } else {
+          note = '新自动化已生效（id=' + scheduleId
+            + '），但旧任务的内容已被改动、不再确认是本插件创建的，所以保留未删。'
+            + '如果确认不再需要，请手动删除它。';
+        }
+      } else if (freshOutcome.ok || isNotFound(freshOutcome)) {
+        // 旧任务已经不存在：不用删，也无需提示。
+      } else {
+        note = '新自动化已生效（id=' + scheduleId + '），但删除旧任务前的核对查询失败（'
+          + String(freshOutcome.detail || '未知错误')
+          + '），旧任务已保留。请到自动化列表核对它是否还需要。';
       }
     } catch (error) {
       // 新任务已经是事件桥当前配置了：不能因为旧任务清理失败就整体报失败。
