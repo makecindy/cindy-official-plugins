@@ -58,9 +58,11 @@ const runtimeStrings = {
     missingTarget: '缺少 target（session、window 或 pane 的名字）',
     missingTextOrKeys: '缺少 text 或 keys',
     unknownPanelAction: '未知的面板动作：',
+    preferenceSaveFailed: '订阅已打开，但「已订阅」偏好没能写入存储；重启后可能需要重新订阅。',
     herdrNotRunning: '找不到或连不上 Herdr 的 socket。请先启动 Herdr，或用 HERDR_SOCKET_PATH 指定正确路径。',
     herdrSocketDenied: '没有权限访问 Herdr 的 socket。请检查文件权限，或用 HERDR_SOCKET_PATH 指定路径。',
     herdrUnsubscribed: '已经退订事件，无法等待事件；先用 herdr_events 的 subscribe 恢复订阅。',
+    ambiguousSend: 'text 与 keys 只能给一个：text 用来输入内容，keys 用来按键，两者不能在同一次调用里同时发送。',
     tmuxMissingHint: '这台电脑上没有 tmux。装上 tmux 后这里会列出 session 与 pane。'
   },
   en: {
@@ -79,9 +81,11 @@ const runtimeStrings = {
     missingTarget: 'target is required (session, window, or pane name)',
     missingTextOrKeys: 'text or keys is required',
     unknownPanelAction: 'Unknown panel action: ',
+    preferenceSaveFailed: 'Subscribed, but the preference could not be persisted; a restart may need subscribing again.',
     herdrNotRunning: 'The Herdr socket is missing or unreachable. Start Herdr, or point HERDR_SOCKET_PATH at the right socket.',
     herdrSocketDenied: 'No permission to access the Herdr socket. Check its file permissions, or point HERDR_SOCKET_PATH at it.',
     herdrUnsubscribed: 'Events are unsubscribed, so no event can be waited on; subscribe again with herdr_events first.',
+    ambiguousSend: 'Pass either text or keys, not both: text types content, keys presses keys; one call sends one of them.',
     tmuxMissingHint: 'tmux is not installed on this computer. Install it to list sessions and panes here.'
   }
 };
@@ -159,7 +163,11 @@ async function nodeRequest(method, params, callId, timeoutMs) {
         + '请先核对终端实际状态，再决定是否重试。'
       );
     }
-    throw error;
+    // 结构化标记：请求没送到 worker（不是 worker 报的错）。
+    // 订阅路径靠它决定「自己排重试」还是「信任 worker 的重连」。
+    const wrapped = new Error(String((error && error.message) || error));
+    wrapped.transportFailure = true;
+    throw wrapped;
   }
   if (!response.ok) {
     const error = new Error(localizeHerdrError(response.message) || runtime.nodeFailed);
@@ -688,9 +696,11 @@ const tools = {
   async herdr_send(args) {
     // 只传 pane_id 是无效参数：send_input 会把终端里已有的草稿提交掉，
     // 不能当成「空发送」执行，要像 tmux_send 一样明确报错。
-    if (!(args.keys && args.keys.length) && (args.text === undefined || args.text === null || args.text === '')) {
-      throw new Error(runtime.missingTextOrKeys);
-    }
+    const hasKeys = Boolean(args.keys && args.keys.length);
+    const hasText = args.text !== undefined && args.text !== null && args.text !== '';
+    if (!hasKeys && !hasText) throw new Error(runtime.missingTextOrKeys);
+    // 两者都给时不能默默丢掉一个（keys-first 会把 text 吞掉）。
+    if (hasKeys && hasText) throw new Error(runtime.ambiguousSend);
     if (args.pane_id && args.keys && args.keys.length) {
       const result = await herdrCall('pane.send_keys', {
         pane_id: args.pane_id,
@@ -775,7 +785,12 @@ const tools = {
   async herdr_events(args) {
     const mode = args.mode || 'status';
     if (mode === 'subscribe') {
-      return enableSubscription(args.__callId);
+      const result = await enableSubscription(args.__callId);
+      if (!result.persisted) {
+        // 订阅已开，但偏好没存上：如实告诉调用方，别让重启后静默失效。
+        return { subscribed: true, preference_saved: false, note: runtime.preferenceSaveFailed };
+      }
+      return { subscribed: true, preference_saved: true };
     }
     if (mode === 'unsubscribe') {
       subscriptionPreference = false;
@@ -817,14 +832,16 @@ const tools = {
     let subscribed = true;
     let subscriptionError = null;
     let transportFailed = false;
+    let preferencePersisted = true;
     try {
-      await enableSubscription(args.__callId);
+      preferencePersisted = (await enableSubscription(args.__callId)).persisted;
     } catch (error) {
       subscribed = false;
       subscriptionError = error && error.message ? error.message : String(error);
       // 传输层失败 = 请求根本没到 worker：worker 没有 desired、也不会重连，
       // 这时主进程自己排重试，不能只承诺「worker 已排好重连」。
-      transportFailed = /与插件工作进程的连接中断/.test(subscriptionError);
+      transportFailed = Boolean(error && error.transportFailure)
+        || /与插件工作进程的连接中断/.test(subscriptionError);
       if (transportFailed) scheduleSubscriptionRetry();
     }
     return {
@@ -832,13 +849,13 @@ const tools = {
       name: wantedName,
       trigger: 'event-only',
       subscribed: subscribed,
-      subscription_note: subscribed
-        ? null
-        : (transportFailed
+      subscription_note: !preferencePersisted
+        ? '订阅已打开，但「已订阅」这个偏好没能写入存储；重启后可能需要重新调用本工具或 herdr_events 的 subscribe。'
+        : (subscribed ? null : (transportFailed
           ? '自动化已创建并保存，但订阅请求没送到插件工作进程（' + subscriptionError
             + '）。已安排自动重试；也可以用 herdr_events 的 subscribe 立即重试。'
-          : '自动化已创建并保存，但当前没能打开事件订阅（' + subscriptionError
-            + '）。worker 已排好重连，Herdr 可用后会自动恢复订阅。')
+            : '自动化已创建并保存，但当前没能打开事件订阅（' + subscriptionError
+              + '）。worker 已排好重连，Herdr 可用后会自动恢复订阅。'))
     };
   },
 
@@ -891,9 +908,12 @@ const tools = {
   async tmux_send(args) {
     if (!args.target) throw new Error(runtime.missingTarget);
     const params = { target: String(args.target) };
-    if (args.keys && args.keys.length) {
+    const hasKeys = Boolean(args.keys && args.keys.length);
+    const hasText = args.text !== undefined && args.text !== null && args.text !== '';
+    if (hasKeys && hasText) throw new Error(runtime.ambiguousSend);
+    if (hasKeys) {
       params.keys = args.keys;
-    } else if (args.text !== undefined && args.text !== null) {
+    } else if (hasText) {
       params.text = args.text;
     } else {
       throw new Error(runtime.missingTextOrKeys);
@@ -1097,10 +1117,17 @@ const SUBSCRIBE_HOST_TIMEOUT_MS = 45000;
 // 否则 setup 成功后重启仍会按旧的退订偏好停摆）。
 async function enableSubscription(callId) {
   subscriptionPreference = true;
-  await persistSubscriptionPreference(true);
+  // 保存失败不能悄悄吞掉：调用方要能告诉用户「重启后可能要重新订阅」。
+  let persisted = true;
+  try {
+    await persistSubscriptionPreference(true);
+  } catch (error) {
+    persisted = false;
+  }
   // worker 的握手是 pane.list(15s) + 订阅确认(15s)，宿主要留出余量，
   // 否则宿主先超时，setup 会在自动化已创建后报普通失败。
-  return nodeRequest('herdr/subscribe', {}, callId, SUBSCRIBE_HOST_TIMEOUT_MS);
+  await nodeRequest('herdr/subscribe', {}, callId, SUBSCRIBE_HOST_TIMEOUT_MS);
+  return { persisted: persisted };
 }
 
 // Keep the event subscription alive for panel and webhook users ——

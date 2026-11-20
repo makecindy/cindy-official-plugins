@@ -53,6 +53,16 @@ function fail(id, code, message) {
 
 // 写操作「已发出但结果未知」的错误：调用方必须先核对终端实际状态，
 // 不要盲目重试（重试可能重复发送输入、任务或关闭操作）。
+// 「写入后等待」的超时：提示词已经发出去了，只是没等到目标状态。
+function outcomeUnknownWait(method) {
+  const error = new Error(
+    'HERDR_OUTCOME_UNKNOWN: ' + method + ' 已提交，但等待目标状态超时。'
+    + '请先读取画面确认实际状态，再决定是否重发，避免重复执行。'
+  );
+  error.code = 'HERDR_OUTCOME_UNKNOWN';
+  return error;
+}
+
 function outcomeUnknown(method) {
   const error = new Error(
     'HERDR_OUTCOME_UNKNOWN: 请求已发出但未收到回包（' + method
@@ -121,6 +131,12 @@ function callOnce(method, params, timeoutMs) {
         }
         if (message.id && message.id !== id) continue;
         if (message.error) {
+          // agent.prompt 带 wait 的 timeout = 提示已发送、只是没等到状态：
+          // 必须报「结果未知」，否则调用方重试会重复发提示。
+          if (message.error.code === 'timeout' && method === 'agent.prompt' && params && params.wait) {
+            finish(reject, outcomeUnknownWait('agent.prompt'));
+            return;
+          }
           // 保留 Herdr 的错误码（例如 timeout）：上层据此判断「继续等」还是「失败」。
           const error = new Error(message.error.code + ': ' + message.error.message);
           error.code = message.error.code;

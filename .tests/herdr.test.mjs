@@ -405,6 +405,25 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(workerSource4, /if \(value\.indexOf\(';\'\) >= 0\) return false;/,
     'semicolon keys must be rejected');
 
+  // 两种等待模式、text/keys 都要在 schema 层二选一。
+  const waitTool = manifest.tools.find((tool) => tool.name === 'herdr_wait');
+  assert.ok(waitTool && waitTool.parameters.oneOf, 'herdr_wait must constrain its two modes');
+  for (const name of ['tmux_send', 'herdr_send']) {
+    const tool = manifest.tools.find((entry) => entry.name === name);
+    assert.ok(tool.parameters.oneOf, `${name} must make text and keys exclusive`);
+  }
+
+  // agent.prompt 带 wait 的超时 = 提示已发送，必须报结果未知。
+  const workerSource5 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSource5, /outcomeUnknownWait\('agent\.prompt'\)/,
+    'a prompt wait timeout must be reported as outcome-unknown');
+
+  // 传输失败要有结构化标记，订阅路径据此决定自己重试。
+  assert.match(mainSource, /wrapped\.transportFailure = true;/,
+    'transport failures must be marked structurally');
+  assert.match(mainSource, /error && error\.transportFailure/,
+    'the subscription note must read the marker');
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,
