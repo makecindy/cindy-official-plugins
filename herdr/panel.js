@@ -426,11 +426,20 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
         if (pinnedView === 'tmux') await request('tmux_send', { target: target, text: draft });
         else await request('send', { pane_id: paneId, text: draft });
       } catch (error) {
-        // 同步没成功：草稿按归属放回。用户期间继续输入的部分接在后面，
-        // 正好还原「原草稿 + 续打」的完整命令，而不是把原草稿丢掉。
+        // 同步没成功：草稿按归属放回。上一次恢复的还在最前面时接在它
+        // 后面（保持输入顺序），否则前置（用户期间续打的部分接在后面）。
         if (currentScope() === scope) {
           const box = $('#term-input');
-          if (box) box.value = draft + box.value;
+          if (box) {
+            if (restoredDraft && restoredDraft.scope === scope
+                && box.value.indexOf(restoredDraft.text) === 0) {
+              box.value = restoredDraft.text + draft + box.value.slice(restoredDraft.text.length);
+              restoredDraft.text += draft;
+            } else {
+              box.value = draft + box.value;
+              restoredDraft = { scope: scope, text: draft };
+            }
+          }
         }
         renderOutput(error.message || T.sendFailed);
         return true;
@@ -459,6 +468,9 @@ let pendingEnterOnly = null;
 // 「终端行里有内容」（草稿刚同步过去、或刚粘过文本）：空输入框的回车
 // 只补 Enter。改行按键之后内容形态未知，但空行补一次回车本身无害。
 let terminalHasContent = null;
+// 同步失败后恢复到输入框的草稿前缀 {scope, text}：连续失败时，
+// 后失败的片段要接在前一个恢复后面，保持输入顺序，不能逐次前置。
+let restoredDraft = null;
 // 不改变终端行内容的直达按键：这些键之后恢复记录仍然有效。
 const PENDING_ENTER_KEEP_KEYS = { 'C-l': true, 'C-a': true, 'C-e': true, PPage: true, NPage: true };
 
@@ -527,6 +539,7 @@ function submitLine() {
   const scope = (pinnedView === 'tmux' ? 't:' + target : 'h:' + paneId);
   // 按下回车这一刻就把草稿从输入框取走：否则排队期间输入的第二条
   // 会和没清掉的第一条拼在一起，被下一次提交重复捕获。
+  restoredDraft = null;
   consumeFromInput(field, text);
   // 同一终端的「文本 + Enter」串行执行：两条提交并行时，第二次 paste
   // 可能排在第一次 Enter 前，把两条命令拼成一行或颠倒顺序。
@@ -677,7 +690,12 @@ async function openPane(pane) {
   // 换目标就丢掉草稿：A 里没发出去的命令不能在回车时打到 B 上。
   const changed = !selectedPane || selectedPane.pane_id !== pane.pane_id;
   selectedPane = pane;
-  if (changed) { $('#term-input').value = ''; pendingEnterOnly = null; terminalHasContent = null; }
+  if (changed) {
+    $('#term-input').value = '';
+    pendingEnterOnly = null;
+    terminalHasContent = null;
+    restoredDraft = null;
+  }
   readToken += 1;
   const token = readToken;
   renderHerdr();
@@ -803,7 +821,12 @@ async function openTmuxPane(pane) {
   // 换目标就丢掉草稿：A 里没发出去的命令不能在回车时打到 B 上。
   const changed = selectedTarget !== pane.target;
   selectedTarget = pane.target;
-  if (changed) { $('#term-input').value = ''; pendingEnterOnly = null; terminalHasContent = null; }
+  if (changed) {
+    $('#term-input').value = '';
+    pendingEnterOnly = null;
+    terminalHasContent = null;
+    restoredDraft = null;
+  }
   readToken += 1;
   const token = readToken;
   renderTmux();
@@ -937,6 +960,7 @@ function closeDetail() {
   selectedTarget = null;
   pendingEnterOnly = null;
   terminalHasContent = null;
+  restoredDraft = null;
   readToken += 1;
   if (view === 'tmux') renderTmux();
   else renderHerdr();
