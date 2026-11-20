@@ -732,3 +732,15 @@ Windows 10.0.26100 / Node 22.22.3 / Git 2.54.0.windows.1 的原生 file-URL 克�
 最终规定四套加插件 **446 通过、36 跳过、0 失败（138.68 秒）**。17 项不支持原生同步的正向及 19 项原有 Windows 跳过不变。清单及官方方式内存归档/内容检查通过：暂存树 `62d0c6a44191ac63e2f0c747f3fc9d2a2cd5afad`，33 文件、245531 压缩 bytes、684242 展开 bytes，精确匹配 Git blob，未留包。1.5.43 高于刚获取的 main 1.5.35；UI/settings/locales、回执 I/O 与恢复推送参数均与 e259b34 相同。
 
 源码/包 1.5.43 未安装，最后实测 local 仍是 97d540e / 1.5.19。本轮 local 身份再次 namespace mismatch，实时偏好无法读取，不提供改写授权。既有真实恢复/UI/集成前提及维护者决定未改变；未安装、改真实开关/凭证/权限/额度、执行 CI-only 改写或 merge/队列、重建退役资源或重试被阻断清理。
+
+## 选项 token 与原样 amend — 2026-11-21（源码 1.5.44）
+
+第 36 轮将 [4644941126](https://github.com/makecindy/cindy-official-plugins/pull/332#discussion_r4644941126) 归入既有请求识别同族，[4644941135](https://github.com/makecindy/cindy-official-plugins/pull/332#discussion_r4644941135) 归入原始消息保留。解析器为目录、ID、诊断及预留 SHA 共用一个下一 token 判据：短横线开头的 token 仍是选项，不是伪路径或额度数据；两种帮助项直接退出且不访问存储，未知选项拒绝。字面量短横线开头的相对路径须加 `./`；完整解析、保留后校验的顺序不变。
+
+签名/非签名共用的唯一 `amendArgs` 加入 `--cleanup=verbatim`，防止本地/全局清理配置改变注释、scissors 后文、空白或 DCO。amend 后原始消息及其他 payload 比较仍必须执行；不改 Git 配置、hook、signer 或执行机制，没有新增状态、存储、锁、队列或重试。
+
+两组新回归先在 3ef8138 失败（八个原生消息场景全部失败），最终定向 **11 通过（13.28 秒）**。消息矩阵隔离本地/全局 `commit.cleanup=strip/scissors`、`core.commentChar=#/@`，逐字节比较原始消息及 tree/parents/author，确认新 SHA 和原配置不变；未调用额度或远端推送，临时仓库/配置由夹具清理。这是原生 Windows/Git 机制证据，不是 Cindy/GitHub 恢复或签名 head 的运行验收。
+
+规定四套加插件 **456 通过、36 跳过、0 失败（143.31 秒）**。17 项不支持原生同步的正向及 19 项原有 Windows 跳过不变。清单及官方方式内存归档/内容检查通过：暂存树 `4c003c99097fa7d970bf8b854954a3c0e21c02b9`，33 文件、245757 压缩 bytes、684736 展开 bytes，精确匹配 Git blob，未留包。源码 1.5.44 高于刚获取的 main 1.5.35；UI/settings/locales、回执 I/O 与推送参数不变。
+
+源码/包 1.5.44 未安装，最后实测 local 仍是 97d540e / 1.5.19；本轮 local 身份仍不可用，实时偏好未知，不提供改写授权。真实拒绝 rerun 恢复、恢复中关闭、当前 UI/读取顺序/集成及当时 head 维护者复审仍是前提。未安装、改真实偏好/凭证/权限/额度、执行 CI-only 改写或 merge/队列、重建退役资源或重试被阻断清理。

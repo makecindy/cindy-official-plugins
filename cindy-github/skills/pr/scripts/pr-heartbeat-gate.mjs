@@ -331,6 +331,7 @@ export function parseArgs(argv, env = process.env) {
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    const nextIsOption = argv[i + 1]?.startsWith('-');
     if (arg === '--help' || arg === '-h') return { help: true };
     if (arg === '--json') {
       json = true;
@@ -374,15 +375,15 @@ export function parseArgs(argv, env = process.env) {
       continue;
     }
     if (arg === '--ci-retry-id') {
-      ciRetryId = argv[i + 1]?.startsWith('--') ? '' : (argv[++i] ?? '');
+      ciRetryId = nextIsOption ? '' : (argv[++i] ?? '');
       continue;
     }
     if (arg === '--reserve-ci-retry') {
-      reserveCiRetry = argv[i + 1]?.startsWith('--') ? '' : (argv[++i] ?? '');
+      reserveCiRetry = nextIsOption ? '' : (argv[++i] ?? '');
       continue;
     }
     if (arg === '--ci-retry-failure') {
-      ciRetryFailure = argv[i + 1]?.startsWith('--') ? '' : (argv[++i] ?? '');
+      ciRetryFailure = nextIsOption ? '' : (argv[++i] ?? '');
       continue;
     }
     if (arg === '--repo') {
@@ -395,7 +396,7 @@ export function parseArgs(argv, env = process.env) {
     }
     if (arg === '--state-dir') {
       stateDirProvided = true;
-      stateDir = argv[i + 1]?.startsWith('--') ? '' : (argv[++i] ?? '');
+      stateDir = nextIsOption ? '' : (argv[++i] ?? '');
       continue;
     }
     if (arg === '--wait') {

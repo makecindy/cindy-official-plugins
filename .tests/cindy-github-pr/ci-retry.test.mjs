@@ -71,6 +71,25 @@ test('CI requests reject absent or empty observation directories without falling
   }
 });
 
+test('CI value options never consume short help or other option tokens as data', async t => {
+  const fx = fixture(t);
+  for (const option of ['--state-dir', '--ci-retry-id', '--ci-retry-failure', '--reserve-ci-retry']) {
+    for (const help of ['-h', '--help']) {
+      const argv = [url, '--state-dir', fx.stateDir, '--ci-retry-status', '--ci-retry-id', prNodeId,
+        '--ci-retry-failure', fx.diagnosis, option, help];
+      assert.deepEqual(parseArgs(argv, fx.env), { help: true }, option + ' ' + help);
+      let stdout = '', stderr = '';
+      assert.equal(await runGate(argv, { env: fx.env, out: s => { stdout += s; }, err: s => { stderr += s; } }), 0);
+      assert.doesNotMatch(stdout + stderr, /ci-retry-reserved|"available"|CINDY_PRECHECK_OK/);
+    }
+    assert.throws(() => parseArgs([url, '--state-dir', fx.stateDir, option, '-unknown'], fx.env), /unknown option: -unknown/);
+  }
+  assert.equal(fs.existsSync(fx.stateDir), false);
+  assert.equal(fs.existsSync(fx.retryDir), false);
+  assert.equal(parseArgs([url, '--state-dir', './-h', '--ci-retry-status'], fx.env).stateDir, './-h',
+    'a literal dash-prefixed path has an explicit relative-path prefix');
+});
+
 test('orphan CI parameters preserve before validation and never dispatch an implicit status or observer', async t => {
   for (const flags of [
     ['--ci-retry-id', prNodeId], ['--ci-retry-failure'],
@@ -156,7 +175,7 @@ test('recovery guide passes dynamic refs, remotes and paths as literal argument 
       shallowPathArgs: ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'shallow'],
       originalObjectArgs: ['--no-replace-objects', 'cat-file', 'commit', oldHead],
       replacementObjectArgs: ['--no-replace-objects', 'cat-file', 'commit', newHead],
-      amendArgs: ['--no-replace-objects', 'commit', '--amend', '--no-edit'],
+      amendArgs: ['--no-replace-objects', 'commit', '--amend', '--no-edit', '--cleanup=verbatim'],
       verifyArgs: ['--no-replace-objects', 'verify-commit', newHead],
       originalSignatureArgs: ['--no-replace-objects', 'show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', oldHead],
       signatureArgs: ['--no-replace-objects', 'show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', newHead],
@@ -755,6 +774,41 @@ test('recovery push limits writes to the parent ref despite inherited submodule 
       assert.equal(git(work, ['config', '--get', 'submodule.recurse']), 'true');
       assert.equal(git(work, ['config', '--get', 'push.followTags']), 'true');
       assert.equal(git(work, ['tag', '--list']), 'unpublished');
+    });
+  }
+});
+
+test('recovery amend preserves exact raw messages despite local or global cleanup settings', async t => {
+  for (const scope of ['local', 'global']) for (const cleanup of ['strip', 'scissors']) for (const commentChar of ['#', '@']) {
+    await t.test(`${scope}/${cleanup}/${commentChar}`, t => {
+      const fx = fixture(t), work = path.join(fx.root, 'message-work');
+      fs.mkdirSync(work);
+      const global = path.join(fx.root, 'isolated-global'); fs.writeFileSync(global, '');
+      const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1',
+        GIT_AUTHOR_DATE: '2026-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' };
+      const git = (args, extra = {}) => execFileSync('git', args, { cwd: work, env: { ...env, ...extra }, stdio: ['ignore', 'pipe', 'pipe'] });
+      git(['init', '-b', 'main']);
+      for (const [key, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false']]) git(['config', key, value]);
+      fs.writeFileSync(path.join(work, 'code.txt'), 'unchanged code\n'); git(['add', 'code.txt']);
+      const message = 'original intent\n\n# intentional hash\n@ intentional at\ntrailing spaces  \n\n' +
+        commentChar + ' ------------------------ >8 ------------------------\nkeep after scissors\n\nSigned-off-by: Ada Example <ada@example.test>\n';
+      const messageFile = path.join(fx.root, 'message.txt'); fs.writeFileSync(messageFile, message);
+      git(['commit', '--cleanup=verbatim', '-F', messageFile]);
+      const original = git(['rev-parse', 'HEAD']).toString().trim();
+      const before = git(['cat-file', 'commit', original]);
+      for (const [key, value] of [['commit.cleanup', cleanup], ['core.commentChar', commentChar]]) git(['config', '--' + scope, key, value]);
+      const plan = guideArguments({ verifiedBranch: 'feature', verifiedRemote: work, gatePath: gate, prUrl: url,
+        observationStateDir: fx.stateDir, originalRemoteSha: original, prNodeId, diagnosisPath: fx.diagnosis, newSha: original });
+      git(plan.amendArgs, { GIT_COMMITTER_DATE: '2026-01-01T00:00:01Z' });
+      const next = git(['rev-parse', 'HEAD']).toString().trim();
+      assert.notEqual(next, original);
+      const after = git(['cat-file', 'commit', next]);
+      const payload = raw => raw.subarray(raw.indexOf('\n\n') + 2);
+      assert.deepEqual(payload(after), payload(before), 'comments, scissors suffix, spaces and DCO must remain byte-identical');
+      const headers = raw => raw.toString().split('\n\n')[0].split('\n').filter(line => /^(tree|parent|author) /.test(line));
+      assert.deepEqual(headers(after), headers(before));
+      assert.equal(git(['config', '--get', 'commit.cleanup']).toString().trim(), cleanup);
+      assert.equal(fs.existsSync(fx.retryDir), false, 'local mechanics test allocates no recovery quota');
     });
   }
 });

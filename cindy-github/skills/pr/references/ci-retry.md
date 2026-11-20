@@ -57,7 +57,7 @@ const shallowStateArgs = ['--no-replace-objects', 'rev-parse', '--is-shallow-rep
 const shallowPathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'shallow'];
 const originalObjectArgs = ['--no-replace-objects', 'cat-file', 'commit', originalRemoteSha];
 const replacementObjectArgs = ['--no-replace-objects', 'cat-file', 'commit', newSha];
-const amendArgs = ['--no-replace-objects', 'commit', '--amend', '--no-edit'];
+const amendArgs = ['--no-replace-objects', 'commit', '--amend', '--no-edit', '--cleanup=verbatim'];
 const verifyArgs = ['--no-replace-objects', 'verify-commit', newSha];
 const originalSignatureArgs = ['--no-replace-objects', 'show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', originalRemoteSha];
 const signatureArgs = ['--no-replace-objects', 'show', '--no-patch', '--format=%G?%n%GF%n%GP%n%GS', newSha];
@@ -362,7 +362,9 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    follow-up. If it is absent/empty, its history cannot be located reliably:
    reject before storage access, with no environment/default-cache fallback or
    claim of successful preservation. A missing value never consumes the next
-   option. Ordinary observation keeps its existing environment/default path.
+   option, including short `-h`: help exits without storage or quota work;
+   unknown option tokens fail parsing. Use `./` for literal relative paths
+   starting with a dash. Ordinary observation keeps its existing environment/default path.
    A missing diagnosis option/value, missing/invalid ID or source SHA, conflicting
    budget mode, or missing/damaged/invalid diagnosis cannot leave old outcomes
    vulnerable to cache cleanup. The existing entry point uses one completed
@@ -378,7 +380,12 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
 4. Recheck eligibility 6 (no approval, queue or auto-merge; all states known),
    the PR is open, the preference is enabled, and local/index/remote
    facts still match, including absence of every effective hook/history overlay.
-   Use `git` with `amendArgs` only after those checks. For a signed head,
+   Use `git` with `amendArgs` only after those checks. The shared
+   `--cleanup=verbatim` argument preserves the raw message regardless
+   of local/global cleanup or comment-character settings. Keep it for unsigned
+   heads too; never rewrite comments, scissors suffixes or whitespace to obtain
+   eligibility. The post-amend raw-message comparison below remains required.
+   For a signed head,
    recheck that the effective automatic signer still resolves to the recorded
    signature identity; a changed or unknown signer stops the amend. Preserve the code
    tree, parents, author, commit intent and existing trailers; never use
