@@ -262,6 +262,17 @@ function matchesEvent(waiter, event, data) {
   return true;
 }
 
+// 分段等待的间隙里到达的事件不能丢：留一小段回看缓冲，
+// 续段（带 since_ms）先回放匹配的，再挂新的 waiter。
+const recentEvents = [];
+const RECENT_EVENTS_MAX = 200;
+const RECENT_EVENTS_WINDOW_MS = 60000;
+
+function rememberEvent(event, data) {
+  recentEvents.push({ t: Date.now(), event: event, data: data });
+  if (recentEvents.length > RECENT_EVENTS_MAX) recentEvents.shift();
+}
+
 function notifyEventWaiters(event, data) {
   for (let index = eventWaiters.length - 1; index >= 0; index -= 1) {
     const waiter = eventWaiters[index];
@@ -275,6 +286,7 @@ function notifyEventWaiters(event, data) {
 function handleEvent(message) {
   const data = message.data || {};
   notify('herdr/event', { event: message.event, data: data });
+  rememberEvent(message.event, data);
   notifyEventWaiters(message.event, data);
   // 分屏变了就重新订阅：新分屏的状态事件否则收不到，已关闭的分屏还会让整条
   // 订阅请求被 Herdr 拒绝。
@@ -751,12 +763,13 @@ async function tmuxSend(target, params) {
   const text = String(params.text);
   // 缓冲区名是交给 tmux 服务的标识：用 crypto 生成，不用计数器/时间戳。
   const buffer = 'herdr-' + crypto.randomUUID();
-  await runTmux(['load-buffer', '-b', buffer, '-'], undefined, text);
+  // load 与 paste 都在清理范围内：load 超时（结果未知，server 可能已收下）
+  // 或 paste 失败时，都要按已知名字尽力删掉，否则这段文本（可能含敏感
+  // 参数）会永久留在全局 tmux buffer 列表里。
   try {
+    await runTmux(['load-buffer', '-b', buffer, '-'], undefined, text);
     await tmuxWrite(['paste-buffer', '-d', '-t', dest, '-b', buffer], '文本');
   } catch (error) {
-    // paste 失败（目标消失等）时 -d 不会执行：按名称尽力删掉，
-    // 否则这段文本会永久留在全局 tmux buffer 列表里。
     try { await runTmux(['delete-buffer', '-b', buffer]); } catch (cleanupError) { void cleanupError; }
     throw error;
   }
@@ -832,6 +845,18 @@ const handlers = {
       await withSubscriptionLock(async function () {
         await openSubscription();
       });
+    }
+    // 续段先回放：上一段超时到这次注册之间的间隙里到达的匹配事件。
+    const since = Number(params.since_ms || 0);
+    if (since > 0) {
+      const cutoff = Date.now() - RECENT_EVENTS_WINDOW_MS;
+      for (const entry of recentEvents) {
+        if (entry.t < since || entry.t < cutoff) continue;
+        const probe = { event: params.event || '', pane_id: params.pane_id || null };
+        if (matchesEvent(probe, entry.event, entry.data)) {
+          return { event: entry.event, data: entry.data, replayed: true };
+        }
+      }
     }
     return new Promise(function (resolve, reject) {
       const waiter = {

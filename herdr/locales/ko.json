@@ -19,7 +19,7 @@
       "description": "에이전트가 지정한 상태에 도달하거나 창 출력이 지정한 텍스트와 일치할 때까지 기다립니다(match 는 {type:\"substring\"|\"regex\", value:\"텍스트\"} 형태). 긴 대기는 timeout_ms 안에서 여러 구간으로 나뉘어 실행되며(기본 300000), 한도를 넘으면 오류가 됩니다."
     },
     "herdr_control": {
-      "description": "Herdr 작업 공간, 탭, 창, Git worktree를 관리합니다. 닫기 작업은 사용자가 명시적으로 요청한 경우에만 실행합니다."
+      "description": "Herdr 작업 공간, 탭, 창, Git worktree를 관리합니다. 닫기 작업과 worktree의 remove는 사용자가 명시적으로 요청한 경우에만 실행합니다."
     },
     "herdr_notify": {
       "description": "Herdr 터미널 화면에 알림을 표시합니다."

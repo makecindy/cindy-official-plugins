@@ -19,7 +19,7 @@
       "description": "agent が指定の状態になるまで、または pane の出力が指定テキストと一致するまで待ちます（match は {type:\"substring\"|\"regex\", value:\"テキスト\"} の形式）。長い待ち timeout_ms の枠内で小分けに実行され（既定 300000）、枠を使い切るとエラーになります。"
     },
     "herdr_control": {
-      "description": "Herdr のワークスペース、タブ、ペイン、Git worktree を管理します。閉じる操作はユーザーが明示的に要求した場合に実行します。"
+      "description": "Herdr のワークスペース、タブ、ペイン、Git worktree を管理します。閉じる操作と worktree の remove は、ユーザーが明示的に要求した場合にのみ実行します。"
     },
     "herdr_notify": {
       "description": "Herdr の端末画面に通知を表示します。"

@@ -614,6 +614,38 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(mainSource, /tools\.herdr_send\(\{ pane_id: request\.pane_id, keys: request\.keys, text: request\.text \}\)/,
     'the panel send bridge must forward text too');
 
+  // 删除旧任务前重新核实归属。
+  assert.match(mainSource, /schedule_get', \{ id: storedId \}\)[\s\S]{0,300}?isOurAutomation\(freshItem/,
+    'the old schedule must be re-fetched before deletion');
+
+  // 事件等待跨段回放。
+  const workerSrc12 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSrc12, /recentEvents/,
+    'the worker must keep a short event replay buffer');
+  assert.match(workerSrc12, /since_ms/,
+    'continuation chunks must pass a replay cursor');
+  assert.match(workerSrc12, /rememberEvent\(message\.event, data\)/,
+    'every event must enter the replay buffer');
+
+  // load 与 paste 都在清理范围内。
+  assert.match(workerSrc12, /try \{\s*await runTmux\(\['load-buffer'/,
+    'load-buffer failures must also clean up the buffer');
+
+  // worktree remove 标为破坏性（四语言）。
+  const controlTool = manifest.tools.find((tool) => tool.name === 'herdr_control');
+  assert.match(controlTool.description, /remove/,
+    'herdr_control must mark worktree remove as destructive');
+  for (const loc of ['en', 'zh-CN', 'ja', 'ko']) {
+    const locData = JSON.parse(readFileSync(path.join(root, 'herdr', 'locales', loc + '.json'), 'utf8'));
+    assert.match(locData.tools.herdr_control.description, /remove/,
+      loc + ' herdr_control must mark worktree remove as destructive');
+  }
+
+  // 面板等语言加载完再首次刷新。
+  const panelSrcLoc = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcLoc, /loadLocale\(\)\.then\(function \(\) \{ refresh\(\); \}/,
+    'the first refresh must wait for the locale');
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,

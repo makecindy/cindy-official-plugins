@@ -19,7 +19,7 @@
       "description": "Wait for an agent to reach a state, or for pane output to match text (match like {type:\"substring\"|\"regex\", value:\"text\"}). A long wait runs in bounded segments under one timeout_ms budget (default 300000) and fails when that budget runs out."
     },
     "herdr_control": {
-      "description": "Manage Herdr workspaces, tabs, panes, and Git worktrees. Close only when the user explicitly requests it."
+      "description": "Manage Herdr workspaces, tabs, panes, and Git worktrees. Close and worktree remove only when the user explicitly requests them."
     },
     "herdr_notify": {
       "description": "Show a notification in the Herdr terminal interface."

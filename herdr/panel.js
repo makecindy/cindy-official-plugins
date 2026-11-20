@@ -929,9 +929,12 @@ channel.addEventListener('message', function (event) {
     return;
   }
   // 宿主语言变了就跟着换文案。
-  if (message.type === 'host-context-changed') loadLocale();
+  if (message.type === 'host-context-changed') {
+    loadLocale().then(function () { refresh(); }, function () { refresh(); });
+  }
 });
 
-loadLocale();
-refresh();
+// 先拿到语言再首次刷新：否则 /app-context 慢一点，列表与详情会先渲染成英文，
+// 要等下一次刷新才纠正。语言变化后也重绘当前视图。
+loadLocale().then(function () { refresh(); }, function () { refresh(); });
 setInterval(refresh, 15000);

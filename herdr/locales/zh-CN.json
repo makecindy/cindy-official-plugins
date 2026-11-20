@@ -19,7 +19,7 @@
       "description": "等待某个 agent 进入指定状态，或等待某个分屏输出命中指定文本（match 形如 {type:\"substring\"|\"regex\", value:\"文本\"}）。长等待拆成多段执行，总时长受 timeout_ms 限制（默认 300000），到时仍未命中就报错。"
     },
     "herdr_control": {
-      "description": "管理 Herdr 的工作区、标签与分屏：创建/聚焦/重命名/关闭工作区与标签，拆分、移动、交换、缩放、调整分屏大小，创建 git worktree。破坏性操作（close）只在用户明确要求时执行。"
+      "description": "管理 Herdr 的工作区、标签与分屏：创建/聚焦/重命名/关闭工作区与标签，拆分、移动、交换、缩放、调整分屏大小，创建 git worktree。破坏性操作（close、worktree 的 remove）只在用户明确要求时执行。"
     },
     "herdr_notify": {
       "description": "在 Herdr 自己的界面里弹一条通知（走 Herdr 的 toast），用于把信息同步到终端那一侧。"

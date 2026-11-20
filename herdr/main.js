@@ -480,7 +480,15 @@ async function replaceUnboundSchedule(storedId, oldItem, name, args) {
   let note = null;
   if (isOurAutomation(oldItem, name, args)) {
     try {
-      await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_delete', { id: storedId }));
+      // 删除前重新核实归属：拿到旧快照之后，用户可能刚把这条自动化
+      // 改成别的内容；按 id 删除前必须以最新对象为准。
+      const freshOutcome = hostBody(
+        await cindy.host.call('cindy_scheduler', 'schedule_get', { id: storedId })
+      );
+      const freshItem = freshOutcome.ok && freshOutcome.body ? freshOutcome.body.data : null;
+      if (isOurAutomation(freshItem, name, args)) {
+        await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_delete', { id: storedId }));
+      }
     } catch (error) {
       // 新任务已经是事件桥当前配置了：不能因为旧任务清理失败就整体报失败。
       // 但要区分「确定没删掉」和「回执丢了、可能已删」。
@@ -878,19 +886,26 @@ const tools = {
       const wanted = args.match_event || {};
       const eventName = typeof wanted === 'string' ? wanted : wanted.event || '';
       const paneId = typeof wanted === 'string' ? null : wanted.pane_id || null;
+      // 分段之间的间隙里到达的事件不能丢：每段带上起点，worker 先回放
+      // 缓冲里这段之后到达的匹配事件，再挂新的 waiter。
+      let since = Date.now();
       while (true) {
         const remaining = deadline - Date.now();
         if (remaining <= 0) throw new Error('等待事件超时（' + timeoutMs + 'ms）');
         const chunk = Math.min(remaining, WAIT_CHUNK_MS);
+        const chunkStart = Date.now();
         try {
           const result = await nodeRequest('herdr/wait-event', {
             event: eventName,
             pane_id: paneId,
-            timeout_ms: chunk
+            timeout_ms: chunk,
+            since_ms: since
           }, args.__callId, chunk + WAIT_CHUNK_MARGIN_MS);
           return result || null;
         } catch (error) {
           if (!isTimeoutError(error)) throw error;
+          // 下一段从这段的起点回放：间隙里到达的匹配事件先补回来。
+          since = chunkStart;
         }
       }
     }
