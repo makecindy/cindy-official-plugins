@@ -407,12 +407,14 @@ async function openSubscription() {
 // 单个 pane 的对账重试次数（有界）：临时失败可以重试，不能无限重试。
 const reconcileRetries = {};
 
-async function reconcileNewPanes(paneIds, previousPaneIds, socket, backlog) {
+async function reconcileNewPanes(paneIds, previousPaneIds, socket, backlog, sinceOverride) {
   const fresh = paneIds.filter(function (id) { return previousPaneIds.indexOf(id) < 0; });
   for (const id of backlog || []) {
     if (paneIds.indexOf(id) >= 0 && fresh.indexOf(id) < 0) fresh.push(id);
   }
-  const since = Date.now();
+  // 重试/交接要保留原补查起点：这段时间里实时到达的状态已经通知过，
+  // 重新计时会把它们再补发一遍。
+  const since = sinceOverride || Date.now();
   // 对账是 fire-and-forget：agent.get 返回前用户可能已退订或换了订阅，
   // 那时补发事件会在退订后再触发一次通知与自动化。
   const stillCurrent = function () {
@@ -442,7 +444,7 @@ async function reconcileNewPanes(paneIds, previousPaneIds, socket, backlog) {
           if (subscription.socket && subscription.running) {
             const current = subscription.socket;
             const currentPanes = subscription.paneIds.slice();
-            reconcileNewPanes(currentPanes, currentPanes, current, rest);
+            reconcileNewPanes(currentPanes, currentPanes, current, rest, since);
           } else {
             subscription.reconcileBacklog = (subscription.reconcileBacklog || []).concat(rest);
           }
@@ -464,7 +466,7 @@ async function reconcileNewPanes(paneIds, previousPaneIds, socket, backlog) {
       if (attempts <= 3 && subscription.desired && subscription.socket === socket) {
         setTimeout(function () {
           if (!subscription.desired || subscription.socket !== socket) return;
-          reconcileNewPanes([paneId], [], socket, []);
+          reconcileNewPanes([paneId], [], socket, [], since);
         }, 5000).unref();
       }
       void error;

@@ -785,6 +785,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a late reconcile remainder must be kicked to the current generation');
   assert.match(workerSrc15, /reconcileRetries/,
     'a transient reconcile failure must get a bounded retry');
+  assert.match(workerSrc15, /sinceOverride/,
+    'retries must keep the original reconcile cursor');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
