@@ -318,7 +318,9 @@ async function openSubscription() {
   const id = nextId();
   const socket = net.createConnection(socketPath());
   socket.setEncoding('utf8');   // 事件里的中文/emoji 可能跨 chunk
-  subscription.socket = socket;
+  // 确认（ACK）之前不把它设成 current：这段时间旧连接仍是 current，
+  // 旧连接被动断开时 close 回调要能正常作废基线并触发重连。
+  subscription.pendingSocket = socket;
 
   try {
     await new Promise(function (resolve, reject) {
@@ -361,6 +363,9 @@ async function openSubscription() {
             // 新旧两条连接各转发一次事件。
             socket.isCurrentSubscription = true;
             if (previous) previous.isCurrentSubscription = false;
+            // 确认之后才切换 current 身份。
+            subscription.socket = socket;
+            subscription.pendingSocket = null;
             finish(resolve);
           }
           continue;
@@ -373,6 +378,12 @@ async function openSubscription() {
     });
       socket.on('close', function () {
         if (socket.herdrIntentionalClose) return;
+        // 还没确认就断开的连接：本轮交接作废，基线不能再用。
+        if (subscription.pendingSocket === socket) {
+          subscription.pendingSocket = null;
+          subscription.generation += 1;
+          subscription.paneIds = [];
+        }
         // 只清理属于自己的状态：旧连接的 close 不能抹掉新连接。
         if (subscription.socket === socket) {
           subscription.socket = null;
@@ -391,6 +402,7 @@ async function openSubscription() {
     // 新订阅没成：无论 close 回调有没有先把记录清掉，都要把旧连接
     // 接回来（还活着）或排一次重连（已经死了），不能让它失管。
     try { socket.destroy(); } catch (destroyError) { void destroyError; }
+    if (subscription.pendingSocket === socket) subscription.pendingSocket = null;
     if (previous && previous !== socket && !previous.destroyed) {
       subscription.socket = previous;
       subscription.running = true;

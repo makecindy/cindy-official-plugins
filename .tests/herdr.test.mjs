@@ -881,7 +881,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.ok(!/args\.allow_held/.test(mainSource),
     'the agent tool must ignore an allow_held argument');
   const panelSrcQd3 = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
-  assert.match(panelSrcQd3, /holdIsNew && pendingEnterOnly/,
+  assert.match(panelSrcQd3, /if \(holdIsNew\) \{/,
     'a hold created after enqueue must also block an empty Enter');
   assert.match(panelSrcQd3, /allow_held: true/,
     'the enter-only resume must unlock the pane queue');
@@ -914,6 +914,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a passive disconnect must invalidate the paneIds baseline');
   assert.match(workerSrc22, /generationAtStart/,
     'a snapshot taken during a handover must be invalidated');
+  assert.match(workerSrc22, /subscription\.pendingSocket = socket;/,
+    'a socket must only become current after the handshake');
+  assert.ok(!/subscription\.socket = socket;[\s\S]{0,80}net\.createConnection/.test(workerSrc22),
+    'the current socket must not be replaced before the acknowledgement');
   assert.match(workerSrc22, /lastDeliveredStatus\[data\.pane_id\] = data\.agent_status/,
     'the delivered status must be recorded per pane');
   assert.match(workerSrc22, /lastDeliveredStatus\[paneId\] !== status/,

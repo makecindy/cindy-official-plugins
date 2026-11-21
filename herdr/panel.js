@@ -754,7 +754,11 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
   // 否则「没有冻结」会被误判成新冻结，首次提交全被拦下。
   const currentHold = scopeHolds[scope] || 0;
   const holdIsNew = currentHold !== 0 && currentHold !== holdAtEnqueue;
-  if (holdIsNew && pendingEnterOnly[scope] !== text) {
+  // 入队之后才建立的 hold 拦住**所有**预排任务：同文本也不例外——
+  // 两次相同命令里，后一条可能在前一条建立 hold 之前就排好了。
+  // 只有在看到 hold 之后才重新入队的提交才是恢复（那时 holdAtEnqueue
+  // 已经等于当前代次，holdIsNew 本来就是 false）。
+  if (holdIsNew) {
     const prior = queuedDrafts[scope] || '';
     queuedDrafts[scope] = prior + text;
     if (currentScope() === scope) {
@@ -762,6 +766,9 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       field.value = field.value.indexOf(prior) === 0
         ? queuedDrafts[scope] + field.value.slice(prior.length)
         : queuedDrafts[scope] + field.value;
+      // 登记恢复 marker：否则之后按 Tab/Up 会把刚回填的内容当成新草稿，
+      // 和之前的累积草稿拼成两份。
+      restoredBoxText[scope] = field.value;
     }
     renderOutput(T.heldHint);
     return;
