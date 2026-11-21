@@ -1100,7 +1100,14 @@ const handlers = {
         await tmuxSend(key, { text: String(params.text) });
       } catch (error) {
         // 阶段标记留在 message 里：面板据此区分「文字没进」和「只差回车」。
-        throw new Error('TMUX_STAGE=text ' + String(error && error.message ? error.message : error));
+        const detail = String(error && error.message ? error.message : error);
+        // 明确失败（文字没写进去）不冻结：这个 pane 没有未完成的写入，
+        // 冻结它会让之后的普通重试被 TMUX_QUEUE_HELD 挡住。
+        // 只有结果未知才需要 hold。
+        if (/HERDR_OUTCOME_UNKNOWN/.test(detail)) {
+          throw new Error('TMUX_STAGE=text ' + detail);
+        }
+        throw new Error('TMUX_STAGE=text_failed ' + detail);
       }
       try {
         await tmuxSend(key, { keys: ['Enter'] });
@@ -1155,7 +1162,8 @@ function enqueueTmuxSend(dest, task, allowHeld) {
     function () { if (allowHeld) delete tmuxQueueHolds[dest]; },
     function (error) {
       const detail = String(error && error.message ? error.message : error);
-      if (/HERDR_OUTCOME_UNKNOWN|TMUX_STAGE=enter|TMUX_STAGE=text/.test(detail)) {
+      // TMUX_STAGE=text_failed 是明确失败，不冻结。
+      if (/HERDR_OUTCOME_UNKNOWN|TMUX_STAGE=enter|TMUX_STAGE=text( |$)/.test(detail)) {
         tmuxQueueHolds[dest] = detail;
       }
     }

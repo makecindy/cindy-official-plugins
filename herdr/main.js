@@ -593,6 +593,18 @@ async function runAutomationNow(scheduleId) {
   throw hostWriteFailure(outcome);
 }
 
+// 存储暂时读不到时的待办唤醒：重试直到能读到 id。
+let pendingTrigger = false;
+let pendingTriggerTimer = null;
+
+function schedulePendingTrigger() {
+  if (pendingTriggerTimer) return;
+  pendingTriggerTimer = setTimeout(function () {
+    pendingTriggerTimer = null;
+    if (pendingTrigger) void triggerAutomation();
+  }, 5000);
+}
+
 // Herdr 报告 agent 进入 blocked/done 时，让宿主调度器跑一次那条自动化。
 // 由宿主负责投递，插件不持有也不外发任何地址。
 // 限流窗口内到达的新事件不丢弃：合并成一次延后执行，否则后一个分屏的
@@ -604,8 +616,20 @@ async function triggerAutomation() {
   } catch (error) {
     // 存储暂时读不了时退回上次记下的 id，不把这次唤醒直接丢掉。
     scheduleId = cachedScheduleId;
+    if (!scheduleId) {
+      // 冷启动时还没有缓存：这次唤醒不能就这样丢掉——
+      // 记下来，存储恢复后重试，否则已持久化的自动化会永远错过这次事件。
+      pendingTrigger = true;
+      schedulePendingTrigger();
+      return;
+    }
   }
-  if (!scheduleId) return;
+  if (!scheduleId) {
+    pendingTrigger = true;
+    schedulePendingTrigger();
+    return;
+  }
+  pendingTrigger = false;
   const now = Date.now();
   if (triggerTimer) return;                       // 已经排了延后执行
   if (now - lastTriggerAt >= TRIGGER_THROTTLE_MS) {

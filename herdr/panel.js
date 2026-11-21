@@ -813,7 +813,14 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       delete restoredBoxText[scope];
     } else if (!resuming) {
       if (currentScope() === scope) {
-        field.value = pending + text + field.value;
+        // 顺序必须和提交顺序一致：框里已经躺着更早提交的失败内容时
+        // （前面那次结果未知、已回填到输入框），新排队的草稿要排在它后面，
+        // 不能前置拼成「ba」这样的倒序命令。
+        const boxHasEarlier = restoredBoxText[scope] !== undefined
+          && field.value.indexOf(restoredBoxText[scope]) === 0;
+        field.value = boxHasEarlier
+          ? field.value + pending + text
+          : pending + text + field.value;
         // 与另两条恢复路径一致：登记恢复 marker，
         // 否则之后按 Tab/Up 会把刚回填的整段当成新草稿重复累积。
         restoredBoxText[scope] = field.value;
@@ -889,7 +896,7 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       }
       if (submitError) {
         // 文本阶段（或整段结果未知）：交给外层 catch 的既有语义处理。
-        throw new Error(submitDetail.replace('TMUX_STAGE=text ', ''));
+        throw new Error(submitDetail.replace(/TMUX_STAGE=text(_failed)? /, ''));
       }
       scopeHolds[scope] = 0;
       // 解冻语义在请求真正发出之后才消费：发不出去（中途被挡下）就还回去，
@@ -925,7 +932,12 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
     // 新内容），用户核对后可以重试或取回原命令。
     // 已经放回输入框的文字不再另存一份，避免同一段文字出现两处。
     const restoredToBox = currentScope() === scope && !field.value;
-    if (restoredToBox) field.value = text;
+    if (restoredToBox) {
+      field.value = text;
+      // 登记 marker：后面的排队草稿要排在这条失败内容之后，
+      // 顺序不能反。
+      restoredBoxText[scope] = text;
+    }
     else if (!queuedDrafts[scope]) queuedDrafts[scope] = text;
     releaseUnlock(scope, unlockTokenValue);
     renderOutput(error.message || T.sendFailed);
