@@ -46,6 +46,9 @@ const strings = {
     terminalInput: '终端输入',
     lang: 'zh-CN',
     dataSourceTabs: '数据源',
+    pluginUnresponsive: '插件未响应',
+    operationFailed: '操作失败',
+    paneReplaced: '这个分屏已经被替换（tmux server 重启），请重新选择目标。',
     sendFailed: '发送失败',
     termPlaceholder: '直接输入命令，回车执行',
     send: '发送',
@@ -91,6 +94,9 @@ const strings = {
     terminalInput: 'Terminal input',
     lang: 'en',
     dataSourceTabs: 'Data source',
+    pluginUnresponsive: 'The plugin did not respond',
+    operationFailed: 'The operation failed',
+    paneReplaced: 'This pane was replaced (the tmux server restarted). Please pick the target again.',
     sendFailed: 'Could not send',
     termPlaceholder: 'Type a command, Enter runs it',
     send: 'Send',
@@ -136,6 +142,9 @@ const strings = {
     terminalInput: '端末入力',
     lang: 'ja',
     dataSourceTabs: 'データソース',
+    pluginUnresponsive: 'プラグインが応答しません',
+    operationFailed: '操作に失敗しました',
+    paneReplaced: 'このペインは置き換えられました（tmux server が再起動）。対象を選び直してください。',
     sendFailed: '送信に失敗',
     termPlaceholder: 'ここにコマンドを入力し Enter で実行',
     send: '送信',
@@ -181,6 +190,9 @@ const strings = {
     terminalInput: '터미널 입력',
     lang: 'ko',
     dataSourceTabs: '데이터 소스',
+    pluginUnresponsive: '플러그인이 응답하지 않습니다',
+    operationFailed: '작업이 실패했습니다',
+    paneReplaced: '이 페인은 교체되었습니다(tmux server 재시작). 대상을 다시 선택하세요.',
     sendFailed: '보내지 못했습니다',
     termPlaceholder: '명령을 입력하고 Enter 로 실행',
     send: '보내기',
@@ -231,7 +243,7 @@ function request(action, payload) {
       cleanup();
       reject(new Error(PANEL_WRITE_ACTIONS[action]
         ? 'HERDR_OUTCOME_UNKNOWN: ' + T.writeTimeoutUnknown + '（' + action + '）'
-        : '插件未响应'));
+        : T.pluginUnresponsive));
     }, PANEL_REQUEST_TIMEOUT_MS);
     function onMessage(event) {
       const message = event.data;
@@ -240,7 +252,7 @@ function request(action, payload) {
       settled = true;
       cleanup();
       if (message.ok) resolve(message.data);
-      else reject(new Error(message.message || '操作失败'));
+      else reject(new Error(message.message || T.operationFailed));
     }
     channel.addEventListener('message', onMessage);
     channel.postMessage(Object.assign({ type: 'panel-request', reqId: reqId, action: action }, payload || {}));
@@ -482,18 +494,22 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
     if (scopeHolds[scope] && !isCancelKey) {
       // 多个被拦下的按键草稿按入队顺序累积（ABC，不是 CBA），
       // 与提交队列共用 queuedDrafts；切回该分屏时统一交还。
-      if (currentScope() === scope && draft) {
-        const holdBox = $('#term-input');
+      // 用户已经切到别的分屏时也要保存：草稿在按键时就从输入框取走了，
+      // 不存下来就永久丢失。
+      if (draft) {
         const prior = queuedDrafts[scope] || '';
         // 只有「这次文字确实是面板刚恢复的那份」才去重：
         // 两份碰巧有相同前缀的独立草稿必须都保留。
         const addition = draftFromRestore && prior && draft.indexOf(prior) === 0
           ? draft.slice(prior.length) : draft;
         queuedDrafts[scope] = prior + addition;
-        holdBox.value = holdBox.value.indexOf(prior) === 0
-          ? queuedDrafts[scope] + holdBox.value.slice(prior.length)
-          : queuedDrafts[scope] + holdBox.value;
-        restoredBoxText[scope] = holdBox.value;
+        if (currentScope() === scope) {
+          const holdBox = $('#term-input');
+          holdBox.value = holdBox.value.indexOf(prior) === 0
+            ? queuedDrafts[scope] + holdBox.value.slice(prior.length)
+            : queuedDrafts[scope] + holdBox.value;
+          restoredBoxText[scope] = holdBox.value;
+        }
       }
       renderOutput(T.heldHint);
       return true;
@@ -916,6 +932,8 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
         ? String(submitError.message || submitError) : '';
       if (submitError && /TMUX_STAGE=enter/.test(submitDetail)) {
         // 文本已进终端、Enter 结果未知：只补回车，不重贴文本。
+        // 本次的解冻占用在这里结束，否则之后的写入永远拿不到解冻标记。
+        releaseUnlock(scope, unlockTokenValue);
         pendingEnterOnly[scope] = text;
         scopeHolds[scope] = holdGeneration += 1;
         scopeHoldKind[scope] = 'enter';
@@ -1212,7 +1230,20 @@ async function refreshTmux(token) {
     const identity = tmuxPaneIdentity(pane, serverGeneration);
     seen[id] = identity;
     const before = tmuxPaneIdentities[id];
-    if (before !== undefined && before !== identity) clearScopeState('t:' + id);
+    if (before !== undefined && before !== identity) {
+      clearScopeState('t:' + id);
+      // 旧 pane 的编辑状态也要作废：详情不能再绑到新进程上，
+      // 输入框里没发出去的草稿不能被下一次回车发到新 pane。
+      if (selectedTarget === id) {
+        selectedTarget = null;
+        const box = $('#term-input');
+        if (box) box.value = '';
+        restoredDraft = null;
+        const detail = $('#detail');
+        if (detail) detail.hidden = true;
+        renderOutput(T.paneReplaced);
+      }
+    }
   }
   for (const id of Object.keys(tmuxPaneIdentities)) {
     if (!(id in seen)) delete tmuxPaneIdentities[id];

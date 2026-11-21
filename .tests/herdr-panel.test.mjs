@@ -275,3 +275,16 @@ test('the panel waits longer than the slowest backend operation', () => {
   // 后端最慢：session.snapshot 30s，tmux_state 是三连 8+8+8s。
   assert.ok(Number(match[1]) >= 30000, `panel budget ${match[1]}ms is shorter than the backend`);
 });
+
+// 非 macOS 的剪贴板快捷键必须留在本地。
+{
+  const textField = { tagName: 'TEXTAREA', isContentEditable: false };
+  assert.equal(lib.specialKey('tmux', { ctrlKey: true, key: 'v', target: textField }), null,
+    'Ctrl+V in the input box must stay a local paste');
+  assert.equal(lib.specialKey('tmux', { ctrlKey: true, shiftKey: true, key: 'C', target: textField }), null,
+    'Ctrl+Shift+C in the input box must stay a local copy');
+  assert.equal(lib.specialKey('tmux', { ctrlKey: true, key: 'c', target: textField }), 'C-c',
+    'plain Ctrl+C must still cancel the terminal line');
+  assert.equal(lib.specialKey('tmux', { ctrlKey: true, key: 'v', target: { tagName: 'DIV' } }), 'C-v',
+    'outside a text field the terminal still receives Ctrl+V');
+}

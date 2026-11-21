@@ -1156,7 +1156,19 @@ const handlers = {
 // 会让另一个调用的 paste 插到本次「文本 + Enter」之间。
 const tmuxSendQueues = {};
 
+// 上一次见到的 tmux server pid：变了说明 server 重启过，
+// 旧的 pane id（%0…）会被复用，旧队列与冻结必须一起作废。
+let tmuxQueueServerPid = null;
+
 async function tmuxQueueKey(dest) {
+  const serverPid = await tmuxServerPid();
+  if (serverPid && tmuxQueueServerPid !== null && serverPid !== tmuxQueueServerPid) {
+    // server 换代：旧 server 上留下的冻结不能拦住新 pane 的正常写入，
+    // 旧队列也不能继续排在新 server 的写入后面。
+    for (const key of Object.keys(tmuxQueueHolds)) delete tmuxQueueHolds[key];
+    for (const key of Object.keys(tmuxSendQueues)) delete tmuxSendQueues[key];
+  }
+  if (serverPid) tmuxQueueServerPid = serverPid;
   let paneId = '';
   try {
     const stdout = await runTmux(['display-message', '-p', '-t', dest, '#{pane_id}']);

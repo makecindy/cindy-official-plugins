@@ -62,6 +62,20 @@
     if (event.ctrlKey && event.altKey) return null;
     if (typeof event.getModifierState === 'function' && event.getModifierState('AltGraph')) return null;
     if (event.ctrlKey) {
+      // 文本框里的剪贴板快捷键留在本地：粘贴/复制不能被发到远端终端，
+      // 否则本地草稿编辑不了，还会把 C-v / C-c 当成终端控制键发出去。
+      // 纯 Ctrl+C 仍是「取消终端里那行」的语义，不能拦。
+      const target = event.target;
+      const inTextField = Boolean(target) && (
+        target.tagName === 'TEXTAREA' || target.tagName === 'INPUT'
+        || target.isContentEditable === true);
+      if (inTextField) {
+        const pressed = String(event.key || '').toLowerCase();
+        const isPaste = pressed === 'v';
+        const isCopy = pressed === 'c' && event.shiftKey;
+        const isCut = pressed === 'x' && event.shiftKey;
+        if (isPaste || isCopy || isCut) return null;
+      }
       if (String(event.key).length !== 1) return null;
       return (view === 'tmux' ? 'C-' : 'ctrl+') + String(event.key).toLowerCase();
     }
