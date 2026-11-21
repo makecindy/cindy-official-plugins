@@ -610,7 +610,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
 
   // 草稿同步与发送目标绑定：等待期间切分屏不会打到新目标、不改写新目标的输入框。
   const panelSrcPin = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
-  assert.match(panelSrcPin, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft, draftFromRestore, epoch\) \{[\s\S]{0,2600}?tmux_send', \{[\s\S]{0,120}?target: target, text: draft, keys: \[key\]/,
+  assert.match(panelSrcPin, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft, draftFromRestore, epoch, holdKindAtPress, recoveryAtPress\) \{[\s\S]{0,2600}?tmux_send', \{[\s\S]{0,120}?target: target, text: draft, keys: \[key\]/,
     'the draft sync must use the pinned target');
   assert.match(panelSrcPin, /if \(!scopeEpochIsCurrent\(scope, epoch\)\) return true;/,
     'late callbacks from a replaced pane must not mutate its restored state');
@@ -682,7 +682,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'queued submits must only consume the sent prefix');
   assert.match(panelSrcTimeout, /按下回车这一刻就把草稿从输入框取走/,
     'the draft must leave the box at submit time, not at dequeue time');
-  assert.match(panelSrcTimeout, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft, draftFromRestore, epoch\)/,
+  assert.match(panelSrcTimeout, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft, draftFromRestore, epoch, holdKindAtPress, recoveryAtPress\)/,
     'the draft must be captured with its ownership at keypress time');
   assert.match(panelSrcTimeout, /捕获并取走/,
     'a line-altering key must consume the draft at keypress time');
@@ -1065,8 +1065,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a failed tmux probe must keep the last server generation');
   assert.match(panelSrcQd3, /pendingRecoveryKey\[scope\] = key/,
     'a keys-stage failure must remember the original key');
-  assert.match(panelSrcQd3, /isRecoveryKey/,
-    'only the original key may pass a keys-stage hold');
+  assert.match(panelSrcQd3, /holdKindAtPress === 'keys' && recoveryAtPress === key/,
+    'only a key pressed after the keys prompt may unlock');
+  assert.match(panelSrcQd3, /if \(isRecoveryKey && draft\)/,
+    'a new draft typed before the recovery key must be kept');
   assert.match(workerSrc22, /const remainingWait = deadline - Date\.now\(\);/,
     'event waits must deduct the subscription handshake from the budget');
   assert.match(mainSource, /'agent.wait': true, 'pane.wait_for_output': true/,

@@ -478,14 +478,25 @@ function forwardKey(event) {
     consumeFromInput(draftField, draft);
   }
   // 同一终端的操作排队执行：草稿同步、改行按键不能与正在进行的提交交错。
+  const holdKindAtPress = scopeHoldKind[scope] || null;
+  const recoveryAtPress = pendingRecoveryKey[scope] || null;
   enqueueForScope(scope, function (epoch) {
-    return forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, draftFromRestore, epoch);
+    return forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, draftFromRestore, epoch, holdKindAtPress, recoveryAtPress);
   });
   return true;
 }
 
-async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, draftFromRestore, epoch) {
-  const isRecoveryKey = scopeHoldKind[scope] === 'keys' && pendingRecoveryKey[scope] === key;
+async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, draftFromRestore, epoch, holdKindAtPress, recoveryAtPress) {
+  // 只有按下时就已经看到 keys 提示的那一次才是恢复。排队中的下一次按键不是。
+  const isRecoveryKey = holdKindAtPress === 'keys' && recoveryAtPress === key;
+  if (isRecoveryKey && draft) {
+    if (currentScope() === scope) {
+      const box = $('#term-input');
+      if (box) box.value = draft + box.value;
+    } else {
+      queuedDrafts[scope] = (queuedDrafts[scope] || '') + draft;
+    }
+  }
   // 会改动终端里那行内容的按键（取消 C-c、历史 Up/Down、补全 Tab、
   // 删除 C-u/C-w/C-k/C-d、Esc、M-* 宏等）让恢复记录失效；
   // 但清屏 C-l、移动光标 C-a/C-e、翻滚动条 PPage/NPage 不改内容，
