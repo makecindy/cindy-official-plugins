@@ -492,7 +492,8 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
   if (isRecoveryKey && draft) {
     if (currentScope() === scope) {
       const box = $('#term-input');
-      if (box) box.value = draft + box.value;
+      // 先按的在前：框里可能已经放回了上一段，这次接在后面。
+      if (box) box.value = box.value + draft;
     } else {
       queuedDrafts[scope] = (queuedDrafts[scope] || '') + draft;
     }
