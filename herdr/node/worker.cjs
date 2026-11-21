@@ -1022,6 +1022,26 @@ const handlers = {
     return enqueueTmuxSend(dest, function () {
       return tmuxSend(params && params.target, params || {});
     });
+  },
+
+  // 提交一行 = 文本 + Enter 的原子任务：两个 RPC 各自排队的话，
+  // B 的文本仍可能插到 A 的 Enter 前面。这里把两步放进同一个队列项。
+  async 'tmux/submit'(params) {
+    const dest = String((params && params.target) || '');
+    return enqueueTmuxSend(dest, async function () {
+      try {
+        await tmuxSend(dest, { text: String(params.text) });
+      } catch (error) {
+        // 阶段标记留在 message 里：面板据此区分「文字没进」和「只差回车」。
+        throw new Error('TMUX_STAGE=text ' + String(error && error.message ? error.message : error));
+      }
+      try {
+        await tmuxSend(dest, { keys: ['Enter'] });
+      } catch (error) {
+        throw new Error('TMUX_STAGE=enter ' + String(error && error.message ? error.message : error));
+      }
+      return { target: dest, mode: 'submitted' };
+    });
   }
 };
 

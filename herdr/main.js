@@ -143,7 +143,7 @@ const READ_ONLY_HERDR_METHODS = {
 };
 
 function isPotentiallyMutating(method, params) {
-  if (method === 'tmux/send') return true;
+  if (method === 'tmux/send' || method === 'tmux/submit') return true;
   if (method !== 'herdr/request') return false;   // tmux/read、tmux/sessions 等
   const inner = params && params.method;
   return !READ_ONLY_HERDR_METHODS[inner];
@@ -348,6 +348,22 @@ function isOurAutomation(item, name, args) {
   return true;
 }
 
+// 解绑替换前后对比：这些字段是从旧任务沿用进新任务的，
+// 期间用户若改过任何一项，新任务已按旧快照创建，旧任务必须保留。
+function sameScheduleConfig(a, b) {
+  const pick = function (item) {
+    return JSON.stringify({
+      prompt: item && item.prompt,
+      agentKind: item && item.agentKind,
+      silentWhenIdle: item && item.silentWhenIdle,
+      timezone: item && item.timezone,
+      cronExpr: item && item.cronExpr,
+      notify: item && item.notify
+    });
+  };
+  return pick(a) === pick(b);
+}
+
 // 「只由事件唤醒」的自动化载荷：cronExpr/timezone 是 schema 必填项，
 // manual=true 时它不会真的按时间跑，只是留着，用户以后想恢复定时触发不用重填。
 // base = 被替换掉的旧任务：本次没显式给的字段沿用旧值，
@@ -497,12 +513,18 @@ async function replaceUnboundSchedule(storedId, oldItem, name, args) {
       // 归属已变化 = 不能删，也要说明为什么留着。
       if (freshOutcome.ok && freshOutcome.body && freshOutcome.body.data) {
         const freshItem = freshOutcome.body.data;
-        if (isOurAutomation(freshItem, name, args)) {
-          await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_delete', { id: storedId }));
-        } else {
+        if (!isOurAutomation(freshItem, name, args)) {
           note = '新自动化已生效（id=' + scheduleId
             + '），但旧任务的内容已被改动、不再确认是本插件创建的，所以保留未删。'
             + '如果确认不再需要，请手动删除它。';
+        } else if (!sameScheduleConfig(freshItem, oldItem)) {
+          // 两次读取之间用户改过配置：新任务用的是旧快照，
+          // 删掉旧任务会把他刚做的修改一起丢掉，保留并说明。
+          note = '新自动化已生效（id=' + scheduleId
+            + '），但核对时发现旧任务在本次配置期间被改动过，已保留未删。'
+            + '请先对比两条任务，确认新任务是否需要沿用改动后，再手动清理旧任务。';
+        } else {
+          await hostWrite(cindy.host.call('cindy_scheduler', 'schedule_delete', { id: storedId }));
         }
       } else if (freshOutcome.ok || isNotFound(freshOutcome)) {
         // 旧任务已经不存在：不用删，也无需提示。
@@ -1127,6 +1149,11 @@ async function handlePanelRequest(request) {
   }
   if (action === 'tmux_send') {
     return tools.tmux_send({ target: request.target, text: request.text, keys: request.keys });
+  }
+  if (action === 'tmux_submit') {
+    // 面板提交一行：worker 把「文本 + Enter」作为一个队列任务执行，
+    // 不让另一个面板的文本插进来。
+    return nodeRequest('tmux/submit', { target: request.target, text: request.text });
   }
   throw new Error(runtime.unknownPanelAction + action);
 }

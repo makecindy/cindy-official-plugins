@@ -687,7 +687,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const panelSrcHold = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSrcHold, /scopeHolds\[scope\] = true/,
     'an unconfirmed Enter must hold the scope queue');
-  assert.match(panelSrcHold, /这个终端上一次回车还没有确认/,
+  assert.match(panelSrcHold, /renderOutput\(T\.heldHint\)/,
     'a held scope must explain why the submit was not queued');
 
   // 缺 id 的创建回执 = 结果未知。
@@ -817,6 +817,22 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
       assert.ok(marks.includes(owner), file + ' must register ' + owner);
     }
   }
+
+  // 单个 worker 队列任务完成文本+Enter；出队复核 hold；提示四语言化；新旧快照对比。
+  const panelSrcAtomic2 = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcAtomic2, /TMUX_STAGE=enter/,
+    'the panel must distinguish the Enter stage of the atomic submit');
+  assert.match(panelSrcAtomic2, /入队时还没冻结、轮到自己时另一个任务已经把该 scope 冻结了/,
+    'the queued submit must re-check the hold at dequeue time');
+  for (const key of ['heldHint', 'enterUnconfirmed', 'enterStillUnknown', 'doneRefreshFailed']) {
+    const count = (panelSrcAtomic2.match(new RegExp(key + ':', 'g')) || []).length;
+    assert.ok(count >= 4, key + ' must be localized in all four languages');
+  }
+  const workerSrc16 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSrc16, /async 'tmux\/submit'/,
+    'the worker must offer one atomic text+Enter operation');
+  assert.match(mainSource, /sameScheduleConfig\(freshItem, oldItem\)/,
+    'the old schedule must be compared with the snapshot before deletion');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(

@@ -39,6 +39,10 @@ const strings = {
     noOutput: '(没有输出)',
     readFailed: '读取失败',
     writeTimeoutUnknown: '请求可能已执行，请先在终端里核对实际状态，再决定是否重试。',
+    heldHint: '这个终端有未确认的操作。请先核对终端：确认后可按 Ctrl+C 取消那行，或回车补发。',
+    enterUnconfirmed: '文本已输入到终端，但回车没有确认。请先在终端里核对内容：若命令尚未执行，直接再按一次回车即可（只会补发回车，不会重复粘贴文本）。',
+    enterStillUnknown: '回车没有确认。请先核对终端内容，再决定是否再按一次回车。',
+    doneRefreshFailed: '操作已完成，但画面刷新失败：',
     sendFailed: '发送失败',
     termPlaceholder: '直接输入命令，回车执行',
     send: '发送',
@@ -77,6 +81,10 @@ const strings = {
     noOutput: '(no output)',
     readFailed: 'Could not read',
     writeTimeoutUnknown: 'The request may have run; check the terminal before retrying.',
+    heldHint: 'This terminal has an unconfirmed operation. Check the terminal first; press Ctrl+C to cancel the line, or Enter to complete it.',
+    enterUnconfirmed: 'The text is in the terminal but Enter is unconfirmed. Check the terminal; if the command did not run, press Enter again (only Enter is resent, not the text).',
+    enterStillUnknown: 'Enter is still unconfirmed. Check the terminal before pressing Enter again.',
+    doneRefreshFailed: 'The operation completed, but refreshing the screen failed: ',
     sendFailed: 'Could not send',
     termPlaceholder: 'Type a command, Enter runs it',
     send: 'Send',
@@ -115,6 +123,10 @@ const strings = {
     noOutput: '（出力なし）',
     readFailed: '読み込みに失敗',
     writeTimeoutUnknown: 'リクエストは実行された可能性があります。端末を確認してから再試してください。',
+    heldHint: 'この端末に未確認の操作があります。端末を確認し、Ctrl+C で行を取り消すか Enter で補完してください。',
+    enterUnconfirmed: 'テキストは端末にありますが Enter が未確認です。端末を確認し、実行されていなければもう一度 Enter を押してください（テキストは再送しません）。',
+    enterStillUnknown: 'Enter が未確認です。端末を確認してから再送してください。',
+    doneRefreshFailed: '操作は完了しましたが、画面の更新に失敗しました：',
     sendFailed: '送信に失敗',
     termPlaceholder: 'ここにコマンドを入力し Enter で実行',
     send: '送信',
@@ -153,6 +165,10 @@ const strings = {
     noOutput: '(출력 없음)',
     readFailed: '읽지 못했습니다',
     writeTimeoutUnknown: '요청이 이미 실행되었을 수 있습니다. 터미널을 확인한 후 다시 시도하세요.',
+    heldHint: '이 터미널에 확인되지 않은 작업이 있습니다. 터미널을 확인하고 Ctrl+C로 취소하거나 Enter로 완료하세요.',
+    enterUnconfirmed: '텍스트는 터미널에 있지만 Enter가 확인되지 않았습니다. 실행되지 않았다면 Enter만 다시 누르세요(텍스트는 재전송하지 않습니다).',
+    enterStillUnknown: 'Enter가 아직 확인되지 않았습니다. 터미널을 확인한 후 다시 누르세요.',
+    doneRefreshFailed: '작업은 완료되었지만 화면 갱신에 실패했습니다: ',
     sendFailed: '보내지 못했습니다',
     termPlaceholder: '명령을 입력하고 Enter 로 실행',
     send: '보내기',
@@ -436,7 +452,7 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
         const holdBox = $('#term-input');
         if (holdBox && draft) holdBox.value = draft + holdBox.value;
       }
-      renderOutput('这个终端有未确认的操作。请先核对终端：确认后可按 Ctrl+C 取消那行，或回车补发。');
+      renderOutput(T.heldHint);
       return true;
     }
     // 例外：这段文字确认已在终端里（Enter 未确认、恢复到了输入框），
@@ -553,7 +569,7 @@ async function refreshAfterWrite() {
   try {
     await refreshTerminal(true);
   } catch (error) {
-    renderOutput('操作已完成，但画面刷新失败：'
+    renderOutput(T.doneRefreshFailed
       + String(error && error.message ? error.message : error));
   }
 }
@@ -610,9 +626,8 @@ async function sendEnterOnly(scope, pinnedView, target, paneId) {
     // 否则回到该终端后既没有可补发的记录、新文本又被冻结拦住。
     terminalHasContent[scope] = true;
     if (hadText !== null) pendingEnterOnly[scope] = hadText;
-    renderOutput('回车没有确认（'
-      + String(error && error.message ? error.message : T.sendFailed)
-      + '）。请先核对终端内容，再决定是否再按一次回车。');
+    renderOutput(T.enterStillUnknown + '（'
+      + String(error && error.message ? error.message : T.sendFailed) + '）');
   }
 }
 
@@ -641,7 +656,7 @@ function submitLine() {
       const box = $('#term-input');
       if (box && !box.value) box.value = text;
     }
-    renderOutput('这个终端上一次回车还没有确认。请先在终端里核对，再按一次回车补发或处理后再提交。');
+    renderOutput(T.heldHint);
     return;
   }
   // 同一终端的「文本 + Enter」串行执行：两条提交并行时，第二次 paste
@@ -653,6 +668,13 @@ function submitLine() {
 
 async function submitLineQueued(text, pinnedView, target, paneId, scope) {
   const field = $('#term-input');
+  // 入队时还没冻结、轮到自己时另一个任务已经把该 scope 冻结了：
+  // 这次提交必须停下，按原顺序把草稿放回输入框。
+  if (scopeHolds[scope] && text && pendingEnterOnly[scope] !== text) {
+    if (currentScope() === scope) field.value = text + field.value;
+    renderOutput(T.heldHint);
+    return;
+  }
   // 空输入框但终端里有内容（草稿刚同步、或粘贴后回车未确认）：
   // 这次回车只补 Enter。
   if (!text) {
@@ -685,20 +707,27 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
   delete terminalHasContent[scope];
   try {
     if (pinnedView === 'tmux') {
-      await request('tmux_send', { target: target, text: text });
+      // 一个 RPC、worker 的一个队列任务里完成「文本 + Enter」：
+      // 另一个面板的文本不会再插到这两步之间。
+      let submitError = null;
       try {
-        await request('tmux_send', { target: target, keys: ['Enter'] });
+        await request('tmux_submit', { target: target, text: text });
       } catch (error) {
-        // Enter 的结果可能是「没发出」也可能是「发出了但回执丢了」：
-        // 不能断言。恢复草稿并记住这次粘贴，下一次同一文本只补回车；
-        // 用户也可以先在终端里核对内容再决定。
+        submitError = error;
+      }
+      const submitDetail = submitError
+        ? String(submitError.message || submitError) : '';
+      if (submitError && /TMUX_STAGE=enter/.test(submitDetail)) {
+        // 文本已进终端、Enter 结果未知：只补回车，不重贴文本。
         pendingEnterOnly[scope] = text;
         scopeHolds[scope] = 'enter';
         if (currentScope() === scope && !field.value) field.value = text;
-        renderOutput('文本已输入到终端，但回车没有确认（'
-          + String(error && error.message ? error.message : T.sendFailed)
-          + '）。请先在终端里核对内容：若命令尚未执行，直接再按一次回车即可（只会补发回车，不会重复粘贴文本）。');
+        renderOutput(T.enterUnconfirmed + '（' + submitDetail.replace('TMUX_STAGE=enter ', '') + '）');
         return;
+      }
+      if (submitError) {
+        // 文本阶段（或整段结果未知）：交给外层 catch 的既有语义处理。
+        throw new Error(submitDetail.replace('TMUX_STAGE=text ', ''));
       }
       scopeHolds[scope] = false;
       await refreshAfterWrite();
