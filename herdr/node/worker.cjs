@@ -726,6 +726,30 @@ function parseTmuxRows(output, fields) {
   return rows;
 }
 
+// tmux server 的进程号：server 重启后 pane id 会被复用（%0…），
+// 只有 server pid 能区分「同一个 pane id，不同的 server」。
+// 短时间缓存：面板刷新很频繁，不必每次都问 tmux。
+let tmuxServerPidCache = { value: null, at: 0 };
+
+async function tmuxServerPid() {
+  const now = Date.now();
+  if (tmuxServerPidCache.value !== null && now - tmuxServerPidCache.at < 3000) {
+    return tmuxServerPidCache.value;
+  }
+  let value = null;
+  try {
+    const output = await runTmux(['list-sessions', '-F', '#{pid}']);
+    const first = String(output || '').split('\n').map(function (line) { return line.trim(); })
+      .filter(Boolean)[0];
+    const parsed = Number(first);
+    if (Number.isFinite(parsed) && parsed > 0) value = parsed;
+  } catch (error) {
+    value = null;
+  }
+  tmuxServerPidCache = { value: value, at: now };
+  return value;
+}
+
 async function tmuxSessions() {
   let output;
   try {
@@ -1061,6 +1085,10 @@ const handlers = {
   async 'tmux/sessions'() {
     const sessions = await tmuxSessions();
     return { available: true, sessions: sessions };
+  },
+
+  async 'tmux/server_pid'() {
+    return { server_pid: await tmuxServerPid() };
   },
 
   async 'tmux/panes'(params) {

@@ -1194,13 +1194,15 @@ async function refreshTmux(token) {
   const sessions = (next && next.sessions) || [];
   // pane id 被复用（tmux server 重启）时，旧分屏的待确认状态必须作废：
   // 否则旧命令会被恢复到新进程里，或被误判成只需补 Enter。
-  // server 代次：所有会话里最晚的创建时间。server 重启后所有会话都是新的，
-  // 代次随之变化；会话改名或分屏移动都不影响它。
-  let serverGeneration = '';
-  for (const session of sessions) {
-    const created = String(session.created || '');
-    if (created && (serverGeneration === '' || Number(created) > Number(serverGeneration))) {
-      serverGeneration = created;
+  // server 代次：优先用 tmux server 的进程号——它只在 server 重启时变化，
+  // 开/关会话、改名、移动分屏都不影响。取不到时退回会话创建时间。
+  let serverGeneration = next && next.server_pid ? String(next.server_pid) : '';
+  if (!serverGeneration) {
+    for (const session of sessions) {
+      const created = String(session.created || '');
+      if (created && (serverGeneration === '' || Number(created) > Number(serverGeneration))) {
+        serverGeneration = created;
+      }
     }
   }
   const seen = {};

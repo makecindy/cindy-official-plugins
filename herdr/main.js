@@ -1052,6 +1052,8 @@ const tools = {
       };
     }
     const sessions = await nodeRequest('tmux/sessions', {}, args.__callId);
+    // server pid：面板用它识别 tmux server 重启后被复用的 pane id。
+    const serverInfo = await nodeRequest('tmux/server_pid', {}, args.__callId);
     const panes = await nodeRequest(
       'tmux/panes',
       args.session ? { session: String(args.session) } : {},
@@ -1062,6 +1064,7 @@ const tools = {
       version: available.version,
       reason: null,
       message: null,
+      server_pid: serverInfo && serverInfo.server_pid ? serverInfo.server_pid : null,
       sessions: sessions.sessions,
       panes: panes.panes
     };
