@@ -321,6 +321,8 @@ async function openSubscription() {
   // 确认（ACK）之前不把它设成 current：这段时间旧连接仍是 current，
   // 旧连接被动断开时 close 回调要能正常作废基线并触发重连。
   subscription.pendingSocket = socket;
+  // 握手期间连接代次变过（旧连接断开）：基线要作废。
+  let handoverStale = false;
 
   try {
     await new Promise(function (resolve, reject) {
@@ -366,6 +368,9 @@ async function openSubscription() {
             // 确认之后才切换 current 身份。
             subscription.socket = socket;
             subscription.pendingSocket = null;
+            // 等 ACK 的这段时间里旧连接可能已经断开：代次变了就作废基线，
+            // 否则这些 pane 会被当成旧成员、永远不做对账。
+            if (subscription.generation !== generationAtStart) handoverStale = true;
             finish(resolve);
           }
           continue;
@@ -414,6 +419,7 @@ async function openSubscription() {
     }
     throw error;
   }
+  if (handoverStale) baseline = [];
   subscription.running = true;
   subscription.attempts = 0;
   subscription.generation += 1;

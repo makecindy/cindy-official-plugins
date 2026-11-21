@@ -732,7 +732,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'an unknown first-stage outcome must hold the scope as unknown');
   assert.ok(!/HERDR_OUTCOME_UNKNOWN[\s\S]{0,200}?pendingEnterOnly = \{ scope: scope, text: text \};\s*\n\s*scopeHolds/.test(panelSrcResume),
     'an unknown first stage must not claim the text is in the terminal');
-  assert.match(panelSrcResume, /if \(kindAtEnqueue === 'unknown'\) scopeHolds\[scope\] = 0;/,
+  assert.match(panelSrcResume, /if \(kindAtEnqueue === 'unknown'\) \{[\s\S]{0,120}scopeHolds\[scope\] = 0;/,
     'an unknown hold must let the checked resend through as a full submit');
   assert.match(panelSrcResume, /sendEnterOnly\(scope, pinnedView, target, paneId\)/,
     'the enter-only resume must use the pinned target');
@@ -916,6 +916,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a snapshot taken during a handover must be invalidated');
   assert.match(workerSrc22, /subscription\.pendingSocket = socket;/,
     'a socket must only become current after the handshake');
+  assert.match(workerSrc22, /if \(subscription\.generation !== generationAtStart\) handoverStale = true;/,
+    'the baseline must be rechecked after the handshake');
+  assert.match(workerSrc22, /if \(handoverStale\) baseline = \[\];/,
+    'a stale handover must void the baseline');
   assert.ok(!/subscription\.socket = socket;[\s\S]{0,80}net\.createConnection/.test(workerSrc22),
     'the current socket must not be replaced before the acknowledgement');
   assert.match(workerSrc22, /lastDeliveredStatus\[data\.pane_id\] = data\.agent_status/,

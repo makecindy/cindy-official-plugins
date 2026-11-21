@@ -730,7 +730,12 @@ function submitLine() {
   const holdAtEnqueue = scopeHolds[scope] || 0;
   const kindAtEnqueue = scopeHoldKind[scope] || null;
   // unknown 冻结：失败时已提示先核对终端，这次提交按完整重发放行。
-  if (kindAtEnqueue === 'unknown') scopeHolds[scope] = 0;
+  // 解冻语义只对这一次提交有效：消费掉之后立刻清掉全局 kind，
+  // 否则紧接着的下一条提交也会捕获 'unknown'，跟着带上 allow_held 绕过冻结。
+  if (kindAtEnqueue === 'unknown') {
+    scopeHolds[scope] = 0;
+    delete scopeHoldKind[scope];
+  }
   if (scopeHolds[scope] && !isResume) {
     if (currentScope() === scope) {
       const box = $('#term-input');
