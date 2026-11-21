@@ -224,7 +224,15 @@ async function herdrCall(method, params, callId, timeoutMs) {
   else if (inner > 0) budget = inner + WORKER_TIMEOUT_MARGIN_MS;
   else budget = DEFAULT_HERDR_CALL_TIMEOUT_MS;
   budget = Math.min(budget, HOST_REQUEST_TIMEOUT_MAX_MS - WAIT_CHUNK_MARGIN_MS);
-  const request = { method: method, params: params || {}, timeout_ms: budget };
+  // allow_held 是 worker 写队列的外层解冻标记：不能藏进 params.params
+  // （那是发给 Herdr 的方法参数），否则核对后的完整重发仍被队列挡住。
+  const methodParams = Object.assign({}, params || {});
+  const allowHeld = methodParams.allow_held === true;
+  delete methodParams.allow_held;
+  const request = {
+    method: method, params: methodParams, timeout_ms: budget,
+    allow_held: allowHeld
+  };
   return nodeRequest('herdr/request', request, callId, budget + WAIT_CHUNK_MARGIN_MS);
 }
 

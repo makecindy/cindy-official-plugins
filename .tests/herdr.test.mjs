@@ -216,7 +216,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   // 普通调用也要带明确预算，让 worker 先于宿主到点、报出可核对的结果。
   assert.match(
     mainSource,
-    /const request = \{ method: method, params: params \|\| \{\}, timeout_ms: budget \}/,
+    /const request = \{[\s\S]{0,150}?method: method, params: methodParams, timeout_ms: budget/,
     'herdrCall must always send an explicit worker timeout'
   );
 
@@ -1029,6 +1029,12 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a signal-killed tmux child must be treated as an unknown outcome');
   assert.match(workerSrc22, /HANDOVER_DEDUPE_MS/,
     'status events during a subscription handover must be deduplicated');
+  assert.match(mainSource, /delete methodParams\.allow_held;[\s\S]{0,150}allow_held: allowHeld/,
+    'the herdr unlock flag must be an outer worker field');
+  assert.match(panelSrcQd3, /const unlockedResend = kindAtEnqueue === 'unknown';[\s\S]{0,120}try \{\s*\n\s*if \(pinnedView === 'tmux'\)/,
+    'the unlock flag must be computed inside the queued submit');
+  assert.ok(!/async function sendEnterOnly[\s\S]{0,600}unlockedResend/.test(panelSrcQd3),
+    'sendEnterOnly must not reference the submit-time unlock flag');
   assert.match(workerSrc22, /mode: 'text\+keys'/,
     'tmux text and keys must be applied atomically in one queue task');
   assert.match(workerSrc22, /expectedServerPid !== undefined && expectedServerPid !== null[\s\S]{0,300}String\(expectedServerPid\) !== String\(serverPid\)/,

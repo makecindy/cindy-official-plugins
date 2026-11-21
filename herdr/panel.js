@@ -825,9 +825,6 @@ async function sendEnterOnly(scope, pinnedView, target, paneId, epoch) {
   const hadText = pendingEnterOnly[scope] !== undefined ? pendingEnterOnly[scope] : null;
   delete pendingEnterOnly[scope];
   delete terminalHasContent[scope];
-  // 只有入队时已处于 unknown 冻结（用户看过提示、核对过终端）的完整重发
-  // 才带 allow_held；tmux 与 Herdr 两条路径共用。
-  const unlockedResend = kindAtEnqueue === 'unknown';
   try {
     // Herdr 的键名契约是小写（enter/up/esc…），tmux 才是 Enter。
     if (pinnedView === 'tmux') {
@@ -1020,6 +1017,9 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
   }
   delete pendingEnterOnly[scope];
   delete terminalHasContent[scope];
+  // 只有入队时已处于 unknown 冻结（用户看过提示、核对过终端）的完整重发
+  // 才带 allow_held；tmux 与 Herdr 两条路径共用。
+  const unlockedResend = kindAtEnqueue === 'unknown';
   try {
     if (pinnedView === 'tmux') {
       // 一个 RPC、worker 的一个队列任务里完成「文本 + Enter」：
