@@ -803,6 +803,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   // unknown 冻结时按键要拦截（只放行取消键）。
   assert.match(panelSrcRt, /scopeHolds\[scope\] && key !== 'C-c' && key !== 'ctrl\+c'/,
     'a held scope must only let an explicit cancel key through');
+  assert.match(panelSrcRt, /if \(holdBox && draft\) holdBox\.value = draft \+ holdBox\.value;/,
+    'a blocked key must restore the draft ahead of text typed while queued');
 
   // AltGraph 留给文本输入。
   assert.match(libSrc, /ctrlKey && event\.altKey\) return null;/,

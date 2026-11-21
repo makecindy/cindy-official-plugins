@@ -429,9 +429,12 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
     // 它正是用来清掉那行的；其它键一律拦下并提示先核对，
     // 否则恢复在输入框里的同一草稿会被再粘一次（draftdraft）。
     if (scopeHolds[scope] && key !== 'C-c' && key !== 'ctrl+c') {
+      // 草稿在入队时已被取走：按原输入顺序前置回去，
+      // 排队期间用户续打的内容接在后面（git status + ' --short'）。
+      // 只在输入框为空时恢复会把前半段命令弄丢。
       if (currentScope() === scope) {
         const holdBox = $('#term-input');
-        if (holdBox && !holdBox.value && draft) holdBox.value = draft;
+        if (holdBox && draft) holdBox.value = draft + holdBox.value;
       }
       renderOutput('这个终端有未确认的操作。请先核对终端：确认后可按 Ctrl+C 取消那行，或回车补发。');
       return true;
