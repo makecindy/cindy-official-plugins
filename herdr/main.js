@@ -27,6 +27,8 @@ let triggerTimer = null;
 // 的短请求：每段最多 WAIT_CHUNK_MS，段内超时（Herdr 返回 timeout）就接着等下一段，
 // 直到用户给的等待上限。主机这一层的等待要比 Herdr 那一段略长，否则先断的是主机。
 const HOST_REQUEST_TIMEOUT_MAX_MS = 120000;
+// tmux 写：解析代次与 pane、排队、load/paste、回车；慢机器上要留足预算。
+const TMUX_WRITE_TIMEOUT_MS = 90000;
 const WAIT_CHUNK_MS = 45000;
 // 宿主这一层要比 worker 的 socket 计时更晚到点（worker = 内层 + 15s），
 // 否则宿主会先把续段循环打断。45s 的一段因此是 45 < 60 < 70 秒的次序。
@@ -95,14 +97,19 @@ const runtimeStrings = {
 };
 
 let runtime = runtimeStrings.en;
+// 语言加载竞态：旧请求晚回时不能覆盖新请求的结果。
+let localeLoadSeq = 0;
 
 async function loadRuntimeLocale() {
+  const seq = localeLoadSeq += 1;
   try {
     const response = await cindy.request({ kind: 'app-context' });
+    if (seq !== localeLoadSeq) return;
     const context = (response && response.context) || {};
     const locale = context.uiLocale || context.locale;
     runtime = runtimeStrings[locale] || runtimeStrings.en;
   } catch (error) {
+    if (seq !== localeLoadSeq) return;
     runtime = runtimeStrings.en;
   }
 }
@@ -1111,6 +1118,9 @@ async function tmuxSendRequest(args, allowHeld) {
   {
     if (!args.target) throw new Error(runtime.missingTarget);
     const params = { target: String(args.target) };
+    if (args.server_pid !== undefined && args.server_pid !== null) {
+      params.server_pid = args.server_pid;
+    }
     const hasKeys = Boolean(args.keys && args.keys.length);
     const hasText = args.text !== undefined && args.text !== null && args.text !== '';
     if (hasKeys && hasText) throw new Error(runtime.ambiguousSend);
@@ -1123,7 +1133,7 @@ async function tmuxSendRequest(args, allowHeld) {
     }
     // 面板在用户显式取消/补回车时请求解冻该 pane 的写队列。
     if (allowHeld === true) params.allow_held = true;
-    return nodeRequest('tmux/send', params, args.__callId);
+    return nodeRequest('tmux/send', params, args.__callId, TMUX_WRITE_TIMEOUT_MS);
   }
 };
 
@@ -1180,6 +1190,15 @@ async function handlePanelRequest(request) {
   }
   if (action === 'send') {
     // 面板转发：改行按键前的草稿同步走 text，纯按键走 keys（二选一）。
+    // 「草稿 + 按键」同来时走 worker 复合发送：按 pane 排队、顺序执行，
+    // 跨面板不会交错成 A文本、B文本、A键、B键。
+    const hasText = request.text !== undefined && request.text !== null && request.text !== '';
+    const hasKeys = Boolean(request.keys && request.keys.length);
+    if (hasText && hasKeys) {
+      return nodeRequest('herdr/compose_send', {
+        pane_id: request.pane_id, text: request.text, keys: request.keys
+      }, request.__callId);
+    }
     return tools.herdr_send({ pane_id: request.pane_id, keys: request.keys, text: request.text });
   }
   if (action === 'submit') {
@@ -1213,16 +1232,19 @@ async function handlePanelRequest(request) {
     return tools.tmux_read({ target: request.target, lines: request.lines });
   }
   if (action === 'tmux_send') {
-    return tmuxSendRequest({
-      target: request.target, text: request.text, keys: request.keys
-    }, request.allow_held === true);
+    const params = { target: request.target, text: request.text, keys: request.keys };
+    if (request.server_pid !== undefined && request.server_pid !== null) {
+      params.server_pid = request.server_pid;
+    }
+    return tmuxSendRequest(params, request.allow_held === true);
   }
   if (action === 'tmux_submit') {
     // 面板提交一行：worker 把「文本 + Enter」作为一个队列任务执行，
     // 不让另一个面板的文本插进来。
     return nodeRequest('tmux/submit', {
-      target: request.target, text: request.text, allow_held: request.allow_held
-    });
+      target: request.target, text: request.text,
+      allow_held: request.allow_held, server_pid: request.server_pid
+    }, request.__callId, TMUX_WRITE_TIMEOUT_MS);
   }
   throw new Error(runtime.unknownPanelAction + action);
 }

@@ -86,6 +86,21 @@ function sendLine(socket, payload) {
   socket.write(JSON.stringify(payload) + '\n');
 }
 
+// 只读方法：写入 socket 后收不到回包也只是一次失败读取，
+// 不能报「结果未知」吓调用方停止重试。
+const READ_ONLY_METHODS = {
+  ping: true, 'session.snapshot': true, 'pane.read': true, 'pane.list': true,
+  'pane.get': true, 'pane.current': true, 'agent.read': true, 'agent.list': true,
+  'agent.get': true, 'workspace.list': true, 'workspace.get': true,
+  'tab.list': true, 'tab.get': true, 'worktree.list': true, 'events.wait': true
+};
+
+function sentOutcome(method) {
+  return READ_ONLY_METHODS[method]
+    ? new Error('herdr 请求失败（未收到回包）：' + method)
+    : outcomeUnknown(method);
+}
+
 // The Herdr server answers one request per connection and then closes it,
 // so every ordinary call needs its own socket.
 function callOnce(method, params, timeoutMs) {
@@ -103,7 +118,7 @@ function callOnce(method, params, timeoutMs) {
     let sent = false;
     const timer = setTimeout(function () {
       finish(reject, sent
-        ? outcomeUnknown(method)
+        ? sentOutcome(method)
         : new Error('herdr 请求超时（未发出）：' + method));
     }, timeoutMs || DEFAULT_TIMEOUT_MS);
 
@@ -133,7 +148,7 @@ function callOnce(method, params, timeoutMs) {
         } catch (error) {
           // 请求已经发出去了：回包解析不了不能报「没执行」。
           finish(reject, sent
-            ? outcomeUnknown(method)
+            ? sentOutcome(method)
             : new Error('herdr 返回了无法解析的响应'));
           return;
         }
@@ -159,16 +174,25 @@ function callOnce(method, params, timeoutMs) {
     });
 
     socket.on('error', function (error) {
-      finish(reject, sent ? outcomeUnknown(method) : describeConnectionError(error));
+      finish(reject, sent ? sentOutcome(method) : describeConnectionError(error));
     });
     socket.on('close', function () {
       if (!settled) {
         finish(reject, sent
-          ? outcomeUnknown(method)
+          ? sentOutcome(method)
           : new Error('herdr 连接在返回前关闭（未发出）：' + method));
       }
     });
   });
+}
+
+// 每个 herdr pane 一条写队列：跨面板的文本/按键不会在队列里交错。
+const herdrSendQueues = {};
+
+function enqueueHerdrSend(paneId, task) {
+  const run = (herdrSendQueues[paneId] || Promise.resolve()).then(task, task);
+  herdrSendQueues[paneId] = run.then(function () {}, function () {});
+  return run;
 }
 
 // --- Event subscription -------------------------------------------------
@@ -917,12 +941,15 @@ async function tmuxSend(target, params) {
   const keys = Array.isArray(params.keys) && params.keys.length
     ? validateTmuxKeys(params.keys)
     : null;
-  if (keys) {
+  const hasText = params.text !== undefined && params.text !== null;
+  if (!hasText && !keys) {
+    throw tmuxError('缺少 text 或 keys', 'TMUX_BAD_TARGET');
+  }
+  // text + keys 同一次调用按顺序执行：两个面板的「草稿 + 按键」不会交错成
+  // A文本、B文本、A键、B键（每个写请求在 worker 队列里独占一个任务）。
+  if (!hasText) {
     await tmuxWrite(['send-keys', '-t', dest, '--'].concat(keys), '按键');
     return { target: dest, mode: 'keys', keys: keys };
-  }
-  if (params.text === undefined || params.text === null) {
-    throw tmuxError('缺少 text 或 keys', 'TMUX_BAD_TARGET');
   }
   // 文本不走 argv：单独的 ';' 会被 tmux(1) COMMANDS 当命令分隔符（实测会静默丢失）。
   // 改成 load-buffer(stdin) + paste-buffer -d，内容原样粘进目标 pane。
@@ -939,6 +966,10 @@ async function tmuxSend(target, params) {
     try { await runTmux(['delete-buffer', '-b', buffer]); } catch (cleanupError) { void cleanupError; }
     throw error;
   }
+  if (keys) {
+    await tmuxWrite(['send-keys', '-t', dest, '--'].concat(keys), '按键');
+    return { target: dest, mode: 'text+keys', text: text, keys: keys };
+  }
   return { target: dest, mode: 'text', text: text };
 }
 
@@ -947,6 +978,24 @@ async function tmuxSend(target, params) {
 const handlers = {
   async ping() {
     return callOnce('ping', {}, 10000);
+  },
+
+  // 面板的「草稿 + 按键」一次调用：按 pane 排队、顺序执行，跨面板不会交错。
+  async 'herdr/compose_send'(params) {
+    const paneId = String(params && params.pane_id || '');
+    if (!paneId) throw new Error('缺少 pane_id');
+    const hasText = params && params.text !== undefined && params.text !== null;
+    const hasKeys = Boolean(params && Array.isArray(params.keys) && params.keys.length);
+    if (!hasText && !hasKeys) throw new Error('缺少 text 或 keys');
+    return enqueueHerdrSend(paneId, async function () {
+      if (hasText) {
+        await callOnce('pane.send_text', { pane_id: paneId, text: String(params.text) });
+      }
+      if (hasKeys) {
+        await callOnce('pane.send_keys', { pane_id: paneId, keys: params.keys });
+      }
+      return { pane_id: paneId, mode: hasText && hasKeys ? 'text+keys' : (hasText ? 'text' : 'keys') };
+    });
   },
 
   async 'herdr/request'(params) {
@@ -1110,7 +1159,7 @@ const handlers = {
     // 两个窗口/面板同时提交时会 paste(A), paste(B), Enter(A)，
     // 把两条命令拼成一条。锁要放在所有调用方共享的这一层。
     const dest = String((params && params.target) || '');
-    const identity = await tmuxQueueKey(dest);
+    const identity = await tmuxQueueKey(dest, params && params.server_pid);
     const key = identity.key;
     // 发送也用解析后的 pane id：队列等待期间当前 pane 若变了，
     // 原始 session/window 名会写进另一个 pane。
@@ -1128,7 +1177,7 @@ const handlers = {
   // B 的文本仍可能插到 A 的 Enter 前面。这里把两步放进同一个队列项。
   async 'tmux/submit'(params) {
     const dest = String((params && params.target) || '');
-    const identity = await tmuxQueueKey(dest);
+    const identity = await tmuxQueueKey(dest, params && params.server_pid);
     const key = identity.key;
     const allowHeld = Boolean(params && params.allow_held);
     return enqueueTmuxSend(key, identity.serverPid, async function () {
@@ -1159,10 +1208,19 @@ const handlers = {
 // 旧 Promise 不尝试删除（Promise 链已被旧调用捕获），而是在出队时验证代次。
 const tmuxSendQueues = {};
 
-async function tmuxQueueKey(dest) {
+async function tmuxQueueKey(dest, expectedServerPid) {
   const serverPid = await tmuxServerPid();
   if (!serverPid) {
     const wrapped = new Error('TMUX_TARGET_UNRESOLVED: 无法确认 tmux server 代次。');
+    wrapped.code = 'TMUX_TARGET_UNRESOLVED';
+    throw wrapped;
+  }
+  // 面板把它选中 pane 时的 server 代次一起带来：server 重启复用 %N 之后，
+  // 面板还没刷新出来的这次写入不能打到新 server 的同名 pane 上。
+  if (expectedServerPid !== undefined && expectedServerPid !== null
+      && String(expectedServerPid) !== String(serverPid)) {
+    const wrapped = new Error('TMUX_TARGET_UNRESOLVED: tmux server 已更换，'
+      + '面板当前选中的 pane 已不存在，请刷新后重新选择。');
     wrapped.code = 'TMUX_TARGET_UNRESOLVED';
     throw wrapped;
   }

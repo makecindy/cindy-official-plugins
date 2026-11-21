@@ -214,6 +214,9 @@ let selectedPane = null;
 
 let tmux = { available: false, version: null, reason: null, message: null, sessions: [], panes: [], hint: null };
 let tmuxFilter = null;
+// 最近一次 tmux_state 里的 server pid：写入时带给 worker 校验代次，
+// server 重启复用 %N 之后，这次写入不能打到新 server 的同名 pane。
+let tmuxServerPid = null;
 let selectedTarget = null;
 
 // 每次读取带一个序号：晚到的旧结果不能盖掉用户已经选中的另一个 pane。
@@ -521,8 +524,24 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
       // 已在远端，跳过同步。
     } else if (draft) {
       try {
-        if (pinnedView === 'tmux') await request('tmux_send', { target: target, text: draft });
-        else await request('send', { pane_id: paneId, text: draft });
+        // 「草稿 + 按键」一次调用：worker 里同一队列任务顺序执行两步，
+        // 两个面板不会交错成 A文本、B文本、A键、B键。
+        if (pinnedView === 'tmux') {
+          await request('tmux_send', {
+            target: target, text: draft, keys: [key], server_pid: tmuxServerPid
+          });
+        } else {
+          await request('send', { pane_id: paneId, text: draft, keys: [key] });
+        }
+        // 草稿与按键已随同一次调用发出，下面不再单独发 key。
+        if (!scopeEpochIsCurrent(scope, epoch)) return true;
+        if (!PENDING_ENTER_KEEP_KEYS[key]) {
+          delete pendingEnterOnly[scope];
+          scopeHolds[scope] = 0;
+          terminalHasContent[scope] = true;
+        }
+        await refreshAfterWrite();
+        return true;
       } catch (error) {
         if (!scopeEpochIsCurrent(scope, epoch)) return true;
         // 结果未知 = 草稿可能已在终端：冻结并记下「可能有内容」，
@@ -1000,7 +1019,13 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
         // 文本阶段已成功：这条命令已在终端里，只差 Enter。它不再是
         // 「未发送的队列项」，绝不能重新进 queuedSubmissions——补发 Enter
         // 成功后恢复队列时会把它当成未发送命令再显示出来。
-        if (currentScope() === scope && !field.value) field.value = text;
+        // 保留排队身份标记：输入框里的就是终端里的那条命令，下次回车按
+        // 「只补 Enter」走，不会被当成新命令排到 C 后面。不入队：文本已
+        // 在终端里，补发成功后不能再把它当成未发送命令恢复出来。
+        if (currentScope() === scope && !field.value) {
+          field.value = text;
+          if (wasQueuedSubmission) restoredSubmissionText[scope] = text;
+        }
         renderOutput(T.enterUnconfirmed + '（' + submitDetail.replace('TMUX_STAGE=enter ', '') + '）');
         return;
       }

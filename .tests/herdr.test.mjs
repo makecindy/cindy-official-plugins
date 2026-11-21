@@ -443,8 +443,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
 
   const workerSource6 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
   // 已发出的写请求收到损坏回包 = 结果未知。
-  assert.match(workerSource6, /finish\(reject, sent\s*\?\s*outcomeUnknown\(method\)/,
-    'an unparseable reply after send must be outcome-unknown');
+  assert.match(workerSource6, /finish\(reject, sent\s*\?\s*sentOutcome\(method\)/,
+    'an unparseable reply after send must go through the outcome classifier');
+  assert.match(workerSource6, /READ_ONLY_METHODS\[method\][\s\S]{0,200}outcomeUnknown\(method\)/,
+    'only mutating requests may report an unknown outcome');
   // 分段等待要能认出「已发送后的等待超时」。
   assert.match(workerSource6, /HERDR_OUTCOME_UNKNOWN: timeout:/,
     'the wait timeout must keep a marker the segmented path recognises');
@@ -604,7 +606,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
 
   // 草稿同步与发送目标绑定：等待期间切分屏不会打到新目标、不改写新目标的输入框。
   const panelSrcPin = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
-  assert.match(panelSrcPin, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft, draftFromRestore, epoch\) \{[\s\S]{0,2600}?tmux_send', \{ target: target, text: draft \}/,
+  assert.match(panelSrcPin, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft, draftFromRestore, epoch\) \{[\s\S]{0,2600}?tmux_send', \{[\s\S]{0,120}?target: target, text: draft, keys: \[key\]/,
     'the draft sync must use the pinned target');
   assert.match(panelSrcPin, /if \(!scopeEpochIsCurrent\(scope, epoch\)\) return true;/,
     'late callbacks from a replaced pane must not mutate its restored state');
@@ -894,6 +896,16 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const workerSrc20 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
   assert.match(workerSrc20, /TMUX_QUEUE_HELD/,
     'an unknown write must freeze the pane write queue');
+  assert.match(mainSource, /let localeLoadSeq = 0;/,
+    'locale loads must be sequenced');
+  assert.match(mainSource, /if \(seq !== localeLoadSeq\) return;/,
+    'an older locale response must not overwrite a newer one');
+  assert.match(mainSource, /TMUX_WRITE_TIMEOUT_MS = 90000/,
+    'tmux writes must have an explicit timeout budget');
+  assert.match(mainSource, /params.server_pid = args.server_pid;/,
+    'the panel-selected server generation must reach the worker');
+  assert.match(mainSource, /herdr\/compose_send/,
+    'herdr draft and key must be forwarded atomically');
   assert.match(mainSource, /for \(let attempt = 0; attempt < 3; attempt \+= 1\)[\s\S]{0,700}beforePid === afterPid/,
     'tmux pane snapshots must be bracketed by matching server pids');
   assert.match(mainSource, /TMUX_STATE_UNSTABLE/,
@@ -902,7 +914,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'an unpersisted replacement schedule id must win over stale KV');
   assert.match(mainSource, /pendingScheduleId = scheduleId;[\s\S]{0,180}await writeKv/,
     'the new schedule id must become authoritative before attempting persistence');
-  assert.match(mainSource, /tmuxSendRequest\(\{[\s\S]{0,200}\}, request\.allow_held === true\)/,
+  assert.match(mainSource, /tmuxSendRequest\(params, request\.allow_held === true\)/,
     'only the panel bridge may unlock the worker queue');
   assert.ok(!/args\.allow_held/.test(mainSource),
     'the agent tool must ignore an allow_held argument');
@@ -941,6 +953,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'cancelling the current unknown line must preserve later queued commands');
   assert.match(panelSrcQd3, /queuedDrafts\[scope\] = \(queuedDrafts\[scope\] \|\| ''\) \+ draft;/,
     'consecutive failed key drafts must be retained in order');
+  assert.match(panelSrcQd3, /text: draft, keys: \[key\], server_pid: tmuxServerPid/,
+    'a tmux draft and key must be forwarded atomically with the server generation');
+  assert.match(panelSrcQd3, /pane_id: paneId, text: draft, keys: \[key\] \}\)/,
+    'a herdr draft and key must be forwarded atomically');
   assert.match(panelSrcQd3, /aria-label', T\.terminalInput/,
     'the terminal input accessible name must be localized');
 
@@ -978,6 +994,16 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'an explicit unsubscribe must invalidate the pane baseline');
   assert.match(workerSrc22, /重试计时期间订阅换代[\s\S]{0,300}reconcileNewPanes\(currentPanes, currentPanes, current, \[paneId\], since\)/,
     'a reconciliation retry must hand off to a replacement subscription');
+  assert.match(workerSrc22, /READ_ONLY_METHODS/,
+    'read-only herdr requests must not be reported as unknown outcomes');
+  assert.match(workerSrc22, /sentOutcome\(method\)/,
+    'a read-only request that stalls must stay retryable');
+  assert.match(workerSrc22, /mode: 'text\+keys'/,
+    'tmux text and keys must be applied atomically in one queue task');
+  assert.match(workerSrc22, /expectedServerPid !== undefined && expectedServerPid !== null[\s\S]{0,300}String\(expectedServerPid\) !== String\(serverPid\)/,
+    'the worker must verify the panel-selected server generation');
+  assert.match(workerSrc22, /async 'herdr\/compose_send'\(params\)/,
+    'herdr text and keys must be queued per pane and applied atomically');
   assert.match(workerSrc22, /function dequeued\(\)[\s\S]{0,400}tmuxQueueHolds\[dest\]/,
     'the hold must be rechecked when a queued write starts');
   assert.match(workerSrc22, /TMUX_STAGE=text_failed/,
