@@ -462,13 +462,17 @@ async function reconcileNewPanes(paneIds, previousPaneIds, socket, backlog, sinc
       }
       // 断线前已投递过同一状态的不再补：基线的代价只是多查一次，
       // 不是多发一次通知（30 秒限流只是延后，不是去重）。
-      if ((status === 'blocked' || status === 'done') && !liveArrived(paneId)
-          && lastDeliveredStatus[paneId] !== status) {
-        // 字段名与正常状态事件一致（agent_status）：主脚本只认这个键。
-        handleEvent({
-          event: 'pane_agent_status_changed',
-          data: { pane_id: paneId, agent_status: status, reconciled: true }
-        });
+      if (lastDeliveredStatus[paneId] !== status) {
+        if ((status === 'blocked' || status === 'done') && !liveArrived(paneId)) {
+          // 字段名与正常状态事件一致（agent_status）：主脚本只认这个键。
+          handleEvent({
+            event: 'pane_agent_status_changed',
+            data: { pane_id: paneId, agent_status: status, reconciled: true }
+          });
+        }
+        // 补查读到的任何状态都更新去重依据：只更新 blocked/done 的话，
+        // 中间态（working/idle）不刷新基线，下次重新 blocked 会被误判重复。
+        lastDeliveredStatus[paneId] = status;
       }
     } catch (error) {
       // 临时失败（超时、Herdr 重启）：pane 还活着就排有界重试，
