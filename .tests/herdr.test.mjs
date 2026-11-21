@@ -216,7 +216,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   // 普通调用也要带明确预算，让 worker 先于宿主到点、报出可核对的结果。
   assert.match(
     mainSource,
-    /const request = \{ method: method, params: params \|\| \{\}, timeout_ms: budget \}/,
+    /const request = \{[\s\S]{0,150}?method: method, params: methodParams, timeout_ms: budget/,
     'herdrCall must always send an explicit worker timeout'
   );
 
