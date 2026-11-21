@@ -997,12 +997,10 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
         pendingEnterOnly[scope] = text;
         scopeHolds[scope] = holdGeneration += 1;
         scopeHoldKind[scope] = 'enter';
-        if (currentScope() === scope && !field.value) {
-          field.value = text;
-          if (wasQueuedSubmission) restoredSubmissionText[scope] = text;
-        } else if (wasQueuedSubmission) {
-          queuedSubmissions[scope] = [text].concat(queuedSubmissions[scope] || []);
-        }
+        // 文本阶段已成功：这条命令已在终端里，只差 Enter。它不再是
+        // 「未发送的队列项」，绝不能重新进 queuedSubmissions——补发 Enter
+        // 成功后恢复队列时会把它当成未发送命令再显示出来。
+        if (currentScope() === scope && !field.value) field.value = text;
         renderOutput(T.enterUnconfirmed + '（' + submitDetail.replace('TMUX_STAGE=enter ', '') + '）');
         return;
       }

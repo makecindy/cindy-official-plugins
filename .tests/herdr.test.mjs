@@ -925,6 +925,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a failed queued command must retain its queue identity for retry');
   assert.match(panelSrcQd3, /queuedSubmissions\[scope\] = \[text\]\.concat\(queuedSubmissions\[scope\] \|\| \[\]\)/,
     'a failed queued command must return to the head ahead of later commands');
+  assert.ok(!/TMUX_STAGE=enter[\s\S]{0,900}queuedSubmissions\[scope\] = \[text\]/.test(panelSrcQd3),
+    'an enter-stage failure must not requeue the text already in the terminal');
   assert.match(panelSrcQd3, /if \(currentScope\(\) !== scope\) return;[\s\S]{0,100}queue.shift\(\)/,
     'a queued command must not be restored into another pane');
   assert.match(panelSrcQd3, /if \(waiting && waiting.length && !isPresentedQueuedCommand && text[\s\S]{0,220}waiting.push\(text\)/,
