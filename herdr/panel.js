@@ -579,11 +579,13 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
       // 取消成功：那行已经丢掉，之前攒下的草稿与解冻占用一起作废，
       // 否则下一次提交会被旧的 queuedDrafts 拦住。
       if (key === 'C-c' || key === 'ctrl+c') {
-        delete queuedSubmissions[scope];
         delete queuedDrafts[scope];
         delete scopeHoldKind[scope];
         delete scopeUnlockClaims[scope];
+        delete scopeUnlockText[scope];
         delete restoredBoxText[scope];
+        delete restoredSubmissionText[scope];
+        restoreNextSubmission(scope);
       }
     }
     await refreshAfterWrite();
@@ -637,16 +639,21 @@ const scopeHoldKind = {};
 // unknown 解冻语义只能被一次提交占用：占用期间别的提交拿不到它，
 // 占用者没有真正发出请求时把占用还回去（用户可以重试恢复）。
 const scopeUnlockClaims = {};
+const scopeUnlockText = {};
 let unlockToken = 0;
 
 function releaseUnlock(scope, token) {
-  if (token && scopeUnlockClaims[scope] === token) delete scopeUnlockClaims[scope];
+  if (token && scopeUnlockClaims[scope] === token) {
+    delete scopeUnlockClaims[scope];
+    delete scopeUnlockText[scope];
+  }
 }
 // 冻结期间被拦下的按键草稿：按入队顺序累积为一段文本。
 const queuedDrafts = {};
 // 被新 hold 拦下的独立 Enter 提交：必须保留每条命令的 Enter 边界，
 // 恢复时逐条交给用户确认，不能拼成一条命令。
 const queuedSubmissions = {};
+const restoredSubmissionText = {};
 // 最近一次把累积草稿写回输入框的内容：用来区分「用户新打的文字」和
 // 「面板刚恢复的同一份文字」，不能只看前缀。
 const restoredBoxText = {};
@@ -709,8 +716,10 @@ function restoreNextSubmission(scope) {
   const box = $('#term-input');
   if (!queue || !queue.length || !box || box.value) return;
   // 一次只把下一条独立提交放回输入框，保留每次 Enter 的边界。
+  if (currentScope() !== scope) return;
   box.value = queue.shift();
   if (!queue.length) delete queuedSubmissions[scope];
+  restoredSubmissionText[scope] = box.value;
   restoredBoxText[scope] = box.value;
 }
 
@@ -783,6 +792,7 @@ async function sendEnterOnly(scope, pinnedView, target, paneId, epoch) {
     scopeHolds[scope] = 0;
     delete scopeHoldKind[scope];
     await refreshAfterWrite();
+    restoreNextSubmission(scope);
   } catch (error) {
     if (epoch !== undefined && !scopeEpochIsCurrent(scope, epoch)) return;
     // 回车结果未知：恢复同一目标的待提交记录，否则下一次回车什么都不做,
@@ -809,6 +819,23 @@ function submitLine() {
   if (pinnedView === 'tmux' && !target) return;
   if (pinnedView !== 'tmux' && !paneId) return;
   const scope = (pinnedView === 'tmux' ? 't:' + target : 'h:' + paneId);
+  const waiting = queuedSubmissions[scope];
+  const isPresentedQueuedCommand = restoredSubmissionText[scope] !== undefined;
+  const isUnclaimedUnknownRecovery = Boolean(text) && scopeHoldKind[scope] === 'unknown'
+    && scopeUnlockClaims[scope] === undefined;
+  const isClaimedRecoveryRetry = Boolean(text) && scopeUnlockClaims[scope] !== undefined
+    && scopeUnlockText[scope] === text;
+  if (waiting && waiting.length && !isPresentedQueuedCommand && text
+      && !isUnclaimedUnknownRecovery && !isClaimedRecoveryRetry) {
+    // 旧的排队命令优先；新输入 D 追加在 B/C 后面，不能越过它们执行。
+    waiting.push(text);
+    consumeFromInput(field, text);
+    restoreNextSubmission(scope);
+    renderOutput(T.heldHint);
+    return;
+  }
+  // 当前显示的 queued command 已被用户确认提交，清除标记；下一条仍按队列恢复。
+  if (isPresentedQueuedCommand) delete restoredSubmissionText[scope];
   // 按下回车这一刻就把草稿从输入框取走：否则排队期间输入的第二条
   // 会和没清掉的第一条拼在一起，被下一次提交重复捕获。
   restoredDraft = null;
@@ -830,6 +857,7 @@ function submitLine() {
     scopeHolds[scope] = 0;
     unlockTokenValue = unlockToken += 1;
     scopeUnlockClaims[scope] = unlockTokenValue;
+    scopeUnlockText[scope] = text;
   }
   if (scopeHolds[scope] && !isResume) {
     if (currentScope() === scope) {
@@ -927,6 +955,7 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       delete scopeHoldKind[scope];
       releaseUnlock(scope, unlockTokenValue);
       await refreshAfterWrite();
+      restoreNextSubmission(scope);
     } catch (error) {
       if (!scopeEpochIsCurrent(scope, epoch)) return;
       scopeHolds[scope] = holdGeneration += 1;
@@ -1227,7 +1256,9 @@ function clearScopeState(scope) {
   delete scopeHoldKind[scope];
   delete queuedDrafts[scope];
   delete queuedSubmissions[scope];
+  delete restoredSubmissionText[scope];
   delete scopeUnlockClaims[scope];
+  delete scopeUnlockText[scope];
   delete restoredBoxText[scope];
 }
 

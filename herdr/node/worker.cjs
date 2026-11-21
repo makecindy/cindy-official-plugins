@@ -511,8 +511,19 @@ async function reconcileNewPanes(paneIds, previousPaneIds, socket, backlog, sinc
       if (subscription.desired && attempts <= 3) {
         if (subscription.socket === socket) {
           setTimeout(function () {
-            if (!subscription.desired || subscription.socket !== socket) return;
-            reconcileNewPanes([paneId], [], socket, [], since);
+            if (!subscription.desired) return;
+            if (subscription.socket === socket) {
+              reconcileNewPanes([paneId], [], socket, [], since);
+              return;
+            }
+            // 重试计时期间订阅换代：交给当前代次，不能让旧 timer 静默退出。
+            if (subscription.socket && subscription.running) {
+              const current = subscription.socket;
+              const currentPanes = subscription.paneIds.slice();
+              reconcileNewPanes(currentPanes, currentPanes, current, [paneId], since);
+            } else {
+              subscription.reconcileBacklog = (subscription.reconcileBacklog || []).concat([paneId]);
+            }
           }, 5000).unref();
         } else if (subscription.socket && subscription.running) {
           // 换代之后才失败的：直接交给当前订阅，别等不会来的下一次换代。

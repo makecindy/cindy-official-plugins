@@ -764,7 +764,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(panelSrcKeys, /'ctrl\+l': true/,
     'the Herdr keep-keys must be recognised too');
   // 改行键送达后记终端有内容。
-  assert.match(panelSrcKeys, /terminalHasContent\[scope\] = true;[\s\S]{0,400}await refreshAfterWrite/,
+  assert.match(panelSrcKeys, /terminalHasContent\[scope\] = true;[\s\S]{0,700}await refreshAfterWrite/,
     'a delivered line-key must record remote content');
   // sendEnterOnly 失败无条件恢复 map。
   assert.match(panelSrcKeys, /map 记录按 scope 存：无论现在选中哪个分屏都要恢复/,
@@ -898,6 +898,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'tmux pane snapshots must be bracketed by matching server pids');
   assert.match(mainSource, /TMUX_STATE_UNSTABLE/,
     'an unstable tmux snapshot must fail closed');
+  assert.match(mainSource, /if \(pendingScheduleId\) return pendingScheduleId;/,
+    'an unpersisted replacement schedule id must win over stale KV');
+  assert.match(mainSource, /pendingScheduleId = scheduleId;[\s\S]{0,180}await writeKv/,
+    'the new schedule id must become authoritative before attempting persistence');
   assert.match(mainSource, /tmuxSendRequest\(\{[\s\S]{0,200}\}, request\.allow_held === true\)/,
     'only the panel bridge may unlock the worker queue');
   assert.ok(!/args\.allow_held/.test(mainSource),
@@ -917,6 +921,18 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'each blocked Enter submission must keep its own command boundary');
   assert.match(panelSrcQd3, /function restoreNextSubmission\(scope\)/,
     'queued commands must be restored one at a time');
+  assert.match(panelSrcQd3, /if \(currentScope\(\) !== scope\) return;[\s\S]{0,100}queue.shift\(\)/,
+    'a queued command must not be restored into another pane');
+  assert.match(panelSrcQd3, /if \(waiting && waiting.length && !isPresentedQueuedCommand && text[\s\S]{0,220}waiting.push\(text\)/,
+    'new commands must be appended after older hidden submissions');
+  assert.match(panelSrcQd3, /isUnclaimedUnknownRecovery[\s\S]{0,180}isClaimedRecoveryRetry/,
+    'the active recovery command must pass while later commands remain queued');
+  assert.match(panelSrcQd3, /restoreNextSubmission\(scope\);[\s\S]{0,50}renderOutput\(T.heldHint\)/,
+    'a new command must wait while older submissions are restored');
+  assert.match(panelSrcQd3, /async function sendEnterOnly[\s\S]{0,650}restoreNextSubmission\(scope\)/,
+    'a successful enter-only resume must release the next queued submission');
+  assert.ok(!/delete queuedSubmissions\[scope\];[\s\S]{0,300}C-c/.test(panelSrcQd3),
+    'cancelling the current unknown line must preserve later queued commands');
   assert.match(panelSrcQd3, /queuedDrafts\[scope\] = \(queuedDrafts\[scope\] \|\| ''\) \+ draft;/,
     'consecutive failed key drafts must be retained in order');
   assert.match(panelSrcQd3, /aria-label', T\.terminalInput/,
@@ -954,6 +970,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a socket must only become current after the handshake');
   assert.match(workerSrc22, /async function closeSubscription\(\)[\s\S]{0,300}subscription\.paneIds = \[\];/,
     'an explicit unsubscribe must invalidate the pane baseline');
+  assert.match(workerSrc22, /重试计时期间订阅换代[\s\S]{0,300}reconcileNewPanes\(currentPanes, currentPanes, current, \[paneId\], since\)/,
+    'a reconciliation retry must hand off to a replacement subscription');
   assert.match(workerSrc22, /function dequeued\(\)[\s\S]{0,400}tmuxQueueHolds\[dest\]/,
     'the hold must be rechecked when a queued write starts');
   assert.match(workerSrc22, /TMUX_STAGE=text_failed/,

@@ -238,8 +238,12 @@ async function readKv() {
 
 // 上次成功读到的自动化 id：存储暂时不可读时用它兜底，不丢这次唤醒。
 let cachedScheduleId = null;
+// 创建新自动化后 KV 持久化失败：该 id 在本进程内优先于 KV 里的旧 id，
+// 直到确认写入成功；否则下一次读会重新选中旧的绑定任务。
+let pendingScheduleId = null;
 
 async function readScheduleId() {
+  if (pendingScheduleId) return pendingScheduleId;
   const kv = await readKv();
   const id = kv[SCHEDULE_ID_KEY];
   if (id) {
@@ -468,6 +472,9 @@ async function ensureAutomationScheduleUnlocked(name, args) {
 // 自动化已经确定创建了：KV 读或写失败都不能报「请重试」（重试会再建一条），
 // 要带着已知 id 报「已创建但没存上，先核对」。
 async function persistScheduleId(scheduleId) {
+  // 对落盘失败的 id 建立本进程优先级，不能让下一次 KV 读取用旧值覆盖。
+  pendingScheduleId = scheduleId;
+  cachedScheduleId = scheduleId;
   let saved;
   try {
     saved = await writeKv({ [SCHEDULE_ID_KEY]: scheduleId });
@@ -478,11 +485,14 @@ async function persistScheduleId(scheduleId) {
     );
   }
   if (saved[SCHEDULE_ID_KEY] !== scheduleId) {
+    pendingScheduleId = scheduleId;
+    cachedScheduleId = scheduleId;
     throw new Error(
       'HERDR_OUTCOME_UNKNOWN: 自动化已创建（id=' + scheduleId + '），但 id 没保存成功。'
       + '请先核对自动化列表，不要直接重试重复创建。'
     );
   }
+  if (pendingScheduleId === scheduleId) pendingScheduleId = null;
 }
 
 // 旧任务已绑到别的会话、而这次要求不绑：宿主的 schedule_update 不接受
