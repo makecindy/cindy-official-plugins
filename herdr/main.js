@@ -1047,6 +1047,17 @@ const tools = {
   },
 
   async tmux_send(args) {
+    // Agent 工具契约里没有 allow_held：调用方多带的这个字段一律忽略，
+    // 冻结只能由面板已核对的恢复路径解除（见 panelBridge 的内部调用）。
+    return tmuxSendRequest({
+      target: args.target, text: args.text, keys: args.keys
+    }, false);
+  }
+};
+
+// tmux 写请求的公共实现：allowHeld 只对面板内部通道开放。
+async function tmuxSendRequest(args, allowHeld) {
+  {
     if (!args.target) throw new Error(runtime.missingTarget);
     const params = { target: String(args.target) };
     const hasKeys = Boolean(args.keys && args.keys.length);
@@ -1060,7 +1071,7 @@ const tools = {
       throw new Error(runtime.missingTextOrKeys);
     }
     // 面板在用户显式取消/补回车时请求解冻该 pane 的写队列。
-    if (args.allow_held === true) params.allow_held = true;
+    if (allowHeld === true) params.allow_held = true;
     return nodeRequest('tmux/send', params, args.__callId);
   }
 };
@@ -1151,10 +1162,9 @@ async function handlePanelRequest(request) {
     return tools.tmux_read({ target: request.target, lines: request.lines });
   }
   if (action === 'tmux_send') {
-    return tools.tmux_send({
-      target: request.target, text: request.text, keys: request.keys,
-      allow_held: request.allow_held
-    });
+    return tmuxSendRequest({
+      target: request.target, text: request.text, keys: request.keys
+    }, request.allow_held === true);
   }
   if (action === 'tmux_submit') {
     // 面板提交一行：worker 把「文本 + Enter」作为一个队列任务执行，

@@ -687,8 +687,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
 
   // Enter 未确认要冻结同 scope 的后续提交。
   const panelSrcHold = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
-  assert.match(panelSrcHold, /scopeHolds\[scope\] = true/,
-    'an unconfirmed Enter must hold the scope queue');
+  assert.match(panelSrcHold, /scopeHolds\[scope\] = holdGeneration \+= 1/,
+    'an unconfirmed Enter must hold the scope queue with a fresh generation');
   assert.match(panelSrcHold, /renderOutput\(T\.heldHint\)/,
     'a held scope must explain why the submit was not queued');
 
@@ -719,7 +719,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a failed tmux probe must not prune live pane records');
   assert.match(panelSrcHold, /pruneStaleScopeState\(\);/,
     'the refresh path must prune stale scope state');
-  assert.match(panelSrcHold, /scopeHolds\[scope\] = 'unknown';[\s\S]{0,80}renderOutput/,
+  assert.match(panelSrcHold, /scopeHoldKind\[scope\] = 'unknown';[\s\S]{0,120}renderOutput/,
     'an unknown line-key outcome must hold the scope');
   assert.match(panelSrcHold, /取消\/改行已送达/,
     'the hold must only clear after the cancelling key lands');
@@ -728,11 +728,11 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
 
   // 首段结果未知也冻结；恢复用钉住的目标；Herdr 回车是小写。
   const panelSrcResume = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
-  assert.match(panelSrcResume, /scopeHolds\[scope\] = 'unknown';/,
+  assert.match(panelSrcResume, /scopeHoldKind\[scope\] = 'unknown'/,
     'an unknown first-stage outcome must hold the scope as unknown');
   assert.ok(!/HERDR_OUTCOME_UNKNOWN[\s\S]{0,200}?pendingEnterOnly = \{ scope: scope, text: text \};\s*\n\s*scopeHolds/.test(panelSrcResume),
     'an unknown first stage must not claim the text is in the terminal');
-  assert.match(panelSrcResume, /if \(holdAtEnqueue === 'unknown'\) scopeHolds\[scope\] = false;/,
+  assert.match(panelSrcResume, /if \(kindAtEnqueue === 'unknown'\) scopeHolds\[scope\] = 0;/,
     'an unknown hold must let the checked resend through as a full submit');
   assert.match(panelSrcResume, /sendEnterOnly\(scope, pinnedView, target, paneId\)/,
     'the enter-only resume must use the pinned target');
@@ -783,7 +783,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   // 已在终端的待补文本不再重复同步；草稿同步未知也冻结。
   assert.match(panelSrcRf, /if \(draft && pendingEnterOnly\[scope\] === draft\)/,
     'a draft that is already in the terminal must not be pasted again');
-  assert.match(panelSrcRf, /HERDR_OUTCOME_UNKNOWN[\s\S]{0,200}?terminalHasContent\[scope\] = true;\s*\n\s*scopeHolds\[scope\] = 'unknown';/,
+  assert.match(panelSrcRf, /HERDR_OUTCOME_UNKNOWN[\s\S]{0,200}?terminalHasContent\[scope\] = true;[\s\S]{0,120}scopeHoldKind\[scope\] = 'unknown'/,
     'an unknown draft-sync outcome must hold the scope');
 
   // 对账：晚到余量交给当前代次；临时失败有界重试。
@@ -876,8 +876,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const workerSrc20 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
   assert.match(workerSrc20, /TMUX_QUEUE_HELD/,
     'an unknown write must freeze the pane write queue');
-  assert.match(mainSource, /params\.allow_held = true/,
-    'the explicit recovery request must reach the worker');
+  assert.match(mainSource, /tmuxSendRequest\(\{[\s\S]{0,200}\}, request\.allow_held === true\)/,
+    'only the panel bridge may unlock the worker queue');
+  assert.ok(!/args\.allow_held/.test(mainSource),
+    'the agent tool must ignore an allow_held argument');
   const panelSrcQd3 = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSrcQd3, /holdIsNew && pendingEnterOnly/,
     'a hold created after enqueue must also block an empty Enter');
@@ -895,7 +897,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const panelSrcRec = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSrcRec, /allow_held: true \}\)/,
     'the resume path must send the unlock marker');
-  assert.match(panelSrcRec, /unlockedResend = holdAtEnqueue === 'unknown'/,
+  assert.match(panelSrcRec, /unlockedResend = kindAtEnqueue === 'unknown'/,
     'only a checked full resend may unlock the queue');
   assert.match(panelSrcRec, /draftFromRestore && prior && draft\.indexOf\(prior\) === 0/,
     'duplicate detection must use the capture-time restore marker');
@@ -910,6 +912,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const workerSrc22 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
   assert.match(workerSrc22, /subscription\.paneIds = \[\];/,
     'a passive disconnect must invalidate the paneIds baseline');
+  assert.match(workerSrc22, /generationAtStart/,
+    'a snapshot taken during a handover must be invalidated');
   assert.match(workerSrc22, /lastDeliveredStatus\[data\.pane_id\] = data\.agent_status/,
     'the delivered status must be recorded per pane');
   assert.match(workerSrc22, /lastDeliveredStatus\[paneId\] !== status/,
@@ -919,6 +923,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const panelSrcLang = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   const langCount = (panelSrcLang.match(/lang: '/g) || []).length;
   assert.ok(langCount >= 4, 'the page language must be defined for all locales');
+  const tabCount = (panelSrcLang.match(/dataSourceTabs: '/g) || []).length;
+  assert.ok(tabCount >= 4, 'the tablist accessible name must be localized');
+  assert.match(panelSrcLang, /dataSourceTabs\);/,
+    'the tablist accessible name must be applied on language change');
   assert.match(panelSrcLang, /documentElement\.lang = T\.lang/,
     'the page lang must follow the host language');
 

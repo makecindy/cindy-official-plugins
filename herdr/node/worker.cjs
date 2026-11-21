@@ -184,7 +184,9 @@ const subscription = {
   desired: false,
   attempts: 0,
   retryTimer: null,
-  refreshTimer: null
+  refreshTimer: null,
+  // 每次订阅建立/断开都递增：换订阅期间做长等待时用它判断快照是否还有效。
+  generation: 0
 };
 
 const SUBSCRIPTION_RETRY_MIN_MS = 2000;
@@ -303,8 +305,13 @@ async function openSubscription() {
   // 新的失败时旧连接继续服务，不会出现没人收事件的空窗。
   const previous = subscription.socket;
 
+  const generationAtStart = subscription.generation;
   const previousPaneIds = subscription.paneIds.slice();
   const paneIds = await listPaneIds();
+  // 等待期间连接代次变了（旧连接在这时被动断开）：基线快照作废，
+  // 否则断线窗口里进入 blocked/done 的现有 pane 会被当成「旧成员」跳过。
+  let baseline = previousPaneIds;
+  if (subscription.generation !== generationAtStart) baseline = [];
   // paneIds 基线要在新订阅确认后再推进：握手失败时旧连接仍在服务，
   // 提前覆盖会让下一次重试把新 pane 当旧成员、跳过对账。
   const entries = buildEntries(paneIds);
@@ -370,6 +377,7 @@ async function openSubscription() {
         if (subscription.socket === socket) {
           subscription.socket = null;
           subscription.running = false;
+          subscription.generation += 1;
           // 被动断线：paneIds 基线失效。留着它会让下一次订阅把仍在的
           // pane 当「旧成员」跳过对账，断线窗口里进入 blocked/done 的
           // 状态就永远补不回来（实时事件也接不到了）。
@@ -396,6 +404,7 @@ async function openSubscription() {
   }
   subscription.running = true;
   subscription.attempts = 0;
+  subscription.generation += 1;
   // 确认后才推进 paneIds 基线（见上面的说明）。
   subscription.paneIds = paneIds;
   // 新连接已经确认，再关旧的（主动关不触发重连，也不清新连接的状态）。
@@ -408,7 +417,7 @@ async function openSubscription() {
   // 上一轮被新订阅打断的补查也一并接着做。
   const backlog = subscription.reconcileBacklog || [];
   subscription.reconcileBacklog = [];
-  reconcileNewPanes(paneIds, previousPaneIds, socket, backlog);
+  reconcileNewPanes(paneIds, baseline, socket, backlog);
 }
 
 // 只对「这次订阅里新出现」的 pane 查一次当前状态：旧 pane 的状态

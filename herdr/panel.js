@@ -45,6 +45,7 @@ const strings = {
     doneRefreshFailed: '操作已完成，但画面刷新失败：',
     terminalInput: '终端输入',
     lang: 'zh-CN',
+    dataSourceTabs: '数据源',
     sendFailed: '发送失败',
     termPlaceholder: '直接输入命令，回车执行',
     send: '发送',
@@ -89,6 +90,7 @@ const strings = {
     doneRefreshFailed: 'The operation completed, but refreshing the screen failed: ',
     terminalInput: 'Terminal input',
     lang: 'en',
+    dataSourceTabs: 'Data source',
     sendFailed: 'Could not send',
     termPlaceholder: 'Type a command, Enter runs it',
     send: 'Send',
@@ -133,6 +135,7 @@ const strings = {
     doneRefreshFailed: '操作は完了しましたが、画面の更新に失敗しました：',
     terminalInput: '端末入力',
     lang: 'ja',
+    dataSourceTabs: 'データソース',
     sendFailed: '送信に失敗',
     termPlaceholder: 'ここにコマンドを入力し Enter で実行',
     send: '送信',
@@ -177,6 +180,7 @@ const strings = {
     doneRefreshFailed: '작업은 완료되었지만 화면 갱신에 실패했습니다: ',
     terminalInput: '터미널 입력',
     lang: 'ko',
+    dataSourceTabs: '데이터 소스',
     sendFailed: '보내지 못했습니다',
     termPlaceholder: '명령을 입력하고 Enter 로 실행',
     send: '보내기',
@@ -381,6 +385,9 @@ function localize() {
   $('#term-input').setAttribute('aria-label', T.terminalInput);
   // 整页语言标记同步：否则 en/ja/ko 用户仍被按中文规则朗读。
   document.documentElement.lang = T.lang;
+  // 顶部数据源 tablist 的可访问名同样跟随语言。
+  const tabs = document.querySelector('.seg[role="tablist"]');
+  if (tabs) tabs.setAttribute('aria-label', T.dataSourceTabs);
   $('#detail-close').setAttribute('aria-label', T.collapse);
   // 按钮的可访问名要说它会做什么，不能用「已更新」这种状态文案。
   $('#refresh').setAttribute('aria-label', T.refreshAction);
@@ -504,7 +511,8 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
         // 不能像确定失败那样只放回输入框让人普通重发。
         if (/HERDR_OUTCOME_UNKNOWN/.test(String(error && error.message ? error.message : error))) {
           terminalHasContent[scope] = true;
-          scopeHolds[scope] = 'unknown';
+          scopeHolds[scope] = holdGeneration += 1;
+          scopeHoldKind[scope] = 'unknown';
         }
         // 同步没成功：草稿按归属放回。上一次恢复的还在最前面时接在它
         // 后面（保持输入顺序），否则前置（用户期间续打的部分接在后面）。
@@ -541,7 +549,7 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
     // 即便没有本地草稿也记下来，空回车才能把这行提交。
     if (!PENDING_ENTER_KEEP_KEYS[key]) {
       delete pendingEnterOnly[scope];
-      scopeHolds[scope] = false;
+      scopeHolds[scope] = 0;
       terminalHasContent[scope] = true;
     }
     await refreshAfterWrite();
@@ -550,7 +558,8 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
     // 改行键本身结果未知时（可能已改、可能没改），同样冻结这个终端。
     if (!PENDING_ENTER_KEEP_KEYS[key]
         && /HERDR_OUTCOME_UNKNOWN/.test(String(error && error.message ? error.message : error))) {
-      scopeHolds[scope] = 'unknown';
+      scopeHolds[scope] = holdGeneration += 1;
+      scopeHoldKind[scope] = 'unknown';
     }
     renderOutput(error.message || T.sendFailed);
   }
@@ -582,7 +591,12 @@ const scopeQueues = {};
 // Enter 未确认的终端要冻结后续提交：队列若立刻放行，下一条会清掉
 // 待核对记录并把文本粘到仍含上一条的终端行上。补发 Enter 成功或
 // 用户切换目标后才解除。
+// 冻结代次：每次建立 hold 递增，0 表示没有冻结。用代次而不是布尔/状态值，
+// 否则连续两次未确认的回车会被误判成同一个 hold。
+let holdGeneration = 0;
 const scopeHolds = {};
+// 该次冻结的语义（enter / unknown），与代次一一对应。
+const scopeHoldKind = {};
 // 冻结期间被拦下的多次提交：按入队顺序累积成一段，
 // 不能逐条前置（B、C 会变成 CBA）。
 const queuedDrafts = {};
@@ -654,6 +668,7 @@ function pruneStaleScopeState() {
   for (const scope of Object.keys(scopeHolds)) {
     if (covers(scope) && !live[scope]) {
       delete scopeHolds[scope];
+      delete scopeHoldKind[scope];
       delete queuedDrafts[scope];
     }
   }
@@ -676,12 +691,14 @@ async function sendEnterOnly(scope, pinnedView, target, paneId) {
     if (pinnedView === 'tmux') {
       await request('tmux_send', { target: target, keys: ['Enter'], allow_held: true });
     } else await request('send', { pane_id: paneId, keys: ['enter'] });
-    scopeHolds[scope] = false;
+    scopeHolds[scope] = 0;
+    delete scopeHoldKind[scope];
     await refreshAfterWrite();
   } catch (error) {
     // 回车结果未知：恢复同一目标的待提交记录，否则下一次回车什么都不做，
     // 终端里已有的命令就再也提交不了；同时提示先核对终端。
-    scopeHolds[scope] = true;
+    scopeHolds[scope] = holdGeneration += 1;
+    scopeHoldKind[scope] = 'enter';
     // map 记录按 scope 存：无论现在选中哪个分屏都要恢复，
     // 否则回到该终端后既没有可补发的记录、新文本又被冻结拦住。
     terminalHasContent[scope] = true;
@@ -709,10 +726,11 @@ function submitLine() {
   // 这个终端有一次未确认的回车：只拦「新文本」提交——空框回车
   // 和同一文本的恢复必须放行，否则永远无法补发。草稿放回输入框。
   const isResume = !text || pendingEnterOnly[scope] === text;
-  // 先在清空前记下入队时的冻结代次（核对过的恢复要靠它解冻 worker 队列）。
-  const holdAtEnqueue = scopeHolds[scope] || false;
-  // 'unknown' 冻结：失败时已提示先核对终端，这次提交按完整重发放行。
-  if (holdAtEnqueue === 'unknown') scopeHolds[scope] = false;
+  // 先在清空前记下入队时的冻结代次与语义（核对过的恢复要靠它解冻 worker 队列）。
+  const holdAtEnqueue = scopeHolds[scope] || 0;
+  const kindAtEnqueue = scopeHoldKind[scope] || null;
+  // unknown 冻结：失败时已提示先核对终端，这次提交按完整重发放行。
+  if (kindAtEnqueue === 'unknown') scopeHolds[scope] = 0;
   if (scopeHolds[scope] && !isResume) {
     if (currentScope() === scope) {
       const box = $('#term-input');
@@ -732,7 +750,7 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
   const field = $('#term-input');
   // 入队之后才建立的 hold 要挡住所有预先排队的任务，包括空回车：
   // 用户还没看到提示，不能替他补发。入队时已存在的 hold 才是确认过的恢复。
-  const holdIsNew = scopeHolds[scope] && scopeHolds[scope] !== holdAtEnqueue;
+  const holdIsNew = scopeHolds[scope] !== 0 && scopeHolds[scope] !== holdAtEnqueue;
   if (holdIsNew && pendingEnterOnly[scope] !== text) {
     const prior = queuedDrafts[scope] || '';
     queuedDrafts[scope] = prior + text;
@@ -785,10 +803,12 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       if (pinnedView === 'tmux') {
         await request('tmux_send', { target: target, keys: ['Enter'], allow_held: true });
       } else await request('send', { pane_id: paneId, keys: ['enter'] });
-      scopeHolds[scope] = false;
+      scopeHolds[scope] = 0;
+      delete scopeHoldKind[scope];
       await refreshAfterWrite();
     } catch (error) {
-      scopeHolds[scope] = true;
+      scopeHolds[scope] = holdGeneration += 1;
+      scopeHoldKind[scope] = 'enter';
       pendingEnterOnly[scope] = text;
       // 只在仍选中同一目标时补回输入框，别把 A 的命令写进 B 的框。
       if (currentScope() === scope && !field.value) field.value = text;
@@ -806,7 +826,7 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       try {
         // 只有入队时已处于 unknown 冻结（用户看过提示、核对过终端）的
         // 完整重发才带 allow_held；普通提交必须继续受队列冻结约束。
-        const unlockedResend = holdAtEnqueue === 'unknown';
+        const unlockedResend = kindAtEnqueue === 'unknown';
         await request('tmux_submit', {
           target: target, text: text, allow_held: unlockedResend
         });
@@ -818,7 +838,8 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       if (submitError && /TMUX_STAGE=enter/.test(submitDetail)) {
         // 文本已进终端、Enter 结果未知：只补回车，不重贴文本。
         pendingEnterOnly[scope] = text;
-        scopeHolds[scope] = 'enter';
+        scopeHolds[scope] = holdGeneration += 1;
+        scopeHoldKind[scope] = 'enter';
         if (currentScope() === scope && !field.value) field.value = text;
         renderOutput(T.enterUnconfirmed + '（' + submitDetail.replace('TMUX_STAGE=enter ', '') + '）');
         return;
@@ -827,12 +848,14 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
         // 文本阶段（或整段结果未知）：交给外层 catch 的既有语义处理。
         throw new Error(submitDetail.replace('TMUX_STAGE=text ', ''));
       }
-      scopeHolds[scope] = false;
+      scopeHolds[scope] = 0;
+      delete scopeHoldKind[scope];
       await refreshAfterWrite();
     } else {
       // submit = pane.send_input，自带回车；pane.send_text 只打字不执行。
       await request('submit', { pane_id: paneId, text: text });
-      scopeHolds[scope] = false;
+      scopeHolds[scope] = 0;
+      delete scopeHoldKind[scope];
       await refreshAfterWrite();
     }
   } catch (error) {
@@ -848,7 +871,8 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       // 单槽记录：请求返回时用户可能已在另一个分屏操作，
       // 不能覆盖那个分屏的记录。
       terminalHasContent[scope] = true;
-      scopeHolds[scope] = 'unknown';
+      scopeHolds[scope] = holdGeneration += 1;
+      scopeHoldKind[scope] = 'unknown';
     }
     if (currentScope() === scope && !field.value) field.value = text;
     renderOutput(error.message || T.sendFailed);
