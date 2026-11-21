@@ -148,7 +148,8 @@ const READ_ONLY_HERDR_METHODS = {
   ping: true, 'session.snapshot': true, 'pane.read': true, 'pane.list': true,
   'pane.get': true, 'pane.current': true, 'agent.read': true, 'agent.list': true,
   'agent.get': true, 'workspace.list': true, 'workspace.get': true,
-  'tab.list': true, 'tab.get': true, 'worktree.list': true, 'events.wait': true
+  'tab.list': true, 'tab.get': true, 'worktree.list': true, 'events.wait': true,
+  'agent.wait': true, 'pane.wait_for_output': true
 };
 
 function isPotentiallyMutating(method, params) {
@@ -1155,6 +1156,7 @@ async function tmuxSendRequest(args, allowHeld, composite) {
     }
     // 面板在用户显式取消/补回车时请求解冻该 pane 的写队列。
     if (allowHeld === true) params.allow_held = true;
+    params.timeout_ms = TMUX_WRITE_TIMEOUT_MS;
     return nodeRequest('tmux/send', params, args.__callId, TMUX_WRITE_TIMEOUT_MS);
   }
 };
@@ -1272,7 +1274,8 @@ async function handlePanelRequest(request) {
     // 不让另一个面板的文本插进来。
     return nodeRequest('tmux/submit', {
       target: request.target, text: request.text,
-      allow_held: request.allow_held, server_pid: request.server_pid
+      allow_held: request.allow_held, server_pid: request.server_pid,
+      timeout_ms: TMUX_WRITE_TIMEOUT_MS
     }, request.__callId, TMUX_WRITE_TIMEOUT_MS);
   }
   throw new Error(runtime.unknownPanelAction + action);

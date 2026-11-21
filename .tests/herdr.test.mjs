@@ -1053,7 +1053,13 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'herdr text and keys must be queued per pane and applied atomically');
   assert.match(workerSrc22, /HERDR_STAGE=keys/,
     'a keys-stage failure after the text must be marked as text already sent');
-  assert.match(workerSrc22, /function dequeued\(\)[\s\S]{0,400}tmuxQueueHolds\[dest\]/,
+  assert.match(workerSrc22, /TMUX_QUEUE_EXPIRED/,
+    'a queued tmux write must stop when its deadline has passed');
+  assert.match(workerSrc22, /const remainingWait = deadline - Date\.now\(\);/,
+    'event waits must deduct the subscription handshake from the budget');
+  assert.match(mainSource, /'agent.wait': true, 'pane.wait_for_output': true/,
+    'the public wait methods must be read-only in the host process too');
+  assert.match(workerSrc22, /function dequeued\(\)[\s\S]{0,700}tmuxQueueHolds\[dest\]/,
     'the hold must be rechecked when a queued write starts');
   assert.match(workerSrc22, /TMUX_STAGE=text_failed/,
     'a definite text failure must be distinguishable from an unknown outcome');

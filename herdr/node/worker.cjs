@@ -1172,6 +1172,8 @@ const handlers = {
   async 'herdr/wait-event'(params) {
     const requested = Number(params.timeout_ms || 0);
     const timeoutMs = requested > 0 ? Math.min(requested, 60000) : 60000;
+    // timeout_ms 是整次等待的上限，握手重连的耗时也算进去。
+    const deadline = Date.now() + timeoutMs;
     // 用户退订过就不能借 wait 把长连接重新打开（否则通知和自动化会自己回来）。
     if (!subscription.desired) {
       const error = new Error('HERDR_UNSUBSCRIBED: 已退订，事件等待需要先订阅（herdr_events mode=subscribe）。');
@@ -1182,6 +1184,10 @@ const handlers = {
       await withSubscriptionLock(async function () {
         await openSubscription();
       });
+    }
+    const remainingWait = deadline - Date.now();
+    if (remainingWait <= 0) {
+      throw new Error('timeout: 等待事件超时：' + (params.event || '任意事件'));
     }
     // 续段先回放：上一段超时到这次注册之间的间隙里到达的匹配事件。
     const since = Number(params.since_ms || 0);
@@ -1208,7 +1214,7 @@ const handlers = {
         if (index >= 0) eventWaiters.splice(index, 1);
         // 消息里带 timeout 前缀，上层据此判断「接着等下一段」而不是当失败。
         reject(new Error('timeout: 等待事件超时：' + (waiter.event || '任意事件')));
-      }, timeoutMs);
+      }, remainingWait);
       eventWaiters.push(waiter);
     });
   },
@@ -1290,9 +1296,10 @@ const handlers = {
     const keys = params && Array.isArray(params.keys) ? params.keys : [];
     const recoveryKey = keys.length === 1 && /^(C-c|ctrl\+c|Enter|enter)$/.test(String(keys[0]));
     const allowHeld = Boolean(params && params.allow_held) || recoveryKey;
-    return enqueueTmuxSend(key, identity.serverPid, function () {
+    return enqueueTmuxSend(key, identity.serverPid, function (writeDeadline) {
+      if (writeDeadline - Date.now() <= 0) throw tmuxQueueExpired();
       return tmuxSend(identity.paneId, sendParams);
-    }, allowHeld);
+    }, allowHeld, params && params.timeout_ms);
   },
 
   // 提交一行 = 文本 + Enter 的原子任务：两个 RPC 各自排队的话，
@@ -1302,7 +1309,8 @@ const handlers = {
     const identity = await tmuxQueueKey(dest, params && params.server_pid);
     const key = identity.key;
     const allowHeld = Boolean(params && params.allow_held);
-    return enqueueTmuxSend(key, identity.serverPid, async function () {
+    return enqueueTmuxSend(key, identity.serverPid, async function (writeDeadline) {
+      if (writeDeadline - Date.now() <= 0) throw tmuxQueueExpired();
       try {
         await tmuxSend(identity.paneId, { text: String(params.text) });
       } catch (error) {
@@ -1315,6 +1323,9 @@ const handlers = {
           throw new Error('TMUX_STAGE=text ' + detail);
         }
         throw new Error('TMUX_STAGE=text_failed ' + detail);
+      }
+      if (writeDeadline - Date.now() <= 0) {
+        throw new Error('TMUX_STAGE=enter HERDR_OUTCOME_UNKNOWN: 文本已写入，回车阶段预算已耗尽；请先核对终端再决定是否重试。');
       }
       try {
         await tmuxSend(identity.paneId, { keys: ['Enter'] });
@@ -1371,7 +1382,13 @@ async function tmuxQueueKey(dest, expectedServerPid) {
 // （Ctrl+C）或补发回车（allowHeld）才放行，成功后解冻。
 const tmuxQueueHolds = {};
 
-function enqueueTmuxSend(dest, serverPid, task, allowHeld) {
+function tmuxQueueExpired() {
+  const expired = new Error('TMUX_QUEUE_EXPIRED: 这次写入还在排队时预算已用完，尚未发出，可以重新提交。');
+  expired.code = 'TMUX_QUEUE_EXPIRED';
+  return expired;
+}
+
+function enqueueTmuxSend(dest, serverPid, task, allowHeld, timeoutMs) {
   if (tmuxQueueHolds[dest] && !allowHeld) {
     const held = new Error('TMUX_QUEUE_HELD: 这个 pane 上一次写操作结果未知，'
       + '请先核对终端，用 Ctrl+C 取消那行或补发回车后再写入。');
@@ -1380,7 +1397,9 @@ function enqueueTmuxSend(dest, serverPid, task, allowHeld) {
   }
   // 出队时再检查一次冻结：入队时的检查发生在前一个请求完成之前，
   // 前一个请求随后以「结果未知」结束的话，这一项不能接着写。
+  const writeDeadline = Date.now() + (Number(timeoutMs) > 0 ? Number(timeoutMs) : 90000);
   async function dequeued() {
+    if (writeDeadline - Date.now() <= 0) throw tmuxQueueExpired();
     // 旧 server 上排队的 Promise 即使仍被引用，出队时也不得向新 server
     // 复用的 pane id 写入。
     const currentServerPid = await tmuxServerPid();
@@ -1395,7 +1414,7 @@ function enqueueTmuxSend(dest, serverPid, task, allowHeld) {
       held.code = 'TMUX_QUEUE_HELD';
       throw held;
     }
-    return task();
+    return task(writeDeadline);
   }
   const run = (tmuxSendQueues[dest] || Promise.resolve()).then(dequeued, dequeued);
   tmuxSendQueues[dest] = run.then(
