@@ -248,7 +248,7 @@ test('submitting a line pins one target for both tmux sends', () => {
   assert.ok(wrapper, 'submitLine must exist');
   assert.match(wrapper[1], /const target = selectedTarget;/, 'target must be captured at submit time');
   assert.match(wrapper[1], /enqueueForScope\(scope/, 'submits must be serialized per scope');
-  const body = /async function submitLineQueued\(text, pinnedView, target, paneId, scope, holdAtEnqueue, kindAtEnqueue, unlockTokenValue\) \{([\s\S]*?)\n\}/.exec(source);
+  const body = /async function submitLineQueued\(text, pinnedView, target, paneId, scope, holdAtEnqueue, kindAtEnqueue, unlockTokenValue, epoch\) \{([\s\S]*?)\n\}/.exec(source);
   assert.ok(body, 'submitLineQueued must exist');
   const text = body[1];
   assert.match(text, /request\('tmux_submit', \{[\s\S]{0,120}?target: target, text: text, allow_held: unlockedResend/,

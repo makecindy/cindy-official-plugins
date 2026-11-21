@@ -1051,23 +1051,32 @@ const tools = {
         hint: available.reason === 'not-installed' ? runtime.tmuxMissingHint : null
       };
     }
-    const sessions = await nodeRequest('tmux/sessions', {}, args.__callId);
-    // server pid：面板用它识别 tmux server 重启后被复用的 pane id。
-    const serverInfo = await nodeRequest('tmux/server_pid', {}, args.__callId);
-    const panes = await nodeRequest(
-      'tmux/panes',
-      args.session ? { session: String(args.session) } : {},
-      args.__callId
-    );
-    return {
-      available: true,
-      version: available.version,
-      reason: null,
-      message: null,
-      server_pid: serverInfo && serverInfo.server_pid ? serverInfo.server_pid : null,
-      sessions: sessions.sessions,
-      panes: panes.panes
-    };
+    // server pid 必须和 pane 列表属于同一代：读前后各核对一次，快速重启时
+    // 丢弃混代快照并重试；始终不稳定就失败关闭，不能把旧 pane 绑定到新 PID。
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const before = await nodeRequest('tmux/server_pid', {}, args.__callId);
+      const sessions = await nodeRequest('tmux/sessions', {}, args.__callId);
+      const panes = await nodeRequest(
+        'tmux/panes',
+        args.session ? { session: String(args.session) } : {},
+        args.__callId
+      );
+      const after = await nodeRequest('tmux/server_pid', {}, args.__callId);
+      const beforePid = before && before.server_pid ? Number(before.server_pid) : null;
+      const afterPid = after && after.server_pid ? Number(after.server_pid) : null;
+      if (beforePid === afterPid) {
+        return {
+          available: true,
+          version: available.version,
+          reason: null,
+          message: null,
+          server_pid: afterPid,
+          sessions: sessions.sessions,
+          panes: panes.panes
+        };
+      }
+    }
+    throw new Error('TMUX_STATE_UNSTABLE: tmux server changed while reading panes.');
   },
 
   async tmux_read(args) {

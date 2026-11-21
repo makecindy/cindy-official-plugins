@@ -604,8 +604,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
 
   // 草稿同步与发送目标绑定：等待期间切分屏不会打到新目标、不改写新目标的输入框。
   const panelSrcPin = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
-  assert.match(panelSrcPin, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft, draftFromRestore\) \{[\s\S]{0,2600}?tmux_send', \{ target: target, text: draft \}/,
+  assert.match(panelSrcPin, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft, draftFromRestore, epoch\) \{[\s\S]{0,2600}?tmux_send', \{ target: target, text: draft \}/,
     'the draft sync must use the pinned target');
+  assert.match(panelSrcPin, /if \(!scopeEpochIsCurrent\(scope, epoch\)\) return true;/,
+    'late callbacks from a replaced pane must not mutate its restored state');
   assert.match(panelSrcPin, /if \(currentScope\(\) === scope && !field\.value\) field\.value = text;/,
     'the draft restore must only touch the box of the same target');
   // 草稿同步后空输入框的回车可以只补 Enter。
@@ -668,13 +670,13 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the write-timeout hint must exist in all four locales');
 
   // 同一终端的提交串行化 + 按键时钉住视图。
-  assert.match(panelSrcTimeout, /enqueueForScope\(scope, function \(\) \{\s*return submitLineQueued/,
+  assert.match(panelSrcTimeout, /enqueueForScope\(scope, function \(epoch\) \{\s*return submitLineQueued/,
     'submits must be serialized per scope');
   assert.match(panelSrcTimeout, /consumeFromInput/,
     'queued submits must only consume the sent prefix');
   assert.match(panelSrcTimeout, /按下回车这一刻就把草稿从输入框取走/,
     'the draft must leave the box at submit time, not at dequeue time');
-  assert.match(panelSrcTimeout, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft, draftFromRestore\)/,
+  assert.match(panelSrcTimeout, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft, draftFromRestore, epoch\)/,
     'the draft must be captured with its ownership at keypress time');
   assert.match(panelSrcTimeout, /捕获并取走/,
     'a line-altering key must consume the draft at keypress time');
@@ -734,8 +736,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'an unknown first stage must not claim the text is in the terminal');
   assert.match(panelSrcResume, /if \(kindAtEnqueue === 'unknown'\) \{[\s\S]{0,120}scopeHolds\[scope\] = 0;/,
     'an unknown hold must let the checked resend through as a full submit');
-  assert.match(panelSrcResume, /sendEnterOnly\(scope, pinnedView, target, paneId\)/,
-    'the enter-only resume must use the pinned target');
+  assert.match(panelSrcResume, /sendEnterOnly\(scope, pinnedView, target, paneId, epoch\)/,
+    'the enter-only resume must use the pinned target and scope epoch');
   assert.match(panelSrcResume, /const pendingEnterOnly = \{\};/,
     'pending-enter records must be stored per scope');
   assert.match(panelSrcResume, /const terminalHasContent = \{\};/,
@@ -826,8 +828,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the panel must distinguish the Enter stage of the atomic submit');
   assert.match(panelSrcAtomic2, /入队之后才建立的 hold 要挡住所有预先排队的任务/,
     'the queued submit must re-check the hold at dequeue time');
-  assert.match(panelSrcAtomic2, /queuedDrafts\[scope\] = prior \+ text/,
-    'multiple blocked submits must keep their original order');
+  assert.match(panelSrcAtomic2, /const queuedSubmissions = \{\};/,
+    'blocked submits must have a separate queue from draft fragments');
+  assert.match(panelSrcAtomic2, /queuedSubmissions\[scope\] = \[\]\)\)\.push\(text\)/,
+    'multiple blocked submits must keep their command boundaries and original order');
   for (const key of ['heldHint', 'enterUnconfirmed', 'enterStillUnknown', 'doneRefreshFailed', 'terminalInput']) {
     const count = (panelSrcAtomic2.match(new RegExp(key + ':', 'g')) || []).length;
     assert.ok(count >= 4, key + ' must be localized in all four languages');
@@ -870,14 +874,18 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the worker queue key must include the tmux server generation');
   assert.match(workerSrc19, /currentServerPid !== serverPid/,
     'an old-server queued write must be rejected at dequeue');
+  assert.match(workerSrc19, /key: String\(serverPid\) \+ ':' \+ paneId/,
+    'worker holds and queues must be partitioned by server generation');
   assert.ok(!/tmuxServerPidCache/.test(workerSrc19),
     'server pid must not be cached across a restart');
   const panelSrcId = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSrcId, /function tmuxStableTarget/,
     'the panel must scope tmux state by stable pane id');
+  assert.match(panelSrcId, /for \(const scope of allScopes\)[\s\S]{0,250}clearScopeState\(scope\)/,
+    'a disappeared pane must invalidate its queued scope tasks');
   assert.match(panelSrcId, /scopeQueueEpochs\[scope\] = \(scopeQueueEpochs\[scope\] \|\| 0\) \+ 1/,
     'a replaced pane must invalidate pending scope tasks');
-  assert.match(panelSrcId, /if \(\(scopeQueueEpochs\[scope\] \|\| 0\) !== epoch\) return undefined/,
+  assert.match(panelSrcId, /if \(!scopeEpochIsCurrent\(scope, epoch\)\) return undefined/,
     'a stale scope task must not execute after replacement');
   assert.match(panelSrcId, /selectedTarget = stable;/,
     'selecting a tmux pane must store the stable id');
@@ -886,6 +894,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const workerSrc20 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
   assert.match(workerSrc20, /TMUX_QUEUE_HELD/,
     'an unknown write must freeze the pane write queue');
+  assert.match(mainSource, /for \(let attempt = 0; attempt < 3; attempt \+= 1\)[\s\S]{0,700}beforePid === afterPid/,
+    'tmux pane snapshots must be bracketed by matching server pids');
+  assert.match(mainSource, /TMUX_STATE_UNSTABLE/,
+    'an unstable tmux snapshot must fail closed');
   assert.match(mainSource, /tmuxSendRequest\(\{[\s\S]{0,200}\}, request\.allow_held === true\)/,
     'only the panel bridge may unlock the worker queue');
   assert.ok(!/args\.allow_held/.test(mainSource),
@@ -893,12 +905,18 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const panelSrcQd3 = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSrcQd3, /if \(holdIsNew\) \{/,
     'a hold created after enqueue must also block an empty Enter');
-  assert.match(panelSrcQd3, /if \(!text\) \{[\s\S]{0,200}await sendEnterOnly\(scope, pinnedView, target, paneId\);/,
+  assert.match(panelSrcQd3, /if \(!text\) \{[\s\S]{0,200}await sendEnterOnly\(scope, pinnedView, target, paneId, epoch\);/,
     'an empty submit must still send an Enter');
   assert.match(panelSrcQd3, /allow_held: true/,
     'the enter-only resume must unlock the pane queue');
   assert.match(panelSrcQd3, /queuedDrafts\[scope\] = prior \+ addition/,
     'blocked key drafts must accumulate in order');
+  assert.match(panelSrcQd3, /queuedSubmissions\[scope\] = \[\]/,
+    'queued submissions must be stored as separate commands');
+  assert.match(panelSrcQd3, /queuedSubmissions\[scope\] = \[\]\)\)\.push\(text\)/,
+    'each blocked Enter submission must keep its own command boundary');
+  assert.match(panelSrcQd3, /function restoreNextSubmission\(scope\)/,
+    'queued commands must be restored one at a time');
   assert.match(panelSrcQd3, /queuedDrafts\[scope\] = \(queuedDrafts\[scope\] \|\| ''\) \+ draft;/,
     'consecutive failed key drafts must be retained in order');
   assert.match(panelSrcQd3, /aria-label', T\.terminalInput/,

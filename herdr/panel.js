@@ -467,13 +467,13 @@ function forwardKey(event) {
     consumeFromInput(draftField, draft);
   }
   // 同一终端的操作排队执行：草稿同步、改行按键不能与正在进行的提交交错。
-  enqueueForScope(scope, function () {
-    return forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, draftFromRestore);
+  enqueueForScope(scope, function (epoch) {
+    return forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, draftFromRestore, epoch);
   });
   return true;
 }
 
-async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, draftFromRestore) {
+async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, draftFromRestore, epoch) {
   // 会改动终端里那行内容的按键（取消 C-c、历史 Up/Down、补全 Tab、
   // 删除 C-u/C-w/C-k/C-d、Esc、M-* 宏等）让恢复记录失效；
   // 但清屏 C-l、移动光标 C-a/C-e、翻滚动条 PPage/NPage 不改内容，
@@ -524,6 +524,7 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
         if (pinnedView === 'tmux') await request('tmux_send', { target: target, text: draft });
         else await request('send', { pane_id: paneId, text: draft });
       } catch (error) {
+        if (!scopeEpochIsCurrent(scope, epoch)) return true;
         // 结果未知 = 草稿可能已在终端：冻结并记下「可能有内容」，
         // 不能像确定失败那样只放回输入框让人普通重发。
         if (/HERDR_OUTCOME_UNKNOWN/.test(String(error && error.message ? error.message : error))) {
@@ -554,6 +555,7 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
         renderOutput(error.message || T.sendFailed);
         return true;
       }
+      if (!scopeEpochIsCurrent(scope, epoch)) return true;
       // 草稿已转移到终端：记下来，之后空输入框的回车可以只补 Enter。
       // 注意不是 pendingEnterOnly——随后的改行按键会改变这行内容，
       // 同一文本恢复粘贴的去重记录不能假装它还原样存在。
@@ -566,6 +568,7 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
     if (pinnedView === 'tmux') {
       await request('tmux_send', { target: target, keys: [key], allow_held: allowHeld });
     } else await request('send', { pane_id: paneId, keys: [key] });
+    if (!scopeEpochIsCurrent(scope, epoch)) return true;
     // 取消/改行已送达：未确认的那一行不存在了，记录与冻结才解除。
     // 改行键可能已经在终端行里留下内容（Up 调出历史、Tab 补全）：
     // 即便没有本地草稿也记下来，空回车才能把这行提交。
@@ -576,6 +579,7 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
       // 取消成功：那行已经丢掉，之前攒下的草稿与解冻占用一起作废，
       // 否则下一次提交会被旧的 queuedDrafts 拦住。
       if (key === 'C-c' || key === 'ctrl+c') {
+        delete queuedSubmissions[scope];
         delete queuedDrafts[scope];
         delete scopeHoldKind[scope];
         delete scopeUnlockClaims[scope];
@@ -584,6 +588,7 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
     }
     await refreshAfterWrite();
   } catch (error) {
+    if (!scopeEpochIsCurrent(scope, epoch)) return true;
     // 失败或结果未知：保留待核对记录与冻结，新文本不会被放行粘到旧命令上。
     // 改行键本身结果未知时（可能已改、可能没改），同样冻结这个终端。
     if (!PENDING_ENTER_KEEP_KEYS[key]
@@ -637,9 +642,11 @@ let unlockToken = 0;
 function releaseUnlock(scope, token) {
   if (token && scopeUnlockClaims[scope] === token) delete scopeUnlockClaims[scope];
 }
-// 冻结期间被拦下的多次提交：按入队顺序累积成一段，
-// 不能逐条前置（B、C 会变成 CBA）。
+// 冻结期间被拦下的按键草稿：按入队顺序累积为一段文本。
 const queuedDrafts = {};
+// 被新 hold 拦下的独立 Enter 提交：必须保留每条命令的 Enter 边界，
+// 恢复时逐条交给用户确认，不能拼成一条命令。
+const queuedSubmissions = {};
 // 最近一次把累积草稿写回输入框的内容：用来区分「用户新打的文字」和
 // 「面板刚恢复的同一份文字」，不能只看前缀。
 const restoredBoxText = {};
@@ -655,11 +662,15 @@ function consumeFromInput(field, sent) {
   }
 }
 
+function scopeEpochIsCurrent(scope, epoch) {
+  return (scopeQueueEpochs[scope] || 0) === epoch;
+}
+
 function enqueueForScope(scope, task) {
   const epoch = scopeQueueEpochs[scope] || 0;
   function runIfCurrent() {
-    if ((scopeQueueEpochs[scope] || 0) !== epoch) return undefined;
-    return task();
+    if (!scopeEpochIsCurrent(scope, epoch)) return undefined;
+    return task(epoch);
   }
   const run = (scopeQueues[scope] || Promise.resolve()).then(runIfCurrent, runIfCurrent);
   scopeQueues[scope] = run.then(function () {}, function () {});
@@ -680,15 +691,27 @@ async function refreshAfterWrite() {
 // 切回某个分屏时，把冻结期间被拦下、还没交还给用户的提交放回输入框。
 function restoreQueuedDrafts() {
   const scope = currentScope();
-  if (!scope || !queuedDrafts[scope]) return;
+  if (!scope) return;
   const box = $('#term-input');
-  if (box) {
+  if (!box) return;
+  if (queuedDrafts[scope]) {
     // 框里已经显示着这些草稿时不再重复添加（面板自己回填过一次）。
     const alreadyShown = box.value.indexOf(queuedDrafts[scope]) !== -1;
     if (!alreadyShown) box.value = queuedDrafts[scope] + box.value;
     restoredBoxText[scope] = box.value;
+    delete queuedDrafts[scope];
   }
-  delete queuedDrafts[scope];
+  restoreNextSubmission(scope);
+}
+
+function restoreNextSubmission(scope) {
+  const queue = queuedSubmissions[scope];
+  const box = $('#term-input');
+  if (!queue || !queue.length || !box || box.value) return;
+  // 一次只把下一条独立提交放回输入框，保留每次 Enter 的边界。
+  box.value = queue.shift();
+  if (!queue.length) delete queuedSubmissions[scope];
+  restoredBoxText[scope] = box.value;
 }
 
 // 清掉已经不存在（或同名重建）的分屏的待确认状态。
@@ -712,20 +735,29 @@ function pruneStaleScopeState() {
   for (const scope of Object.keys(terminalHasContent)) {
     if (covers(scope) && !live[scope]) delete terminalHasContent[scope];
   }
-  for (const scope of Object.keys(scopeHolds)) {
-    if (covers(scope) && !live[scope]) {
-      delete scopeHolds[scope];
-      delete scopeHoldKind[scope];
-      delete queuedDrafts[scope];
-      delete scopeUnlockClaims[scope];
-    }
-  }
-  // 没有冻结的失败草稿同样按存活列表清理：分屏消失后（tmux server 重启
-  // 会复用 %0 这类 pane id）旧命令不能被带进新分屏的输入框。
-  for (const scope of Object.keys(queuedDrafts)) {
-    if (covers(scope) && !live[scope]) {
-      delete queuedDrafts[scope];
-      delete restoredBoxText[scope];
+  // pane 消失时统一使整个 scope 的待确认状态、尚未开始的队列任务和选中态失效。
+  // 如果之后新 pane 复用同一个 %N，旧命令不能从旧队列回调或输入框流过去。
+  const allScopes = new Set([
+    ...Object.keys(scopeQueues), ...Object.keys(pendingEnterOnly),
+    ...Object.keys(terminalHasContent), ...Object.keys(scopeHolds),
+    ...Object.keys(queuedDrafts), ...Object.keys(queuedSubmissions),
+    ...Object.keys(scopeUnlockClaims), ...Object.keys(restoredBoxText)
+  ]);
+  for (const scope of allScopes) {
+    if (!covers(scope) || live[scope]) continue;
+    clearScopeState(scope);
+    if (scope.startsWith('t:')) {
+      const id = scope.slice(2);
+      delete tmuxPaneIdentities[id];
+      if (selectedTarget === id) {
+        selectedTarget = null;
+        const box = $('#term-input');
+        if (box) box.value = '';
+        restoredDraft = null;
+        const detail = $('#detail');
+        if (detail) detail.hidden = true;
+        renderOutput(T.paneReplaced);
+      }
     }
   }
 }
@@ -738,7 +770,7 @@ function currentScope() {
 
 // 只补一次回车：文本确认已在终端里时用它，绝不重复粘贴。
 // 目标用入队时钉住的值：排队期间切了分屏，Enter 不能发到新目标上。
-async function sendEnterOnly(scope, pinnedView, target, paneId) {
+async function sendEnterOnly(scope, pinnedView, target, paneId, epoch) {
   const hadText = pendingEnterOnly[scope] !== undefined ? pendingEnterOnly[scope] : null;
   delete pendingEnterOnly[scope];
   delete terminalHasContent[scope];
@@ -747,11 +779,13 @@ async function sendEnterOnly(scope, pinnedView, target, paneId) {
     if (pinnedView === 'tmux') {
       await request('tmux_send', { target: target, keys: ['Enter'], allow_held: true });
     } else await request('send', { pane_id: paneId, keys: ['enter'] });
+    if (epoch !== undefined && !scopeEpochIsCurrent(scope, epoch)) return;
     scopeHolds[scope] = 0;
     delete scopeHoldKind[scope];
     await refreshAfterWrite();
   } catch (error) {
-    // 回车结果未知：恢复同一目标的待提交记录，否则下一次回车什么都不做，
+    if (epoch !== undefined && !scopeEpochIsCurrent(scope, epoch)) return;
+    // 回车结果未知：恢复同一目标的待提交记录，否则下一次回车什么都不做,
     // 终端里已有的命令就再也提交不了；同时提示先核对终端。
     scopeHolds[scope] = holdGeneration += 1;
     scopeHoldKind[scope] = 'enter';
@@ -807,13 +841,14 @@ function submitLine() {
   }
   // 同一终端的「文本 + Enter」串行执行：两条提交并行时，第二次 paste
   // 可能排在第一次 Enter 前，把两条命令拼成一行或颠倒顺序。
-  enqueueForScope(scope, function () {
-    return submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue, kindAtEnqueue, unlockTokenValue);
+  enqueueForScope(scope, function (epoch) {
+    return submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue, kindAtEnqueue, unlockTokenValue, epoch);
   });
 }
 
-async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue, kindAtEnqueue, unlockTokenValue) {
+async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue, kindAtEnqueue, unlockTokenValue, epoch) {
   const field = $('#term-input');
+  if (!scopeEpochIsCurrent(scope, epoch)) return;
   // 入队之后才建立的 hold 要挡住所有预先排队的任务，包括空回车：
   // 用户还没看到提示，不能替他补发。入队时已存在的 hold 才是确认过的恢复。
   // 新 scope 上 scopeHolds[scope] 是 undefined：先归一到 0 再比较，
@@ -825,28 +860,10 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
   // 只有在看到 hold 之后才重新入队的提交才是恢复（那时 holdAtEnqueue
   // 已经等于当前代次，holdIsNew 本来就是 false）。
   if (holdIsNew) {
-    const prior = queuedDrafts[scope] || '';
-    queuedDrafts[scope] = prior + text;
-    if (currentScope() === scope) {
-      // 顺序必须和提交顺序一致：框里已经躺着更早提交的失败内容时
-      // （前面那次结果未知、已回填到输入框），这次的草稿要排在它后面，
-      // 不能前置拼成倒序命令。
-      const boxHasEarlier = restoredBoxText[scope] !== undefined
-        && field.value.indexOf(restoredBoxText[scope]) === 0;
-      if (boxHasEarlier) {
-        // 只追加本次被拦下的内容：累计值里包含之前已经显示过的部分，
-        // 整段追加会把同一段命令复制成两份。
-        field.value = field.value + text;
-      } else {
-        // 框里以之前累积的内容开头就替换掉它，新打的内容留在后面。
-        field.value = field.value.indexOf(prior) === 0
-          ? queuedDrafts[scope] + field.value.slice(prior.length)
-          : queuedDrafts[scope] + field.value;
-      }
-      // 登记恢复 marker：否则之后按 Tab/Up 会把刚回填的内容当成新草稿，
-      // 和之前的累积草稿拼成两份。
-      restoredBoxText[scope] = field.value;
-    }
+    // 每次 Enter 提交是独立命令：保留条目及其边界，不能拼成一个文本。
+    if (text) (queuedSubmissions[scope] || (queuedSubmissions[scope] = [])).push(text);
+    // 输入框保留更早的失败命令；本条在独立队列里逐条恢复，避免丢掉 Enter 边界。
+    // 不把两条独立提交拼入同一输入行。
     releaseUnlock(scope, unlockTokenValue);
     renderOutput(T.heldHint);
     return;
@@ -887,7 +904,7 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
   // （“Press Enter to continue”），侧栏拦下了按键，必须由这里转出去。
   if (!text) {
     try {
-      await sendEnterOnly(scope, pinnedView, target, paneId);
+      await sendEnterOnly(scope, pinnedView, target, paneId, epoch);
     } finally {
       // 补发回车不消费解冻语义：结束路径都要把占用还回去，
       // 否则这个分屏之后再次结果未知时拿不到 unknown 标记。
@@ -905,11 +922,13 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       if (pinnedView === 'tmux') {
         await request('tmux_send', { target: target, keys: ['Enter'], allow_held: true });
       } else await request('send', { pane_id: paneId, keys: ['enter'] });
+      if (!scopeEpochIsCurrent(scope, epoch)) return;
       scopeHolds[scope] = 0;
       delete scopeHoldKind[scope];
       releaseUnlock(scope, unlockTokenValue);
       await refreshAfterWrite();
     } catch (error) {
+      if (!scopeEpochIsCurrent(scope, epoch)) return;
       scopeHolds[scope] = holdGeneration += 1;
       scopeHoldKind[scope] = 'enter';
       pendingEnterOnly[scope] = text;
@@ -933,9 +952,11 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
         await request('tmux_submit', {
           target: target, text: text, allow_held: unlockedResend
         });
+        if (!scopeEpochIsCurrent(scope, epoch)) return;
       } catch (error) {
         submitError = error;
       }
+      if (!scopeEpochIsCurrent(scope, epoch)) return;
       const submitDetail = submitError
         ? String(submitError.message || submitError) : '';
       if (submitError && /TMUX_STAGE=enter/.test(submitDetail)) {
@@ -959,15 +980,19 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       delete scopeHoldKind[scope];
       releaseUnlock(scope, unlockTokenValue);
       await refreshAfterWrite();
+      restoreNextSubmission(scope);
     } else {
       // submit = pane.send_input，自带回车；pane.send_text 只打字不执行。
       await request('submit', { pane_id: paneId, text: text });
+      if (!scopeEpochIsCurrent(scope, epoch)) return;
       scopeHolds[scope] = 0;
       delete scopeHoldKind[scope];
       releaseUnlock(scope, unlockTokenValue);
       await refreshAfterWrite();
+      restoreNextSubmission(scope);
     }
   } catch (error) {
+    if (!scopeEpochIsCurrent(scope, epoch)) return;
     // 第一段的失败走这里。结果未知 = 文本可能已粘进终端：
     // 和 Enter 未确认一样冻结这个终端，直到用户核对或取消；
     // 确定失败才只是恢复草稿。只在仍选中同一目标时回填。
@@ -1201,6 +1226,7 @@ function clearScopeState(scope) {
   delete scopeHolds[scope];
   delete scopeHoldKind[scope];
   delete queuedDrafts[scope];
+  delete queuedSubmissions[scope];
   delete scopeUnlockClaims[scope];
   delete restoredBoxText[scope];
 }
