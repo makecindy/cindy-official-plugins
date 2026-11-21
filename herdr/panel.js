@@ -43,6 +43,7 @@ const strings = {
     enterUnconfirmed: '文本已输入到终端，但回车没有确认。请先在终端里核对内容：若命令尚未执行，直接再按一次回车即可（只会补发回车，不会重复粘贴文本）。',
     enterStillUnknown: '回车没有确认。请先核对终端内容，再决定是否再按一次回车。',
     doneRefreshFailed: '操作已完成，但画面刷新失败：',
+    terminalInput: '终端输入',
     sendFailed: '发送失败',
     termPlaceholder: '直接输入命令，回车执行',
     send: '发送',
@@ -85,6 +86,7 @@ const strings = {
     enterUnconfirmed: 'The text is in the terminal but Enter is unconfirmed. Check the terminal; if the command did not run, press Enter again (only Enter is resent, not the text).',
     enterStillUnknown: 'Enter is still unconfirmed. Check the terminal before pressing Enter again.',
     doneRefreshFailed: 'The operation completed, but refreshing the screen failed: ',
+    terminalInput: 'Terminal input',
     sendFailed: 'Could not send',
     termPlaceholder: 'Type a command, Enter runs it',
     send: 'Send',
@@ -127,6 +129,7 @@ const strings = {
     enterUnconfirmed: 'テキストは端末にありますが Enter が未確認です。端末を確認し、実行されていなければもう一度 Enter を押してください（テキストは再送しません）。',
     enterStillUnknown: 'Enter が未確認です。端末を確認してから再送してください。',
     doneRefreshFailed: '操作は完了しましたが、画面の更新に失敗しました：',
+    terminalInput: '端末入力',
     sendFailed: '送信に失敗',
     termPlaceholder: 'ここにコマンドを入力し Enter で実行',
     send: '送信',
@@ -169,6 +172,7 @@ const strings = {
     enterUnconfirmed: '텍스트는 터미널에 있지만 Enter가 확인되지 않았습니다. 실행되지 않았다면 Enter만 다시 누르세요(텍스트는 재전송하지 않습니다).',
     enterStillUnknown: 'Enter가 아직 확인되지 않았습니다. 터미널을 확인한 후 다시 누르세요.',
     doneRefreshFailed: '작업은 완료되었지만 화면 갱신에 실패했습니다: ',
+    terminalInput: '터미널 입력',
     sendFailed: '보내지 못했습니다',
     termPlaceholder: '명령을 입력하고 Enter 로 실행',
     send: '보내기',
@@ -369,6 +373,8 @@ function syncTermTarget() {
 
 function localize() {
   syncTermTarget();
+  // 屏幕阅读器读到的输入框名称也要跟随宿主语言。
+  $('#term-input').setAttribute('aria-label', T.terminalInput);
   $('#detail-close').setAttribute('aria-label', T.collapse);
   // 按钮的可访问名要说它会做什么，不能用「已更新」这种状态文案。
   $('#refresh').setAttribute('aria-label', T.refreshAction);
@@ -451,12 +457,15 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
     // 它正是用来清掉那行的；其它键一律拦下并提示先核对，
     // 否则恢复在输入框里的同一草稿会被再粘一次（draftdraft）。
     if (scopeHolds[scope] && key !== 'C-c' && key !== 'ctrl+c') {
-      // 草稿在入队时已被取走：按原输入顺序前置回去，
-      // 排队期间用户续打的内容接在后面（git status + ' --short'）。
-      // 只在输入框为空时恢复会把前半段命令弄丢。
-      if (currentScope() === scope) {
+      // 多个被拦下的按键草稿按入队顺序累积（ABC，不是 CBA），
+      // 与提交队列共用 queuedDrafts；切回该分屏时统一交还。
+      if (currentScope() === scope && draft) {
         const holdBox = $('#term-input');
-        if (holdBox && draft) holdBox.value = draft + holdBox.value;
+        const prior = queuedDrafts[scope] || '';
+        queuedDrafts[scope] = prior + draft;
+        holdBox.value = holdBox.value.indexOf(prior) === 0
+          ? queuedDrafts[scope] + holdBox.value.slice(prior.length)
+          : queuedDrafts[scope] + holdBox.value;
       }
       renderOutput(T.heldHint);
       return true;
@@ -502,8 +511,10 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
     }
   }
   try {
-    if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: [key] });
-    else await request('send', { pane_id: paneId, keys: [key] });
+    const allowHeld = key === 'C-c' || key === 'ctrl+c' || key === 'Enter' || key === 'enter';
+    if (pinnedView === 'tmux') {
+      await request('tmux_send', { target: target, keys: [key], allow_held: allowHeld });
+    } else await request('send', { pane_id: paneId, keys: [key] });
     // 取消/改行已送达：未确认的那一行不存在了，记录与冻结才解除。
     // 改行键可能已经在终端行里留下内容（Up 调出历史、Tab 补全）：
     // 即便没有本地草稿也记下来，空回车才能把这行提交。
@@ -635,8 +646,9 @@ async function sendEnterOnly(scope, pinnedView, target, paneId) {
   delete terminalHasContent[scope];
   try {
     // Herdr 的键名契约是小写（enter/up/esc…），tmux 才是 Enter。
-    if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
-    else await request('send', { pane_id: paneId, keys: ['enter'] });
+    if (pinnedView === 'tmux') {
+      await request('tmux_send', { target: target, keys: ['Enter'], allow_held: true });
+    } else await request('send', { pane_id: paneId, keys: ['enter'] });
     scopeHolds[scope] = false;
     await refreshAfterWrite();
   } catch (error) {
@@ -682,16 +694,18 @@ function submitLine() {
   }
   // 同一终端的「文本 + Enter」串行执行：两条提交并行时，第二次 paste
   // 可能排在第一次 Enter 前，把两条命令拼成一行或颠倒顺序。
+  const holdAtEnqueue = scopeHolds[scope] || false;
   enqueueForScope(scope, function () {
-    return submitLineQueued(text, pinnedView, target, paneId, scope);
+    return submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue);
   });
 }
 
-async function submitLineQueued(text, pinnedView, target, paneId, scope) {
+async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue) {
   const field = $('#term-input');
-  // 入队时还没冻结、轮到自己时另一个任务已经把该 scope 冻结了：
-  // 这次提交必须停下，按原顺序把草稿放回输入框。
-  if (scopeHolds[scope] && text && pendingEnterOnly[scope] !== text) {
+  // 入队之后才建立的 hold 要挡住所有预先排队的任务，包括空回车：
+  // 用户还没看到提示，不能替他补发。入队时已存在的 hold 才是确认过的恢复。
+  const holdIsNew = scopeHolds[scope] && scopeHolds[scope] !== holdAtEnqueue;
+  if (holdIsNew && pendingEnterOnly[scope] !== text) {
     const prior = queuedDrafts[scope] || '';
     queuedDrafts[scope] = prior + text;
     if (currentScope() === scope) {

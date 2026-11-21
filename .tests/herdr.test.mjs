@@ -805,8 +805,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   // unknown 冻结时按键要拦截（只放行取消键）。
   assert.match(panelSrcRt, /scopeHolds\[scope\] && key !== 'C-c' && key !== 'ctrl\+c'/,
     'a held scope must only let an explicit cancel key through');
-  assert.match(panelSrcRt, /if \(holdBox && draft\) holdBox\.value = draft \+ holdBox\.value;/,
-    'a blocked key must restore the draft ahead of text typed while queued');
+  assert.match(panelSrcRt, /queuedDrafts\[scope\] = prior \+ draft/,
+    'a blocked key must accumulate drafts in their original order');
 
   // AltGraph 留给文本输入。
   assert.match(libSrc, /ctrlKey && event\.altKey\) return null;/,
@@ -824,11 +824,11 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const panelSrcAtomic2 = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSrcAtomic2, /TMUX_STAGE=enter/,
     'the panel must distinguish the Enter stage of the atomic submit');
-  assert.match(panelSrcAtomic2, /入队时还没冻结、轮到自己时另一个任务已经把该 scope 冻结了/,
+  assert.match(panelSrcAtomic2, /入队之后才建立的 hold 要挡住所有预先排队的任务/,
     'the queued submit must re-check the hold at dequeue time');
   assert.match(panelSrcAtomic2, /queuedDrafts\[scope\] = prior \+ text/,
     'multiple blocked submits must keep their original order');
-  for (const key of ['heldHint', 'enterUnconfirmed', 'enterStillUnknown', 'doneRefreshFailed']) {
+  for (const key of ['heldHint', 'enterUnconfirmed', 'enterStillUnknown', 'doneRefreshFailed', 'terminalInput']) {
     const count = (panelSrcAtomic2.match(new RegExp(key + ':', 'g')) || []).length;
     assert.ok(count >= 4, key + ' must be localized in all four languages');
   }
@@ -871,6 +871,22 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the panel must scope tmux state by stable pane id');
   assert.match(panelSrcId, /selectedTarget = stable;/,
     'selecting a tmux pane must store the stable id');
+
+  // unknown 之后冻结 worker 队列；显式恢复带 allow_held；新 hold 挡预排空回车；按键草稿有序；可访问名四语言。
+  const workerSrc20 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSrc20, /TMUX_QUEUE_HELD/,
+    'an unknown write must freeze the pane write queue');
+  assert.match(mainSource, /params\.allow_held = true/,
+    'the explicit recovery request must reach the worker');
+  const panelSrcQd3 = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcQd3, /holdIsNew && pendingEnterOnly/,
+    'a hold created after enqueue must also block an empty Enter');
+  assert.match(panelSrcQd3, /allow_held: true/,
+    'the enter-only resume must unlock the pane queue');
+  assert.match(panelSrcQd3, /queuedDrafts\[scope\] = prior \+ draft/,
+    'blocked key drafts must accumulate in order');
+  assert.match(panelSrcQd3, /aria-label', T\.terminalInput/,
+    'the terminal input accessible name must be localized');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(

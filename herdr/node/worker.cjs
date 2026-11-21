@@ -1035,9 +1035,10 @@ const handlers = {
     // 发送也用解析后的 pane id：队列等待期间当前 pane 若变了，
     // 原始 session/window 名会写进另一个 pane。
     const sendParams = Object.assign({}, params || {}, { target: key });
+    const allowHeld = Boolean(params && params.allow_held);
     return enqueueTmuxSend(key, function () {
       return tmuxSend(key, sendParams);
-    });
+    }, allowHeld);
   },
 
   // 提交一行 = 文本 + Enter 的原子任务：两个 RPC 各自排队的话，
@@ -1088,9 +1089,28 @@ async function tmuxQueueKey(dest) {
   return paneId;
 }
 
-function enqueueTmuxSend(dest, task) {
+// 上一次写操作结果未知时，同一 pane 的后续写必须停住：
+// 文本可能已经粘进终端，继续写入会拼出错误命令。只有用户显式取消
+// （Ctrl+C）或补发回车（allowHeld）才放行，成功后解冻。
+const tmuxQueueHolds = {};
+
+function enqueueTmuxSend(dest, task, allowHeld) {
+  if (tmuxQueueHolds[dest] && !allowHeld) {
+    const held = new Error('TMUX_QUEUE_HELD: 这个 pane 上一次写操作结果未知，'
+      + '请先核对终端，用 Ctrl+C 取消那行或补发回车后再写入。');
+    held.code = 'TMUX_QUEUE_HELD';
+    return Promise.reject(held);
+  }
   const run = (tmuxSendQueues[dest] || Promise.resolve()).then(task, task);
-  tmuxSendQueues[dest] = run.then(function () {}, function () {});
+  tmuxSendQueues[dest] = run.then(
+    function () { if (allowHeld) delete tmuxQueueHolds[dest]; },
+    function (error) {
+      const detail = String(error && error.message ? error.message : error);
+      if (/HERDR_OUTCOME_UNKNOWN|TMUX_STAGE=enter|TMUX_STAGE=text/.test(detail)) {
+        tmuxQueueHolds[dest] = detail;
+      }
+    }
+  );
   return run;
 }
 

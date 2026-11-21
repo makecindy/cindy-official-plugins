@@ -1059,6 +1059,8 @@ const tools = {
     } else {
       throw new Error(runtime.missingTextOrKeys);
     }
+    // 面板在用户显式取消/补回车时请求解冻该 pane 的写队列。
+    if (args.allow_held === true) params.allow_held = true;
     return nodeRequest('tmux/send', params, args.__callId);
   }
 };
@@ -1149,7 +1151,10 @@ async function handlePanelRequest(request) {
     return tools.tmux_read({ target: request.target, lines: request.lines });
   }
   if (action === 'tmux_send') {
-    return tools.tmux_send({ target: request.target, text: request.text, keys: request.keys });
+    return tools.tmux_send({
+      target: request.target, text: request.text, keys: request.keys,
+      allow_held: request.allow_held
+    });
   }
   if (action === 'tmux_submit') {
     // 面板提交一行：worker 把「文本 + Enter」作为一个队列任务执行，
