@@ -1158,10 +1158,12 @@ function renderTmux() {
 // 用会话名 + 会话创建时间区分「同一个 pane id，不同的进程」。
 const tmuxPaneIdentities = {};
 
-function tmuxPaneIdentity(pane, sessionCreated) {
+function tmuxPaneIdentity(pane, serverGeneration) {
   const id = tmuxStableTarget(pane);
   if (!id) return null;
-  return [id, pane.session || '', sessionCreated || ''].join('|');
+  // 只用「pane id + server 代次」：会话改名、分屏移动都不改变它，
+  // 而 tmux server 重启（复用 %0 这类 pane id）一定会换一代。
+  return [id, String(serverGeneration || '')].join('|');
 }
 
 // 某个 scope 的全部待确认状态作废（分屏被重建、被替换）。
@@ -1192,13 +1194,20 @@ async function refreshTmux(token) {
   const sessions = (next && next.sessions) || [];
   // pane id 被复用（tmux server 重启）时，旧分屏的待确认状态必须作废：
   // 否则旧命令会被恢复到新进程里，或被误判成只需补 Enter。
-  const createdBySession = {};
-  for (const session of sessions) createdBySession[session.name] = String(session.created || '');
+  // server 代次：所有会话里最晚的创建时间。server 重启后所有会话都是新的，
+  // 代次随之变化；会话改名或分屏移动都不影响它。
+  let serverGeneration = '';
+  for (const session of sessions) {
+    const created = String(session.created || '');
+    if (created && (serverGeneration === '' || Number(created) > Number(serverGeneration))) {
+      serverGeneration = created;
+    }
+  }
   const seen = {};
   for (const pane of (next && next.panes) || []) {
     const id = tmuxStableTarget(pane);
     if (!id) continue;
-    const identity = tmuxPaneIdentity(pane, createdBySession[pane.session]);
+    const identity = tmuxPaneIdentity(pane, serverGeneration);
     seen[id] = identity;
     const before = tmuxPaneIdentities[id];
     if (before !== undefined && before !== identity) clearScopeState('t:' + id);
