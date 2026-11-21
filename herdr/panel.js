@@ -597,6 +597,14 @@ let holdGeneration = 0;
 const scopeHolds = {};
 // 该次冻结的语义（enter / unknown），与代次一一对应。
 const scopeHoldKind = {};
+// unknown 解冻语义只能被一次提交占用：占用期间别的提交拿不到它，
+// 占用者没有真正发出请求时把占用还回去（用户可以重试恢复）。
+const scopeUnlockClaims = {};
+let unlockToken = 0;
+
+function releaseUnlock(scope, token) {
+  if (token && scopeUnlockClaims[scope] === token) delete scopeUnlockClaims[scope];
+}
 // 冻结期间被拦下的多次提交：按入队顺序累积成一段，
 // 不能逐条前置（B、C 会变成 CBA）。
 const queuedDrafts = {};
@@ -728,13 +736,18 @@ function submitLine() {
   const isResume = !text || pendingEnterOnly[scope] === text;
   // 先在清空前记下入队时的冻结代次与语义（核对过的恢复要靠它解冻 worker 队列）。
   const holdAtEnqueue = scopeHolds[scope] || 0;
-  const kindAtEnqueue = scopeHoldKind[scope] || null;
+  // unknown 解冻语义已被别的提交占用时不再捕获：只有用户核对过的那一次
+  // 能带着 allow_held 通过，紧跟着的下一条提交不能继承。
+  const unlockClaimed = scopeUnlockClaims[scope] !== undefined;
+  const kindAtEnqueue = unlockClaimed ? null : (scopeHoldKind[scope] || null);
+  let unlockTokenValue = 0;
   // unknown 冻结：失败时已提示先核对终端，这次提交按完整重发放行。
-  // 解冻语义只对这一次提交有效：消费掉之后立刻清掉全局 kind，
-  // 否则紧接着的下一条提交也会捕获 'unknown'，跟着带上 allow_held 绕过冻结。
+  // 这里只「占用」解冻语义，真正发出恢复请求之后才消费它——
+  // 中途被挡下（草稿不匹配、出现新冻结）时还回去，用户可以重试。
   if (kindAtEnqueue === 'unknown') {
     scopeHolds[scope] = 0;
-    delete scopeHoldKind[scope];
+    unlockTokenValue = unlockToken += 1;
+    scopeUnlockClaims[scope] = unlockTokenValue;
   }
   if (scopeHolds[scope] && !isResume) {
     if (currentScope() === scope) {
@@ -747,11 +760,11 @@ function submitLine() {
   // 同一终端的「文本 + Enter」串行执行：两条提交并行时，第二次 paste
   // 可能排在第一次 Enter 前，把两条命令拼成一行或颠倒顺序。
   enqueueForScope(scope, function () {
-    return submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue, kindAtEnqueue);
+    return submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue, kindAtEnqueue, unlockTokenValue);
   });
 }
 
-async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue, kindAtEnqueue) {
+async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue, kindAtEnqueue, unlockTokenValue) {
   const field = $('#term-input');
   // 入队之后才建立的 hold 要挡住所有预先排队的任务，包括空回车：
   // 用户还没看到提示，不能替他补发。入队时已存在的 hold 才是确认过的恢复。
@@ -775,6 +788,7 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       // 和之前的累积草稿拼成两份。
       restoredBoxText[scope] = field.value;
     }
+    releaseUnlock(scope, unlockTokenValue);
     renderOutput(T.heldHint);
     return;
   }
@@ -796,16 +810,15 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
         // 否则之后按 Tab/Up 会把刚回填的整段当成新草稿重复累积。
         restoredBoxText[scope] = field.value;
       }
+      releaseUnlock(scope, unlockTokenValue);
       renderOutput(T.heldHint);
       return;
     }
   }
-  // 空输入框但终端里有内容（草稿刚同步、或粘贴后回车未确认）：
-  // 这次回车只补 Enter。
+  // 空输入框的这次回车就是一次 Enter：终端里可能有 CLI 提示
+  // （“Press Enter to continue”），侧栏拦下了按键，必须由这里转出去。
   if (!text) {
-    if (pendingEnterOnly[scope] !== undefined || terminalHasContent[scope]) {
-      await sendEnterOnly(scope, pinnedView, target, paneId);
-    }
+    await sendEnterOnly(scope, pinnedView, target, paneId);
     return;
   }
   // 恢复语义：这段文本已在终端里（上次粘贴后 Enter 未确认，或草稿刚被
@@ -820,6 +833,7 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       } else await request('send', { pane_id: paneId, keys: ['enter'] });
       scopeHolds[scope] = 0;
       delete scopeHoldKind[scope];
+      releaseUnlock(scope, unlockTokenValue);
       await refreshAfterWrite();
     } catch (error) {
       scopeHolds[scope] = holdGeneration += 1;
@@ -864,13 +878,17 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
         throw new Error(submitDetail.replace('TMUX_STAGE=text ', ''));
       }
       scopeHolds[scope] = 0;
+      // 解冻语义在请求真正发出之后才消费：发不出去（中途被挡下）就还回去，
+      // 用户改完文字重试时仍然能用它解冻 worker 的队列。
       delete scopeHoldKind[scope];
+      releaseUnlock(scope, unlockTokenValue);
       await refreshAfterWrite();
     } else {
       // submit = pane.send_input，自带回车；pane.send_text 只打字不执行。
       await request('submit', { pane_id: paneId, text: text });
       scopeHolds[scope] = 0;
       delete scopeHoldKind[scope];
+      releaseUnlock(scope, unlockTokenValue);
       await refreshAfterWrite();
     }
   } catch (error) {
@@ -889,6 +907,10 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       scopeHolds[scope] = holdGeneration += 1;
       scopeHoldKind[scope] = 'unknown';
     }
+    // 被消费的提交不能凭空消失：按 scope 单独记下来（不覆盖用户正在输入的
+    // 新内容），用户核对后可以重试或取回原命令。
+    if (!queuedDrafts[scope]) queuedDrafts[scope] = text;
+    releaseUnlock(scope, unlockTokenValue);
     if (currentScope() === scope && !field.value) field.value = text;
     renderOutput(error.message || T.sendFailed);
   }

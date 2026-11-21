@@ -883,6 +883,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const panelSrcQd3 = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSrcQd3, /if \(holdIsNew\) \{/,
     'a hold created after enqueue must also block an empty Enter');
+  assert.match(panelSrcQd3, /if \(!text\) \{\s*\n\s*await sendEnterOnly\(scope, pinnedView, target, paneId\);/,
+    'an empty submit must still send an Enter');
   assert.match(panelSrcQd3, /allow_held: true/,
     'the enter-only resume must unlock the pane queue');
   assert.match(panelSrcQd3, /queuedDrafts\[scope\] = prior \+ addition/,
