@@ -654,7 +654,9 @@ function restoreQueuedDrafts() {
   if (!scope || !queuedDrafts[scope]) return;
   const box = $('#term-input');
   if (box) {
-    box.value = queuedDrafts[scope] + box.value;
+    // 框里已经显示着这些草稿时不再重复添加（面板自己回填过一次）。
+    const alreadyShown = box.value.indexOf(queuedDrafts[scope]) !== -1;
+    if (!alreadyShown) box.value = queuedDrafts[scope] + box.value;
     restoredBoxText[scope] = box.value;
   }
   delete queuedDrafts[scope];
@@ -803,7 +805,9 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       const boxHasEarlier = restoredBoxText[scope] !== undefined
         && field.value.indexOf(restoredBoxText[scope]) === 0;
       if (boxHasEarlier) {
-        field.value = field.value + queuedDrafts[scope];
+        // 只追加本次被拦下的内容：累计值里包含之前已经显示过的部分，
+        // 整段追加会把同一段命令复制成两份。
+        field.value = field.value + text;
       } else {
         // 框里以之前累积的内容开头就替换掉它，新打的内容留在后面。
         field.value = field.value.indexOf(prior) === 0
@@ -836,9 +840,11 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
         // 不能前置拼成「ba」这样的倒序命令。
         const boxHasEarlier = restoredBoxText[scope] !== undefined
           && field.value.indexOf(restoredBoxText[scope]) === 0;
+        // 框里已经显示着这些草稿时不再重复添加。
+        const pendingPart = field.value.indexOf(pending) !== -1 ? '' : pending;
         field.value = boxHasEarlier
-          ? field.value + pending + text
-          : pending + text + field.value;
+          ? field.value + pendingPart + text
+          : pendingPart + text + field.value;
         // 与另两条恢复路径一致：登记恢复 marker，
         // 否则之后按 Tab/Up 会把刚回填的整段当成新草稿重复累积。
         restoredBoxText[scope] = field.value;

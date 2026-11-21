@@ -918,6 +918,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a snapshot taken during a handover must be invalidated');
   assert.match(workerSrc22, /subscription\.pendingSocket = socket;/,
     'a socket must only become current after the handshake');
+  assert.match(workerSrc22, /function dequeued\(\)[\s\S]{0,400}tmuxQueueHolds\[dest\]/,
+    'the hold must be rechecked when a queued write starts');
   assert.match(workerSrc22, /TMUX_STAGE=text_failed/,
     'a definite text failure must be distinguishable from an unknown outcome');
   assert.match(workerSrc22, /TMUX_STAGE=text\( \|\$\)/,

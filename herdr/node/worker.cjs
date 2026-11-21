@@ -1157,7 +1157,18 @@ function enqueueTmuxSend(dest, task, allowHeld) {
     held.code = 'TMUX_QUEUE_HELD';
     return Promise.reject(held);
   }
-  const run = (tmuxSendQueues[dest] || Promise.resolve()).then(task, task);
+  // 出队时再检查一次冻结：入队时的检查发生在前一个请求完成之前，
+  // 前一个请求随后以「结果未知」结束的话，这一项不能接着写。
+  function dequeued() {
+    if (tmuxQueueHolds[dest] && !allowHeld) {
+      const held = new Error('TMUX_QUEUE_HELD: 这个 pane 上一次写操作结果未知，'
+        + '请先核对终端，用 Ctrl+C 取消那行或补发回车后再写入。');
+      held.code = 'TMUX_QUEUE_HELD';
+      throw held;
+    }
+    return task();
+  }
+  const run = (tmuxSendQueues[dest] || Promise.resolve()).then(dequeued, dequeued);
   tmuxSendQueues[dest] = run.then(
     function () { if (allowHeld) delete tmuxQueueHolds[dest]; },
     function (error) {
