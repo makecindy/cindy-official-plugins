@@ -624,9 +624,14 @@ async function triggerAutomation() {
       return;
     }
   }
+  // 成功读到「没有配置自动化」是正常状态：直接返回，不重试，
+  // 免得没配自动化的用户也被每 5 秒一次的 /kv 读取打扰。
   if (!scheduleId) {
-    pendingTrigger = true;
-    schedulePendingTrigger();
+    pendingTrigger = false;
+    if (pendingTriggerTimer) {
+      clearTimeout(pendingTriggerTimer);
+      pendingTriggerTimer = null;
+    }
     return;
   }
   pendingTrigger = false;

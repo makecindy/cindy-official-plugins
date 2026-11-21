@@ -686,6 +686,15 @@ function pruneStaleScopeState() {
       delete scopeHolds[scope];
       delete scopeHoldKind[scope];
       delete queuedDrafts[scope];
+      delete scopeUnlockClaims[scope];
+    }
+  }
+  // 没有冻结的失败草稿同样按存活列表清理：分屏消失后（tmux server 重启
+  // 会复用 %0 这类 pane id）旧命令不能被带进新分屏的输入框。
+  for (const scope of Object.keys(queuedDrafts)) {
+    if (covers(scope) && !live[scope]) {
+      delete queuedDrafts[scope];
+      delete restoredBoxText[scope];
     }
   }
 }
@@ -788,10 +797,19 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
     const prior = queuedDrafts[scope] || '';
     queuedDrafts[scope] = prior + text;
     if (currentScope() === scope) {
-      // 框里以之前累积的内容开头就替换掉它，新打的内容留在后面。
-      field.value = field.value.indexOf(prior) === 0
-        ? queuedDrafts[scope] + field.value.slice(prior.length)
-        : queuedDrafts[scope] + field.value;
+      // 顺序必须和提交顺序一致：框里已经躺着更早提交的失败内容时
+      // （前面那次结果未知、已回填到输入框），这次的草稿要排在它后面，
+      // 不能前置拼成倒序命令。
+      const boxHasEarlier = restoredBoxText[scope] !== undefined
+        && field.value.indexOf(restoredBoxText[scope]) === 0;
+      if (boxHasEarlier) {
+        field.value = field.value + queuedDrafts[scope];
+      } else {
+        // 框里以之前累积的内容开头就替换掉它，新打的内容留在后面。
+        field.value = field.value.indexOf(prior) === 0
+          ? queuedDrafts[scope] + field.value.slice(prior.length)
+          : queuedDrafts[scope] + field.value;
+      }
       // 登记恢复 marker：否则之后按 Tab/Up 会把刚回填的内容当成新草稿，
       // 和之前的累积草稿拼成两份。
       restoredBoxText[scope] = field.value;
