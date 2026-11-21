@@ -543,7 +543,7 @@ const TMUX_CAPTURE_TIMEOUT_MS = 15000;
 const TMUX_CAPTURE_MAX_CHARS = 120000;
 const TMUX_SESSION_FIELDS = ['name', 'windows', 'attached', 'created'];
 const TMUX_PANE_FIELDS = [
-  'target', 'session', 'window', 'pane', 'window_name', 'command', 'path',
+  'target', 'pane_id', 'session', 'window', 'pane', 'window_name', 'command', 'path',
   'active', 'dead', 'width', 'height', 'pid', 'title'
 ];
 const TMUX_SESSION_FORMAT = TMUX_SESSION_FIELDS.map(function (field) {
@@ -557,6 +557,7 @@ const TMUX_SESSION_FORMAT = TMUX_SESSION_FIELDS.map(function (field) {
 const TMUX_PANE_FORMAT = TMUX_PANE_FIELDS.map(function (field) {
   return {
     target: '#{session_name}:#{window_index}.#{pane_index}',
+    pane_id: '#{pane_id}',
     session: '#{session_name}',
     window: '#{window_index}',
     pane: '#{pane_index}',
@@ -710,6 +711,7 @@ async function tmuxPanes(session) {
   return parseTmuxRows(output, TMUX_PANE_FIELDS).map(function (row) {
     return {
       target: row.target,
+      pane_id: row.pane_id || null,
       session: row.session,
       window: Number(row.window) || 0,
       pane: Number(row.pane) || 0,
@@ -1030,8 +1032,11 @@ const handlers = {
     // 把两条命令拼成一条。锁要放在所有调用方共享的这一层。
     const dest = String((params && params.target) || '');
     const key = await tmuxQueueKey(dest);
+    // 发送也用解析后的 pane id：队列等待期间当前 pane 若变了，
+    // 原始 session/window 名会写进另一个 pane。
+    const sendParams = Object.assign({}, params || {}, { target: key });
     return enqueueTmuxSend(key, function () {
-      return tmuxSend(params && params.target, params || {});
+      return tmuxSend(key, sendParams);
     });
   },
 
@@ -1042,13 +1047,13 @@ const handlers = {
     const key = await tmuxQueueKey(dest);
     return enqueueTmuxSend(key, async function () {
       try {
-        await tmuxSend(dest, { text: String(params.text) });
+        await tmuxSend(key, { text: String(params.text) });
       } catch (error) {
         // 阶段标记留在 message 里：面板据此区分「文字没进」和「只差回车」。
         throw new Error('TMUX_STAGE=text ' + String(error && error.message ? error.message : error));
       }
       try {
-        await tmuxSend(dest, { keys: ['Enter'] });
+        await tmuxSend(key, { keys: ['Enter'] });
       } catch (error) {
         throw new Error('TMUX_STAGE=enter ' + String(error && error.message ? error.message : error));
       }

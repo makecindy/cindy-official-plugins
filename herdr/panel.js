@@ -235,6 +235,12 @@ function request(action, payload) {
   });
 }
 
+// tmux 的 target（session:window.pane）只是位置，重建会复用；
+// 写入与恢复状态都按 tmux 的稳定 pane_id（%N）归属。
+function tmuxStableTarget(pane) {
+  return (pane && pane.pane_id) || (pane && pane.target) || null;
+}
+
 // 状态点配色：agent 运行中绿、出错红、空闲/已完成灰；普通 pane 中性色。
 // 颜色只做辅助，详情卡里的文字始终说明状态本身。
 function paneDotClass(pane) {
@@ -592,7 +598,7 @@ function restoreQueuedDrafts() {
 function pruneStaleScopeState() {
   const live = {};
   if (view === 'tmux' && tmux && tmux.available === true) {
-    for (const pane of tmux.panes || []) live['t:' + pane.target] = true;
+    for (const pane of tmux.panes || []) live['t:' + tmuxStableTarget(pane)] = true;
   }
   if (view !== 'tmux') {
     for (const pane of state.panes || []) live['h:' + pane.pane_id] = true;
@@ -968,7 +974,7 @@ function renderTmux() {
         title: [pane.path, pane.target].filter(Boolean).join(' · '),
         ariaLabel: [pane.target, statusLabelForTmux(pane), pane.command, pane.path]
           .filter(Boolean).join(' · '),
-        on: selectedTarget === pane.target,
+        on: selectedTarget === tmuxStableTarget(pane),
         onSelect: function () { openTmuxPane(pane); }
       }));
     }
@@ -1003,13 +1009,14 @@ function renderTmuxDetail(pane) {
   $('#detail-sub').textContent = [pane.window_name, pane.command, pane.path]
     .filter(Boolean).join(' · ');
   setDetailState(tmuxDotClass(pane), statusLabelForTmux(pane));
-  setComposerTarget(pane.target);
+  setComposerTarget(tmuxStableTarget(pane));
 }
 
 async function openTmuxPane(pane) {
   // 换目标就丢掉草稿：A 里没发出去的命令不能在回车时打到 B 上。
-  const changed = selectedTarget !== pane.target;
-  selectedTarget = pane.target;
+  const stable = tmuxStableTarget(pane);
+  const changed = selectedTarget !== stable;
+  selectedTarget = stable;
   if (changed) {
     // 输入框清空，但各 scope 的待确认状态保留：切走并没有取消
     // 那个终端里待提交的行，回来后的恢复路径还要用。
@@ -1026,7 +1033,7 @@ async function openTmuxPane(pane) {
   renderOutput('');
   $('#detail-body').textContent = T.loading;
   try {
-    const result = await request('tmux_read', { target: pane.target });
+    const result = await request('tmux_read', { target: tmuxStableTarget(pane) });
     if (token !== readToken) return;
     renderOutput(result.text || T.noOutput);
   } catch (error) {
@@ -1068,7 +1075,7 @@ async function refresh(force) {
     if (view === 'tmux') {
       if (selectedTarget) {
         const fresh = ((tmux && tmux.panes) || []).find(function (pane) {
-          return pane.target === selectedTarget;
+          return tmuxStableTarget(pane) === selectedTarget;
         });
         // 分屏已经没了：关掉详情，别继续对着无效目标发输入。
         if (fresh) renderTmuxDetail(fresh);

@@ -860,6 +860,18 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(panelSrcQd2, /const resuming = !text/,
     'an empty-Enter resume must pass through while keeping blocked drafts');
 
+  // 稳定 pane id：队列任务用它发送，面板用它做 scope。
+  const workerSrc19 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSrc19, /pane_id: '#\{pane_id\}'/,
+    'the tmux pane list must expose the stable pane id');
+  assert.match(workerSrc19, /tmuxSend\(key, sendParams\)/,
+    'the queued send must use the resolved pane id as its target');
+  const panelSrcId = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcId, /function tmuxStableTarget/,
+    'the panel must scope tmux state by stable pane id');
+  assert.match(panelSrcId, /selectedTarget = stable;/,
+    'selecting a tmux pane must store the stable id');
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,
