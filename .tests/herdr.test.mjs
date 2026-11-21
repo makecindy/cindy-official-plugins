@@ -906,6 +906,16 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(panelSrcMark, /draft\.indexOf\(restoredBoxText\[scope\]\) === 0/,
     'text typed after a restored draft must keep its restore origin');
 
+  // 被动断线失效基线；回填路径登记恢复 marker；页面 lang 四语言。
+  const workerSrc22 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSrc22, /subscription\.paneIds = \[\];/,
+    'a passive disconnect must invalidate the paneIds baseline');
+  const panelSrcLang = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  const langCount = (panelSrcLang.match(/lang: '/g) || []).length;
+  assert.ok(langCount >= 4, 'the page language must be defined for all locales');
+  assert.match(panelSrcLang, /documentElement\.lang = T\.lang/,
+    'the page lang must follow the host language');
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,

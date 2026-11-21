@@ -44,6 +44,7 @@ const strings = {
     enterStillUnknown: '回车没有确认。请先核对终端内容，再决定是否再按一次回车。',
     doneRefreshFailed: '操作已完成，但画面刷新失败：',
     terminalInput: '终端输入',
+    lang: 'zh-CN',
     sendFailed: '发送失败',
     termPlaceholder: '直接输入命令，回车执行',
     send: '发送',
@@ -87,6 +88,7 @@ const strings = {
     enterStillUnknown: 'Enter is still unconfirmed. Check the terminal before pressing Enter again.',
     doneRefreshFailed: 'The operation completed, but refreshing the screen failed: ',
     terminalInput: 'Terminal input',
+    lang: 'en',
     sendFailed: 'Could not send',
     termPlaceholder: 'Type a command, Enter runs it',
     send: 'Send',
@@ -130,6 +132,7 @@ const strings = {
     enterStillUnknown: 'Enter が未確認です。端末を確認してから再送してください。',
     doneRefreshFailed: '操作は完了しましたが、画面の更新に失敗しました：',
     terminalInput: '端末入力',
+    lang: 'ja',
     sendFailed: '送信に失敗',
     termPlaceholder: 'ここにコマンドを入力し Enter で実行',
     send: '送信',
@@ -173,6 +176,7 @@ const strings = {
     enterStillUnknown: 'Enter가 아직 확인되지 않았습니다. 터미널을 확인한 후 다시 누르세요.',
     doneRefreshFailed: '작업은 완료되었지만 화면 갱신에 실패했습니다: ',
     terminalInput: '터미널 입력',
+    lang: 'ko',
     sendFailed: '보내지 못했습니다',
     termPlaceholder: '명령을 입력하고 Enter 로 실행',
     send: '보내기',
@@ -375,6 +379,8 @@ function localize() {
   syncTermTarget();
   // 屏幕阅读器读到的输入框名称也要跟随宿主语言。
   $('#term-input').setAttribute('aria-label', T.terminalInput);
+  // 整页语言标记同步：否则 en/ja/ko 用户仍被按中文规则朗读。
+  document.documentElement.lang = T.lang;
   $('#detail-close').setAttribute('aria-label', T.collapse);
   // 按钮的可访问名要说它会做什么，不能用「已更新」这种状态文案。
   $('#refresh').setAttribute('aria-label', T.refreshAction);
@@ -753,6 +759,8 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
     } else if (!resuming) {
       if (currentScope() === scope) {
         field.value = pending + text + field.value;
+        // 与另两条恢复路径一致：登记恢复 marker，
+        // 否则之后按 Tab/Up 会把刚回填的整段当成新草稿重复累积。
         restoredBoxText[scope] = field.value;
       }
       renderOutput(T.heldHint);

@@ -365,6 +365,10 @@ async function openSubscription() {
         if (subscription.socket === socket) {
           subscription.socket = null;
           subscription.running = false;
+          // 被动断线：paneIds 基线失效。留着它会让下一次订阅把仍在的
+          // pane 当「旧成员」跳过对账，断线窗口里进入 blocked/done 的
+          // 状态就永远补不回来（实时事件也接不到了）。
+          subscription.paneIds = [];
         }
         if (!settled) finish(reject, new Error('订阅连接在确认前关闭'));
         scheduleReconnect();
