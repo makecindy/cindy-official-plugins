@@ -498,6 +498,7 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
       // 不存下来就永久丢失。
       if (draft) {
         const prior = queuedDrafts[scope] || '';
+        // 多个已排队按键分别失败时都要保留，按输入顺序累积。
         // 只有「这次文字确实是面板刚恢复的那份」才去重：
         // 两份碰巧有相同前缀的独立草稿必须都保留。
         const addition = draftFromRestore && prior && draft.indexOf(prior) === 0
@@ -535,7 +536,7 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
         // 用户在请求返回前切到别的分屏时，输入框已经不是这个 scope 的了：
         // 草稿仍要按 scope 存下来，否则这条命令会彻底丢失。
         if (currentScope() !== scope) {
-          if (!queuedDrafts[scope]) queuedDrafts[scope] = draft;
+          queuedDrafts[scope] = (queuedDrafts[scope] || '') + draft;
         }
         if (currentScope() === scope) {
           const box = $('#term-input');
@@ -616,6 +617,8 @@ const PENDING_ENTER_KEEP_KEYS = {
 // 同一终端的提交/按键串行执行：两条 submitLine 并行时，第二次 paste 可能
 // 排在第一次 Enter 前，把两条命令拼成一行或颠倒顺序。按 scope 排队。
 const scopeQueues = {};
+// 每个 scope 的队列代次：pane 被替换时递增，旧队列里尚未开始的闭包就作废。
+const scopeQueueEpochs = {};
 
 // Enter 未确认的终端要冻结后续提交：队列若立刻放行，下一条会清掉
 // 待核对记录并把文本粘到仍含上一条的终端行上。补发 Enter 成功或
@@ -653,7 +656,12 @@ function consumeFromInput(field, sent) {
 }
 
 function enqueueForScope(scope, task) {
-  const run = (scopeQueues[scope] || Promise.resolve()).then(task, task);
+  const epoch = scopeQueueEpochs[scope] || 0;
+  function runIfCurrent() {
+    if ((scopeQueueEpochs[scope] || 0) !== epoch) return undefined;
+    return task();
+  }
+  const run = (scopeQueues[scope] || Promise.resolve()).then(runIfCurrent, runIfCurrent);
   scopeQueues[scope] = run.then(function () {}, function () {});
   return run;
 }
@@ -1186,6 +1194,8 @@ function tmuxPaneIdentity(pane, serverGeneration) {
 
 // 某个 scope 的全部待确认状态作废（分屏被重建、被替换）。
 function clearScopeState(scope) {
+  scopeQueueEpochs[scope] = (scopeQueueEpochs[scope] || 0) + 1;
+  delete scopeQueues[scope];
   delete pendingEnterOnly[scope];
   delete terminalHasContent[scope];
   delete scopeHolds[scope];

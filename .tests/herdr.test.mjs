@@ -864,11 +864,21 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const workerSrc19 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
   assert.match(workerSrc19, /pane_id: '#\{pane_id\}'/,
     'the tmux pane list must expose the stable pane id');
-  assert.match(workerSrc19, /tmuxSend\(key, sendParams\)/,
+  assert.match(workerSrc19, /tmuxSend\(identity\.paneId, sendParams\)/,
     'the queued send must use the resolved pane id as its target');
+  assert.match(workerSrc19, /key: String\(serverPid\) \+ ':' \+ paneId/,
+    'the worker queue key must include the tmux server generation');
+  assert.match(workerSrc19, /currentServerPid !== serverPid/,
+    'an old-server queued write must be rejected at dequeue');
+  assert.ok(!/tmuxServerPidCache/.test(workerSrc19),
+    'server pid must not be cached across a restart');
   const panelSrcId = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSrcId, /function tmuxStableTarget/,
     'the panel must scope tmux state by stable pane id');
+  assert.match(panelSrcId, /scopeQueueEpochs\[scope\] = \(scopeQueueEpochs\[scope\] \|\| 0\) \+ 1/,
+    'a replaced pane must invalidate pending scope tasks');
+  assert.match(panelSrcId, /if \(\(scopeQueueEpochs\[scope\] \|\| 0\) !== epoch\) return undefined/,
+    'a stale scope task must not execute after replacement');
   assert.match(panelSrcId, /selectedTarget = stable;/,
     'selecting a tmux pane must store the stable id');
 
@@ -889,6 +899,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the enter-only resume must unlock the pane queue');
   assert.match(panelSrcQd3, /queuedDrafts\[scope\] = prior \+ addition/,
     'blocked key drafts must accumulate in order');
+  assert.match(panelSrcQd3, /queuedDrafts\[scope\] = \(queuedDrafts\[scope\] \|\| ''\) \+ draft;/,
+    'consecutive failed key drafts must be retained in order');
   assert.match(panelSrcQd3, /aria-label', T\.terminalInput/,
     'the terminal input accessible name must be localized');
 
@@ -901,6 +913,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the resume path must send the unlock marker');
   assert.match(panelSrcRec, /unlockedResend = kindAtEnqueue === 'unknown'/,
     'only a checked full resend may unlock the queue');
+  assert.match(panelSrcRec, /releaseUnlock\(scope, unlockTokenValue\);[\s\S]{0,200}pendingEnterOnly\[scope\] = text;/,
+    'enter-stage failure must release its unlock claim');
+  assert.match(panelSrcRec, /if \(selectedTarget === id\) \{[\s\S]{0,300}T\.paneReplaced/,
+    'a replaced selected pane must close and clear the detail');
   assert.match(panelSrcRec, /draftFromRestore && prior && draft\.indexOf\(prior\) === 0/,
     'duplicate detection must use the capture-time restore marker');
 

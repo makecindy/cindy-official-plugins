@@ -728,26 +728,17 @@ function parseTmuxRows(output, fields) {
 
 // tmux server 的进程号：server 重启后 pane id 会被复用（%0…），
 // 只有 server pid 能区分「同一个 pane id，不同的 server」。
-// 短时间缓存：面板刷新很频繁，不必每次都问 tmux。
-let tmuxServerPidCache = { value: null, at: 0 };
-
+// 不缓存：pid 用于写入隔离与换代安全，3 秒缓存会跨过快速重启窗口。
 async function tmuxServerPid() {
-  const now = Date.now();
-  if (tmuxServerPidCache.value !== null && now - tmuxServerPidCache.at < 3000) {
-    return tmuxServerPidCache.value;
-  }
-  let value = null;
   try {
     const output = await runTmux(['list-sessions', '-F', '#{pid}']);
     const first = String(output || '').split('\n').map(function (line) { return line.trim(); })
       .filter(Boolean)[0];
     const parsed = Number(first);
-    if (Number.isFinite(parsed) && parsed > 0) value = parsed;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   } catch (error) {
-    value = null;
+    return null;
   }
-  tmuxServerPidCache = { value: value, at: now };
-  return value;
 }
 
 async function tmuxSessions() {
@@ -1108,16 +1099,17 @@ const handlers = {
     // 两个窗口/面板同时提交时会 paste(A), paste(B), Enter(A)，
     // 把两条命令拼成一条。锁要放在所有调用方共享的这一层。
     const dest = String((params && params.target) || '');
-    const key = await tmuxQueueKey(dest);
+    const identity = await tmuxQueueKey(dest);
+    const key = identity.key;
     // 发送也用解析后的 pane id：队列等待期间当前 pane 若变了，
     // 原始 session/window 名会写进另一个 pane。
-    const sendParams = Object.assign({}, params || {}, { target: key });
+    const sendParams = Object.assign({}, params || {}, { target: identity.paneId });
     // Agent 工具直接发的取消/回车键也要能解冻（它不带面板的 allow_held 标记）。
     const keys = params && Array.isArray(params.keys) ? params.keys : [];
     const recoveryKey = keys.length === 1 && /^(C-c|ctrl\+c|Enter|enter)$/.test(String(keys[0]));
     const allowHeld = Boolean(params && params.allow_held) || recoveryKey;
-    return enqueueTmuxSend(key, function () {
-      return tmuxSend(key, sendParams);
+    return enqueueTmuxSend(key, identity.serverPid, function () {
+      return tmuxSend(identity.paneId, sendParams);
     }, allowHeld);
   },
 
@@ -1125,11 +1117,12 @@ const handlers = {
   // B 的文本仍可能插到 A 的 Enter 前面。这里把两步放进同一个队列项。
   async 'tmux/submit'(params) {
     const dest = String((params && params.target) || '');
-    const key = await tmuxQueueKey(dest);
+    const identity = await tmuxQueueKey(dest);
+    const key = identity.key;
     const allowHeld = Boolean(params && params.allow_held);
-    return enqueueTmuxSend(key, async function () {
+    return enqueueTmuxSend(key, identity.serverPid, async function () {
       try {
-        await tmuxSend(key, { text: String(params.text) });
+        await tmuxSend(identity.paneId, { text: String(params.text) });
       } catch (error) {
         // 阶段标记留在 message 里：面板据此区分「文字没进」和「只差回车」。
         const detail = String(error && error.message ? error.message : error);
@@ -1142,7 +1135,7 @@ const handlers = {
         throw new Error('TMUX_STAGE=text_failed ' + detail);
       }
       try {
-        await tmuxSend(key, { keys: ['Enter'] });
+        await tmuxSend(identity.paneId, { keys: ['Enter'] });
       } catch (error) {
         throw new Error('TMUX_STAGE=enter ' + String(error && error.message ? error.message : error));
       }
@@ -1151,24 +1144,17 @@ const handlers = {
   }
 };
 
-// 每个 tmux 目标一条队列（见上面的说明）。键用解析后的真实 pane id：
-// work、work:2、work:2.1 都可能指向同一个 pane，按原始字符串分队列
-// 会让另一个调用的 paste 插到本次「文本 + Enter」之间。
+// 队列键带 tmux server pid：%0 在新 server 中与旧 server 的 %0 不是同一 pane。
+// 旧 Promise 不尝试删除（Promise 链已被旧调用捕获），而是在出队时验证代次。
 const tmuxSendQueues = {};
-
-// 上一次见到的 tmux server pid：变了说明 server 重启过，
-// 旧的 pane id（%0…）会被复用，旧队列与冻结必须一起作废。
-let tmuxQueueServerPid = null;
 
 async function tmuxQueueKey(dest) {
   const serverPid = await tmuxServerPid();
-  if (serverPid && tmuxQueueServerPid !== null && serverPid !== tmuxQueueServerPid) {
-    // server 换代：旧 server 上留下的冻结不能拦住新 pane 的正常写入，
-    // 旧队列也不能继续排在新 server 的写入后面。
-    for (const key of Object.keys(tmuxQueueHolds)) delete tmuxQueueHolds[key];
-    for (const key of Object.keys(tmuxSendQueues)) delete tmuxSendQueues[key];
+  if (!serverPid) {
+    const wrapped = new Error('TMUX_TARGET_UNRESOLVED: 无法确认 tmux server 代次。');
+    wrapped.code = 'TMUX_TARGET_UNRESOLVED';
+    throw wrapped;
   }
-  if (serverPid) tmuxQueueServerPid = serverPid;
   let paneId = '';
   try {
     const stdout = await runTmux(['display-message', '-p', '-t', dest, '#{pane_id}']);
@@ -1186,7 +1172,7 @@ async function tmuxQueueKey(dest) {
     wrapped.code = 'TMUX_TARGET_UNRESOLVED';
     throw wrapped;
   }
-  return paneId;
+  return { paneId: paneId, serverPid: serverPid, key: String(serverPid) + ':' + paneId };
 }
 
 // 上一次写操作结果未知时，同一 pane 的后续写必须停住：
@@ -1194,7 +1180,7 @@ async function tmuxQueueKey(dest) {
 // （Ctrl+C）或补发回车（allowHeld）才放行，成功后解冻。
 const tmuxQueueHolds = {};
 
-function enqueueTmuxSend(dest, task, allowHeld) {
+function enqueueTmuxSend(dest, serverPid, task, allowHeld) {
   if (tmuxQueueHolds[dest] && !allowHeld) {
     const held = new Error('TMUX_QUEUE_HELD: 这个 pane 上一次写操作结果未知，'
       + '请先核对终端，用 Ctrl+C 取消那行或补发回车后再写入。');
@@ -1203,7 +1189,15 @@ function enqueueTmuxSend(dest, task, allowHeld) {
   }
   // 出队时再检查一次冻结：入队时的检查发生在前一个请求完成之前，
   // 前一个请求随后以「结果未知」结束的话，这一项不能接着写。
-  function dequeued() {
+  async function dequeued() {
+    // 旧 server 上排队的 Promise 即使仍被引用，出队时也不得向新 server
+    // 复用的 pane id 写入。
+    const currentServerPid = await tmuxServerPid();
+    if (!currentServerPid || currentServerPid !== serverPid) {
+      const stale = new Error('TMUX_TARGET_UNRESOLVED: tmux server 已更换，旧写入已取消。');
+      stale.code = 'TMUX_TARGET_UNRESOLVED';
+      throw stale;
+    }
     if (tmuxQueueHolds[dest] && !allowHeld) {
       const held = new Error('TMUX_QUEUE_HELD: 这个 pane 上一次写操作结果未知，'
         + '请先核对终端，用 Ctrl+C 取消那行或补发回车后再写入。');
