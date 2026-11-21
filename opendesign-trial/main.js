@@ -145,7 +145,7 @@
     const a = msg.args || {},
       ctx = a.session_context;
     if (
-      !ctx?.session_id ||
+      typeof ctx?.session_id !== "string" ||
       !ctx.workdir ||
       !ctx.workdir_is_local ||
       !/^[a-zA-Z0-9-]{1,64}$/.test(ctx.session_id)
