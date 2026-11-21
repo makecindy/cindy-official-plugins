@@ -201,7 +201,7 @@ let readToken = 0;
 const PANEL_REQUEST_TIMEOUT_MS = 80000;
 // 这些动作会把内容写进终端/后端：80 秒超时只代表「没收到回包」，
 // 不代表「没执行」，必须按结果未知处理，不能报普通失败让人直接重试。
-const PANEL_WRITE_ACTIONS = { tmux_send: true, submit: true, send: true, prompt: true };
+const PANEL_WRITE_ACTIONS = { tmux_send: true, tmux_submit: true, submit: true, send: true, prompt: true };
 
 function request(action, payload) {
   return new Promise(function (resolve, reject) {
@@ -545,6 +545,9 @@ const scopeQueues = {};
 // 待核对记录并把文本粘到仍含上一条的终端行上。补发 Enter 成功或
 // 用户切换目标后才解除。
 const scopeHolds = {};
+// 冻结期间被拦下的多次提交：按入队顺序累积成一段，
+// 不能逐条前置（B、C 会变成 CBA）。
+const queuedDrafts = {};
 
 // 排队执行时输入框可能已追加新内容：只去掉已发送的那段前缀，
 // 不能把用户排队期间新打的部分也清掉。
@@ -596,7 +599,10 @@ function pruneStaleScopeState() {
     if (covers(scope) && !live[scope]) delete terminalHasContent[scope];
   }
   for (const scope of Object.keys(scopeHolds)) {
-    if (covers(scope) && !live[scope]) delete scopeHolds[scope];
+    if (covers(scope) && !live[scope]) {
+      delete scopeHolds[scope];
+      delete queuedDrafts[scope];
+    }
   }
 }
 
@@ -671,10 +677,19 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
   // 入队时还没冻结、轮到自己时另一个任务已经把该 scope 冻结了：
   // 这次提交必须停下，按原顺序把草稿放回输入框。
   if (scopeHolds[scope] && text && pendingEnterOnly[scope] !== text) {
-    if (currentScope() === scope) field.value = text + field.value;
+    const prior = queuedDrafts[scope] || '';
+    queuedDrafts[scope] = prior + text;
+    if (currentScope() === scope) {
+      // 框里以之前累积的内容开头就替换掉它，新打的内容留在后面。
+      field.value = field.value.indexOf(prior) === 0
+        ? queuedDrafts[scope] + field.value.slice(prior.length)
+        : queuedDrafts[scope] + field.value;
+    }
     renderOutput(T.heldHint);
     return;
   }
+  // 这次提交真正放行：之前被拦下的累积草稿已经交回给用户了。
+  delete queuedDrafts[scope];
   // 空输入框但终端里有内容（草稿刚同步、或粘贴后回车未确认）：
   // 这次回车只补 Enter。
   if (!text) {

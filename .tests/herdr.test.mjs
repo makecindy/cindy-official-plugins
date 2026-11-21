@@ -657,6 +657,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const panelSrcTimeout = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSrcTimeout, /PANEL_WRITE_ACTIONS/,
     'write actions must be marked for unknown-outcome timeouts');
+  assert.match(panelSrcTimeout, /tmux_submit: true/,
+    'the atomic tmux submit must keep the unknown-outcome timeout');
   assert.match(panelSrcTimeout, /HERDR_OUTCOME_UNKNOWN: ' \+ T\.writeTimeoutUnknown/,
     'a write timeout must be reported as unknown, not a plain failure');
   for (const loc2 of ['zh-CN', 'en', 'ja', 'ko']) {
@@ -824,6 +826,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the panel must distinguish the Enter stage of the atomic submit');
   assert.match(panelSrcAtomic2, /入队时还没冻结、轮到自己时另一个任务已经把该 scope 冻结了/,
     'the queued submit must re-check the hold at dequeue time');
+  assert.match(panelSrcAtomic2, /queuedDrafts\[scope\] = prior \+ text/,
+    'multiple blocked submits must keep their original order');
   for (const key of ['heldHint', 'enterUnconfirmed', 'enterStillUnknown', 'doneRefreshFailed']) {
     const count = (panelSrcAtomic2.match(new RegExp(key + ':', 'g')) || []).length;
     assert.ok(count >= 4, key + ' must be localized in all four languages');
