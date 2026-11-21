@@ -456,13 +456,22 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
     // 有未确认的操作（unknown 冻结）：只允许明确的取消键（C-c）通过——
     // 它正是用来清掉那行的；其它键一律拦下并提示先核对，
     // 否则恢复在输入框里的同一草稿会被再粘一次（draftdraft）。
-    if (scopeHolds[scope] && key !== 'C-c' && key !== 'ctrl+c') {
+    const isCancelKey = key === 'C-c' || key === 'ctrl+c';
+    if (isCancelKey) {
+      // 取消就是要把终端里的行丢掉：跳过草稿同步，直接发取消键。
+      draft = '';
+    }
+    if (scopeHolds[scope] && !isCancelKey) {
       // 多个被拦下的按键草稿按入队顺序累积（ABC，不是 CBA），
       // 与提交队列共用 queuedDrafts；切回该分屏时统一交还。
       if (currentScope() === scope && draft) {
         const holdBox = $('#term-input');
         const prior = queuedDrafts[scope] || '';
-        queuedDrafts[scope] = prior + draft;
+        // 连续按 Tab 时第二次捕获的文字已包含上次恢复的累积串：
+        // 只追加新增部分，别把整段再存一次。
+        const addition = prior && draft.indexOf(prior) === 0
+          ? draft.slice(prior.length) : draft;
+        queuedDrafts[scope] = prior + addition;
         holdBox.value = holdBox.value.indexOf(prior) === 0
           ? queuedDrafts[scope] + holdBox.value.slice(prior.length)
           : queuedDrafts[scope] + holdBox.value;
@@ -748,8 +757,9 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
     // 输入框在入队时已消费过这段文字，这里不能再扣：
     // 框里可能是用户刚输入的、带相同前缀的新命令。
     try {
-      if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
-      else await request('send', { pane_id: paneId, keys: ['enter'] });
+      if (pinnedView === 'tmux') {
+        await request('tmux_send', { target: target, keys: ['Enter'], allow_held: true });
+      } else await request('send', { pane_id: paneId, keys: ['enter'] });
       scopeHolds[scope] = false;
       await refreshAfterWrite();
     } catch (error) {
@@ -769,7 +779,8 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       // 另一个面板的文本不会再插到这两步之间。
       let submitError = null;
       try {
-        await request('tmux_submit', { target: target, text: text });
+        // unknown 冻结后用户核对过的完整重发：带 allow_held 解冻该 pane 队列。
+        await request('tmux_submit', { target: target, text: text, allow_held: true });
       } catch (error) {
         submitError = error;
       }

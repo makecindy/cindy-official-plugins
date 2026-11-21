@@ -251,7 +251,7 @@ test('submitting a line pins one target for both tmux sends', () => {
   const body = /async function submitLineQueued\(text, pinnedView, target, paneId, scope, holdAtEnqueue\) \{([\s\S]*?)\n\}/.exec(source);
   assert.ok(body, 'submitLineQueued must exist');
   const text = body[1];
-  assert.match(text, /request\('tmux_submit', \{ target: target, text: text \}\)/,
+  assert.match(text, /request\('tmux_submit', \{ target: target, text: text, allow_held: true \}\)/,
     'the text and Enter must be one RPC pinned to the captured target');
   // Herdr 的提交走 submit 动作（pane.send_input），不是只打字的 send。
   assert.match(text, /request\('submit', \{ pane_id: paneId, text: text \}\)/,

@@ -1159,7 +1159,9 @@ async function handlePanelRequest(request) {
   if (action === 'tmux_submit') {
     // 面板提交一行：worker 把「文本 + Enter」作为一个队列任务执行，
     // 不让另一个面板的文本插进来。
-    return nodeRequest('tmux/submit', { target: request.target, text: request.text });
+    return nodeRequest('tmux/submit', {
+      target: request.target, text: request.text, allow_held: request.allow_held
+    });
   }
   throw new Error(runtime.unknownPanelAction + action);
 }

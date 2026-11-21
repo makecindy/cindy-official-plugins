@@ -1035,7 +1035,10 @@ const handlers = {
     // 发送也用解析后的 pane id：队列等待期间当前 pane 若变了，
     // 原始 session/window 名会写进另一个 pane。
     const sendParams = Object.assign({}, params || {}, { target: key });
-    const allowHeld = Boolean(params && params.allow_held);
+    // Agent 工具直接发的取消/回车键也要能解冻（它不带面板的 allow_held 标记）。
+    const keys = params && Array.isArray(params.keys) ? params.keys : [];
+    const recoveryKey = keys.length === 1 && /^(C-c|ctrl\+c|Enter|enter)$/.test(String(keys[0]));
+    const allowHeld = Boolean(params && params.allow_held) || recoveryKey;
     return enqueueTmuxSend(key, function () {
       return tmuxSend(key, sendParams);
     }, allowHeld);
@@ -1046,6 +1049,7 @@ const handlers = {
   async 'tmux/submit'(params) {
     const dest = String((params && params.target) || '');
     const key = await tmuxQueueKey(dest);
+    const allowHeld = Boolean(params && params.allow_held);
     return enqueueTmuxSend(key, async function () {
       try {
         await tmuxSend(key, { text: String(params.text) });
@@ -1059,7 +1063,7 @@ const handlers = {
         throw new Error('TMUX_STAGE=enter ' + String(error && error.message ? error.message : error));
       }
       return { target: dest, mode: 'submitted' };
-    });
+    }, allowHeld);
   }
 };
 

@@ -540,7 +540,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a resumed submit must only send Enter, not paste the text again');
   assert.match(panelSrcAtomic, /PENDING_ENTER_KEEP_KEYS/,
     'line-preserving keys must keep the pending-enter record');
-  assert.match(panelSrcAtomic, /if \(!PENDING_ENTER_KEEP_KEYS\[key\]\) \{\s*delete pendingEnterOnly\[scope\];/,
+  assert.match(panelSrcAtomic, /if \(!PENDING_ENTER_KEEP_KEYS\[key\]\) \{[\s\S]{0,300}?delete pendingEnterOnly\[scope\];/,
     'line-altering keys must invalidate the pending-enter record for their scope');
   // 记录按 scope 保留：关闭详情不等于取消终端里待提交的行。
   assert.ok(!/closeDetail[\s\S]{0,300}?delete pendingEnterOnly/.test(panelSrcAtomic),
@@ -604,7 +604,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
 
   // 草稿同步与发送目标绑定：等待期间切分屏不会打到新目标、不改写新目标的输入框。
   const panelSrcPin = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
-  assert.match(panelSrcPin, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft\) \{[\s\S]{0,1500}?tmux_send', \{ target: target, text: draft \}/,
+  assert.match(panelSrcPin, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft\) \{[\s\S]{0,2200}?tmux_send', \{ target: target, text: draft \}/,
     'the draft sync must use the pinned target');
   assert.match(panelSrcPin, /if \(currentScope\(\) === scope && !field\.value\) field\.value = text;/,
     'the draft restore must only touch the box of the same target');
@@ -803,9 +803,9 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'refreshTerminal must rethrow when asked');
 
   // unknown 冻结时按键要拦截（只放行取消键）。
-  assert.match(panelSrcRt, /scopeHolds\[scope\] && key !== 'C-c' && key !== 'ctrl\+c'/,
+    assert.match(panelSrcHold, /scopeHolds\[scope\] && !isCancelKey/,
     'a held scope must only let an explicit cancel key through');
-  assert.match(panelSrcRt, /queuedDrafts\[scope\] = prior \+ draft/,
+  assert.match(panelSrcRt, /queuedDrafts\[scope\] = prior \+ addition/,
     'a blocked key must accumulate drafts in their original order');
 
   // AltGraph 留给文本输入。
@@ -883,10 +883,22 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a hold created after enqueue must also block an empty Enter');
   assert.match(panelSrcQd3, /allow_held: true/,
     'the enter-only resume must unlock the pane queue');
-  assert.match(panelSrcQd3, /queuedDrafts\[scope\] = prior \+ draft/,
+  assert.match(panelSrcQd3, /queuedDrafts\[scope\] = prior \+ addition/,
     'blocked key drafts must accumulate in order');
   assert.match(panelSrcQd3, /aria-label', T\.terminalInput/,
     'the terminal input accessible name must be localized');
+
+  // 冻结后的恢复路径要能解冻；连续 Tab 不重复累积。
+  const workerSrc21 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSrc21, /recoveryKey/,
+    'a plain cancel/Enter key must unlock the worker queue too');
+  const panelSrcRec = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcRec, /allow_held: true \}\)/,
+    'the resume path must send the unlock marker');
+  assert.match(panelSrcRec, /tmux_submit', \{ target: target, text: text, allow_held: true/,
+    'a checked full resend must unlock the queue');
+  assert.match(panelSrcRec, /const addition = prior && draft\.indexOf\(prior\) === 0/,
+    'repeated blocked keys must not duplicate accumulated drafts');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
