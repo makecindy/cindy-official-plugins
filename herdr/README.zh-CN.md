@@ -43,3 +43,7 @@
 
 插件带一个随包 Node 工作进程，权限等同当前登录用户；它只访问本机 Herdr
 socket 和本机 tmux 可执行文件，不建立任何网络连接——唤醒自动化走宿主调度器。
+
+## 第三方标识
+
+面板用各 agent 的官方图标来标识分屏里运行的是哪个 agent：Claude（`assets/agents/claude.svg`，Anthropic, PBC）、Codex（`assets/agents/codex.svg`，OpenAI, Inc.）、Cursor（`assets/agents/cursor.png`，Anysphere, Inc.）。图标未经修改，仅用于指认对应的 agent（指名使用），权利归各自所有者；同时已在仓库的 `TRADEMARKS.zh-CN.md` 登记。

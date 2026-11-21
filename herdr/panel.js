@@ -38,6 +38,7 @@ const strings = {
     loading: '读取中…',
     noOutput: '(没有输出)',
     readFailed: '读取失败',
+    writeTimeoutUnknown: '请求可能已执行，请先在终端里核对实际状态，再决定是否重试。',
     sendFailed: '发送失败',
     termPlaceholder: '直接输入命令，回车执行',
     send: '发送',
@@ -75,6 +76,7 @@ const strings = {
     loading: 'Loading…',
     noOutput: '(no output)',
     readFailed: 'Could not read',
+    writeTimeoutUnknown: 'The request may have run; check the terminal before retrying.',
     sendFailed: 'Could not send',
     termPlaceholder: 'Type a command, Enter runs it',
     send: 'Send',
@@ -112,6 +114,7 @@ const strings = {
     loading: '読み込み中…',
     noOutput: '（出力なし）',
     readFailed: '読み込みに失敗',
+    writeTimeoutUnknown: 'リクエストは実行された可能性があります。端末を確認してから再試してください。',
     sendFailed: '送信に失敗',
     termPlaceholder: 'ここにコマンドを入力し Enter で実行',
     send: '送信',
@@ -149,6 +152,7 @@ const strings = {
     loading: '읽는 중…',
     noOutput: '(출력 없음)',
     readFailed: '읽지 못했습니다',
+    writeTimeoutUnknown: '요청이 이미 실행되었을 수 있습니다. 터미널을 확인한 후 다시 시도하세요.',
     sendFailed: '보내지 못했습니다',
     termPlaceholder: '명령을 입력하고 Enter 로 실행',
     send: '보내기',
@@ -198,8 +202,7 @@ function request(action, payload) {
       settled = true;
       cleanup();
       reject(new Error(PANEL_WRITE_ACTIONS[action]
-        ? 'HERDR_OUTCOME_UNKNOWN: 面板请求超时（' + action + '）：请求可能已执行，'
-          + '请先在终端里核对实际状态，再决定是否重试。'
+        ? 'HERDR_OUTCOME_UNKNOWN: ' + T.writeTimeoutUnknown + '（' + action + '）'
         : '插件未响应'));
     }, PANEL_REQUEST_TIMEOUT_MS);
     function onMessage(event) {
@@ -422,6 +425,17 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
   // 发送成功之前，未确认的那一行可能还原样在终端里；失败时记录要保留。
     // 即将转发会改动终端行的按键：发起时的本地草稿先同步过去，
     // 否则终端行被换掉后旧草稿留着，下一次回车会把它粘到别的内容上。
+    // 有未确认的操作（unknown 冻结）：只允许明确的取消键（C-c）通过——
+    // 它正是用来清掉那行的；其它键一律拦下并提示先核对，
+    // 否则恢复在输入框里的同一草稿会被再粘一次（draftdraft）。
+    if (scopeHolds[scope] && key !== 'C-c' && key !== 'ctrl+c') {
+      if (currentScope() === scope) {
+        const holdBox = $('#term-input');
+        if (holdBox && !holdBox.value && draft) holdBox.value = draft;
+      }
+      renderOutput('这个终端有未确认的操作。请先核对终端：确认后可按 Ctrl+C 取消那行，或回车补发。');
+      return true;
+    }
     // 例外：这段文字确认已在终端里（Enter 未确认、恢复到了输入框），
     // 不能再粘一遍，直接发键。
     if (draft && pendingEnterOnly[scope] === draft) {
@@ -534,7 +548,7 @@ function enqueueForScope(scope, task) {
 // 绝不能掉进写失败的 catch（那会把已执行的命令放回输入框让人重复执行）。
 async function refreshAfterWrite() {
   try {
-    await refreshTerminal();
+    await refreshTerminal(true);
   } catch (error) {
     renderOutput('操作已完成，但画面刷新失败：'
       + String(error && error.message ? error.message : error));
@@ -712,7 +726,7 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
 }
 
 // 重读当前 pane 的画面；不清空输入框——发送返回前用户可能已经开始打下一条。
-async function refreshTerminal() {
+async function refreshTerminal(rethrow) {
   const token = readToken + 1;
   readToken = token;
   try {
@@ -723,6 +737,9 @@ async function refreshTerminal() {
     renderOutput(result.text || T.noOutput);
   } catch (error) {
     if (token !== readToken) return;
+    // 写后调用（refreshAfterWrite）要拿得到失败，才能提示「操作已完成」，
+    // 否则用户只看到读取失败，可能把已执行的命令重新提交。
+    if (rethrow) throw error;
     renderOutput(error.message || T.readFailed);
   }
 }

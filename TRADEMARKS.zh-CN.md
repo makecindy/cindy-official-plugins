@@ -30,6 +30,9 @@
 | TapTap（心动网络股份有限公司） | `taptap-maker/assets/icon.png`、插件显示名 |
 | Brave Search（Brave Software, Inc.）、Tavily | `cindy-web-search` 文案中的服务名 |
 | Mermaid | `cindy-mermaid` 插件显示名 |
+| Claude（Anthropic, PBC）| `herdr/assets/agents/claude.svg` —— 官方标识，未修改；用于面板中标识 Claude agent |
+| OpenAI、Codex（OpenAI, Inc.）| `herdr/assets/agents/codex.svg` —— 官方标识，未修改；用于面板中标识 Codex agent |
+| Cursor（Anysphere, Inc.）| `herdr/assets/agents/cursor.png` —— 官方标识，未修改；用于面板中标识 Cursor agent |
 
 插件目录名与显示名中使用这些名称，属于**指明性使用**（nominative use）—— 仅用于说明该
 插件对接的是哪个服务，不表示任何隶属或获得授权的关系。

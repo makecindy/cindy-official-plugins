@@ -57,6 +57,10 @@
     // 不能当终端组合键转发，否则输入框的编辑快捷键全部失效。
     // 终端控制键只认真正的 Control。
     if (event.metaKey) return null;
+    // AltGraph 在 Windows/Linux 上表现为 ctrl+alt：那是输入字符
+    // （AltGr+Q = @、AltGr+E = €），不能当终端组合键。
+    if (event.ctrlKey && event.altKey) return null;
+    if (typeof event.getModifierState === 'function' && event.getModifierState('AltGraph')) return null;
     if (event.ctrlKey) {
       if (String(event.key).length !== 1) return null;
       return (view === 'tmux' ? 'C-' : 'ctrl+') + String(event.key).toLowerCase();

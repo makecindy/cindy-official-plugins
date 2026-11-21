@@ -34,6 +34,9 @@ owners:
 | TapTap (X.D. Network Inc.) | `taptap-maker/assets/icon.png`, plugin display name |
 | Brave Search (Brave Software, Inc.), Tavily | service names in `cindy-web-search` copy |
 | Mermaid | `cindy-mermaid` plugin display name |
+| Claude (Anthropic, PBC) | `herdr/assets/agents/claude.svg` — the official mark, unmodified; identifies Claude agents in the panel |
+| OpenAI, Codex (OpenAI, Inc.) | `herdr/assets/agents/codex.svg` — the official mark, unmodified; identifies Codex agents in the panel |
+| Cursor (Anysphere, Inc.) | `herdr/assets/agents/cursor.png` — the official mark, unmodified; identifies Cursor agents in the panel |
 
 Using these names in plugin directory names and display names is **nominative
 use** — it identifies which service the plugin integrates with, and does not

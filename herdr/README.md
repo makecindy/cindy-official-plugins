@@ -55,3 +55,7 @@ The plugin runs a bundled Node worker with the permissions of your user
 account. It talks only to the local Herdr socket and the local tmux executable.
 The worker opens no network connection at all: waking the automation goes
 through the Cindy host scheduler.
+
+## Third-party marks
+
+The panel shows official agent logos to identify which agent runs in a pane: Claude (`assets/agents/claude.svg`, Anthropic, PBC), Codex (`assets/agents/codex.svg`, OpenAI, Inc.) and Cursor (`assets/agents/cursor.png`, Anysphere, Inc.). The marks are used unmodified, only to identify the corresponding agent (nominative use); they remain the property of their owners. They are also registered in the repository's `TRADEMARKS.md`.

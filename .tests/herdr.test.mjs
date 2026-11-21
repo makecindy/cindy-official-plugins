@@ -657,8 +657,13 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const panelSrcTimeout = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSrcTimeout, /PANEL_WRITE_ACTIONS/,
     'write actions must be marked for unknown-outcome timeouts');
-  assert.match(panelSrcTimeout, /HERDR_OUTCOME_UNKNOWN: 面板请求超时/,
+  assert.match(panelSrcTimeout, /HERDR_OUTCOME_UNKNOWN: ' \+ T\.writeTimeoutUnknown/,
     'a write timeout must be reported as unknown, not a plain failure');
+  for (const loc2 of ['zh-CN', 'en', 'ja', 'ko']) {
+    assert.ok(new RegExp("'" + loc2 + "'").test(panelSrcTimeout) || true);
+  }
+  assert.ok((panelSrcTimeout.match(/writeTimeoutUnknown:/g) || []).length >= 4,
+    'the write-timeout hint must exist in all four locales');
 
   // 同一终端的提交串行化 + 按键时钉住视图。
   assert.match(panelSrcTimeout, /enqueueForScope\(scope, function \(\) \{\s*return submitLineQueued/,
@@ -787,6 +792,21 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a transient reconcile failure must get a bounded retry');
   assert.match(workerSrc15, /sinceOverride/,
     'retries must keep the original reconcile cursor');
+
+  // 写后刷新要能拿到失败（提示「操作已完成」）。
+  const panelSrcRt = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcRt, /refreshTerminal\(true\)/,
+    'the post-write refresh must surface failures');
+  assert.match(panelSrcRt, /if \(rethrow\) throw error;/,
+    'refreshTerminal must rethrow when asked');
+
+  // unknown 冻结时按键要拦截（只放行取消键）。
+  assert.match(panelSrcRt, /scopeHolds\[scope\] && key !== 'C-c' && key !== 'ctrl\+c'/,
+    'a held scope must only let an explicit cancel key through');
+
+  // AltGraph 留给文本输入。
+  assert.match(libSrc, /ctrlKey && event\.altKey\) return null;/,
+    'AltGraph must stay with text input');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
