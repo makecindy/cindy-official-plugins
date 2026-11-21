@@ -1,0 +1,46 @@
+{
+  "name": "Herdr コンソール",
+  "description": "ローカルの Herdr と tmux のペインを確認・操作し、Herdr のイベントを Cindy の通知や自動化につなぎます。",
+  "whenToUse": "ローカルの Herdr エージェントの状態を確認する、入力を送る、状態の変化を待つ、Herdr や tmux のペインを操作する、または Herdr イベントを Cindy に連携する際に使用します。",
+  "tools": {
+    "herdr_state": {
+      "description": "Herdr のワークスペース、タブ、ペイン、エージェントを状態、作業ディレクトリ、タイトルとともに一覧表示します。"
+    },
+    "herdr_read": {
+      "description": "ペインやエージェントの端末出力を読み取ります。現在の画面は visible、直近の行は recent、折り返しを除いた行は recent_unwrapped を指定します。"
+    },
+    "herdr_prompt": {
+      "description": "Herdr の agent にプロンプトを送ります。wait_until を指定するとその状態（idle/working/blocked/done/unknown）になるまで待ちます（timeout_ms の枠内、既定 120000）。対象が既に blocked なら何も送られず、そのまま返します。結果が HERDR_OUTCOME_UNKNOWN なら、届いたか確認してから判断してください。"
+    },
+    "herdr_send": {
+      "description": "Herdr の pane にテキストまたはキーを送ります（keys は enter、ctrl+h、alt+x、f1、shift+tab などの Herdr 形式）。結果が HERDR_OUTCOME_UNKNOWN なら、送信済みだが返事が届いていない、つまり既に生效している可能性があります。再送する前に画面を確認してください。"
+    },
+    "herdr_wait": {
+      "description": "agent が指定の状態になるまで、または pane の出力が指定テキストと一致するまで待ちます（match は {type:\"substring\"|\"regex\", value:\"テキスト\"} の形式）。長い待ち timeout_ms の枠内で小分けに実行され（既定 300000）、枠を使い切るとエラーになります。"
+    },
+    "herdr_control": {
+      "description": "Herdr のワークスペース、タブ、ペイン、Git worktree を管理します。閉じる操作と worktree の remove は、ユーザーが明示的に要求した場合にのみ実行します。"
+    },
+    "herdr_notify": {
+      "description": "Herdr の端末画面に通知を表示します。"
+    },
+    "herdr_events": {
+      "description": "Herdr のイベント購読を管理します：mode=status は現在の購読状態、subscribe は購読を開始（agent の状態変化、pane の生成・破棄、タブの切替など）、unsubscribe は停止、wait は現在の購読上でイベントが 1 つ届くまで待ちます（match_event は {event:\"pane.agent_status_changed\", pane_id:\"w1:p1\"} の形式、pane_id は省略可）。"
+    },
+    "herdr_automation_setup": {
+      "description": "Herdr のイベントだけで起きる Cindy の自動化を作ります：agent が blocked / done になると、プラグインがホストのスケジューラに 1 回実行を頼みます。タイマーでは動きません。targetSessionId を指定すると既存のセッションに紐づきます。自動化の id を返します。"
+    },
+    "herdr_call": {
+      "description": "他のツールが扱わない少见なメソッドを、Herdr の socket API に直接呼び出します。pane や workspace の作成・削除を含め Herdr の状態を変えるので、意図を確認してから実行してください。メソッド名は Herdr Socket API のドキュメントを参照。"
+    },
+    "tmux_state": {
+      "description": "ローカルの tmux セッションとペインをコマンド、作業ディレクトリ、サイズ、状態とともに表示します。利用できない場合は available=false と案内を返します。"
+    },
+    "tmux_read": {
+      "description": "tmux の session/window/pane の画面を読み取ります。既定は表示中の画面。lines を指定すると最新 N 行（スクロールバック含む）を返します。1 回あたり最大 5000 行・約 120000 文字で、超過分の古い内容は切り捨てられ truncated=true と requested_lines / max_lines / char_limit を返します。履歴が足りない場合は全量を返します。"
+    },
+    "tmux_send": {
+      "description": "tmux の session / window / pane にテキストまたはキーを送ります。テキストはリテラル（-l）で送られるため、C-b や Enter を含む内容もキー名として解釈されません。keys は tmux が認識するキー名（Enter、Escape、F1、C-c、M-x、S-Tab など）のみ受け付け、未認識の名前は文字列として送らず拒否します。"
+    }
+  }
+}

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="/panel.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="bar">
+    <div class="seg" role="tablist" aria-label="数据源">
+      <button type="button" data-view="herdr" class="on" role="tab" aria-selected="true">Herdr</button>
+      <button type="button" data-view="tmux" role="tab" aria-selected="false">tmux</button>
+    </div>
+    <span id="status" class="status" role="status"></span>
+    <button id="refresh" type="button" class="icon" aria-label="刷新">
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="M13.5 8a5.5 5.5 0 1 1-1.9-4.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M13.4 1.8v3.1h-3.1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </header>
+
+  <div id="list" class="list" role="list"></div>
+
+  <section id="detail" class="detail" hidden>
+    <div class="detail-head">
+      <div class="detail-id">
+        <span id="detail-title" class="detail-title"></span>
+        <span id="detail-sub" class="detail-sub"></span>
+      </div>
+      <span id="detail-state" class="chip chip-state">
+        <span id="detail-state-dot" class="dot"></span>
+        <span id="detail-state-text"></span>
+      </span>
+      <button id="detail-wrap" type="button" class="icon" aria-pressed="true" aria-label="自动换行">
+        <svg class="wrap-on" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M3 4h10M3 8h7M3 12h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M11.5 9.5l2.5 2.5-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <svg class="wrap-off" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M2 4h12M2 8h12M2 12h12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button id="detail-close" type="button" class="icon" aria-label="收起">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+    <div class="term">
+      <pre id="detail-body" class="output"></pre>
+      <div class="term-line">
+        <span class="term-prompt" aria-hidden="true">&gt;</span>
+        <input id="term-input" class="term-input" type="text" autocomplete="off"
+          autocapitalize="off" spellcheck="false" aria-label="终端输入">
+      </div>
+    </div>
+    <div id="composer-target" class="composer-target"></div>
+  </section>
+</div>
+<script src="/panel-lib.js"></script>
+<script src="/panel.js"></script>
+</body>
+</html>
