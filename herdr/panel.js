@@ -422,11 +422,21 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
   // 发送成功之前，未确认的那一行可能还原样在终端里；失败时记录要保留。
     // 即将转发会改动终端行的按键：发起时的本地草稿先同步过去，
     // 否则终端行被换掉后旧草稿留着，下一次回车会把它粘到别的内容上。
-    if (draft) {
+    // 例外：这段文字确认已在终端里（Enter 未确认、恢复到了输入框），
+    // 不能再粘一遍，直接发键。
+    if (draft && pendingEnterOnly[scope] === draft) {
+      // 已在远端，跳过同步。
+    } else if (draft) {
       try {
         if (pinnedView === 'tmux') await request('tmux_send', { target: target, text: draft });
         else await request('send', { pane_id: paneId, text: draft });
       } catch (error) {
+        // 结果未知 = 草稿可能已在终端：冻结并记下「可能有内容」，
+        // 不能像确定失败那样只放回输入框让人普通重发。
+        if (/HERDR_OUTCOME_UNKNOWN/.test(String(error && error.message ? error.message : error))) {
+          terminalHasContent[scope] = true;
+          scopeHolds[scope] = 'unknown';
+        }
         // 同步没成功：草稿按归属放回。上一次恢复的还在最前面时接在它
         // 后面（保持输入顺序），否则前置（用户期间续打的部分接在后面）。
         if (currentScope() === scope) {
@@ -463,7 +473,7 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
       scopeHolds[scope] = false;
       terminalHasContent[scope] = true;
     }
-    await refreshTerminal();
+    await refreshAfterWrite();
   } catch (error) {
     // 失败或结果未知：保留待核对记录与冻结，新文本不会被放行粘到旧命令上。
     // 改行键本身结果未知时（可能已改、可能没改），同样冻结这个终端。
@@ -520,6 +530,17 @@ function enqueueForScope(scope, task) {
   return run;
 }
 
+// 写操作已经成功后的刷新（只读）：刷新失败只说明画面没更新，
+// 绝不能掉进写失败的 catch（那会把已执行的命令放回输入框让人重复执行）。
+async function refreshAfterWrite() {
+  try {
+    await refreshTerminal();
+  } catch (error) {
+    renderOutput('操作已完成，但画面刷新失败：'
+      + String(error && error.message ? error.message : error));
+  }
+}
+
 // 清掉已经不存在（或同名重建）的分屏的待确认状态。
 // 只清「这次成功拿到完整列表」的那个后端：探测失败（权限、超时）
 // 不代表分屏消失，不能把仍在运行的分屏的记录也删掉。
@@ -563,7 +584,7 @@ async function sendEnterOnly(scope, pinnedView, target, paneId) {
     if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
     else await request('send', { pane_id: paneId, keys: ['enter'] });
     scopeHolds[scope] = false;
-    await refreshTerminal();
+    await refreshAfterWrite();
   } catch (error) {
     // 回车结果未知：恢复同一目标的待提交记录，否则下一次回车什么都不做，
     // 终端里已有的命令就再也提交不了；同时提示先核对终端。
@@ -633,7 +654,7 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
       if (pinnedView === 'tmux') await request('tmux_send', { target: target, keys: ['Enter'] });
       else await request('send', { pane_id: paneId, keys: ['enter'] });
       scopeHolds[scope] = false;
-      await refreshTerminal();
+      await refreshAfterWrite();
     } catch (error) {
       scopeHolds[scope] = true;
       pendingEnterOnly[scope] = text;
@@ -663,12 +684,12 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
         return;
       }
       scopeHolds[scope] = false;
-      await refreshTerminal();
+      await refreshAfterWrite();
     } else {
       // submit = pane.send_input，自带回车；pane.send_text 只打字不执行。
       await request('submit', { pane_id: paneId, text: text });
       scopeHolds[scope] = false;
-      await refreshTerminal();
+      await refreshAfterWrite();
     }
   } catch (error) {
     // 第一段的失败走这里。结果未知 = 文本可能已粘进终端：

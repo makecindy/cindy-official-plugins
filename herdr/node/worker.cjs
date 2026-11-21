@@ -404,6 +404,9 @@ async function openSubscription() {
 
 // 只对「这次订阅里新出现」的 pane 查一次当前状态：旧 pane 的状态
 // 旧连接一直在收，重发会重复通知；新 pane 的变化在间隙里没人收。
+// 单个 pane 的对账重试次数（有界）：临时失败可以重试，不能无限重试。
+const reconcileRetries = {};
+
 async function reconcileNewPanes(paneIds, previousPaneIds, socket, backlog) {
   const fresh = paneIds.filter(function (id) { return previousPaneIds.indexOf(id) < 0; });
   for (const id of backlog || []) {
@@ -428,12 +431,21 @@ async function reconcileNewPanes(paneIds, previousPaneIds, socket, backlog) {
     try {
       const agent = await callOnce('agent.get', { pane_id: paneId }, 15000);
       const status = agent && (agent.status || agent.agent_status);
+      reconcileRetries[paneId] = 0;
       if (!stillCurrent()) {
         // 主动退订：到此为止。连接被新订阅替换：把还没核对的 pane
         // 交给下一轮补查，否则它的 blocked/done 就永远漏了。
         if (subscription.desired) {
           const rest = fresh.slice(fresh.indexOf(paneId));
-          subscription.reconcileBacklog = (subscription.reconcileBacklog || []).concat(rest);
+          // 新订阅可能已经把 backlog 取走并清空：余量直接交给当前代次，
+          // 不能留在那里等下一次未必会来的换订阅。
+          if (subscription.socket && subscription.running) {
+            const current = subscription.socket;
+            const currentPanes = subscription.paneIds.slice();
+            reconcileNewPanes(currentPanes, currentPanes, current, rest);
+          } else {
+            subscription.reconcileBacklog = (subscription.reconcileBacklog || []).concat(rest);
+          }
         }
         return;
       }
@@ -444,7 +456,19 @@ async function reconcileNewPanes(paneIds, previousPaneIds, socket, backlog) {
           data: { pane_id: paneId, agent_status: status, reconciled: true }
         });
       }
-    } catch (error) { void error; }
+    } catch (error) {
+      // 临时失败（超时、Herdr 重启）：pane 还活着就排有界重试，
+      // 不能就此丢掉——paneIds 已提交，后续换订阅会把它当旧成员跳过对账。
+      const attempts = (reconcileRetries[paneId] || 0) + 1;
+      reconcileRetries[paneId] = attempts;
+      if (attempts <= 3 && subscription.desired && subscription.socket === socket) {
+        setTimeout(function () {
+          if (!subscription.desired || subscription.socket !== socket) return;
+          reconcileNewPanes([paneId], [], socket, []);
+        }, 5000).unref();
+      }
+      void error;
+    }
   }
 }
 

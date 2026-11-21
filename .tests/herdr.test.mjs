@@ -755,7 +755,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(panelSrcKeys, /'ctrl\+l': true/,
     'the Herdr keep-keys must be recognised too');
   // 改行键送达后记终端有内容。
-  assert.match(panelSrcKeys, /terminalHasContent\[scope\] = true;[\s\S]{0,60}\n    \}\n    await refreshTerminal/,
+  assert.match(panelSrcKeys, /terminalHasContent\[scope\] = true;[\s\S]{0,60}\n    \}\n    await refreshAfterWrite/,
     'a delivered line-key must record remote content');
   // sendEnterOnly 失败无条件恢复 map。
   assert.match(panelSrcKeys, /map 记录按 scope 存：无论现在选中哪个分屏都要恢复/,
@@ -765,6 +765,26 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the reconcile must stop when the subscription is no longer current');
   assert.match(workerSrc13, /reconcileBacklog/,
     'an interrupted reconcile must hand the remaining panes to the next subscription');
+
+  // 只读刷新失败不能掉进写结果的 catch。
+  const panelSrcRf = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcRf, /async function refreshAfterWrite\(\)/,
+    'post-write refreshes must be isolated from the write outcome');
+  const refreshCalls = (panelSrcRf.match(/await refreshAfterWrite\(\);/g) || []).length;
+  assert.ok(refreshCalls >= 4, 'all write paths must use the isolated refresh');
+
+  // 已在终端的待补文本不再重复同步；草稿同步未知也冻结。
+  assert.match(panelSrcRf, /if \(draft && pendingEnterOnly\[scope\] === draft\)/,
+    'a draft that is already in the terminal must not be pasted again');
+  assert.match(panelSrcRf, /HERDR_OUTCOME_UNKNOWN[\s\S]{0,200}?terminalHasContent\[scope\] = true;\s*\n\s*scopeHolds\[scope\] = 'unknown';/,
+    'an unknown draft-sync outcome must hold the scope');
+
+  // 对账：晚到余量交给当前代次；临时失败有界重试。
+  const workerSrc15 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSrc15, /余量直接交给当前代次/,
+    'a late reconcile remainder must be kicked to the current generation');
+  assert.match(workerSrc15, /reconcileRetries/,
+    'a transient reconcile failure must get a bounded retry');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
