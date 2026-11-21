@@ -530,9 +530,14 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
         queuedDrafts[scope] = prior + addition;
         if (currentScope() === scope) {
           const holdBox = $('#term-input');
-          holdBox.value = holdBox.value.indexOf(prior) === 0
-            ? queuedDrafts[scope] + holdBox.value.slice(prior.length)
-            : queuedDrafts[scope] + holdBox.value;
+          if (prior && holdBox.value.indexOf(prior) === 0) {
+            holdBox.value = queuedDrafts[scope] + holdBox.value.slice(prior.length);
+          } else if (prior) {
+            holdBox.value = queuedDrafts[scope] + holdBox.value;
+          } else {
+            // 空前缀不是「框里所有内容的开头」。后到的片段接在已恢复文字后面。
+            holdBox.value = holdBox.value + addition;
+          }
           restoredBoxText[scope] = holdBox.value;
         }
       }

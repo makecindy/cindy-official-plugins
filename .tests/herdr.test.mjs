@@ -1071,6 +1071,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a new draft typed before the recovery key must be kept');
   assert.match(panelSrcQd3, /box\.value = box\.value \+ draft/,
     'recovery drafts must be restored in typing order');
+  assert.match(panelSrcQd3, /holdBox\.value = holdBox\.value \+ addition/,
+    'an empty prior must not put the next fragment in front');
   assert.match(workerSrc22, /const remainingWait = deadline - Date\.now\(\);/,
     'event waits must deduct the subscription handshake from the budget');
   assert.match(mainSource, /'agent.wait': true, 'pane.wait_for_output': true/,
