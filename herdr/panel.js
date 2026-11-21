@@ -742,15 +742,18 @@ function submitLine() {
   // 同一终端的「文本 + Enter」串行执行：两条提交并行时，第二次 paste
   // 可能排在第一次 Enter 前，把两条命令拼成一行或颠倒顺序。
   enqueueForScope(scope, function () {
-    return submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue);
+    return submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue, kindAtEnqueue);
   });
 }
 
-async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue) {
+async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue, kindAtEnqueue) {
   const field = $('#term-input');
   // 入队之后才建立的 hold 要挡住所有预先排队的任务，包括空回车：
   // 用户还没看到提示，不能替他补发。入队时已存在的 hold 才是确认过的恢复。
-  const holdIsNew = scopeHolds[scope] !== 0 && scopeHolds[scope] !== holdAtEnqueue;
+  // 新 scope 上 scopeHolds[scope] 是 undefined：先归一到 0 再比较，
+  // 否则「没有冻结」会被误判成新冻结，首次提交全被拦下。
+  const currentHold = scopeHolds[scope] || 0;
+  const holdIsNew = currentHold !== 0 && currentHold !== holdAtEnqueue;
   if (holdIsNew && pendingEnterOnly[scope] !== text) {
     const prior = queuedDrafts[scope] || '';
     queuedDrafts[scope] = prior + text;
