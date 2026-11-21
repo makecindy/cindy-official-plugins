@@ -463,11 +463,18 @@ async function reconcileNewPanes(paneIds, previousPaneIds, socket, backlog, sinc
       // 不能就此丢掉——paneIds 已提交，后续换订阅会把它当旧成员跳过对账。
       const attempts = (reconcileRetries[paneId] || 0) + 1;
       reconcileRetries[paneId] = attempts;
-      if (attempts <= 3 && subscription.desired && subscription.socket === socket) {
-        setTimeout(function () {
-          if (!subscription.desired || subscription.socket !== socket) return;
-          reconcileNewPanes([paneId], [], socket, [], since);
-        }, 5000).unref();
+      if (subscription.desired && attempts <= 3) {
+        if (subscription.socket === socket) {
+          setTimeout(function () {
+            if (!subscription.desired || subscription.socket !== socket) return;
+            reconcileNewPanes([paneId], [], socket, [], since);
+          }, 5000).unref();
+        } else if (subscription.socket && subscription.running) {
+          // 换代之后才失败的：直接交给当前订阅，别等不会来的下一次换代。
+          const current = subscription.socket;
+          const currentPanes = subscription.paneIds.slice();
+          reconcileNewPanes(currentPanes, currentPanes, current, [paneId], since);
+        }
       }
       void error;
     }
@@ -1019,7 +1026,8 @@ const handlers = {
     // 两个窗口/面板同时提交时会 paste(A), paste(B), Enter(A)，
     // 把两条命令拼成一条。锁要放在所有调用方共享的这一层。
     const dest = String((params && params.target) || '');
-    return enqueueTmuxSend(dest, function () {
+    const key = await tmuxQueueKey(dest);
+    return enqueueTmuxSend(key, function () {
       return tmuxSend(params && params.target, params || {});
     });
   },
@@ -1028,7 +1036,8 @@ const handlers = {
   // B 的文本仍可能插到 A 的 Enter 前面。这里把两步放进同一个队列项。
   async 'tmux/submit'(params) {
     const dest = String((params && params.target) || '');
-    return enqueueTmuxSend(dest, async function () {
+    const key = await tmuxQueueKey(dest);
+    return enqueueTmuxSend(key, async function () {
       try {
         await tmuxSend(dest, { text: String(params.text) });
       } catch (error) {
@@ -1045,8 +1054,21 @@ const handlers = {
   }
 };
 
-// 每个 tmux 目标一条队列（见上面的说明）。
+// 每个 tmux 目标一条队列（见上面的说明）。键用解析后的真实 pane id：
+// work、work:2、work:2.1 都可能指向同一个 pane，按原始字符串分队列
+// 会让另一个调用的 paste 插到本次「文本 + Enter」之间。
 const tmuxSendQueues = {};
+
+async function tmuxQueueKey(dest) {
+  try {
+    const stdout = await runTmux(['display-message', '-p', '-t', dest, '#{pane_id}']);
+    const paneId = String(stdout || '').trim();
+    return paneId || dest;
+  } catch (error) {
+    void error;
+    return dest;
+  }
+}
 
 function enqueueTmuxSend(dest, task) {
   const run = (tmuxSendQueues[dest] || Promise.resolve()).then(task, task);

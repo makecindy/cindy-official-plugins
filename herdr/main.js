@@ -358,6 +358,7 @@ function sameScheduleConfig(a, b) {
       silentWhenIdle: item && item.silentWhenIdle,
       timezone: item && item.timezone,
       cronExpr: item && item.cronExpr,
+      targetSessionId: item && item.targetSessionId,
       notify: item && item.notify
     });
   };

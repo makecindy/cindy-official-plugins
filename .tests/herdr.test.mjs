@@ -838,6 +838,20 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(mainSource, /sameScheduleConfig\(freshItem, oldItem\)/,
     'the old schedule must be compared with the snapshot before deletion');
 
+  // 解析后的 pane 身份做队列键；换代后失败交接；会话绑定纳入漂移；被拦草稿交还。
+  const workerSrc17 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSrc17, /tmuxQueueKey/,
+    'tmux write queues must key on the resolved pane identity');
+  assert.match(workerSrc17, /换代之后才失败的：直接交给当前订阅/,
+    'a failed reconcile after a handover must reach the current subscription');
+  assert.match(mainSource, /targetSessionId: item && item\.targetSessionId/,
+    'the drift check must include targetSessionId');
+  const panelSrcQd = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcQd, /restoreQueuedDrafts/,
+    'queued drafts must be handed back when the pane is reselected');
+  assert.match(panelSrcQd, /只有用户看到并重新提交它/,
+    'queued drafts must not be dropped by an empty-Enter resume');
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,

@@ -577,6 +577,15 @@ async function refreshAfterWrite() {
   }
 }
 
+// 切回某个分屏时，把冻结期间被拦下、还没交还给用户的提交放回输入框。
+function restoreQueuedDrafts() {
+  const scope = currentScope();
+  if (!scope || !queuedDrafts[scope]) return;
+  const box = $('#term-input');
+  if (box) box.value = queuedDrafts[scope] + box.value;
+  delete queuedDrafts[scope];
+}
+
 // 清掉已经不存在（或同名重建）的分屏的待确认状态。
 // 只清「这次成功拿到完整列表」的那个后端：探测失败（权限、超时）
 // 不代表分屏消失，不能把仍在运行的分屏的记录也删掉。
@@ -688,8 +697,18 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
     renderOutput(T.heldHint);
     return;
   }
-  // 这次提交真正放行：之前被拦下的累积草稿已经交回给用户了。
-  delete queuedDrafts[scope];
+  // 之前被拦下的累积草稿：只有用户看到并重新提交它（本次文本以它开头）
+  // 才算交还；否则连同本次文本按原顺序放回输入框，绝不能静默丢掉。
+  const pending = queuedDrafts[scope];
+  if (pending) {
+    if (text && text.indexOf(pending) === 0) {
+      delete queuedDrafts[scope];
+    } else {
+      if (currentScope() === scope) field.value = pending + text + field.value;
+      renderOutput(T.heldHint);
+      return;
+    }
+  }
   // 空输入框但终端里有内容（草稿刚同步、或粘贴后回车未确认）：
   // 这次回车只补 Enter。
   if (!text) {
@@ -860,6 +879,7 @@ async function openPane(pane) {
     // 那个终端里待提交的行，回来后的恢复路径还要用。
     $('#term-input').value = '';
     restoredDraft = null;
+    restoreQueuedDrafts();
   }
   readToken += 1;
   const token = readToken;
@@ -991,6 +1011,7 @@ async function openTmuxPane(pane) {
     // 那个终端里待提交的行，回来后的恢复路径还要用。
     $('#term-input').value = '';
     restoredDraft = null;
+    restoreQueuedDrafts();
   }
   readToken += 1;
   const token = readToken;
