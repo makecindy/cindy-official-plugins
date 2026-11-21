@@ -874,7 +874,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const workerSrc19 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
   assert.match(workerSrc19, /pane_id: '#\{pane_id\}'/,
     'the tmux pane list must expose the stable pane id');
-  assert.match(workerSrc19, /tmuxSend\(identity\.paneId, sendParams\)/,
+  assert.match(workerSrc19, /tmuxSend\(identity\.paneId, sendParams, writeDeadline\)/,
     'the queued send must use the resolved pane id as its target');
   assert.match(workerSrc19, /key: String\(serverPid\) \+ ':' \+ paneId/,
     'the worker queue key must include the tmux server generation');
@@ -1055,6 +1055,18 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a keys-stage failure after the text must be marked as text already sent');
   assert.match(workerSrc22, /TMUX_QUEUE_EXPIRED/,
     'a queued tmux write must stop when its deadline has passed');
+  assert.match(workerSrc22, /const writeDeadline = Date\.now\(\) \+ \(Number\(params && params\.timeout_ms\)/,
+    'the tmux write deadline starts before target resolution');
+  assert.match(workerSrc22, /tmuxStepBudget\(deadline\)/,
+    'each tmux child must be limited to the remaining budget');
+  assert.match(workerSrc22, /herdrHandshakeError/,
+    'a short event wait must not block on the subscription handshake');
+  assert.match(panelSrcQd3, /next && next\.available === false/,
+    'a failed tmux probe must keep the last server generation');
+  assert.match(panelSrcQd3, /pendingRecoveryKey\[scope\] = key/,
+    'a keys-stage failure must remember the original key');
+  assert.match(panelSrcQd3, /isRecoveryKey/,
+    'only the original key may pass a keys-stage hold');
   assert.match(workerSrc22, /const remainingWait = deadline - Date\.now\(\);/,
     'event waits must deduct the subscription handshake from the budget');
   assert.match(mainSource, /'agent.wait': true, 'pane.wait_for_output': true/,

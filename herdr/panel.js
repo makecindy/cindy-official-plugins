@@ -485,6 +485,7 @@ function forwardKey(event) {
 }
 
 async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, draftFromRestore, epoch) {
+  const isRecoveryKey = scopeHoldKind[scope] === 'keys' && pendingRecoveryKey[scope] === key;
   // 会改动终端里那行内容的按键（取消 C-c、历史 Up/Down、补全 Tab、
   // 删除 C-u/C-w/C-k/C-d、Esc、M-* 宏等）让恢复记录失效；
   // 但清屏 C-l、移动光标 C-a/C-e、翻滚动条 PPage/NPage 不改内容，
@@ -502,7 +503,7 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
       // 取消就是要把终端里的行丢掉：跳过草稿同步，直接发取消键。
       draft = '';
     }
-    if (scopeHolds[scope] && !isCancelKey) {
+    if (scopeHolds[scope] && !isCancelKey && !isRecoveryKey) {
       // 多个被拦下的按键草稿按入队顺序累积（ABC，不是 CBA），
       // 与提交队列共用 queuedDrafts；切回该分屏时统一交还。
       // 用户已经切到别的分屏时也要保存：草稿在按键时就从输入框取走了，
@@ -530,7 +531,7 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
     // 不能再粘一遍，直接发键。
     if (draft && pendingEnterOnly[scope] === draft) {
       // 已在远端，跳过同步。
-    } else if (draft) {
+    } else if (draft && !isRecoveryKey) {
       try {
         // 「草稿 + 按键」一次调用：worker 里同一队列任务顺序执行两步，
         // 两个面板不会交错成 A文本、B文本、A键、B键。
@@ -561,6 +562,7 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
           // keys 阶段专属语义：文本已在终端，只允许核对后的空 Enter、
           // Ctrl+C 或原按键解冻；任意新文本不能解锁（见 submitLine 的闸门）。
           scopeHoldKind[scope] = 'keys';
+          pendingRecoveryKey[scope] = key;
           renderOutput(T.heldHint + '（'
             + detailEarly.replace('HERDR_STAGE=keys ', '') + '）');
           return true;
@@ -607,15 +609,17 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
     const allowHeld = key === 'C-c' || key === 'ctrl+c' || key === 'Enter' || key === 'enter';
     if (pinnedView === 'tmux') {
       await request('tmux_send', {
-        target: target, keys: [key], allow_held: allowHeld, server_pid: tmuxServerPid
+        target: target, keys: [key],
+        allow_held: allowHeld || isRecoveryKey, server_pid: tmuxServerPid
       });
-    } else await request('send', { pane_id: paneId, keys: [key] });
+    } else await request('send', { pane_id: paneId, keys: [key], allow_held: allowHeld || isRecoveryKey });
     if (!scopeEpochIsCurrent(scope, epoch)) return true;
     // 取消/改行已送达：未确认的那一行不存在了，记录与冻结才解除。
     // 改行键可能已经在终端行里留下内容（Up 调出历史、Tab 补全）：
     // 即便没有本地草稿也记下来，空回车才能把这行提交。
     if (!PENDING_ENTER_KEEP_KEYS[key]) {
       delete pendingEnterOnly[scope];
+      delete pendingRecoveryKey[scope];
       scopeHolds[scope] = 0;
       terminalHasContent[scope] = true;
       // 取消成功：那行已经丢掉，之前攒下的草稿与解冻占用一起作废，
@@ -623,6 +627,7 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
       if (key === 'C-c' || key === 'ctrl+c') {
         delete queuedDrafts[scope];
         delete scopeHoldKind[scope];
+  delete pendingRecoveryKey[scope];
         delete scopeUnlockClaims[scope];
         delete scopeUnlockText[scope];
         delete restoredBoxText[scope];
@@ -678,6 +683,8 @@ let holdGeneration = 0;
 const scopeHolds = {};
 // 该次冻结的语义（enter / unknown），与代次一一对应。
 const scopeHoldKind = {};
+// keys 阶段待补发的原按键：只放行这一下，不能让任意新文本解锁。
+const pendingRecoveryKey = {};
 // unknown 解冻语义只能被一次提交占用：占用期间别的提交拿不到它，
 // 占用者没有真正发出请求时把占用还回去（用户可以重试恢复）。
 const scopeUnlockClaims = {};
@@ -1342,6 +1349,13 @@ async function refreshTmux(token) {
     next = await request('tmux_state', {});
   }
   if (stale()) return;
+  // 探测失败（超时、PATH、权限）不是「tmux server 没了」：保留上次的
+  // server pid 和分屏身份，否则旧任务会失去代次、写进重启后复用的 pane。
+  if (next && next.available === false) {
+    tmux = next;
+    renderTmux();
+    return;
+  }
   const sessions = (next && next.sessions) || [];
   // pane id 被复用（tmux server 重启）时，旧分屏的待确认状态必须作废：
   // 否则旧命令会被恢复到新进程里，或被误判成只需补 Enter。

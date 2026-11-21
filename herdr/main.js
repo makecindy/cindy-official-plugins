@@ -1225,6 +1225,11 @@ async function handlePanelRequest(request) {
         timeout_ms: HERDR_WRITE_TIMEOUT_MS
       }, request.__callId, HERDR_WRITE_TIMEOUT_MS);
     }
+    if (request.allow_held === true && hasKeys) {
+      return herdrCall('pane.send_keys', {
+        pane_id: request.pane_id, keys: request.keys, allow_held: true
+      });
+    }
     return tools.herdr_send({ pane_id: request.pane_id, keys: request.keys, text: request.text });
   }
   if (action === 'submit') {

@@ -841,9 +841,9 @@ function parseTmuxRows(output, fields) {
 // tmux server 的进程号：server 重启后 pane id 会被复用（%0…），
 // 只有 server pid 能区分「同一个 pane id，不同的 server」。
 // 不缓存：pid 用于写入隔离与换代安全，3 秒缓存会跨过快速重启窗口。
-async function tmuxServerPid() {
+async function tmuxServerPid(timeoutMs) {
   try {
-    const output = await runTmux(['list-sessions', '-F', '#{pid}']);
+    const output = await runTmux(['list-sessions', '-F', '#{pid}'], timeoutMs);
     const first = String(output || '').split('\n').map(function (line) { return line.trim(); })
       .filter(Boolean)[0];
     const parsed = Number(first);
@@ -1003,16 +1003,23 @@ function tmuxOutcomeUnknown(target, what) {
   return error;
 }
 
-async function tmuxWrite(args, what) {
+async function tmuxWrite(args, what, timeoutMs) {
   try {
-    await runTmux(args);
+    await runTmux(args, timeoutMs);
   } catch (error) {
     if (error && error.code === 'TMUX_TIMEOUT') throw tmuxOutcomeUnknown(args[args.indexOf('-t') + 1], what);
     throw error;
   }
 }
 
-async function tmuxSend(target, params) {
+function tmuxStepBudget(deadline) {
+  if (!deadline) return TMUX_TIMEOUT_MS;
+  const left = Math.floor(deadline - Date.now());
+  if (!(left > 0)) throw tmuxQueueExpired();
+  return Math.min(TMUX_TIMEOUT_MS, left);
+}
+
+async function tmuxSend(target, params, deadline) {
   const dest = String(target || '');
   if (!dest) throw tmuxError('缺少 target', 'TMUX_BAD_TARGET');
   const keys = Array.isArray(params.keys) && params.keys.length
@@ -1025,7 +1032,7 @@ async function tmuxSend(target, params) {
   // text + keys 同一次调用按顺序执行：两个面板的「草稿 + 按键」不会交错成
   // A文本、B文本、A键、B键（每个写请求在 worker 队列里独占一个任务）。
   if (!hasText) {
-    await tmuxWrite(['send-keys', '-t', dest, '--'].concat(keys), '按键');
+    await tmuxWrite(['send-keys', '-t', dest, '--'].concat(keys), '按键', tmuxStepBudget(deadline));
     return { target: dest, mode: 'keys', keys: keys };
   }
   // 文本不走 argv：单独的 ';' 会被 tmux(1) COMMANDS 当命令分隔符（实测会静默丢失）。
@@ -1037,15 +1044,15 @@ async function tmuxSend(target, params) {
   // 或 paste 失败时，都要按已知名字尽力删掉，否则这段文本（可能含敏感
   // 参数）会永久留在全局 tmux buffer 列表里。
   try {
-    await runTmux(['load-buffer', '-b', buffer, '-'], undefined, text);
-    await tmuxWrite(['paste-buffer', '-d', '-t', dest, '-b', buffer], '文本');
+    await runTmux(['load-buffer', '-b', buffer, '-'], tmuxStepBudget(deadline), text);
+    await tmuxWrite(['paste-buffer', '-d', '-t', dest, '-b', buffer], '文本', tmuxStepBudget(deadline));
   } catch (error) {
     try { await runTmux(['delete-buffer', '-b', buffer]); } catch (cleanupError) { void cleanupError; }
     throw error;
   }
   if (keys) {
     try {
-      await tmuxWrite(['send-keys', '-t', dest, '--'].concat(keys), '按键');
+      await tmuxWrite(['send-keys', '-t', dest, '--'].concat(keys), '按键', tmuxStepBudget(deadline));
     } catch (error) {
       // 文本已粘进终端、按键失败：必须带阶段标记，面板按「只差按键」处理，
       // 不能把整段文本当成没发送又粘一遍。
@@ -1181,9 +1188,20 @@ const handlers = {
       throw error;
     }
     if (!subscription.running) {
-      await withSubscriptionLock(async function () {
+      const handshake = withSubscriptionLock(async function () {
         await openSubscription();
+      }).catch(function (error) { return { herdrHandshakeError: error }; });
+      const left = deadline - Date.now();
+      if (left <= 0) throw new Error('timeout: 等待事件超时：' + (params.event || '任意事件'));
+      const outcome = await new Promise(function (resolve, reject) {
+        const timer = setTimeout(function () {
+          reject(new Error('timeout: 等待事件超时：' + (params.event || '任意事件')));
+        }, left);
+        handshake.then(function (value) { clearTimeout(timer); resolve(value); }, function (error) {
+          clearTimeout(timer); reject(error);
+        });
       });
+      if (outcome && outcome.herdrHandshakeError) throw outcome.herdrHandshakeError;
     }
     const remainingWait = deadline - Date.now();
     if (remainingWait <= 0) {
@@ -1283,11 +1301,12 @@ const handlers = {
     // 先做廉价的键名校验：不合法的键不该先去查 pane 身份
     // （查不到目标会盖掉真正的原因）。
     if (params && params.keys !== undefined) validateTmuxKeys(params.keys);
+    const writeDeadline = Date.now() + (Number(params && params.timeout_ms) > 0 ? Number(params.timeout_ms) : 90000);
     // 同一目标的「文本 + Enter」要串行：面板队列只在各自实例里，
     // 两个窗口/面板同时提交时会 paste(A), paste(B), Enter(A)，
     // 把两条命令拼成一条。锁要放在所有调用方共享的这一层。
     const dest = String((params && params.target) || '');
-    const identity = await tmuxQueueKey(dest, params && params.server_pid);
+    const identity = await tmuxQueueKey(dest, params && params.server_pid, writeDeadline);
     const key = identity.key;
     // 发送也用解析后的 pane id：队列等待期间当前 pane 若变了，
     // 原始 session/window 名会写进另一个 pane。
@@ -1296,23 +1315,22 @@ const handlers = {
     const keys = params && Array.isArray(params.keys) ? params.keys : [];
     const recoveryKey = keys.length === 1 && /^(C-c|ctrl\+c|Enter|enter)$/.test(String(keys[0]));
     const allowHeld = Boolean(params && params.allow_held) || recoveryKey;
-    return enqueueTmuxSend(key, identity.serverPid, function (writeDeadline) {
-      if (writeDeadline - Date.now() <= 0) throw tmuxQueueExpired();
-      return tmuxSend(identity.paneId, sendParams);
-    }, allowHeld, params && params.timeout_ms);
+    return enqueueTmuxSend(key, identity.serverPid, function () {
+      return tmuxSend(identity.paneId, sendParams, writeDeadline);
+    }, allowHeld, writeDeadline);
   },
 
   // 提交一行 = 文本 + Enter 的原子任务：两个 RPC 各自排队的话，
   // B 的文本仍可能插到 A 的 Enter 前面。这里把两步放进同一个队列项。
   async 'tmux/submit'(params) {
+    const writeDeadline = Date.now() + (Number(params && params.timeout_ms) > 0 ? Number(params.timeout_ms) : 90000);
     const dest = String((params && params.target) || '');
-    const identity = await tmuxQueueKey(dest, params && params.server_pid);
+    const identity = await tmuxQueueKey(dest, params && params.server_pid, writeDeadline);
     const key = identity.key;
     const allowHeld = Boolean(params && params.allow_held);
-    return enqueueTmuxSend(key, identity.serverPid, async function (writeDeadline) {
-      if (writeDeadline - Date.now() <= 0) throw tmuxQueueExpired();
+    return enqueueTmuxSend(key, identity.serverPid, async function () {
       try {
-        await tmuxSend(identity.paneId, { text: String(params.text) });
+        await tmuxSend(identity.paneId, { text: String(params.text) }, writeDeadline);
       } catch (error) {
         // 阶段标记留在 message 里：面板据此区分「文字没进」和「只差回车」。
         const detail = String(error && error.message ? error.message : error);
@@ -1328,7 +1346,7 @@ const handlers = {
         throw new Error('TMUX_STAGE=enter HERDR_OUTCOME_UNKNOWN: 文本已写入，回车阶段预算已耗尽；请先核对终端再决定是否重试。');
       }
       try {
-        await tmuxSend(identity.paneId, { keys: ['Enter'] });
+        await tmuxSend(identity.paneId, { keys: ['Enter'] }, writeDeadline);
       } catch (error) {
         throw new Error('TMUX_STAGE=enter ' + String(error && error.message ? error.message : error));
       }
@@ -1341,8 +1359,8 @@ const handlers = {
 // 旧 Promise 不尝试删除（Promise 链已被旧调用捕获），而是在出队时验证代次。
 const tmuxSendQueues = {};
 
-async function tmuxQueueKey(dest, expectedServerPid) {
-  const serverPid = await tmuxServerPid();
+async function tmuxQueueKey(dest, expectedServerPid, deadline) {
+  const serverPid = await tmuxServerPid(deadline ? tmuxStepBudget(deadline) : undefined);
   if (!serverPid) {
     const wrapped = new Error('TMUX_TARGET_UNRESOLVED: 无法确认 tmux server 代次。');
     wrapped.code = 'TMUX_TARGET_UNRESOLVED';
@@ -1359,7 +1377,7 @@ async function tmuxQueueKey(dest, expectedServerPid) {
   }
   let paneId = '';
   try {
-    const stdout = await runTmux(['display-message', '-p', '-t', dest, '#{pane_id}']);
+    const stdout = await runTmux(['display-message', '-p', '-t', dest, '#{pane_id}'], deadline ? tmuxStepBudget(deadline) : undefined);
     paneId = String(stdout || '').trim();
   } catch (error) {
     // 解析失败时不能退回原始 target：那样同一 pane 会被分到两条队列，
@@ -1388,7 +1406,7 @@ function tmuxQueueExpired() {
   return expired;
 }
 
-function enqueueTmuxSend(dest, serverPid, task, allowHeld, timeoutMs) {
+function enqueueTmuxSend(dest, serverPid, task, allowHeld, writeDeadline) {
   if (tmuxQueueHolds[dest] && !allowHeld) {
     const held = new Error('TMUX_QUEUE_HELD: 这个 pane 上一次写操作结果未知，'
       + '请先核对终端，用 Ctrl+C 取消那行或补发回车后再写入。');
@@ -1397,7 +1415,6 @@ function enqueueTmuxSend(dest, serverPid, task, allowHeld, timeoutMs) {
   }
   // 出队时再检查一次冻结：入队时的检查发生在前一个请求完成之前，
   // 前一个请求随后以「结果未知」结束的话，这一项不能接着写。
-  const writeDeadline = Date.now() + (Number(timeoutMs) > 0 ? Number(timeoutMs) : 90000);
   async function dequeued() {
     if (writeDeadline - Date.now() <= 0) throw tmuxQueueExpired();
     // 旧 server 上排队的 Promise 即使仍被引用，出队时也不得向新 server
@@ -1414,7 +1431,7 @@ function enqueueTmuxSend(dest, serverPid, task, allowHeld, timeoutMs) {
       held.code = 'TMUX_QUEUE_HELD';
       throw held;
     }
-    return task(writeDeadline);
+    return task();
   }
   const run = (tmuxSendQueues[dest] || Promise.resolve()).then(dequeued, dequeued);
   tmuxSendQueues[dest] = run.then(
