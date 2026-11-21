@@ -762,7 +762,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(panelSrcKeys, /'ctrl\+l': true/,
     'the Herdr keep-keys must be recognised too');
   // 改行键送达后记终端有内容。
-  assert.match(panelSrcKeys, /terminalHasContent\[scope\] = true;[\s\S]{0,60}\n    \}\n    await refreshAfterWrite/,
+  assert.match(panelSrcKeys, /terminalHasContent\[scope\] = true;[\s\S]{0,400}await refreshAfterWrite/,
     'a delivered line-key must record remote content');
   // sendEnterOnly 失败无条件恢复 map。
   assert.match(panelSrcKeys, /map 记录按 scope 存：无论现在选中哪个分屏都要恢复/,
@@ -883,7 +883,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const panelSrcQd3 = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSrcQd3, /if \(holdIsNew\) \{/,
     'a hold created after enqueue must also block an empty Enter');
-  assert.match(panelSrcQd3, /if \(!text\) \{\s*\n\s*await sendEnterOnly\(scope, pinnedView, target, paneId\);/,
+  assert.match(panelSrcQd3, /if \(!text\) \{[\s\S]{0,200}await sendEnterOnly\(scope, pinnedView, target, paneId\);/,
     'an empty submit must still send an Enter');
   assert.match(panelSrcQd3, /allow_held: true/,
     'the enter-only resume must unlock the pane queue');

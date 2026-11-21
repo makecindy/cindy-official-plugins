@@ -551,6 +551,14 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
       delete pendingEnterOnly[scope];
       scopeHolds[scope] = 0;
       terminalHasContent[scope] = true;
+      // 取消成功：那行已经丢掉，之前攒下的草稿与解冻占用一起作废，
+      // 否则下一次提交会被旧的 queuedDrafts 拦住。
+      if (key === 'C-c' || key === 'ctrl+c') {
+        delete queuedDrafts[scope];
+        delete scopeHoldKind[scope];
+        delete scopeUnlockClaims[scope];
+        delete restoredBoxText[scope];
+      }
     }
     await refreshAfterWrite();
   } catch (error) {
@@ -818,7 +826,13 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
   // 空输入框的这次回车就是一次 Enter：终端里可能有 CLI 提示
   // （“Press Enter to continue”），侧栏拦下了按键，必须由这里转出去。
   if (!text) {
-    await sendEnterOnly(scope, pinnedView, target, paneId);
+    try {
+      await sendEnterOnly(scope, pinnedView, target, paneId);
+    } finally {
+      // 补发回车不消费解冻语义：结束路径都要把占用还回去，
+      // 否则这个分屏之后再次结果未知时拿不到 unknown 标记。
+      releaseUnlock(scope, unlockTokenValue);
+    }
     return;
   }
   // 恢复语义：这段文本已在终端里（上次粘贴后 Enter 未确认，或草稿刚被
@@ -909,9 +923,11 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
     }
     // 被消费的提交不能凭空消失：按 scope 单独记下来（不覆盖用户正在输入的
     // 新内容），用户核对后可以重试或取回原命令。
-    if (!queuedDrafts[scope]) queuedDrafts[scope] = text;
+    // 已经放回输入框的文字不再另存一份，避免同一段文字出现两处。
+    const restoredToBox = currentScope() === scope && !field.value;
+    if (restoredToBox) field.value = text;
+    else if (!queuedDrafts[scope]) queuedDrafts[scope] = text;
     releaseUnlock(scope, unlockTokenValue);
-    if (currentScope() === scope && !field.value) field.value = text;
     renderOutput(error.message || T.sendFailed);
   }
 }
