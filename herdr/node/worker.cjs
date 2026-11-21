@@ -472,7 +472,9 @@ async function reconcileNewPanes(paneIds, previousPaneIds, socket, backlog, sinc
         }
         // 补查读到的任何状态都更新去重依据：只更新 blocked/done 的话，
         // 中间态（working/idle）不刷新基线，下次重新 blocked 会被误判重复。
-        lastDeliveredStatus[paneId] = status;
+        // 但这期间已经有实时状态到达过：实时事件已把基线更新为更新的值，
+        // 不能用补查读到的旧状态把它覆盖回去。
+        if (!liveArrived(paneId)) lastDeliveredStatus[paneId] = status;
       }
     } catch (error) {
       // 临时失败（超时、Herdr 重启）：pane 还活着就排有界重试，

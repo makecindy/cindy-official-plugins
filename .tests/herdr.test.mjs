@@ -914,8 +914,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the delivered status must be recorded per pane');
   assert.match(workerSrc22, /lastDeliveredStatus\[paneId\] !== status/,
     'a reconcile must not re-deliver an already delivered status');
-  assert.match(workerSrc22, /lastDeliveredStatus\[paneId\] = status;/,
-    'every status read during a reconcile must refresh the dedupe basis');
+  assert.match(workerSrc22, /if \(!liveArrived\(paneId\)\) lastDeliveredStatus\[paneId\] = status;/,
+    'a reconcile must not overwrite a fresher live status');
   const panelSrcLang = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   const langCount = (panelSrcLang.match(/lang: '/g) || []).length;
   assert.ok(langCount >= 4, 'the page language must be defined for all locales');
