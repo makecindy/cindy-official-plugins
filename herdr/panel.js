@@ -870,11 +870,13 @@ function submitLine() {
   // 同一终端的「文本 + Enter」串行执行：两条提交并行时，第二次 paste
   // 可能排在第一次 Enter 前，把两条命令拼成一行或颠倒顺序。
   enqueueForScope(scope, function (epoch) {
-    return submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue, kindAtEnqueue, unlockTokenValue, epoch);
+    return submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue, kindAtEnqueue,
+      unlockTokenValue, epoch, isPresentedQueuedCommand);
   });
 }
 
-async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue, kindAtEnqueue, unlockTokenValue, epoch) {
+async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue,
+  kindAtEnqueue, unlockTokenValue, epoch, wasQueuedSubmission) {
   const field = $('#term-input');
   if (!scopeEpochIsCurrent(scope, epoch)) return;
   // 入队之后才建立的 hold 要挡住所有预先排队的任务，包括空回车：
@@ -995,7 +997,12 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
         pendingEnterOnly[scope] = text;
         scopeHolds[scope] = holdGeneration += 1;
         scopeHoldKind[scope] = 'enter';
-        if (currentScope() === scope && !field.value) field.value = text;
+        if (currentScope() === scope && !field.value) {
+          field.value = text;
+          if (wasQueuedSubmission) restoredSubmissionText[scope] = text;
+        } else if (wasQueuedSubmission) {
+          queuedSubmissions[scope] = [text].concat(queuedSubmissions[scope] || []);
+        }
         renderOutput(T.enterUnconfirmed + '（' + submitDetail.replace('TMUX_STAGE=enter ', '') + '）');
         return;
       }
@@ -1046,8 +1053,11 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       // 登记 marker：后面的排队草稿要排在这条失败内容之后，
       // 顺序不能反。
       restoredBoxText[scope] = text;
-    }
-    else if (!queuedDrafts[scope]) queuedDrafts[scope] = text;
+      if (wasQueuedSubmission) restoredSubmissionText[scope] = text;
+    } else if (wasQueuedSubmission) {
+      // 失败的队列头仍排在 C 等后续项之前；输入框里新打的文字会在之后入队。
+      queuedSubmissions[scope] = [text].concat(queuedSubmissions[scope] || []);
+    } else if (!queuedDrafts[scope]) queuedDrafts[scope] = text;
     releaseUnlock(scope, unlockTokenValue);
     renderOutput(error.message || T.sendFailed);
   }
