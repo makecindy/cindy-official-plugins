@@ -432,18 +432,20 @@ function forwardKey(event) {
   // 会让两个队列项带着同一份草稿，出队后重复发送。
   const draftField = $('#term-input');
   let draft = '';
+  let draftFromRestore = false;
   if (draftField && !PENDING_ENTER_KEEP_KEYS[key] && draftField.value) {
     draft = draftField.value;
+    draftFromRestore = restoredBoxText[scope] === draft;
     consumeFromInput(draftField, draft);
   }
   // 同一终端的操作排队执行：草稿同步、改行按键不能与正在进行的提交交错。
   enqueueForScope(scope, function () {
-    return forwardKeyQueued(key, pinnedView, target, paneId, scope, draft);
+    return forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, draftFromRestore);
   });
   return true;
 }
 
-async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
+async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, draftFromRestore) {
   // 会改动终端里那行内容的按键（取消 C-c、历史 Up/Down、补全 Tab、
   // 删除 C-u/C-w/C-k/C-d、Esc、M-* 宏等）让恢复记录失效；
   // 但清屏 C-l、移动光标 C-a/C-e、翻滚动条 PPage/NPage 不改内容，
@@ -467,14 +469,15 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft) {
       if (currentScope() === scope && draft) {
         const holdBox = $('#term-input');
         const prior = queuedDrafts[scope] || '';
-        // 连续按 Tab 时第二次捕获的文字已包含上次恢复的累积串：
-        // 只追加新增部分，别把整段再存一次。
-        const addition = prior && draft.indexOf(prior) === 0
+        // 只有「这次文字确实是面板刚恢复的那份」才去重：
+        // 两份碰巧有相同前缀的独立草稿必须都保留。
+        const addition = draftFromRestore && prior && draft.indexOf(prior) === 0
           ? draft.slice(prior.length) : draft;
         queuedDrafts[scope] = prior + addition;
         holdBox.value = holdBox.value.indexOf(prior) === 0
           ? queuedDrafts[scope] + holdBox.value.slice(prior.length)
           : queuedDrafts[scope] + holdBox.value;
+        restoredBoxText[scope] = holdBox.value;
       }
       renderOutput(T.heldHint);
       return true;
@@ -574,6 +577,9 @@ const scopeHolds = {};
 // 冻结期间被拦下的多次提交：按入队顺序累积成一段，
 // 不能逐条前置（B、C 会变成 CBA）。
 const queuedDrafts = {};
+// 最近一次把累积草稿写回输入框的内容：用来区分「用户新打的文字」和
+// 「面板刚恢复的同一份文字」，不能只看前缀。
+const restoredBoxText = {};
 
 // 排队执行时输入框可能已追加新内容：只去掉已发送的那段前缀，
 // 不能把用户排队期间新打的部分也清掉。
@@ -608,7 +614,10 @@ function restoreQueuedDrafts() {
   const scope = currentScope();
   if (!scope || !queuedDrafts[scope]) return;
   const box = $('#term-input');
-  if (box) box.value = queuedDrafts[scope] + box.value;
+  if (box) {
+    box.value = queuedDrafts[scope] + box.value;
+    restoredBoxText[scope] = box.value;
+  }
   delete queuedDrafts[scope];
 }
 
@@ -691,8 +700,10 @@ function submitLine() {
   // 这个终端有一次未确认的回车：只拦「新文本」提交——空框回车
   // 和同一文本的恢复必须放行，否则永远无法补发。草稿放回输入框。
   const isResume = !text || pendingEnterOnly[scope] === text;
+  // 先在清空前记下入队时的冻结代次（核对过的恢复要靠它解冻 worker 队列）。
+  const holdAtEnqueue = scopeHolds[scope] || false;
   // 'unknown' 冻结：失败时已提示先核对终端，这次提交按完整重发放行。
-  if (scopeHolds[scope] === 'unknown') scopeHolds[scope] = false;
+  if (holdAtEnqueue === 'unknown') scopeHolds[scope] = false;
   if (scopeHolds[scope] && !isResume) {
     if (currentScope() === scope) {
       const box = $('#term-input');
@@ -703,7 +714,6 @@ function submitLine() {
   }
   // 同一终端的「文本 + Enter」串行执行：两条提交并行时，第二次 paste
   // 可能排在第一次 Enter 前，把两条命令拼成一行或颠倒顺序。
-  const holdAtEnqueue = scopeHolds[scope] || false;
   enqueueForScope(scope, function () {
     return submitLineQueued(text, pinnedView, target, paneId, scope, holdAtEnqueue);
   });
@@ -737,7 +747,10 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
     if (text && text.indexOf(pending) === 0) {
       delete queuedDrafts[scope];
     } else if (!resuming) {
-      if (currentScope() === scope) field.value = pending + text + field.value;
+      if (currentScope() === scope) {
+        field.value = pending + text + field.value;
+        restoredBoxText[scope] = field.value;
+      }
       renderOutput(T.heldHint);
       return;
     }
@@ -779,8 +792,12 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       // 另一个面板的文本不会再插到这两步之间。
       let submitError = null;
       try {
-        // unknown 冻结后用户核对过的完整重发：带 allow_held 解冻该 pane 队列。
-        await request('tmux_submit', { target: target, text: text, allow_held: true });
+        // 只有入队时已处于 unknown 冻结（用户看过提示、核对过终端）的
+        // 完整重发才带 allow_held；普通提交必须继续受队列冻结约束。
+        const unlockedResend = holdAtEnqueue === 'unknown';
+        await request('tmux_submit', {
+          target: target, text: text, allow_held: unlockedResend
+        });
       } catch (error) {
         submitError = error;
       }

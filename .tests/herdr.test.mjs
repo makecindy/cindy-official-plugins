@@ -604,7 +604,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
 
   // 草稿同步与发送目标绑定：等待期间切分屏不会打到新目标、不改写新目标的输入框。
   const panelSrcPin = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
-  assert.match(panelSrcPin, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft\) \{[\s\S]{0,2200}?tmux_send', \{ target: target, text: draft \}/,
+  assert.match(panelSrcPin, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft, draftFromRestore\) \{[\s\S]{0,2600}?tmux_send', \{ target: target, text: draft \}/,
     'the draft sync must use the pinned target');
   assert.match(panelSrcPin, /if \(currentScope\(\) === scope && !field\.value\) field\.value = text;/,
     'the draft restore must only touch the box of the same target');
@@ -674,7 +674,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'queued submits must only consume the sent prefix');
   assert.match(panelSrcTimeout, /按下回车这一刻就把草稿从输入框取走/,
     'the draft must leave the box at submit time, not at dequeue time');
-  assert.match(panelSrcTimeout, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft\)/,
+  assert.match(panelSrcTimeout, /forwardKeyQueued\(key, pinnedView, target, paneId, scope, draft, draftFromRestore\)/,
     'the draft must be captured with its ownership at keypress time');
   assert.match(panelSrcTimeout, /捕获并取走/,
     'a line-altering key must consume the draft at keypress time');
@@ -732,7 +732,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'an unknown first-stage outcome must hold the scope as unknown');
   assert.ok(!/HERDR_OUTCOME_UNKNOWN[\s\S]{0,200}?pendingEnterOnly = \{ scope: scope, text: text \};\s*\n\s*scopeHolds/.test(panelSrcResume),
     'an unknown first stage must not claim the text is in the terminal');
-  assert.match(panelSrcResume, /if \(scopeHolds\[scope\] === 'unknown'\) scopeHolds\[scope\] = false;/,
+  assert.match(panelSrcResume, /if \(holdAtEnqueue === 'unknown'\) scopeHolds\[scope\] = false;/,
     'an unknown hold must let the checked resend through as a full submit');
   assert.match(panelSrcResume, /sendEnterOnly\(scope, pinnedView, target, paneId\)/,
     'the enter-only resume must use the pinned target');
@@ -895,10 +895,14 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const panelSrcRec = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   assert.match(panelSrcRec, /allow_held: true \}\)/,
     'the resume path must send the unlock marker');
-  assert.match(panelSrcRec, /tmux_submit', \{ target: target, text: text, allow_held: true/,
-    'a checked full resend must unlock the queue');
-  assert.match(panelSrcRec, /const addition = prior && draft\.indexOf\(prior\) === 0/,
-    'repeated blocked keys must not duplicate accumulated drafts');
+  assert.match(panelSrcRec, /unlockedResend = holdAtEnqueue === 'unknown'/,
+    'only a checked full resend may unlock the queue');
+  assert.match(panelSrcRec, /draftFromRestore && prior && draft\.indexOf\(prior\) === 0/,
+    'duplicate detection must use the capture-time restore marker');
+
+  const panelSrcMark = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcMark, /restoredBoxText\[scope\] = holdBox\.value/,
+    'restored drafts must be marked at capture time');
 
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
