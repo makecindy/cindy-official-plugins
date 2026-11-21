@@ -988,11 +988,23 @@ const handlers = {
     const hasKeys = Boolean(params && Array.isArray(params.keys) && params.keys.length);
     if (!hasText && !hasKeys) throw new Error('缺少 text 或 keys');
     return enqueueHerdrSend(paneId, async function () {
+      let textSent = false;
       if (hasText) {
         await callOnce('pane.send_text', { pane_id: paneId, text: String(params.text) });
+        textSent = true;
       }
       if (hasKeys) {
-        await callOnce('pane.send_keys', { pane_id: paneId, keys: params.keys });
+        try {
+          await callOnce('pane.send_keys', { pane_id: paneId, keys: params.keys });
+        } catch (error) {
+          // 文本已送达但按键失败：必须带阶段标记，面板按「只差按键」处理，
+          // 不能把整段草稿当成没发送又粘一遍。
+          const detail = String(error && error.message ? error.message : error);
+          const wrapped = new Error('HERDR_STAGE=keys ' + detail);
+          wrapped.code = 'HERDR_STAGE_KEYS';
+          wrapped.textSent = textSent;
+          throw wrapped;
+        }
       }
       return { pane_id: paneId, mode: hasText && hasKeys ? 'text+keys' : (hasText ? 'text' : 'keys') };
     });

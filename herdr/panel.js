@@ -544,6 +544,17 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
         return true;
       } catch (error) {
         if (!scopeEpochIsCurrent(scope, epoch)) return true;
+        // 文本已送达、按键失败：不能把整段草稿当没发送又粘一遍——
+        // 记「终端有内容」并冻结，让用户核对后空框补发该键。
+        const detailEarly = String(error && error.message ? error.message : error);
+        if (/HERDR_STAGE=keys/.test(detailEarly)) {
+          terminalHasContent[scope] = true;
+          scopeHolds[scope] = holdGeneration += 1;
+          scopeHoldKind[scope] = 'unknown';
+          renderOutput(T.heldHint + '（'
+            + detailEarly.replace('HERDR_STAGE=keys ', '') + '）');
+          return true;
+        }
         // 结果未知 = 草稿可能已在终端：冻结并记下「可能有内容」，
         // 不能像确定失败那样只放回输入框让人普通重发。
         if (/HERDR_OUTCOME_UNKNOWN/.test(String(error && error.message ? error.message : error))) {

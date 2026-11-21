@@ -902,6 +902,12 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'an older locale response must not overwrite a newer one');
   assert.match(mainSource, /TMUX_WRITE_TIMEOUT_MS = 90000/,
     'tmux writes must have an explicit timeout budget');
+  assert.match(mainSource, /HERDR_WRITE_TIMEOUT_MS = 90000/,
+    'herdr composite writes must have an explicit timeout budget');
+  assert.match(mainSource, /method === 'herdr\/compose_send'\) return true;/,
+    'the composite send must be classified as potentially mutating');
+  assert.match(mainSource, /tmuxSendRequest\(params, request\.allow_held === true, true\)/,
+    'the panel composite tmux send must bypass the either-or rule');
   assert.match(mainSource, /params.server_pid = args.server_pid;/,
     'the panel-selected server generation must reach the worker');
   assert.match(mainSource, /herdr\/compose_send/,
@@ -914,7 +920,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'an unpersisted replacement schedule id must win over stale KV');
   assert.match(mainSource, /pendingScheduleId = scheduleId;[\s\S]{0,180}await writeKv/,
     'the new schedule id must become authoritative before attempting persistence');
-  assert.match(mainSource, /tmuxSendRequest\(params, request\.allow_held === true\)/,
+  assert.match(mainSource, /tmuxSendRequest\(params, request\.allow_held === true, true\)/,
     'only the panel bridge may unlock the worker queue');
   assert.ok(!/args\.allow_held/.test(mainSource),
     'the agent tool must ignore an allow_held argument');
@@ -1004,6 +1010,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the worker must verify the panel-selected server generation');
   assert.match(workerSrc22, /async 'herdr\/compose_send'\(params\)/,
     'herdr text and keys must be queued per pane and applied atomically');
+  assert.match(workerSrc22, /HERDR_STAGE=keys/,
+    'a keys-stage failure after the text must be marked as text already sent');
   assert.match(workerSrc22, /function dequeued\(\)[\s\S]{0,400}tmuxQueueHolds\[dest\]/,
     'the hold must be rechecked when a queued write starts');
   assert.match(workerSrc22, /TMUX_STAGE=text_failed/,

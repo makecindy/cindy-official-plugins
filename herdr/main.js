@@ -29,6 +29,8 @@ let triggerTimer = null;
 const HOST_REQUEST_TIMEOUT_MAX_MS = 120000;
 // tmux 写：解析代次与 pane、排队、load/paste、回车；慢机器上要留足预算。
 const TMUX_WRITE_TIMEOUT_MS = 90000;
+// Herdr 写（含复合发送）：两个 herdr 调用各有自身超时，排队等待另计。
+const HERDR_WRITE_TIMEOUT_MS = 90000;
 const WAIT_CHUNK_MS = 45000;
 // 宿主这一层要比 worker 的 socket 计时更晚到点（worker = 内层 + 15s），
 // 否则宿主会先把续段循环打断。45s 的一段因此是 45 < 60 < 70 秒的次序。
@@ -150,7 +152,8 @@ const READ_ONLY_HERDR_METHODS = {
 };
 
 function isPotentiallyMutating(method, params) {
-  if (method === 'tmux/send' || method === 'tmux/submit') return true;
+  if (method === 'tmux/send' || method === 'tmux/submit'
+      || method === 'herdr/compose_send') return true;
   if (method !== 'herdr/request') return false;   // tmux/read、tmux/sessions 等
   const inner = params && params.method;
   return !READ_ONLY_HERDR_METHODS[inner];
@@ -1113,8 +1116,9 @@ const tools = {
   }
 };
 
-// tmux 写请求的公共实现：allowHeld 只对面板内部通道开放。
-async function tmuxSendRequest(args, allowHeld) {
+// tmux 写请求的公共实现：allowHeld 与 composite（text+keys 原子发送）
+// 只对面板内部通道开放；Agent 工具保持二选一限制。
+async function tmuxSendRequest(args, allowHeld, composite) {
   {
     if (!args.target) throw new Error(runtime.missingTarget);
     const params = { target: String(args.target) };
@@ -1123,12 +1127,14 @@ async function tmuxSendRequest(args, allowHeld) {
     }
     const hasKeys = Boolean(args.keys && args.keys.length);
     const hasText = args.text !== undefined && args.text !== null && args.text !== '';
-    if (hasKeys && hasText) throw new Error(runtime.ambiguousSend);
+    if (hasKeys && hasText && composite !== true) throw new Error(runtime.ambiguousSend);
     if (hasKeys) {
       params.keys = args.keys;
-    } else if (hasText) {
+    }
+    if (hasText) {
       params.text = args.text;
-    } else {
+    }
+    if (!hasKeys && !hasText) {
       throw new Error(runtime.missingTextOrKeys);
     }
     // 面板在用户显式取消/补回车时请求解冻该 pane 的写队列。
@@ -1197,7 +1203,7 @@ async function handlePanelRequest(request) {
     if (hasText && hasKeys) {
       return nodeRequest('herdr/compose_send', {
         pane_id: request.pane_id, text: request.text, keys: request.keys
-      }, request.__callId);
+      }, request.__callId, HERDR_WRITE_TIMEOUT_MS);
     }
     return tools.herdr_send({ pane_id: request.pane_id, keys: request.keys, text: request.text });
   }
@@ -1236,7 +1242,8 @@ async function handlePanelRequest(request) {
     if (request.server_pid !== undefined && request.server_pid !== null) {
       params.server_pid = request.server_pid;
     }
-    return tmuxSendRequest(params, request.allow_held === true);
+    // 面板内部通道：允许「草稿 + 按键」原子发送（worker 同一队列任务执行两步）。
+    return tmuxSendRequest(params, request.allow_held === true, true);
   }
   if (action === 'tmux_submit') {
     // 面板提交一行：worker 把「文本 + Enter」作为一个队列任务执行，
