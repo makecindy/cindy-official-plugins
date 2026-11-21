@@ -283,8 +283,13 @@ function notifyEventWaiters(event, data) {
   }
 }
 
+// 每个 pane 最近已投递给主进程的状态：断线后补查用它去重，
+// 避免把断线前已通知过的 blocked/done 再通知一遍。
+const lastDeliveredStatus = {};
+
 function handleEvent(message) {
   const data = message.data || {};
+  if (data.pane_id && data.agent_status) lastDeliveredStatus[data.pane_id] = data.agent_status;
   notify('herdr/event', { event: message.event, data: data });
   rememberEvent(message.event, data);
   notifyEventWaiters(message.event, data);
@@ -455,7 +460,10 @@ async function reconcileNewPanes(paneIds, previousPaneIds, socket, backlog, sinc
         }
         return;
       }
-      if ((status === 'blocked' || status === 'done') && !liveArrived(paneId)) {
+      // 断线前已投递过同一状态的不再补：基线的代价只是多查一次，
+      // 不是多发一次通知（30 秒限流只是延后，不是去重）。
+      if ((status === 'blocked' || status === 'done') && !liveArrived(paneId)
+          && lastDeliveredStatus[paneId] !== status) {
         // 字段名与正常状态事件一致（agent_status）：主脚本只认这个键。
         handleEvent({
           event: 'pane_agent_status_changed',

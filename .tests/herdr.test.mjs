@@ -910,6 +910,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const workerSrc22 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
   assert.match(workerSrc22, /subscription\.paneIds = \[\];/,
     'a passive disconnect must invalidate the paneIds baseline');
+  assert.match(workerSrc22, /lastDeliveredStatus\[data\.pane_id\] = data\.agent_status/,
+    'the delivered status must be recorded per pane');
+  assert.match(workerSrc22, /lastDeliveredStatus\[paneId\] !== status/,
+    'a reconcile must not re-deliver an already delivered status');
   const panelSrcLang = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
   const langCount = (panelSrcLang.match(/lang: '/g) || []).length;
   assert.ok(langCount >= 4, 'the page language must be defined for all locales');
