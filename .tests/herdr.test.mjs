@@ -1025,8 +1025,10 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'read-only herdr requests must not be reported as unknown outcomes');
   assert.match(workerSrc22, /sentOutcome\(method\)/,
     'a read-only request that stalls must stay retryable');
-  assert.match(workerSrc22, /error connecting to/,
+  assert.match(workerSrc22, /No such file or directory/,
     'a missing tmux socket must count as no server running');
+  assert.ok(!/error connecting to'/.test(workerSrc22),
+    'a permission error must not be treated as no server');
   assert.match(workerSrc22, /'agent.wait': true, 'pane.wait_for_output': true/,
     'the public wait methods must be read-only');
   assert.match(workerSrc22, /TMUX_STAGE=keys/,

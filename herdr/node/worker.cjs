@@ -726,12 +726,13 @@ function tmuxError(message, code, stderr) {
 function isNoTmuxServer(error) {
   if (!error || error.code !== 'TMUX_FAILED') return false;
   const text = String(error.stderr || error.message || '');
-  // tmux 3.x 在没有 server 时也会说「error connecting to <socket> (No such
-  // file or directory)」或「failed to connect to server」：这些都是「没开
-  // server」，不是命令失败。实测本机装了 tmux 但没起 server 时会走这条。
+  // tmux 3.x 在没有 server 时说「error connecting to <socket> (No such
+  // file or directory)」或「failed to connect to server」：这才是「没开
+  // server」。Permission denied 等其它连接错误必须照原样抛出，否则面板会把
+  // 仍在运行的分屏的草稿与恢复记录当成「分屏消失」清掉。
   return text.indexOf('no server running') >= 0
     || text.indexOf('no sessions') >= 0
-    || text.indexOf('error connecting to') >= 0
+    || text.indexOf('No such file or directory') >= 0
     || text.indexOf('failed to connect to server') >= 0;
 }
 
