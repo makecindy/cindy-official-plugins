@@ -92,7 +92,8 @@ const READ_ONLY_METHODS = {
   ping: true, 'session.snapshot': true, 'pane.read': true, 'pane.list': true,
   'pane.get': true, 'pane.current': true, 'agent.read': true, 'agent.list': true,
   'agent.get': true, 'workspace.list': true, 'workspace.get': true,
-  'tab.list': true, 'tab.get': true, 'worktree.list': true, 'events.wait': true
+  'tab.list': true, 'tab.get': true, 'worktree.list': true, 'events.wait': true,
+  'agent.wait': true, 'pane.wait_for_output': true
 };
 
 function sentOutcome(method) {
@@ -188,6 +189,11 @@ function callOnce(method, params, timeoutMs) {
 
 // 每个 herdr pane 一条写队列：跨面板的文本/按键不会在队列里交错。
 const herdrSendQueues = {};
+
+// 会改动 pane 输入的方法：必须走按 pane 队列，复合发送才不会与纯按键交错。
+const HERDR_PANE_WRITE_METHODS = {
+  'pane.send_text': true, 'pane.send_keys': true, 'pane.send_input': true
+};
 
 function enqueueHerdrSend(paneId, task) {
   const run = (herdrSendQueues[paneId] || Promise.resolve()).then(task, task);
@@ -967,7 +973,17 @@ async function tmuxSend(target, params) {
     throw error;
   }
   if (keys) {
-    await tmuxWrite(['send-keys', '-t', dest, '--'].concat(keys), '按键');
+    try {
+      await tmuxWrite(['send-keys', '-t', dest, '--'].concat(keys), '按键');
+    } catch (error) {
+      // 文本已粘进终端、按键失败：必须带阶段标记，面板按「只差按键」处理，
+      // 不能把整段文本当成没发送又粘一遍。
+      const wrapped = new Error('TMUX_STAGE=keys '
+        + String(error && error.message ? error.message : error));
+      wrapped.code = 'TMUX_STAGE_KEYS';
+      wrapped.textSent = true;
+      throw wrapped;
+    }
     return { target: dest, mode: 'text+keys', text: text, keys: keys };
   }
   return { target: dest, mode: 'text', text: text };
@@ -1013,6 +1029,15 @@ const handlers = {
   async 'herdr/request'(params) {
     const method = String(params.method || '');
     if (!method) throw new Error('缺少 method');
+    // 同一 pane 的所有写操作共用一条队列：复合发送与纯按键/提交不会交错。
+    if (HERDR_PANE_WRITE_METHODS[method]) {
+      const paneId = String((params.params || {}).pane_id || '');
+      if (paneId) {
+        return enqueueHerdrSend(paneId, function () {
+          return callOnce(method, params.params || {});
+        });
+      }
+    }
     const inner = params.params || {};
     // 除 params.timeout_ms 外，agent.prompt 的等待还挂在 wait.timeout_ms 上
     // （提交提示词 + 等待是一个请求），两处都要算进余量。
@@ -1292,8 +1317,8 @@ function enqueueTmuxSend(dest, serverPid, task, allowHeld) {
     function () { if (allowHeld) delete tmuxQueueHolds[dest]; },
     function (error) {
       const detail = String(error && error.message ? error.message : error);
-      // TMUX_STAGE=text_failed 是明确失败，不冻结。
-      if (/HERDR_OUTCOME_UNKNOWN|TMUX_STAGE=enter|TMUX_STAGE=text( |$)/.test(detail)) {
+      // TMUX_STAGE=text_failed 是明确失败，不冻结；keys 阶段文本已在终端，要冻结。
+      if (/HERDR_OUTCOME_UNKNOWN|TMUX_STAGE=enter|TMUX_STAGE=text( |$)|TMUX_STAGE=keys/.test(detail)) {
         tmuxQueueHolds[dest] = detail;
       }
     }

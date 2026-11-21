@@ -225,7 +225,9 @@ let readToken = 0;
 // 面板这一层必须晚于后端：普通写请求的 worker 预算是 45 秒、宿主是 70 秒，
 // 面板若也是 45 秒就会先报「插件未响应」并丢掉稍后到达的「结果未知」，
 // 用户重试可能把命令执行两次。快照的宿主预算是 45 秒，也一起覆盖。
-const PANEL_REQUEST_TIMEOUT_MS = 80000;
+// 面板预算必须晚于主进程的 tmux 写预算（90s）+ 回包余量，
+// 否则主进程还在等精确回包时，面板已经误判结果未知并冻结。
+const PANEL_REQUEST_TIMEOUT_MS = 100000;
 // 这些动作会把内容写进终端/后端：80 秒超时只代表「没收到回包」，
 // 不代表「没执行」，必须按结果未知处理，不能报普通失败让人直接重试。
 const PANEL_WRITE_ACTIONS = { tmux_send: true, tmux_submit: true, submit: true, send: true, prompt: true };
@@ -424,15 +426,21 @@ function syncWrapButton() {
   output.classList.toggle('nowrap', !outputWrap);
 }
 
+// 面板语言加载竞态：旧请求晚回时不能覆盖新请求的结果。
+let panelLocaleSeq = 0;
+
 async function loadLocale() {
+  const seq = panelLocaleSeq += 1;
   try {
     const response = await fetch('/app-context');
+    if (seq !== panelLocaleSeq) return;
     const context = await response.json();
     const ctx = (context && context.context) || {};
     // uiLocale ?? locale 是宿主语言的唯一事实来源；插件没提供的语言回退英文。
     const locale = ctx.uiLocale || ctx.locale;
     T = strings[locale] || strings.en;
   } catch (error) {
+    if (seq !== panelLocaleSeq) return;
     T = strings.en;
   }
   localize();
@@ -547,10 +555,12 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
         // 文本已送达、按键失败：不能把整段草稿当没发送又粘一遍——
         // 记「终端有内容」并冻结，让用户核对后空框补发该键。
         const detailEarly = String(error && error.message ? error.message : error);
-        if (/HERDR_STAGE=keys/.test(detailEarly)) {
+        if (/(HERDR|TMUX)_STAGE=keys/.test(detailEarly)) {
           terminalHasContent[scope] = true;
           scopeHolds[scope] = holdGeneration += 1;
-          scopeHoldKind[scope] = 'unknown';
+          // keys 阶段专属语义：文本已在终端，只允许核对后的空 Enter、
+          // Ctrl+C 或原按键解冻；任意新文本不能解锁（见 submitLine 的闸门）。
+          scopeHoldKind[scope] = 'keys';
           renderOutput(T.heldHint + '（'
             + detailEarly.replace('HERDR_STAGE=keys ', '') + '）');
           return true;
@@ -596,7 +606,9 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
   try {
     const allowHeld = key === 'C-c' || key === 'ctrl+c' || key === 'Enter' || key === 'enter';
     if (pinnedView === 'tmux') {
-      await request('tmux_send', { target: target, keys: [key], allow_held: allowHeld });
+      await request('tmux_send', {
+        target: target, keys: [key], allow_held: allowHeld, server_pid: tmuxServerPid
+      });
     } else await request('send', { pane_id: paneId, keys: [key] });
     if (!scopeEpochIsCurrent(scope, epoch)) return true;
     // 取消/改行已送达：未确认的那一行不存在了，记录与冻结才解除。
@@ -816,7 +828,9 @@ async function sendEnterOnly(scope, pinnedView, target, paneId, epoch) {
   try {
     // Herdr 的键名契约是小写（enter/up/esc…），tmux 才是 Enter。
     if (pinnedView === 'tmux') {
-      await request('tmux_send', { target: target, keys: ['Enter'], allow_held: true });
+      await request('tmux_send', {
+        target: target, keys: ['Enter'], allow_held: true, server_pid: tmuxServerPid
+      });
     } else await request('send', { pane_id: paneId, keys: ['enter'] });
     if (epoch !== undefined && !scopeEpochIsCurrent(scope, epoch)) return;
     scopeHolds[scope] = 0;
@@ -980,7 +994,9 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
     // 框里可能是用户刚输入的、带相同前缀的新命令。
     try {
       if (pinnedView === 'tmux') {
-        await request('tmux_send', { target: target, keys: ['Enter'], allow_held: true });
+        await request('tmux_send', {
+          target: target, keys: ['Enter'], allow_held: true, server_pid: tmuxServerPid
+        });
       } else await request('send', { pane_id: paneId, keys: ['enter'] });
       if (!scopeEpochIsCurrent(scope, epoch)) return;
       scopeHolds[scope] = 0;
@@ -1011,7 +1027,7 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
         // 完整重发才带 allow_held；普通提交必须继续受队列冻结约束。
         const unlockedResend = kindAtEnqueue === 'unknown';
         await request('tmux_submit', {
-          target: target, text: text, allow_held: unlockedResend
+          target: target, text: text, allow_held: unlockedResend, server_pid: tmuxServerPid
         });
         if (!scopeEpochIsCurrent(scope, epoch)) return;
       } catch (error) {
@@ -1361,6 +1377,7 @@ async function refreshTmux(token) {
   }
   for (const id of Object.keys(seen)) tmuxPaneIdentities[id] = seen[id];
   tmux = next;
+  tmuxServerPid = next && next.server_pid !== undefined ? next.server_pid : null;
   if (tmuxFilter && !sessions.some(function (s) { return s.name === tmuxFilter; })) {
     tmuxFilter = null;
   }

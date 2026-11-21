@@ -898,6 +898,9 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'an unknown write must freeze the pane write queue');
   assert.match(mainSource, /let localeLoadSeq = 0;/,
     'locale loads must be sequenced');
+  const panelSrcLocale = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcLocale, /let panelLocaleSeq = 0;/,
+    'the panel locale loads must be sequenced too');
   assert.match(mainSource, /if \(seq !== localeLoadSeq\) return;/,
     'an older locale response must not overwrite a newer one');
   assert.match(mainSource, /TMUX_WRITE_TIMEOUT_MS = 90000/,
@@ -953,7 +956,7 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the active recovery command must pass while later commands remain queued');
   assert.match(panelSrcQd3, /restoreNextSubmission\(scope\);[\s\S]{0,50}renderOutput\(T.heldHint\)/,
     'a new command must wait while older submissions are restored');
-  assert.match(panelSrcQd3, /async function sendEnterOnly[\s\S]{0,650}restoreNextSubmission\(scope\)/,
+  assert.match(panelSrcQd3, /async function sendEnterOnly[\s\S]{0,900}restoreNextSubmission\(scope\)/,
     'a successful enter-only resume must release the next queued submission');
   assert.ok(!/delete queuedSubmissions\[scope\];[\s\S]{0,300}C-c/.test(panelSrcQd3),
     'cancelling the current unknown line must preserve later queued commands');
@@ -961,6 +964,14 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'consecutive failed key drafts must be retained in order');
   assert.match(panelSrcQd3, /text: draft, keys: \[key\], server_pid: tmuxServerPid/,
     'a tmux draft and key must be forwarded atomically with the server generation');
+  assert.match(panelSrcQd3, /tmuxServerPid = next && next\.server_pid/,
+    'the panel must record the tmux server pid from each stable snapshot');
+  assert.match(panelSrcQd3, /allow_held: unlockedResend, server_pid: tmuxServerPid/,
+    'tmux submit must carry the selected server generation');
+  assert.match(panelSrcQd3, /scopeHoldKind\[scope\] = 'keys'/,
+    'a keys-stage hold must only accept an empty Enter, Ctrl+C or the original key');
+  assert.match(panelSrcQd3, /const PANEL_REQUEST_TIMEOUT_MS = 100000/,
+    'the panel budget must outlast the tmux write budget');
   assert.match(panelSrcQd3, /pane_id: paneId, text: draft, keys: \[key\] \}\)/,
     'a herdr draft and key must be forwarded atomically');
   assert.match(panelSrcQd3, /aria-label', T\.terminalInput/,
@@ -971,8 +982,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(workerSrc21, /recoveryKey/,
     'a plain cancel/Enter key must unlock the worker queue too');
   const panelSrcRec = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
-  assert.match(panelSrcRec, /allow_held: true \}\)/,
-    'the resume path must send the unlock marker');
+  assert.match(panelSrcRec, /allow_held: true, server_pid: tmuxServerPid/,
+    'the resume path must send the unlock marker with the server generation');
   assert.match(panelSrcRec, /unlockedResend = kindAtEnqueue === 'unknown'/,
     'only a checked full resend may unlock the queue');
   assert.match(panelSrcRec, /releaseUnlock\(scope, unlockTokenValue\);[\s\S]{0,200}pendingEnterOnly\[scope\] = text;/,
@@ -1004,6 +1015,12 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'read-only herdr requests must not be reported as unknown outcomes');
   assert.match(workerSrc22, /sentOutcome\(method\)/,
     'a read-only request that stalls must stay retryable');
+  assert.match(workerSrc22, /'agent.wait': true, 'pane.wait_for_output': true/,
+    'the public wait methods must be read-only');
+  assert.match(workerSrc22, /TMUX_STAGE=keys/,
+    'a keys-stage tmux failure must mark the text as already sent');
+  assert.match(workerSrc22, /HERDR_PANE_WRITE_METHODS/,
+    'all herdr pane writes must share the per-pane queue');
   assert.match(workerSrc22, /mode: 'text\+keys'/,
     'tmux text and keys must be applied atomically in one queue task');
   assert.match(workerSrc22, /expectedServerPid !== undefined && expectedServerPid !== null[\s\S]{0,300}String\(expectedServerPid\) !== String\(serverPid\)/,
