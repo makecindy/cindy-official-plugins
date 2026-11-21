@@ -921,6 +921,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'an unstable tmux snapshot must fail closed');
   assert.match(mainSource, /if \(pendingScheduleId\) return pendingScheduleId;/,
     'an unpersisted replacement schedule id must win over stale KV');
+  assert.match(mainSource, /const storedId = pending \|\| kv\[SCHEDULE_ID_KEY\];/,
+    'setup must reuse a created-but-unpersisted automation id');
   assert.match(mainSource, /pendingScheduleId = scheduleId;[\s\S]{0,180}await writeKv/,
     'the new schedule id must become authoritative before attempting persistence');
   assert.match(mainSource, /tmuxSendRequest\(params, request\.allow_held === true, true\)/,
@@ -1025,6 +1027,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'an unknown herdr write must freeze its pane queue');
   assert.match(workerSrc22, /HERDR_QUEUE_EXPIRED/,
     'a queued herdr write must not run after its deadline');
+  assert.match(workerSrc22, /const left = deadline - Date\.now\(\);/,
+    'the second compose_send stage must use the remaining deadline');
   assert.match(workerSrc22, /code === null && signal/,
     'a signal-killed tmux child must be treated as an unknown outcome');
   assert.match(workerSrc22, /HANDOVER_DEDUPE_MS/,

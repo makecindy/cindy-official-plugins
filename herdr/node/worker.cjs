@@ -221,7 +221,7 @@ function enqueueHerdrSend(paneId, task, allowHeld, timeoutMs) {
       expired.code = 'HERDR_QUEUE_EXPIRED';
       throw expired;
     }
-    return task(remaining);
+    return task(remaining, deadline);
   }
   const run = (herdrSendQueues[paneId] || Promise.resolve()).then(dequeued, dequeued);
   herdrSendQueues[paneId] = run.then(
@@ -1069,15 +1069,24 @@ const handlers = {
     if (!hasText && !hasKeys) throw new Error('缺少 text 或 keys');
     const allowHeld = Boolean(params.allow_held)
       || isHerdrRecoveryKey('pane.send_keys', { keys: params.keys || [] });
-    return enqueueHerdrSend(paneId, async function (remaining) {
+    return enqueueHerdrSend(paneId, async function (remaining, deadline) {
       let textSent = false;
       if (hasText) {
         await callOnce('pane.send_text', { pane_id: paneId, text: String(params.text) }, remaining);
         textSent = true;
       }
       if (hasKeys) {
+        // 第二段只能用「绝对 deadline 减去第一段耗时」的剩余预算：
+        // 不能用出队时的总预算，否则主进程已报结果未知、worker 还在等。
+        const left = deadline - Date.now();
+        if (left <= 0) {
+          const unknown = new Error('HERDR_STAGE=keys HERDR_OUTCOME_UNKNOWN: '
+            + '文本已写入，按键阶段预算已耗尽；请先核对终端再决定是否重试。');
+          unknown.code = 'HERDR_STAGE_KEYS';
+          unknown.textSent = textSent;
+          throw unknown;
+        }
         try {
-          const left = Math.max(1000, remaining - 0);
           await callOnce('pane.send_keys', { pane_id: paneId, keys: params.keys }, left);
         } catch (error) {
           // 文本已送达但按键失败：必须带阶段标记，面板按「只差按键」处理，

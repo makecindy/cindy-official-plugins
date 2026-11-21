@@ -432,10 +432,18 @@ async function ensureAutomationSchedule(name, args) {
 async function ensureAutomationScheduleUnlocked(name, args) {
   // 读不到就抛：不能把「存储不可读」当成「没配过」再去新建一条。
   const kv = await readKv();
-  const storedId = kv[SCHEDULE_ID_KEY];
+  // 上次「已创建但 KV 没落盘」的 id 优先：用户核对列表后重新调用 setup
+  // 时先 schedule_get 核实它并补存，不能直接再建一条 S2。
+  const pending = pendingScheduleId;
+  const storedId = pending || kv[SCHEDULE_ID_KEY];
   if (storedId) {
     const fetched = await cindy.host.call('cindy_scheduler', 'schedule_get', { id: storedId });
     const outcome = hostBody(fetched);
+    if (!outcome.ok && isNotFound(outcome) && pending === storedId) {
+      // 那条已经被删掉了：别继续把它当成待落盘 id。
+      pendingScheduleId = null;
+      cachedScheduleId = null;
+    }
     if (!outcome.ok && !isNotFound(outcome)) {
       // 查询失败时不能闷头新建：那会让归属 id 被第二条覆盖。
       throw new Error(runtime.automationFailed + (outcome.detail || runtime.automationUnknown));
