@@ -1022,6 +1022,9 @@ const handlers = {
   },
 
   async 'tmux/send'(params) {
+    // 先做廉价的键名校验：不合法的键不该先去查 pane 身份
+    // （查不到目标会盖掉真正的原因）。
+    if (params && params.keys !== undefined) validateTmuxKeys(params.keys);
     // 同一目标的「文本 + Enter」要串行：面板队列只在各自实例里，
     // 两个窗口/面板同时提交时会 paste(A), paste(B), Enter(A)，
     // 把两条命令拼成一条。锁要放在所有调用方共享的这一层。
@@ -1060,14 +1063,24 @@ const handlers = {
 const tmuxSendQueues = {};
 
 async function tmuxQueueKey(dest) {
+  let paneId = '';
   try {
     const stdout = await runTmux(['display-message', '-p', '-t', dest, '#{pane_id}']);
-    const paneId = String(stdout || '').trim();
-    return paneId || dest;
+    paneId = String(stdout || '').trim();
   } catch (error) {
-    void error;
-    return dest;
+    // 解析失败时不能退回原始 target：那样同一 pane 会被分到两条队列，
+    // 另一个写入就能插进本次「文本 + Enter」之间。宁可停止写入。
+    const wrapped = new Error('TMUX_TARGET_UNRESOLVED: 无法确认写入目标的 pane 身份（'
+      + dest + '）：' + String(error && error.message ? error.message : error));
+    wrapped.code = 'TMUX_TARGET_UNRESOLVED';
+    throw wrapped;
   }
+  if (!paneId) {
+    const wrapped = new Error('TMUX_TARGET_UNRESOLVED: 写入目标没有返回 pane id（' + dest + '）。');
+    wrapped.code = 'TMUX_TARGET_UNRESOLVED';
+    throw wrapped;
+  }
+  return paneId;
 }
 
 function enqueueTmuxSend(dest, task) {

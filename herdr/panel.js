@@ -701,9 +701,13 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope) {
   // 才算交还；否则连同本次文本按原顺序放回输入框，绝不能静默丢掉。
   const pending = queuedDrafts[scope];
   if (pending) {
+    // 空输入框回车是当前未确认操作的恢复路径：先放行，
+    // 被拦下的后续草稿继续留在 map 里，之后切分屏/再提交时交还。
+    const resuming = !text
+      && (pendingEnterOnly[scope] !== undefined || terminalHasContent[scope]);
     if (text && text.indexOf(pending) === 0) {
       delete queuedDrafts[scope];
-    } else {
+    } else if (!resuming) {
       if (currentScope() === scope) field.value = pending + text + field.value;
       renderOutput(T.heldHint);
       return;

@@ -852,6 +852,14 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(panelSrcQd, /只有用户看到并重新提交它/,
     'queued drafts must not be dropped by an empty-Enter resume');
 
+  // 身份解析失败要停止写入；空回车恢复要能让被拦草稿继续保留。
+  const workerSrc18 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
+  assert.match(workerSrc18, /TMUX_TARGET_UNRESOLVED/,
+    'an unresolved tmux target must stop the write instead of splitting the queue');
+  const panelSrcQd2 = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
+  assert.match(panelSrcQd2, /const resuming = !text/,
+    'an empty-Enter resume must pass through while keeping blocked drafts');
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,
