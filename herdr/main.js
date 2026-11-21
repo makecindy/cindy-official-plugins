@@ -1202,7 +1202,9 @@ async function handlePanelRequest(request) {
     const hasKeys = Boolean(request.keys && request.keys.length);
     if (hasText && hasKeys) {
       return nodeRequest('herdr/compose_send', {
-        pane_id: request.pane_id, text: request.text, keys: request.keys
+        pane_id: request.pane_id, text: request.text, keys: request.keys,
+        allow_held: request.allow_held === true,
+        timeout_ms: HERDR_WRITE_TIMEOUT_MS
       }, request.__callId, HERDR_WRITE_TIMEOUT_MS);
     }
     return tools.herdr_send({ pane_id: request.pane_id, keys: request.keys, text: request.text });
@@ -1217,7 +1219,11 @@ async function handlePanelRequest(request) {
       throw new Error(runtime.missingTextOrKeys);
     }
     // 面板请求不是 Agent 工具调用，没有 callId 可带。
-    return herdrCall('pane.send_input', { pane_id: request.pane_id, text: request.text });
+    return herdrCall('pane.send_input', {
+      pane_id: request.pane_id, text: request.text,
+      // 面板核对后的完整重发可以解冻 worker 的 per-pane 写队列。
+      allow_held: request.allow_held === true
+    });
   }
   if (action === 'prompt') {
     return tools.herdr_prompt({ target: request.target, text: request.text });

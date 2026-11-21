@@ -195,10 +195,51 @@ const HERDR_PANE_WRITE_METHODS = {
   'pane.send_text': true, 'pane.send_keys': true, 'pane.send_input': true
 };
 
-function enqueueHerdrSend(paneId, task) {
-  const run = (herdrSendQueues[paneId] || Promise.resolve()).then(task, task);
-  herdrSendQueues[paneId] = run.then(function () {}, function () {});
+// 上一次写操作结果未知时冻结该 pane 的写队列（与 tmux 队列同语义）：
+// 只有显式取消/补发回车/面板恢复才解冻。
+const herdrQueueHolds = {};
+
+function herdrHeldError() {
+  const held = new Error('HERDR_QUEUE_HELD: 这个 pane 上一次写操作结果未知，'
+    + '请先核对终端，用 Ctrl+C 取消那行或补发回车后再写入。');
+  held.code = 'HERDR_QUEUE_HELD';
+  return held;
+}
+
+function enqueueHerdrSend(paneId, task, allowHeld, timeoutMs) {
+  if (herdrQueueHolds[paneId] && !allowHeld) {
+    return Promise.reject(herdrHeldError());
+  }
+  // 排队与发送共用调用方的截止时间：过期还没发出的任务不得再执行，
+  // 否则调用方已经按「结果未知/未发送」报完之后，旧提交还会写进终端。
+  const deadline = Date.now() + (timeoutMs || 60000);
+  async function dequeued() {
+    if (herdrQueueHolds[paneId] && !allowHeld) throw herdrHeldError();
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      const expired = new Error('herdr 写入排队超时（尚未发出）：该请求未执行，可以重新提交。');
+      expired.code = 'HERDR_QUEUE_EXPIRED';
+      throw expired;
+    }
+    return task(remaining);
+  }
+  const run = (herdrSendQueues[paneId] || Promise.resolve()).then(dequeued, dequeued);
+  herdrSendQueues[paneId] = run.then(
+    function () { if (allowHeld) delete herdrQueueHolds[paneId]; },
+    function (error) {
+      const detail = String(error && error.message ? error.message : error);
+      // 排队超时（没发出）是确定失败，不冻结；结果未知才冻结。
+      if (/HERDR_OUTCOME_UNKNOWN/.test(detail)) herdrQueueHolds[paneId] = detail;
+    }
+  );
   return run;
+}
+
+// 面板/Agent 直接发的取消/回车键可以解冻该 pane 的写队列。
+function isHerdrRecoveryKey(method, params) {
+  if (method !== 'pane.send_keys') return false;
+  const keys = params && Array.isArray(params.keys) ? params.keys : [];
+  return keys.length === 1 && /^(C-c|ctrl\+c|Enter|enter)$/.test(String(keys[0]));
 }
 
 // --- Event subscription -------------------------------------------------
@@ -318,10 +359,22 @@ function notifyEventWaiters(event, data) {
 // 每个 pane 最近已投递给主进程的状态：断线后补查用它去重，
 // 避免把断线前已通知过的 blocked/done 再通知一遍。
 const lastDeliveredStatus = {};
+// 交接窗口：旧连接投递过的状态，新连接可能在 ACK 同一段里再投递一次。
+// 按 pane+status 两秒去重，避免同一状态转换通知两遍、自动化连跑两次。
+const lastDeliveredAt = {};
+const HANDOVER_DEDUPE_MS = 2000;
 
 function handleEvent(message) {
   const data = message.data || {};
-  if (data.pane_id && data.agent_status) lastDeliveredStatus[data.pane_id] = data.agent_status;
+  if (data.pane_id && data.agent_status) {
+    const prev = lastDeliveredStatus[data.pane_id];
+    const at = lastDeliveredAt[data.pane_id] || 0;
+    lastDeliveredStatus[data.pane_id] = data.agent_status;
+    if (prev === data.agent_status && Date.now() - at < HANDOVER_DEDUPE_MS) {
+      return;   // 交接期重复投递：不再通知第二遍。
+    }
+    lastDeliveredAt[data.pane_id] = Date.now();
+  }
   notify('herdr/event', { event: message.event, data: data });
   rememberEvent(message.event, data);
   notifyEventWaiters(message.event, data);
@@ -732,9 +785,20 @@ function runTmux(args, timeoutMs, input) {
         ? tmuxError('这台电脑上没有 tmux（命令未找到）', 'TMUX_NOT_INSTALLED')
         : error);
     });
-    child.on('close', function (code) {
+    child.on('close', function (code, signal) {
       if (code === 0) {
         finish(resolve, stdout);
+        return;
+      }
+      // 被信号终止（SIGTERM/SIGKILL…）：命令可能已交给 server 执行、也可能没有，
+      // 不能按确定失败报——重试会重复写入。
+      if (code === null && signal) {
+        finish(reject, tmuxError(
+          'HERDR_OUTCOME_UNKNOWN: tmux 子进程被信号终止（' + signal + '），'
+            + '写入可能已生效；请先核对终端再决定是否重试。',
+          'TMUX_TIMEOUT',
+          stderr
+        ));
         return;
       }
       // tmux 用非 0 退出码表达「没有 server / 没有匹配 target」，正文在 stderr。
@@ -1003,15 +1067,18 @@ const handlers = {
     const hasText = params && params.text !== undefined && params.text !== null;
     const hasKeys = Boolean(params && Array.isArray(params.keys) && params.keys.length);
     if (!hasText && !hasKeys) throw new Error('缺少 text 或 keys');
-    return enqueueHerdrSend(paneId, async function () {
+    const allowHeld = Boolean(params.allow_held)
+      || isHerdrRecoveryKey('pane.send_keys', { keys: params.keys || [] });
+    return enqueueHerdrSend(paneId, async function (remaining) {
       let textSent = false;
       if (hasText) {
-        await callOnce('pane.send_text', { pane_id: paneId, text: String(params.text) });
+        await callOnce('pane.send_text', { pane_id: paneId, text: String(params.text) }, remaining);
         textSent = true;
       }
       if (hasKeys) {
         try {
-          await callOnce('pane.send_keys', { pane_id: paneId, keys: params.keys });
+          const left = Math.max(1000, remaining - 0);
+          await callOnce('pane.send_keys', { pane_id: paneId, keys: params.keys }, left);
         } catch (error) {
           // 文本已送达但按键失败：必须带阶段标记，面板按「只差按键」处理，
           // 不能把整段草稿当成没发送又粘一遍。
@@ -1023,7 +1090,7 @@ const handlers = {
         }
       }
       return { pane_id: paneId, mode: hasText && hasKeys ? 'text+keys' : (hasText ? 'text' : 'keys') };
-    });
+    }, allowHeld, params.timeout_ms);
   },
 
   async 'herdr/request'(params) {
@@ -1033,9 +1100,11 @@ const handlers = {
     if (HERDR_PANE_WRITE_METHODS[method]) {
       const paneId = String((params.params || {}).pane_id || '');
       if (paneId) {
-        return enqueueHerdrSend(paneId, function () {
-          return callOnce(method, params.params || {});
-        });
+        const allowHeld = isHerdrRecoveryKey(method, params.params || {})
+          || Boolean(params.allow_held);
+        return enqueueHerdrSend(paneId, function (remaining) {
+          return callOnce(method, params.params || {}, remaining);
+        }, allowHeld, params.timeout_ms);
       }
     }
     const inner = params.params || {};

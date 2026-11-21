@@ -1021,6 +1021,14 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'a keys-stage tmux failure must mark the text as already sent');
   assert.match(workerSrc22, /HERDR_PANE_WRITE_METHODS/,
     'all herdr pane writes must share the per-pane queue');
+  assert.match(workerSrc22, /const herdrQueueHolds = \{\};/,
+    'an unknown herdr write must freeze its pane queue');
+  assert.match(workerSrc22, /HERDR_QUEUE_EXPIRED/,
+    'a queued herdr write must not run after its deadline');
+  assert.match(workerSrc22, /code === null && signal/,
+    'a signal-killed tmux child must be treated as an unknown outcome');
+  assert.match(workerSrc22, /HANDOVER_DEDUPE_MS/,
+    'status events during a subscription handover must be deduplicated');
   assert.match(workerSrc22, /mode: 'text\+keys'/,
     'tmux text and keys must be applied atomically in one queue task');
   assert.match(workerSrc22, /expectedServerPid !== undefined && expectedServerPid !== null[\s\S]{0,300}String\(expectedServerPid\) !== String\(serverPid\)/,

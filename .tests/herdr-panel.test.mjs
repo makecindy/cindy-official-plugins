@@ -254,7 +254,7 @@ test('submitting a line pins one target for both tmux sends', () => {
   assert.match(text, /request\('tmux_submit', \{[\s\S]{0,120}?target: target, text: text, allow_held: unlockedResend/,
     'the text and Enter must be one RPC pinned to the captured target');
   // Herdr 的提交走 submit 动作（pane.send_input），不是只打字的 send。
-  assert.match(text, /request\('submit', \{ pane_id: paneId, text: text \}\)/,
+  assert.match(text, /request\('submit', \{[\s\S]{0,100}?pane_id: paneId, text: text, allow_held: unlockedResend/,
     'herdr submission must go through the submit action');
 });
 

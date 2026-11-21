@@ -825,6 +825,9 @@ async function sendEnterOnly(scope, pinnedView, target, paneId, epoch) {
   const hadText = pendingEnterOnly[scope] !== undefined ? pendingEnterOnly[scope] : null;
   delete pendingEnterOnly[scope];
   delete terminalHasContent[scope];
+  // 只有入队时已处于 unknown 冻结（用户看过提示、核对过终端）的完整重发
+  // 才带 allow_held；tmux 与 Herdr 两条路径共用。
+  const unlockedResend = kindAtEnqueue === 'unknown';
   try {
     // Herdr 的键名契约是小写（enter/up/esc…），tmux 才是 Enter。
     if (pinnedView === 'tmux') {
@@ -1023,9 +1026,6 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       // 另一个面板的文本不会再插到这两步之间。
       let submitError = null;
       try {
-        // 只有入队时已处于 unknown 冻结（用户看过提示、核对过终端）的
-        // 完整重发才带 allow_held；普通提交必须继续受队列冻结约束。
-        const unlockedResend = kindAtEnqueue === 'unknown';
         await request('tmux_submit', {
           target: target, text: text, allow_held: unlockedResend, server_pid: tmuxServerPid
         });
@@ -1069,7 +1069,9 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       restoreNextSubmission(scope);
     } else {
       // submit = pane.send_input，自带回车；pane.send_text 只打字不执行。
-      await request('submit', { pane_id: paneId, text: text });
+      await request('submit', {
+        pane_id: paneId, text: text, allow_held: unlockedResend
+      });
       if (!scopeEpochIsCurrent(scope, epoch)) return;
       scopeHolds[scope] = 0;
       delete scopeHoldKind[scope];
