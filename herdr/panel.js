@@ -516,6 +516,11 @@ async function forwardKeyQueued(key, pinnedView, target, paneId, scope, draft, d
         }
         // 同步没成功：草稿按归属放回。上一次恢复的还在最前面时接在它
         // 后面（保持输入顺序），否则前置（用户期间续打的部分接在后面）。
+        // 用户在请求返回前切到别的分屏时，输入框已经不是这个 scope 的了：
+        // 草稿仍要按 scope 存下来，否则这条命令会彻底丢失。
+        if (currentScope() !== scope) {
+          if (!queuedDrafts[scope]) queuedDrafts[scope] = draft;
+        }
         if (currentScope() === scope) {
           const box = $('#term-input');
           if (box) {
@@ -1149,6 +1154,27 @@ function renderTmux() {
   }
 }
 
+// tmux 分屏身份：pane id 会被复用的 tmux server 重启后重复使用，
+// 用会话名 + 会话创建时间区分「同一个 pane id，不同的进程」。
+const tmuxPaneIdentities = {};
+
+function tmuxPaneIdentity(pane, sessionCreated) {
+  const id = tmuxStableTarget(pane);
+  if (!id) return null;
+  return [id, pane.session || '', sessionCreated || ''].join('|');
+}
+
+// 某个 scope 的全部待确认状态作废（分屏被重建、被替换）。
+function clearScopeState(scope) {
+  delete pendingEnterOnly[scope];
+  delete terminalHasContent[scope];
+  delete scopeHolds[scope];
+  delete scopeHoldKind[scope];
+  delete queuedDrafts[scope];
+  delete scopeUnlockClaims[scope];
+  delete restoredBoxText[scope];
+}
+
 async function refreshTmux(token) {
   const stale = function () { return token !== undefined && token !== refreshToken; };
   let next;
@@ -1163,8 +1189,25 @@ async function refreshTmux(token) {
     next = await request('tmux_state', {});
   }
   if (stale()) return;
+  const sessions = (next && next.sessions) || [];
+  // pane id 被复用（tmux server 重启）时，旧分屏的待确认状态必须作废：
+  // 否则旧命令会被恢复到新进程里，或被误判成只需补 Enter。
+  const createdBySession = {};
+  for (const session of sessions) createdBySession[session.name] = String(session.created || '');
+  const seen = {};
+  for (const pane of (next && next.panes) || []) {
+    const id = tmuxStableTarget(pane);
+    if (!id) continue;
+    const identity = tmuxPaneIdentity(pane, createdBySession[pane.session]);
+    seen[id] = identity;
+    const before = tmuxPaneIdentities[id];
+    if (before !== undefined && before !== identity) clearScopeState('t:' + id);
+  }
+  for (const id of Object.keys(tmuxPaneIdentities)) {
+    if (!(id in seen)) delete tmuxPaneIdentities[id];
+  }
+  for (const id of Object.keys(seen)) tmuxPaneIdentities[id] = seen[id];
   tmux = next;
-  const sessions = (tmux && tmux.sessions) || [];
   if (tmuxFilter && !sessions.some(function (s) { return s.name === tmuxFilter; })) {
     tmuxFilter = null;
   }

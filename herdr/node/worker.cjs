@@ -530,6 +530,10 @@ async function closeSubscription() {
   const socket = subscription.socket;
   subscription.socket = null;
   subscription.running = false;
+  // 主动退订也要作废 pane 基线：退订窗口里某个 pane 进入 blocked/done 时
+  // 没有实时事件可补，重新订阅后必须把它当成新 pane 做对账。
+  subscription.generation += 1;
+  subscription.paneIds = [];
   if (socket) {
     socket.herdrIntentionalClose = true;
     try { socket.destroy(); } catch (error) { void error; }
