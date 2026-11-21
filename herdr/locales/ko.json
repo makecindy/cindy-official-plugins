@@ -31,7 +31,7 @@
       "description": "Herdr 이벤트에만 깨어나는 Cindy 자동화를 만듭니다: 에이전트가 blocked 또는 done 이 되면 플러그인이 호스트 스케줄러에 한 번 실행을 요청하며, 이 자동화는 타이머로 스스로 실행되지 않습니다. targetSessionId 를 주면 기존 세션에 연결됩니다. 자동화 id 를 반환합니다."
     },
     "herdr_call": {
-      "description": "위 도구들이 다루지 않는 드문 메서드를 Herdr 소켓 API 로 직접 호출합니다. pane·workspace 생성이나 닫기를 포함해 Herdr 상태를 바꾸므로 의도를 확인한 뒤 실행하세요. 메서드 이름은 Herdr Socket API 문서를 참고하세요."
+      "description": "위 도구들이 다루지 않는 드문 메서드를 Herdr 소켓 API 로 직접 호출합니다. pane·workspace 생성이나 닫기를 포함해 Herdr 상태를 바꾸므로 의도를 확인한 뒤 실행하세요. 메서드 이름은 Herdr Socket API 문서를 참고하세요. timeout_ms / wait.timeout_ms 는 최대 90000ms 로 제한됩니다(초과 값은 잘립니다). 더 긴 대기는 herdr_wait 를 사용하세요."
     },
     "tmux_state": {
       "description": "로컬 tmux 세션과 창을 명령, 작업 디렉터리, 크기, 활성 상태와 함께 나열합니다. tmux를 사용할 수 없으면 available=false와 안내를 반환합니다."

@@ -968,6 +968,10 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
         // 与另两条恢复路径一致：登记恢复 marker，
         // 否则之后按 Tab/Up 会把刚回填的整段当成新草稿重复累积。
         restoredBoxText[scope] = field.value;
+      } else if (text) {
+        // 用户在排队期间切到别的分屏：输入框已不属于这个 scope，
+        // 本次文本必须按原顺序追加回该 scope 的草稿，绝不能丢。
+        queuedDrafts[scope] = (queuedDrafts[scope] || '') + text;
       }
       releaseUnlock(scope, unlockTokenValue);
       renderOutput(T.heldHint);

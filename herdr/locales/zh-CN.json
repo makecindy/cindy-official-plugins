@@ -31,7 +31,7 @@
       "description": "创建一条只由 Herdr 事件唤醒的 Cindy 自动化：agent 进入 blocked 或 done 时由插件请宿主调度器跑一次，这条自动化不会自己按时间运行。targetSessionId 可把自动化绑到某个已有会话，让它在原对话里继续。返回自动化 id。"
     },
     "herdr_call": {
-      "description": "直接调用任意 Herdr socket API 方法（完整方法名 + params），用于上面工具没覆盖的少见方法。调用会改变 Herdr 状态（包括创建、关闭分屏或工作区），执行前先确认用户意图。方法名见 Herdr Socket API 文档。"
+      "description": "直接调用任意 Herdr socket API 方法（完整方法名 + params），用于上面工具没覆盖的少见方法。调用会改变 Herdr 状态（包括创建、关闭分屏或工作区），执行前先确认用户意图。方法名见 Herdr Socket API 文档。 单次 timeout_ms / wait.timeout_ms 上限 90000 毫秒（超过会被截断）；更长的等待请改用 herdr_wait。"
     },
     "tmux_state": {
       "description": "读取本机 tmux 现状：有哪些 session、每个 session 里有哪些 pane（含当前命令、工作目录、尺寸、是否活动）。想知道「tmux 里现在开着什么」时先调它。这台电脑没装 tmux 时返回 available=false 与提示，不报错。"

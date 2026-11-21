@@ -31,7 +31,7 @@
       "description": "Create a Cindy automation that only wakes on Herdr events: when an agent turns blocked or done the plugin asks the host scheduler to run it once, and the automation never runs on a timer. targetSessionId links it to an existing session. Returns the automation ID."
     },
     "herdr_call": {
-      "description": "Call a Herdr socket API method by its full name and parameters, for the rare methods the other tools do not cover. A call can change Herdr state, including creating or closing panes and workspaces, so confirm the intent first. Method names are in the Herdr Socket API documentation."
+      "description": "Call a Herdr socket API method by its full name and parameters, for the rare methods the other tools do not cover. A call can change Herdr state, including creating or closing panes and workspaces, so confirm the intent first. Method names are in the Herdr Socket API documentation. A single timeout_ms / wait.timeout_ms is capped at 90000 ms (longer values are truncated); use herdr_wait for longer waits."
     },
     "tmux_state": {
       "description": "List local tmux sessions and panes with commands, working directories, sizes, and active state. When tmux is unavailable, return available=false and a hint."

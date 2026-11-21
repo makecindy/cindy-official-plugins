@@ -7,7 +7,7 @@
   "icon": "assets/icon.png",
   "description": "把本机 Herdr 终端工作区与 tmux session 接入 Cindy：查看工作区/标签/分屏与 agent 状态、读取画面、发送输入与按键、等待 agent 状态变化，并把 Herdr 事件推成 Cindy 通知与自动化。",
   "whenToUse": "需要看 Herdr 里正在跑什么 agent、读某个分屏的输出、给 agent 派活、等待它完成或需要授权；或者要看/操作本机 tmux 的 session、pane 与画面；或者想把终端事件接到 Cindy 通知与自动化时找我",
-  "version": "0.1.106",
+  "version": "0.1.107",
   "kind": "chip",
   "entry": "main.js",
   "command": "herdr",
@@ -479,7 +479,7 @@
     },
     {
       "name": "herdr_call",
-      "description": "直接调用任意 Herdr socket API 方法（完整方法名 + params），用于上面工具没覆盖的少见方法。调用会改变 Herdr 状态（包括创建、关闭分屏或工作区），执行前先确认用户意图。方法名见 Herdr Socket API 文档。",
+      "description": "直接调用任意 Herdr socket API 方法（完整方法名 + params），用于上面工具没覆盖的少见方法。调用会改变 Herdr 状态（包括创建、关闭分屏或工作区），执行前先确认用户意图。方法名见 Herdr Socket API 文档。 单次 timeout_ms / wait.timeout_ms 上限 90000 毫秒（超过会被截断）；更长的等待请改用 herdr_wait。",
       "parameters": {
         "type": "object",
         "properties": {

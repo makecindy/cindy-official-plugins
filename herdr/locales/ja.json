@@ -31,7 +31,7 @@
       "description": "Herdr のイベントだけで起きる Cindy の自動化を作ります：agent が blocked / done になると、プラグインがホストのスケジューラに 1 回実行を頼みます。タイマーでは動きません。targetSessionId を指定すると既存のセッションに紐づきます。自動化の id を返します。"
     },
     "herdr_call": {
-      "description": "他のツールが扱わない少见なメソッドを、Herdr の socket API に直接呼び出します。pane や workspace の作成・削除を含め Herdr の状態を変えるので、意図を確認してから実行してください。メソッド名は Herdr Socket API のドキュメントを参照。"
+      "description": "他のツールが扱わない少见なメソッドを、Herdr の socket API に直接呼び出します。pane や workspace の作成・削除を含め Herdr の状態を変えるので、意図を確認してから実行してください。メソッド名は Herdr Socket API のドキュメントを参照。 timeout_ms / wait.timeout_ms の上限は 90000 ミリ秒です（超える値は切り詰められます）。長い待機には herdr_wait を使ってください。"
     },
     "tmux_state": {
       "description": "ローカルの tmux セッションとペインをコマンド、作業ディレクトリ、サイズ、状態とともに表示します。利用できない場合は available=false と案内を返します。"

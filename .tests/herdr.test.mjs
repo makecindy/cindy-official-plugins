@@ -597,11 +597,15 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.ok((workerSrc11.match(/setEncoding\('utf8'\)/g) || []).length >= 4,
     'sockets and tmux stdio must all use setEncoding');
 
-  // 四个 locale 的 tmux_read 都要披露字符上限。
+  // 四个 locale 的 tmux_read 都要披露字符上限，herdr_call 要披露等待上限。
   for (const loc of ['en', 'zh-CN', 'ja', 'ko']) {
     const locData = JSON.parse(readFileSync(path.join(root, 'herdr', 'locales', loc + '.json'), 'utf8'));
     assert.match(locData.tools.tmux_read.description, /120 ?000|120000/,
       loc + ' tmux_read must disclose the character limit');
+    assert.match(locData.tools.herdr_call.description, /90000/,
+      loc + ' herdr_call must disclose the 90s wait cap');
+    assert.match(locData.tools.herdr_call.description, /herdr_wait/,
+      loc + ' herdr_call must point long waits to herdr_wait');
   }
 
   // 草稿同步与发送目标绑定：等待期间切分屏不会打到新目标、不改写新目标的输入框。
@@ -896,6 +900,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   const workerSrc20 = readFileSync(path.join(root, 'herdr', 'node', 'worker.cjs'), 'utf8');
   assert.match(workerSrc20, /TMUX_QUEUE_HELD/,
     'an unknown write must freeze the pane write queue');
+  assert.match(manifest.tools.find((tool) => tool.name === 'herdr_call').description, /90000/,
+    'the plugin manifest must disclose the 90s wait cap too');
   assert.match(mainSource, /let localeLoadSeq = 0;/,
     'locale loads must be sequenced');
   const panelSrcLocale = readFileSync(path.join(root, 'herdr', 'panel.js'), 'utf8');
@@ -958,6 +964,8 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
     'the active recovery command must pass while later commands remain queued');
   assert.match(panelSrcQd3, /restoreNextSubmission\(scope\);[\s\S]{0,50}renderOutput\(T.heldHint\)/,
     'a new command must wait while older submissions are restored');
+  assert.match(panelSrcQd3, /queuedDrafts\[scope\] = \(queuedDrafts\[scope\] \|\| ''\) \+ text;/,
+    'a submission blocked after switching panes must be kept per scope');
   assert.match(panelSrcQd3, /async function sendEnterOnly[\s\S]{0,900}restoreNextSubmission\(scope\)/,
     'a successful enter-only resume must release the next queued submission');
   assert.ok(!/delete queuedSubmissions\[scope\];[\s\S]{0,300}C-c/.test(panelSrcQd3),
