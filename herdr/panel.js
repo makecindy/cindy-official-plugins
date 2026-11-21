@@ -435,7 +435,10 @@ function forwardKey(event) {
   let draftFromRestore = false;
   if (draftField && !PENDING_ENTER_KEEP_KEYS[key] && draftField.value) {
     draft = draftField.value;
-    draftFromRestore = restoredBoxText[scope] === draft;
+    // 恢复的文字可能被用户接着编辑（git  后追加 status）：
+    // 以前缀判断是否仍源自这次恢复，不能整串相等才算。
+    draftFromRestore = Boolean(restoredBoxText[scope])
+      && draft.indexOf(restoredBoxText[scope]) === 0;
     consumeFromInput(draftField, draft);
   }
   // 同一终端的操作排队执行：草稿同步、改行按键不能与正在进行的提交交错。
@@ -746,6 +749,7 @@ async function submitLineQueued(text, pinnedView, target, paneId, scope, holdAtE
       && (pendingEnterOnly[scope] !== undefined || terminalHasContent[scope]);
     if (text && text.indexOf(pending) === 0) {
       delete queuedDrafts[scope];
+      delete restoredBoxText[scope];
     } else if (!resuming) {
       if (currentScope() === scope) {
         field.value = pending + text + field.value;
