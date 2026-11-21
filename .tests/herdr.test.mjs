@@ -808,6 +808,14 @@ test('automation setup surfaces KV failures and never reuses a foreign session',
   assert.match(libSrc, /ctrlKey && event\.altKey\) return null;/,
     'AltGraph must stay with text input');
 
+  // 第三方标识登记在插件内（根 TRADEMARKS.md 是共享打包文件，不能在本 PR 改）。
+  for (const file of ['THIRD-PARTY-MARKS.md', 'THIRD-PARTY-MARKS.zh-CN.md']) {
+    const marks = readFileSync(path.join(root, 'herdr', file), 'utf8');
+    for (const owner of ['Anthropic', 'OpenAI', 'Anysphere']) {
+      assert.ok(marks.includes(owner), file + ' must register ' + owner);
+    }
+  }
+
   // 只有 text / keys 都没有时要拒绝，不能把终端里的草稿提交掉。
   assert.match(
     mainSource,
