@@ -41,9 +41,12 @@ function runtime(draft = false, followModel = null) {
         if (m.type === 'tool-result') result = m;
         if (m.type === 'card-update') card = m;
         if (m.type === 'fs-request') {
-          if (m.op === 'list') return { ok: true, entries: [...files.keys()].map(path => ({path})) };
-          if (m.op === 'read') return { ok: files.has(m.path), content: files.get(m.path) };
+          if (m.op === 'list') return { ok: true, entries: [...files.keys()].map((path, mtime) => ({ path, mtime })) };
+          if (m.op === 'read') return files.has(m.path)
+            ? { ok: true, content: files.get(m.path) }
+            : { ok: false, errorCode: 'NOT_FOUND' };
           if (m.op === 'write') files.set(m.path, m.content);
+          if (m.op === 'delete') files.delete(m.path);
         }
         return { ok: true };
       },
@@ -63,14 +66,14 @@ function runtime(draft = false, followModel = null) {
     },
   });
   return {
-    schedules, mr, requests, failures,
+    files, schedules, mr, requests, failures,
     setSettingsReadable(value) { settingsReadable = value; },
     async show(args, session = 's1') {
       result = null;
       await handler({ type: 'tool-call', tool: 'mr_card', callId: 'c' + ++call,
         args: { session_context: { session_id: session }, ...args } });
       assert.equal(result?.ok, true, result?.message);
-      return { ...result.result, html: card.html };
+      return { ...result.result, html: card.html, anchor: card.callId };
     },
     async click(callId, actionId) {
       await handler({ type: 'event', name: 'card-action', sessionId: 's1', callId, actionId, userActionToken: 'click' });
@@ -195,3 +198,21 @@ for (const end of ['merged', 'closed', 'draft']) {
     assert.deepEqual([...r.schedules.keys()], ['other-card']);
   });
 }
+
+
+test('card pruning preserves the current anchor of an active MR and drops its superseded anchor', async () => {
+  const r = runtime();
+  const open = await r.show({ mr: url, published: true });
+  const previous = await r.show({ card_id: open.card_id, to_latest: true });
+  const visible = await r.show({ card_id: open.card_id, to_latest: true });
+  assert.notEqual(visible.anchor, previous.anchor);
+  assert.equal(r.schedules.size, 1);
+
+  for (let i = 0; i < 201; i++) {
+    await r.show({ project_path: 'group/sub/repo', instance: 'team', head: 'other-' + i });
+  }
+
+  assert.equal(r.files.has('mr-cards/' + previous.anchor + '.json'), false);
+  await r.click(visible.anchor, 'pr:stop');
+  assert.equal(r.schedules.size, 0);
+});

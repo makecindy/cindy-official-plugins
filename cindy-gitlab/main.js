@@ -2128,10 +2128,19 @@ async function prunePrCards() {
   for (var i = 0; i < stale.length; i++) {
     var saved = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: stale[i].path });
     if (!saved || !saved.ok) continue;
-    var record;
-    try { record = JSON.parse(saved.content); } catch (e) { continue; }
-    // Active ownership must not disappear merely because other cards were created.
-    if (prFollowActive(record)) continue;
+    try {
+      var record = JSON.parse(saved.content);
+      if (prFollowActive(record)) continue;
+      // Preserve the visible buttons of an active card. Superseded aliases can age out.
+      if (typeof record.alias === 'string' && PR_CARD_ID_RE.test(record.alias)) {
+        var savedOwner = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: prCardPath(record.alias) });
+        if (!savedOwner || (!savedOwner.ok && savedOwner.errorCode !== 'NOT_FOUND')) continue;
+        if (savedOwner.ok) {
+          var owner = JSON.parse(savedOwner.content);
+          if (prFollowActive(owner) && prAnchor(owner) === record.id) continue;
+        }
+      }
+    } catch (e) { continue; }
     await cindy.send({ type: 'fs-request', root: 'data', op: 'delete', path: stale[i].path });
   }
 }
