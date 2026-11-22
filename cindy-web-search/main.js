@@ -7,6 +7,8 @@
  * - brave:network 槽 -> Brave，使用用户自己的 Brave Key；
  * - tavily:network 槽 -> Tavily，使用用户自己的 Tavily Key；
  * - deepseek:network 槽 -> DeepSeek Search API，使用用户自己的 DeepSeek Key。
+ * - anysearch:network 槽 -> AnySearch Search API，使用用户自己的 AnySearch Key；
+ * - tinyfish:network 槽 -> TinyFish Search API，使用用户自己的 TinyFish Key。
  *
  * 未指定 Provider 时只读取普通偏好:
  * - cindyAiEnabled 缺省 true -> cindy；
@@ -19,6 +21,8 @@
 var BRAVE_URL = 'https://api.search.brave.com/res/v1/web/search';
 var TAVILY_URL = 'https://api.tavily.com/search';
 var DEEPSEEK_URL = 'https://api.deepseek.com/v1/tools/search';
+var ANYSEARCH_URL = 'https://api.anysearch.com/v1/search';
+var TINYFISH_URL = 'https://api.search.tinyfish.ai';
 var TAVILY_EXTRACT_URL = 'https://api.tavily.com/extract';
 var FETCH_PAGE_MAX_URL_CHARS = 2048;
 var FETCH_PAGE_MAX_CONTENT_CHARS = 50000;
@@ -44,9 +48,19 @@ var MESSAGES = {
     deepSeek_UPSTREAM_REJECTED: 'DeepSeek 未接受搜索请求，请检查账号权限或更新 Web Search 插件后再试。',
     deepSeek_RESPONSE_INVALID: 'DeepSeek 返回的搜索结果格式无效或过大，请缩小结果条数后重试。',
     deepSeekFallback: 'DeepSeek 搜索请求未完成，请检查网络连接、Cindy 授权，并确认「插件」→「Web Search」详情页已配置有效的 DeepSeek API Key。',
+    byo_NOT_CONFIGURED: '「{provider}」需要 API Key：请打开「插件」→「Web Search」详情页填写后重试',
+    byo_AUTH_REJECTED: '「{provider}」API Key 无效，请打开「插件」→「Web Search」详情页更新',
+    byo_PERMISSION_DENIED: '「{provider}」拒绝了搜索请求，请检查 Key 权限或账户状态',
+    byo_QUOTA_EXHAUSTED: '「{provider}」额度不足或账户不可用，请检查额度与账户状态',
+    byo_RATE_LIMITED: '「{provider}」请求过于频繁，请稍后重试',
+    byo_INVALID_INPUT: '「{provider}」不接受这次查询，请简化关键词后重试',
+    byo_UPSTREAM_UNAVAILABLE: '「{provider}」搜索服务暂时不可用，请稍后重试',
+    byo_UPSTREAM_REJECTED: '「{provider}」未接受搜索请求，请检查账户权限或更新插件后重试',
+    byo_RESPONSE_INVALID: '「{provider}」返回的搜索结果格式无效或过大，请缩小结果条数后重试',
+    byoFallback: '「{provider}」搜索请求未完成，请检查网络连接与插件详情页的 API Key',
     queryEmpty: 'query 不能为空',
     queryTooLong: 'query 过长(上限 2000 字符)',
-    providerUnsupported: 'provider 只支持 cindy / brave / tavily / deepseek',
+    providerUnsupported: 'provider 只支持 cindy / brave / tavily / deepseek / anysearch / tinyfish',
     prefsUnavailable: '搜索偏好读取失败，请稍后重试或显式选择搜索源',
     unknownTool: '未知工具:{tool}',
     pageUrlInvalid: 'url 必须是最多 2048 字符且不含凭证的公开 HTTP(S) 绝对地址',
@@ -83,9 +97,19 @@ var MESSAGES = {
     deepSeek_UPSTREAM_REJECTED: 'DeepSeek did not accept the search request. Check your account permissions or update the Web Search plugin, then try again.',
     deepSeek_RESPONSE_INVALID: 'DeepSeek returned search results with an invalid format or that are too large. Lower the number of results and try again.',
     deepSeekFallback: 'The DeepSeek search request did not complete. Check your network connection and the Cindy authorization, and make sure a valid DeepSeek API Key is configured in "Plugins" > "Web Search" details.',
+    byo_NOT_CONFIGURED: '{provider} needs an API key. Add it in "Plugins" > "Web Search" details and try again.',
+    byo_AUTH_REJECTED: '{provider} rejected the API key. Update it in "Plugins" > "Web Search" details.',
+    byo_PERMISSION_DENIED: '{provider} denied the search request. Check the key permissions or account status.',
+    byo_QUOTA_EXHAUSTED: '{provider} has no remaining quota or the account is unavailable. Check its quota and account status.',
+    byo_RATE_LIMITED: '{provider} is rate limiting requests. Try again later.',
+    byo_INVALID_INPUT: '{provider} did not accept this query. Shorten it and try again.',
+    byo_UPSTREAM_UNAVAILABLE: '{provider} search is temporarily unavailable. Try again later.',
+    byo_UPSTREAM_REJECTED: '{provider} did not accept the search request. Check the account permissions or update the plugin.',
+    byo_RESPONSE_INVALID: '{provider} returned an invalid or oversized result. Lower the result count and try again.',
+    byoFallback: '{provider} search did not complete. Check the network connection and the API key in the plugin details.',
     queryEmpty: 'query must not be empty',
     queryTooLong: 'query is too long (max 2000 characters)',
-    providerUnsupported: 'provider only supports cindy / brave / tavily / deepseek',
+    providerUnsupported: 'provider only supports cindy / brave / tavily / deepseek / anysearch / tinyfish',
     prefsUnavailable: 'Failed to read search preferences. Try again later or choose a provider explicitly.',
     unknownTool: 'Unknown tool: {tool}',
     pageUrlInvalid: 'url must be a public HTTP(S) absolute address of at most 2048 characters and must not contain credentials',
@@ -122,9 +146,19 @@ var MESSAGES = {
     deepSeek_UPSTREAM_REJECTED: 'DeepSeek が検索リクエストを受け付けませんでした。アカウントの権限を確認するか、Web Search プラグインを更新してから再試行してください。',
     deepSeek_RESPONSE_INVALID: 'DeepSeek から返された検索結果の形式が無効か、サイズが大きすぎます。結果の件数を減らして再試行してください。',
     deepSeekFallback: 'DeepSeek 検索リクエストが完了しませんでした。ネットワーク接続と Cindy の認可を確認し、「プラグイン」→「Web Search」の詳細画面に有効な DeepSeek API キーが設定されていることを確認してください。',
+    byo_NOT_CONFIGURED: '「{provider}」には API キーが必要です。「プラグイン」→「Web Search」詳細画面で設定してから再試行してください。',
+    byo_AUTH_REJECTED: '「{provider}」の API キーが無効です。「プラグイン」→「Web Search」詳細画面で更新してください。',
+    byo_PERMISSION_DENIED: '「{provider}」が検索リクエストを拒否しました。キーの権限またはアカウント状態を確認してください。',
+    byo_QUOTA_EXHAUSTED: '「{provider}」の残量が不足しているか、アカウントを利用できません。残量とアカウント状態を確認してください。',
+    byo_RATE_LIMITED: '「{provider}」へのリクエストが多すぎます。しばらくしてから再試行してください。',
+    byo_INVALID_INPUT: '「{provider}」がこのクエリを受け付けませんでした。キーワードを短くして再試行してください。',
+    byo_UPSTREAM_UNAVAILABLE: '「{provider}」検索サービスは一時的に利用できません。しばらくしてから再試行してください。',
+    byo_UPSTREAM_REJECTED: '「{provider}」が検索リクエストを受け付けませんでした。アカウントの権限を確認するか、プラグインを更新してから再試行してください。',
+    byo_RESPONSE_INVALID: '「{provider}」の検索結果の形式が無効か、サイズが大きすぎます。結果の件数を減らして再試行してください。',
+    byoFallback: '「{provider}」の検索リクエストが完了しませんでした。ネットワーク接続と「プラグイン」→「Web Search」詳細画面の API キーを確認してください。',
     queryEmpty: 'query は空にできません',
     queryTooLong: 'query が長すぎます（上限 2000 文字）',
-    providerUnsupported: 'provider は cindy / brave / tavily / deepseek のみ対応しています',
+    providerUnsupported: 'provider は cindy / brave / tavily / deepseek / anysearch / tinyfish のみ対応しています',
     prefsUnavailable: '検索設定を読み込めませんでした。しばらくしてから再試行するか、検索元を明示的に指定してください。',
     unknownTool: '不明なツール: {tool}',
     pageUrlInvalid: 'url は 2048 文字以内の公開 HTTP(S) 絶対アドレスで、認証情報を含まない形式で指定してください',
@@ -161,9 +195,19 @@ var MESSAGES = {
     deepSeek_UPSTREAM_REJECTED: 'DeepSeek이 검색 요청을 받아들이지 않았습니다. 계정 권한을 확인하거나 Web Search 플러그인을 업데이트한 후 다시 시도하세요.',
     deepSeek_RESPONSE_INVALID: 'DeepSeek이 반환한 검색 결과의 형식이 잘못되었거나 너무 큽니다. 결과 수를 줄여서 다시 시도하세요.',
     deepSeekFallback: 'DeepSeek 검색 요청이 완료되지 않았습니다. 네트워크 연결과 Cindy 권한을 확인하고 "플러그인" → "Web Search" 상세 화면에 유효한 DeepSeek API 키가 설정되어 있는지 확인하세요.',
+    byo_NOT_CONFIGURED: '"{provider}"에 API 키가 필요합니다. "플러그인" → "Web Search" 상세 화면에서 설정한 후 다시 시도하세요.',
+    byo_AUTH_REJECTED: '"{provider}" API 키가 유효하지 않습니다. "플러그인" → "Web Search" 상세 화면에서 업데이트하세요.',
+    byo_PERMISSION_DENIED: '"{provider}"이(가) 검색 요청을 거부했습니다. 키 권한 또는 계정 상태를 확인하세요.',
+    byo_QUOTA_EXHAUSTED: '"{provider}"의 할당량이 부족하거나 계정을 사용할 수 없습니다. 할당량과 계정 상태를 확인하세요.',
+    byo_RATE_LIMITED: '"{provider}" 요청이 너무 많습니다. 잠시 후 다시 시도하세요.',
+    byo_INVALID_INPUT: '"{provider}"이(가) 이 검색어를 받아들이지 않았습니다. 키워드를 줄여서 다시 시도하세요.',
+    byo_UPSTREAM_UNAVAILABLE: '"{provider}" 검색 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.',
+    byo_UPSTREAM_REJECTED: '"{provider}"이(가) 검색 요청을 받아들이지 않았습니다. 계정 권한을 확인하거나 플러그인을 업데이트한 후 다시 시도하세요.',
+    byo_RESPONSE_INVALID: '"{provider}"의 검색 결과 형식이 잘못되었거나 너무 큽니다. 결과 수를 줄여서 다시 시도하세요.',
+    byoFallback: '"{provider}" 검색 요청이 완료되지 않았습니다. 네트워크 연결과 "플러그인" → "Web Search" 상세 화면의 API 키를 확인하세요.',
     queryEmpty: 'query는 비워 둘 수 없습니다',
     queryTooLong: 'query가 너무 깁니다(최대 2000자)',
-    providerUnsupported: 'provider는 cindy / brave / tavily / deepseek만 지원합니다',
+    providerUnsupported: 'provider는 cindy / brave / tavily / deepseek / anysearch / tinyfish만 지원합니다',
     prefsUnavailable: '검색 설정을 읽지 못했습니다. 잠시 후 다시 시도하거나 검색 공급자를 직접 지정하세요.',
     unknownTool: '알 수 없는 도구: {tool}',
     pageUrlInvalid: 'url은 2048자 이하의 공개 HTTP(S) 절대 주소여야 하며 자격 증명을 포함할 수 없습니다',
@@ -245,7 +289,8 @@ function clampLimit(n) {
 }
 
 function isByoProvider(value) {
-  return value === 'brave' || value === 'tavily' || value === 'deepseek';
+  return value === 'brave' || value === 'tavily' || value === 'deepseek'
+    || value === 'anysearch' || value === 'tinyfish';
 }
 
 async function readSearchPrefs() {
@@ -402,8 +447,133 @@ async function searchDeepSeek(query, limit, callId) {
   };
 }
 
+var BYO_PROVIDER_NAMES = { anysearch: 'AnySearch', tinyfish: 'TinyFish' };
+
+function byoProviderName(provider) {
+  return hasOwn.call(BYO_PROVIDER_NAMES, provider) ? BYO_PROVIDER_NAMES[provider] : String(provider);
+}
+
+/* 错误码是稳定协议(status/宿主错误码映射),message 只给可行动的本地化说明;
+ * 绝不透传上游响应体——AnySearch 匿名额度耗尽的 402 会带生成的账号密码。 */
+function byoStatusErrorCode(status) {
+  if (status === 400 || status === 413) return 'INVALID_INPUT';
+  if (status === 401) return 'AUTH_REJECTED';
+  if (status === 402) return 'QUOTA_EXHAUSTED';
+  if (status === 403) return 'PERMISSION_DENIED';
+  if (status === 408 || (status >= 500 && status <= 599)) return 'UPSTREAM_UNAVAILABLE';
+  if (status === 429) return 'RATE_LIMITED';
+  return 'UPSTREAM_REJECTED';
+}
+
+function byoTransportErrorCode(errorCode, message) {
+  if (errorCode === 'NETWORK_CREDENTIAL_UNAVAILABLE' || errorCode === 'CREDENTIAL_NOT_CONFIGURED') {
+    return 'NOT_CONFIGURED';
+  }
+  if (errorCode === 'PERMISSION_DENIED') return 'PERMISSION_DENIED';
+  if (typeof message === 'string' && /timeout|timed out|abort|\u8d85\u65f6/i.test(message)) {
+    return 'UPSTREAM_UNAVAILABLE';
+  }
+  return 'INTERNAL';
+}
+
+function byoFailure(provider, errorCode) {
+  var code = typeof errorCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(errorCode)
+    ? errorCode : 'INTERNAL';
+  var messageKey = 'byo_' + code;
+  var known = code !== 'INTERNAL' && hasOwn.call(MESSAGES.en, messageKey);
+  return {
+    ok: false,
+    errorCode: code,
+    message: known
+      ? t(messageKey, { provider: byoProviderName(provider) })
+      : t('byoFallback', { provider: byoProviderName(provider) }),
+  };
+}
+
+function byoResponseUnusable(response) {
+  return !response || response.truncated === true || typeof response.body !== 'string'
+    || response.body.length > 1000000;
+}
+
+function byoResultRows(provider, rows, limit) {
+  if (!Array.isArray(rows) || rows.some(function (item) {
+    return !item || typeof item.title !== 'string' || typeof item.url !== 'string'
+      || (item.snippet !== undefined && typeof item.snippet !== 'string');
+  })) return byoFailure(provider, 'RESPONSE_INVALID');
+  return {
+    ok: true,
+    provider: provider,
+    results: rows.slice(0, limit).map(function (item) {
+      return { title: item.title, url: item.url, snippet: item.snippet || '' };
+    }),
+  };
+}
+
+/** AnySearch POST /v1/search，Key 由主机注入 Authorization:Bearer。 */
+async function searchAnySearch(query, limit, callId) {
+  var r;
+  try {
+    r = await cindy.fetch({
+      url: ANYSEARCH_URL,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ query: query, max_results: limit }),
+      callId: callId,
+    });
+  } catch (e) {
+    return byoFailure('anysearch', byoTransportErrorCode(e && e.errorCode, e && e.message));
+  }
+  if (!r || !r.ok) {
+    return byoFailure('anysearch', byoTransportErrorCode(r && r.errorCode, r && r.message));
+  }
+  if (r.status !== 200) return byoFailure('anysearch', byoStatusErrorCode(r.status));
+  if (byoResponseUnusable(r)) return byoFailure('anysearch', 'RESPONSE_INVALID');
+  var data;
+  try {
+    data = JSON.parse(r.body);
+  } catch (e) {
+    return byoFailure('anysearch', 'RESPONSE_INVALID');
+  }
+  // 200 也可能带 code:-1 的错误信封;不把它当成空结果。
+  if (!data || Number(data.code) !== 0) return byoFailure('anysearch', 'UPSTREAM_REJECTED');
+  if (!data.data || !Array.isArray(data.data.results)) {
+    return byoFailure('anysearch', 'RESPONSE_INVALID');
+  }
+  return byoResultRows('anysearch', data.data.results, limit);
+}
+
+/** TinyFish GET /?query=，Key 由主机注入 X-API-Key；单页最多 10 条。 */
+async function searchTinyFish(query, limit, callId) {
+  var r;
+  try {
+    r = await cindy.fetch({
+      url: TINYFISH_URL + '?query=' + encodeURIComponent(query),
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      callId: callId,
+    });
+  } catch (e) {
+    return byoFailure('tinyfish', byoTransportErrorCode(e && e.errorCode, e && e.message));
+  }
+  if (!r || !r.ok) {
+    return byoFailure('tinyfish', byoTransportErrorCode(r && r.errorCode, r && r.message));
+  }
+  if (r.status !== 200) return byoFailure('tinyfish', byoStatusErrorCode(r.status));
+  if (byoResponseUnusable(r)) return byoFailure('tinyfish', 'RESPONSE_INVALID');
+  var data;
+  try {
+    data = JSON.parse(r.body);
+  } catch (e) {
+    return byoFailure('tinyfish', 'RESPONSE_INVALID');
+  }
+  if (!data || !Array.isArray(data.results)) return byoFailure('tinyfish', 'RESPONSE_INVALID');
+  return byoResultRows('tinyfish', data.results, limit);
+}
+
 function searchByo(provider, query, limit, callId) {
   if (provider === 'deepseek') return searchDeepSeek(query, limit, callId);
+  if (provider === 'anysearch') return searchAnySearch(query, limit, callId);
+  if (provider === 'tinyfish') return searchTinyFish(query, limit, callId);
   if (provider === 'tavily') return searchTavily(query, limit);
   return searchBrave(query, limit);
 }

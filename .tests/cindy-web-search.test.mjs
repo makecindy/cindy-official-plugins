@@ -232,20 +232,20 @@ function createSettingsHarness(options = {}) {
 }
 
 test('manifest declares Cindy Web Search and keeps BYO providers explicit', () => {
-  assert.equal(manifest.version, '1.6.0');
+  assert.equal(manifest.version, '1.7.0');
   assert.equal(manifest.minCindyVersion, '0.1.64');
   assert.equal(manifest.schemaVersion, 3);
   assert.deepEqual(manifest.cindy, { search: ['web'] });
   // Manifest v3 用顶层直接字段声明能力,不再提供 slots。
   assert.equal(Object.hasOwn(manifest, 'slots'), false);
-  assert.deepEqual(manifest.network.hosts, ['api.search.brave.com', 'api.tavily.com', 'api.deepseek.com']);
+  assert.deepEqual(manifest.network.hosts, ['api.search.brave.com', 'api.tavily.com', 'api.deepseek.com', 'api.anysearch.com', 'api.search.tinyfish.ai']);
   assert.deepEqual(manifest.setup, { requires: [] });
   const searchTool = manifest.tools.find((tool) => tool.name === 'search_web');
   const fetchTool = manifest.tools.find((tool) => tool.name === 'fetch_page');
   assert.ok(searchTool);
   assert.ok(fetchTool);
   const provider = searchTool.parameters.properties.provider;
-  assert.deepEqual(provider.enum, ['cindy', 'brave', 'tavily', 'deepseek']);
+  assert.deepEqual(provider.enum, ['cindy', 'brave', 'tavily', 'deepseek', 'anysearch', 'tinyfish']);
   assert.equal(provider.enum.includes('auto'), false);
   const query = searchTool.parameters.properties.query;
   assert.equal(query.maxLength, 2000);
@@ -283,7 +283,6 @@ test('manifest declares Cindy Web Search and keeps BYO providers explicit', () =
   assert.match(readme, /explicitly confirmed public HTTP\(S\) page/);
   assert.match(readmeZh, /用户明确确认的任意公开 HTTP\(S\) 网页正文/);
 });
-
 
 test('fetch_page calls Tavily Extract without handling credentials in the sandbox', async () => {
   const harness = createHarness({
@@ -1021,6 +1020,248 @@ test('settings load and persist DeepSeek as the BYO default without losing other
   assert.match(harness.status.textContent, /已保存/);
 });
 
+function anySearchItem(patch = {}) {
+  return { title: 'Example page', url: 'https://example.test/page', snippet: 'AnySearch summary', ...patch };
+}
+
+function anySearchResponse(items) {
+  return {
+    ok: true,
+    status: 200,
+    body: JSON.stringify({
+      code: 0,
+      message: 'success',
+      request_id: 'req-1',
+      data: { results: items, metadata: { total_results: items.length, search_time_ms: 12 } },
+    }),
+  };
+}
+
+function tinyFishItem(patch = {}) {
+  return {
+    position: 1,
+    site_name: 'example.test',
+    title: 'Example page',
+    snippet: 'TinyFish summary',
+    url: 'https://example.test/page',
+    ...patch,
+  };
+}
+
+function tinyFishResponse(items) {
+  return {
+    ok: true,
+    status: 200,
+    body: JSON.stringify({ query: 'Cindy', results: items, total_results: items.length, page: 0 }),
+  };
+}
+
+test('AnySearch uses its Search API with Host-only credential injection', async () => {
+  const harness = createHarness({
+    kvFetch: () => { throw new Error('explicit selection must not read preferences'); },
+    networkResult: () => anySearchResponse([
+      anySearchItem(),
+      anySearchItem({ title: 'Second page', snippet: undefined }),
+      anySearchItem({ title: 'Extra result' }),
+    ]),
+  });
+  const result = await harness.search({ provider: 'anysearch', query: '  示例 site:example.test  ', limit: 2 });
+  assert.equal(result.ok, true);
+  assert.equal(result.result.provider, 'anysearch');
+  assert.deepEqual(JSON.parse(JSON.stringify(result.result.results)), [
+    { title: 'Example page', url: 'https://example.test/page', snippet: 'AnySearch summary' },
+    { title: 'Second page', url: 'https://example.test/page', snippet: '' },
+  ]);
+  assert.equal(harness.networkCalls.length, 1);
+  assert.equal(harness.cindyRequests.length, 0);
+  const request = harness.networkCalls[0];
+  assert.equal(request.url, 'https://api.anysearch.com/v1/search');
+  assert.equal(request.method, 'POST');
+  assert.equal(request.callId, 'call-1');
+  assert.deepEqual(JSON.parse(JSON.stringify(request.headers)), {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  });
+  assert.deepEqual(JSON.parse(request.body), { query: '示例 site:example.test', max_results: 2 });
+});
+
+test('TinyFish uses the documented Search endpoint with Host-only credential injection', async () => {
+  const harness = createHarness({
+    networkResult: () => tinyFishResponse([
+      tinyFishItem(),
+      tinyFishItem({ title: 'Second page', position: 2 }),
+    ]),
+  });
+  const result = await harness.search({ provider: 'tinyfish', query: '中文 查询', limit: 1 });
+  assert.equal(result.ok, true);
+  assert.equal(result.result.provider, 'tinyfish');
+  assert.deepEqual(JSON.parse(JSON.stringify(result.result.results)), [
+    { title: 'Example page', url: 'https://example.test/page', snippet: 'TinyFish summary' },
+  ]);
+  assert.equal(harness.networkCalls.length, 1);
+  const request = harness.networkCalls[0];
+  assert.equal(request.url, 'https://api.search.tinyfish.ai?query=' + encodeURIComponent('中文 查询'));
+  assert.equal(request.method, 'GET');
+  assert.equal(request.callId, 'call-1');
+  assert.deepEqual(JSON.parse(JSON.stringify(request.headers)), { Accept: 'application/json' });
+  assert.equal(request.body, undefined);
+  assert.equal(harness.cindyRequests.length, 0);
+});
+
+test('AnySearch and TinyFish may be the BYO default while Cindy AI stays the initial default', async () => {
+  for (const [provider, networkResult] of [
+    ['anysearch', () => anySearchResponse([anySearchItem()])],
+    ['tinyfish', () => tinyFishResponse([tinyFishItem()])],
+  ]) {
+    const configured = { cindyAiEnabled: false, byoDefaultProvider: provider };
+    const harness = createHarness({ kv: configured, networkResult });
+    const result = await harness.search();
+    assert.equal(result.ok, true);
+    assert.equal(result.result.provider, provider);
+    assert.equal(harness.cindyRequests.length, 0);
+  }
+});
+
+test('AnySearch and TinyFish respect the shared 1–10 result contract', async () => {
+  for (const [limit, expected] of [[0, 1], [2.9, 2], [50, 10]]) {
+    const anySearch = createHarness({ networkResult: () => anySearchResponse([]) });
+    await anySearch.search({ provider: 'anysearch', limit });
+    assert.equal(JSON.parse(anySearch.networkCalls[0].body).max_results, expected);
+
+    const tinyFish = createHarness({
+      networkResult: () => tinyFishResponse(Array.from({ length: 12 }, (_, index) => tinyFishItem({ position: index + 1 }))),
+    });
+    const tinyFishResult = await tinyFish.search({ provider: 'tinyfish', limit });
+    assert.equal(tinyFishResult.result.results.length, expected);
+  }
+});
+
+test('AnySearch and TinyFish map HTTP failures to stable codes without leaking bodies', async (t) => {
+  const cases = [
+    [400, 'INVALID_INPUT'],
+    [401, 'AUTH_REJECTED'],
+    [402, 'QUOTA_EXHAUSTED'],
+    [403, 'PERMISSION_DENIED'],
+    [429, 'RATE_LIMITED'],
+    [500, 'UPSTREAM_UNAVAILABLE'],
+    [503, 'UPSTREAM_UNAVAILABLE'],
+    [418, 'UPSTREAM_REJECTED'],
+  ];
+  for (const provider of ['anysearch', 'tinyfish']) {
+    for (const [status, code] of cases) {
+      await t.test(`${provider} HTTP ${status}`, async () => {
+        const harness = createHarness({
+          networkResult: () => ({
+            ok: true,
+            status,
+            body: 'upstream body api_key=as_sk_live_secret password=hunter2',
+          }),
+        });
+        const result = await harness.search({ provider, query: 'x' });
+        assert.equal(result.ok, false);
+        assert.equal(result.errorCode, code);
+        assert.doesNotMatch(result.message, /as_sk_live_secret|hunter2|upstream body/);
+        assert.match(result.message, provider === 'anysearch' ? /AnySearch/ : /TinyFish/);
+        assert.equal(harness.networkCalls.length, 1);
+      });
+    }
+  }
+});
+
+test('missing AnySearch and TinyFish credentials produce actionable NOT_CONFIGURED errors', async () => {
+  for (const provider of ['anysearch', 'tinyfish']) {
+    const harness = createHarness({
+      networkResult: () => ({
+        ok: false,
+        errorCode: 'NETWORK_CREDENTIAL_UNAVAILABLE',
+        message: '凭证「x」尚未配置',
+      }),
+    });
+    const result = await harness.search({ provider, query: 'x' });
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, 'NOT_CONFIGURED');
+    assert.match(result.message, /插件/);
+    assert.equal(harness.networkCalls.length, 1);
+  }
+});
+
+test('AnySearch failures stay classified without exposing upstream envelopes', async (t) => {
+  await t.test('code -1 envelope on HTTP 200 is not an empty success', async () => {
+    const harness = createHarness({
+      networkResult: () => ({ ok: true, status: 200, body: JSON.stringify({ code: -1, message: 'bad', request_id: 'r' }) }),
+    });
+    const result = await harness.search({ provider: 'anysearch', query: 'x' });
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, 'UPSTREAM_REJECTED');
+    assert.doesNotMatch(result.message, /bad/);
+  });
+
+  for (const [name, body] of [
+    ['missing results', JSON.stringify({ code: 0, message: 'success', data: {} })],
+    ['results is not an array', JSON.stringify({ code: 0, message: 'success', data: { results: 'nope' } })],
+    ['row missing url', JSON.stringify({ code: 0, message: 'success', data: { results: [{ title: 'x', snippet: 'y' }] } })],
+  ]) {
+    await t.test(name, async () => {
+      const harness = createHarness({ networkResult: () => ({ ok: true, status: 200, body }) });
+      const result = await harness.search({ provider: 'anysearch', query: 'x' });
+      assert.equal(result.ok, false);
+      assert.equal(result.errorCode, 'RESPONSE_INVALID');
+    });
+  }
+
+  await t.test('truncated response fails closed', async () => {
+    const harness = createHarness({
+      networkResult: () => ({ ok: true, status: 200, truncated: true, body: '{}' }),
+    });
+    const result = await harness.search({ provider: 'anysearch', query: 'x' });
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, 'RESPONSE_INVALID');
+  });
+});
+
+test('TinyFish failures stay classified without exposing upstream envelopes', async () => {
+  for (const body of [
+    JSON.stringify({ results: null }),
+    JSON.stringify({ results: [{ title: 'x', snippet: 'y' }] }),
+    '{',
+  ]) {
+    const harness = createHarness({ networkResult: () => ({ ok: true, status: 200, body }) });
+    const result = await harness.search({ provider: 'tinyfish', query: 'x' });
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, 'RESPONSE_INVALID');
+  }
+});
+
+test('AnySearch and TinyFish credentials are scoped to their own hosts and have settings rows', () => {
+  const anySearch = manifest.network.secrets.find(item => item.key === 'anysearch_api_key');
+  assert.deepEqual(anySearch.inject, {
+    header: 'Authorization', format: 'Bearer {value}', hosts: ['api.anysearch.com'],
+  });
+  assert.equal(anySearch.url, 'https://anysearch.com/console/api-keys');
+  assert.equal(manifest.network.hosts.includes('anysearch.com'), false);
+
+  const tinyFish = manifest.network.secrets.find(item => item.key === 'tinyfish_api_key');
+  assert.deepEqual(tinyFish.inject, {
+    header: 'X-API-Key', format: '{value}', hosts: ['api.search.tinyfish.ai'],
+  });
+  assert.equal(tinyFish.url, 'https://agent.tinyfish.ai/api-keys');
+  assert.equal(manifest.network.hosts.includes('agent.tinyfish.ai'), false);
+
+  assert.match(settingsHtml, /data-key="anysearch_api_key"/);
+  assert.match(settingsHtml, /data-key="tinyfish_api_key"/);
+  assert.match(settingsHtml, /<option value="anysearch">AnySearch<\/option>/);
+  assert.match(settingsHtml, /<option value="tinyfish">TinyFish<\/option>/);
+  assert.match(settingsHtml, /href="https:\/\/anysearch\.com\/console\/api-keys"/);
+  assert.match(settingsHtml, /href="https:\/\/agent\.tinyfish\.ai\/api-keys"/);
+  for (const locale of locales) {
+    assert.match(locale.description, /AnySearch/);
+    assert.match(locale.description, /TinyFish/);
+    assert.match(locale.whenToUse, /AnySearch/);
+    assert.match(locale.tools.search_web.description, /AnySearch/);
+    assert.match(locale.tools.search_web.description, /TinyFish/);
+  }
+});
+
 // ── Runtime and settings localization ──────────────────────────────────────
 
 const hostLocales = ['zh-CN', 'en', 'ja', 'ko'];
@@ -1110,7 +1351,7 @@ test('zh-CN runtime output is byte-identical to the previous hardcoded strings',
   assert.equal((await ok.search()).result.note, '经 cindy 搜索到 1 条结果');
   assert.equal((await ok.search({ query: '' })).message, 'query 不能为空');
   assert.equal((await ok.search({ query: 'x'.repeat(2001) })).message, 'query 过长(上限 2000 字符)');
-  assert.equal((await ok.search({ provider: 'bing' })).message, 'provider 只支持 cindy / brave / tavily / deepseek');
+  assert.equal((await ok.search({ provider: 'bing' })).message, 'provider 只支持 cindy / brave / tavily / deepseek / anysearch / tinyfish');
   await ok.hostMessage({ type: 'tool-call', tool: 'nope', callId: 'call-2', args: {} });
   assert.equal(ok.toolResults.at(-1).message, '未知工具:nope');
 });
@@ -1352,7 +1593,7 @@ test('settings secret rows localize placeholders and status in the host locale',
   }
   // Every row in the real page names a key that exists in the table.
   const rowKeys = [...settingsHtml.matchAll(/data-empty-ph-key="(\w+)"/g)].map((m) => m[1]);
-  assert.deepEqual(rowKeys, ['emptyPhBrave', 'emptyPhTavily', 'emptyPhDeepSeek']);
+  assert.deepEqual(rowKeys, ['emptyPhBrave', 'emptyPhTavily', 'emptyPhDeepSeek', 'emptyPhAnySearch', 'emptyPhTinyFish']);
 });
 
 test('settings.html ships no hardcoded copy before the host locale is known', () => {

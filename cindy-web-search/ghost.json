@@ -2,9 +2,9 @@
   "schemaVersion": 3,
   "id": "cindy-web-search",
   "name": "Web Search",
-  "description": "Cindy 内置的网页搜索插件:默认使用 Cindy AI 搜索,也可用你自己的 Brave / Tavily / DeepSeek key 搜索公网;配置 Tavily key 后还能读取经用户明确确认的任意单个公开 HTTP(S) 网页正文。key 在主界面侧边栏「插件」→「Web Search」详情页填写,加密存本机、只注入声明域名的请求。",
-  "whenToUse": "需要搜索公网信息、查资料、找网页、看最新动态时找我;也可在主界面侧边栏「插件」→「Web Search」详情页配置 Brave、Tavily 或 DeepSeek key。需要在用户明确确认 URL 可完整发送给 Tavily 后读取任意公开 HTTP(S) 页面正文时也找我，包括但不限于搜索结果页。",
-  "version": "1.6.0",
+  "description": "Cindy 内置的网页搜索插件:默认使用 Cindy AI 搜索,也可用你自己的 Brave / Tavily / DeepSeek / AnySearch / TinyFish key 搜索公网;配置 Tavily key 后还能读取经用户明确确认的任意单个公开 HTTP(S) 网页正文。key 在主界面侧边栏「插件」→「Web Search」详情页填写,加密存本机、只注入声明域名的请求。",
+  "whenToUse": "需要搜索公网信息、查资料、找网页、看最新动态时找我;也可在主界面侧边栏「插件」→「Web Search」详情页配置 Brave、Tavily、DeepSeek、AnySearch 或 TinyFish key。需要在用户明确确认 URL 可完整发送给 Tavily 后读取任意公开 HTTP(S) 页面正文时也找我，包括但不限于搜索结果页。",
+  "version": "1.7.0",
   "minCindyVersion": "0.1.64",
   "locales": {
     "en": "locales/en.json",
@@ -21,7 +21,7 @@
     "search": ["web"]
   },
   "network": {
-    "hosts": ["api.search.brave.com", "api.tavily.com", "api.deepseek.com"],
+    "hosts": ["api.search.brave.com", "api.tavily.com", "api.deepseek.com", "api.anysearch.com", "api.search.tinyfish.ai"],
     "secrets": [
       {
         "key": "brave_api_key",
@@ -55,6 +55,28 @@
           "format": "Bearer {value}",
           "hosts": ["api.deepseek.com"]
         }
+      },
+      {
+        "key": "anysearch_api_key",
+        "label": "AnySearch API Key",
+        "hint": "as_sk_ 开头；免费额度以 AnySearch 账户为准",
+        "url": "https://anysearch.com/console/api-keys",
+        "inject": {
+          "header": "Authorization",
+          "format": "Bearer {value}",
+          "hosts": ["api.anysearch.com"]
+        }
+      },
+      {
+        "key": "tinyfish_api_key",
+        "label": "TinyFish API Key",
+        "hint": "在 TinyFish 控制台创建；搜索按账户每日免费额度计算",
+        "url": "https://agent.tinyfish.ai/api-keys",
+        "inject": {
+          "header": "X-API-Key",
+          "format": "{value}",
+          "hosts": ["api.search.tinyfish.ai"]
+        }
       }
     ]
   },
@@ -64,12 +86,12 @@
   "tools": [
     {
       "name": "search_web",
-      "description": "搜索公网，返回 { provider, results: [{ title, url, snippet }] }。默认 Cindy AI，也可指定 Brave / Tavily / DeepSeek。查询最多 2000 字符；DeepSeek 最多 128 个 Unicode 字符（不截断），摘要优先使用 summary，按成功请求计费，不读取全文。失败时保留宿主 errorCode，把 message 告诉用户；缺 Key 时按指引在插件详情页配置。不自动重试或切换搜索源。",
+      "description": "搜索公网，返回 { provider, results: [{ title, url, snippet }] }。默认 Cindy AI，也可指定 Brave / Tavily / DeepSeek / AnySearch / TinyFish。查询最多 2000 字符；DeepSeek 最多 128 个 Unicode 字符（不截断），摘要优先使用 summary，按成功请求计费，不读取全文。AnySearch 与 TinyFish 使用你自己的 API Key，免费额度以各自账户为准，只返回结果摘要、不读取网页正文。失败时保留宿主 errorCode，把 message 告诉用户；缺 Key 时按指引在插件详情页配置。不自动重试或切换搜索源。",
       "parameters": {
         "type": "object",
         "properties": {
           "query": { "type": "string", "maxLength": 2000, "description": "搜索关键词(保留用户意图,不要扩写,最多 2000 字符；DeepSeek 最多 128 个 Unicode 字符)" },
-          "provider": { "type": "string", "enum": ["cindy", "brave", "tavily", "deepseek"], "description": "指定搜索源;通常省略(默认使用 Cindy AI 搜索)" },
+          "provider": { "type": "string", "enum": ["cindy", "brave", "tavily", "deepseek", "anysearch", "tinyfish"], "description": "指定搜索源;通常省略(默认使用 Cindy AI 搜索)" },
           "limit": { "type": "number", "description": "结果条数,默认 5,最大 10" }
         },
         "required": ["query"]
