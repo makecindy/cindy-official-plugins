@@ -2855,6 +2855,23 @@ async function schedulesForPr(card) {
   return rows.filter(function (row) { return mentionsPr(row, url); });
 }
 
+async function readOwnedFollowSchedule(card) {
+  if (card.scheduleId) {
+    var known = await prSchedule('schedule_get', { id: card.scheduleId });
+    if (known && (!ownedFollowSchedule(known, card) || known.id !== card.scheduleId))
+      throw new Error(t('prOwnershipUnknown'));
+    if (known) return known;
+  }
+  // A failed start read-back may leave a real schedule without a saved ID.
+  var owned = (await schedulesForPr(card)).filter(function (row) { return ownedFollowSchedule(row, card); });
+  if (!owned.length) return null;
+  if (owned.length !== 1 || !owned[0].id) throw new Error(t('prOwnershipUnknown'));
+  var id = owned[0].id;
+  var saved = await prSchedule('schedule_get', { id: id });
+  if (saved && (!ownedFollowSchedule(saved, card) || saved.id !== id)) throw new Error(t('prOwnershipUnknown'));
+  return saved;
+}
+
 async function createCardSchedule(card, settings) {
   var url = followUrl(card);
   var model = prSettingsForAgent(settings, true).follow_model;
@@ -2907,9 +2924,8 @@ async function syncCardSchedule(card, settings, start) {
       card.scheduleStatus = null;
       card.followedEver = true;
     } else {
-      var owned = await prSchedule('schedule_get', { id: card.scheduleId });
+      var owned = await readOwnedFollowSchedule(card);
       if (owned) {
-        if (!ownedFollowSchedule(owned, card)) throw new Error(t('prOwnershipUnknown'));
         await prSchedule('schedule_delete', { id: owned.id });
         if (await prSchedule('schedule_get', { id: owned.id })) throw new Error('schedule_delete');
       }
@@ -2923,17 +2939,15 @@ async function syncCardSchedule(card, settings, start) {
   } catch (err) {
     card.note = t('prScheduleFailed', { detail: String(err.message || err).slice(0, 160) });
     card.scheduleError = card.note;
-    // A confirmed absence releases the reservation. An unreadable scheduler
-    // keeps it until a refresh reconciles the operation.
-    try {
-      var remaining = await schedulesForPr(card);
-      if (start && !remaining.some(function (s) { return s.targetSessionId === card.sessionId; })) {
-        card.pending = card.scheduleAction = null;
-      }
-      if (!start && remaining.some(function (s) { return s.id === card.scheduleId; })) {
-        card.pending = card.scheduleAction = null;
-      }
-    } catch (_) {}
+    // Stop stays pending until absence is verified, including when the delete receipt is lost.
+    if (start) {
+      try {
+        var remaining = await schedulesForPr(card);
+        if (!remaining.some(function (row) { return ownedFollowSchedule(row, card); })) {
+          card.pending = card.scheduleAction = null;
+        }
+      } catch (_) {}
+    }
   }
   await savePrCardRetry(card);
 }
@@ -2993,7 +3007,6 @@ async function prCardTool(args, callId) {
     if (!repo && !ref) return fail(t('prNeedRepo'));
     if (!ref && !prText(a.head)) return fail(t('prNeedHead'));
     card = newPrCard(callId, repo);
-    if (ref && a.published !== true) card.settingsApplied = true;
   }
   card.sessionId = sessionId;
   if (ref) card.repo = ref.repo;
@@ -3005,30 +3018,6 @@ async function prCardTool(args, callId) {
   if (a.files_total !== undefined) card.filesTotal = prCount(a.files_total);
   if (typeof a.renamed === 'boolean') {
     card.renamed = a.renamed;
-  }
-  if (card.scheduleId && hasCardScheduler() && !card.scheduleAction) {
-    try {
-      var currentSchedule = await prSchedule('schedule_get', { id: card.scheduleId });
-      if (currentSchedule && !ownedFollowSchedule(currentSchedule, card))
-        return fail(t('prScheduleFailed', { detail: t('prOwnershipUnknown') }));
-      if (currentSchedule && a.following === false) return fail(t('prScheduleFailed', { detail: currentSchedule.status }));
-      if (currentSchedule && a.following === true && currentSchedule.status !== 'active')
-        return fail(t('prScheduleFailed', { detail: currentSchedule.status }));
-      card.following = !!currentSchedule && currentSchedule.status === 'active';
-      card.scheduleStatus = currentSchedule && !card.following ? currentSchedule.status : null;
-      if (!currentSchedule) {
-        card.scheduleId = null;
-        if (a.following === true) return fail(t('prScheduleFailed', { detail: 'schedule_get' }));
-      }
-    } catch (err) { return fail(t('prScheduleFailed', { detail: String(err.message || err) })); }
-  }
-  if (a.following === true && hasCardScheduler() && !card.scheduleId) return fail(t('prScheduleFailed', { detail: 'schedule_get' }));
-  if (typeof a.following === 'boolean') {
-    card.following = a.following;
-    card.scheduleAction = null;
-    if (!a.following) card.scheduleId = card.scheduleStatus = null;
-    if (a.following) card.followedEver = true;
-    if (card.pending === 'follow' || card.pending === 'stop') card.pending = null;
   }
   card.note = card.scheduleError || null;
 
@@ -3047,19 +3036,49 @@ async function prCardTool(args, callId) {
     }
     card.stage = card.pr.state === 'merged' ? 'merged' : card.pr.state === 'closed' ? 'closed' : 'open';
     card.queued = false;
-    if (card.stage !== 'open' && card.scheduleId && !status.err) await syncCardSchedule(card, await readPrSettings(), false);
-    if (card.stage !== 'open') {
-      card.pending = null;
-    }
+    if (ref && a.published === true) card.publishedHere = true;
   } else if (card.stage === 'publishing') {
     // 发布没成功,Agent 不带 pr 再调一次:卡片回到询问。
     card.stage = 'ask';
   }
 
+  var canFollow = card.stage === 'open' && !card.pr.draft;
+  var stopSchedule = hasCardScheduler() && (card.scheduleAction === 'stop' ||
+    (!!status && !status.err && !canFollow && (card.scheduleAction === 'start' || !!card.scheduleId)));
+  if (card.stage !== 'open' && !card.scheduleAction && !stopSchedule) card.pending = null;
+  if (!stopSchedule && card.scheduleId && hasCardScheduler() && !card.scheduleAction) {
+    try {
+      var currentSchedule = await prSchedule('schedule_get', { id: card.scheduleId });
+      if (currentSchedule && !ownedFollowSchedule(currentSchedule, card))
+        return fail(t('prScheduleFailed', { detail: t('prOwnershipUnknown') }));
+      if (currentSchedule && a.following === false) return fail(t('prScheduleFailed', { detail: currentSchedule.status }));
+      if (currentSchedule && a.following === true && currentSchedule.status !== 'active')
+        return fail(t('prScheduleFailed', { detail: currentSchedule.status }));
+      card.following = !!currentSchedule && currentSchedule.status === 'active';
+      card.scheduleStatus = currentSchedule && !card.following ? currentSchedule.status : null;
+      if (!currentSchedule) {
+        card.scheduleId = null;
+        if (a.following === true) return fail(t('prScheduleFailed', { detail: 'schedule_get' }));
+      }
+    } catch (err) { return fail(t('prScheduleFailed', { detail: String(err.message || err) })); }
+  }
+  if (!stopSchedule && hasCardScheduler() && typeof a.following === 'boolean' &&
+      (card.scheduleAction || (a.following && !card.scheduleId))) {
+    return fail(t('prScheduleFailed', { detail: 'schedule_get' }));
+  }
+  if (!stopSchedule && typeof a.following === 'boolean') {
+    card.following = a.following;
+    card.scheduleAction = null;
+    if (!a.following) card.scheduleId = card.scheduleStatus = null;
+    if (a.following) card.followedEver = true;
+    if (card.pending === 'follow' || card.pending === 'stop') card.pending = null;
+  }
+
   // A claim is permission to create a schedule, not a report that one already exists.
   // Keep stop reservations until deletion is confirmed; contradictory requests never reacquire.
   var pendingBefore = card.pending;
-  if (a.claim_follow === true && a.following !== false && card.stage === 'open' && !card.pr.draft && card.pending !== 'stop' && !card.following && !card.scheduleId) {
+  if (a.claim_follow === true && a.following !== false && canFollow && !card.scheduleAction &&
+      card.pending !== 'stop' && !card.following && !card.scheduleId) {
     card.pending = 'follow';
   }
 
@@ -3067,15 +3086,15 @@ async function prCardTool(args, callId) {
   var todo = [];
   var nativeStart = false;
   var settingsAppliedBefore = card.settingsApplied;
-  if (card.stage === 'open' && !card.settingsApplied && settings.unreadable) {
+  var applyPublishedSettings = card.publishedHere === true && card.stage === 'open' && !card.settingsApplied;
+  if (applyPublishedSettings && settings.unreadable) {
     // Unreadable settings are not "all off": keep the one-time to-do list for the next call.
     notes.push(t('prSettingsLater'));
   }
-  if (card.stage === 'open' && !card.settingsApplied && !settings.unreadable) {
+  if (applyPublishedSettings && !settings.unreadable && !status.err) {
     card.settingsApplied = true;
-    card.publishedHere = true;
     card.renameRequested = settings.autoRename;
-    if (settings.autoFollow && a.following !== false && card.pending !== 'stop' && !card.following && !card.scheduleId && !card.pr.draft) {
+    if (settings.autoFollow && a.following !== false && canFollow && card.pending !== 'stop' && !card.following && !card.scheduleId) {
       card.pending = 'follow';
       nativeStart = hasCardScheduler();
       if (!nativeStart) todo.push(t('prTodoFollow', { url: card.pr.url }));
@@ -3086,16 +3105,15 @@ async function prCardTool(args, callId) {
     todo.push(t('prTodoRename', { title: prTaskTitle(card) }));
   }
 
-  if (nativeStart || (card.scheduleAction && hasCardScheduler())) {
-    var start = nativeStart || card.scheduleAction === 'start';
-    if (start && (card.stage !== 'open' || card.pr.draft)) {
-      card.scheduleAction = card.pending = null;
-    } else if (start && (settings.unreadable || status && status.err)) {
+  if (stopSchedule) {
+    await syncCardSchedule(card, settings, false);
+  } else if (hasCardScheduler() && (nativeStart || card.scheduleAction === 'start')) {
+    if (settings.unreadable || status.err) {
       card.note = settings.unreadable ? t('prSettingsUnreadable') : t('prFetchFailed', { detail: status.err });
       notes.push(card.note);
       card.scheduleAction = 'start';
-    } else {
-      await syncCardSchedule(card, settings, start);
+    } else if (canFollow) {
+      await syncCardSchedule(card, settings, true);
     }
   }
   if (card.note && !notes.includes(card.note)) notes.push(card.note);
@@ -3129,11 +3147,11 @@ async function prCardTool(args, callId) {
     if (card.scheduleAction) result.follow_state = 'unverified';
     else if (card.following) result.follow_state = 'active';
     else if (card.scheduleStatus === 'paused') result.follow_state = 'paused';
-    else result.follow_state = card.scheduleError || !card.followedEver ? 'failed' : 'stopped';
+    else result.follow_state = card.scheduleError ? 'failed' : 'stopped';
   }
   if (!delivered) { result.card_shown = false; notes.push(t('prCardNotShown')); }
-  if (a.claim_follow === true) result.follow_claimed = a.following !== false && card.stage === 'open' &&
-    !card.pr.draft && card.pending !== 'stop' && !card.scheduleId && prFollowActive(card);
+  if (a.claim_follow === true) result.follow_claimed = a.following !== false && canFollow &&
+    !card.scheduleAction && !card.scheduleId && card.pending === 'follow';
   if (card.pr) {
     result.mr = { number: card.pr.number, title: card.pr.title, url: card.pr.url, state: card.pr.state, draft: card.pr.draft };
   }
