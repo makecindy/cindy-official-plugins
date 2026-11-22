@@ -3087,6 +3087,7 @@ async function prCardTool(args, callId) {
   var nativeStart = false;
   var settingsAppliedBefore = card.settingsApplied;
   var applyPublishedSettings = card.publishedHere === true && card.stage === 'open' && !card.settingsApplied;
+  if (applyPublishedSettings && a.following === false) card.skipPublishedFollow = true;
   if (applyPublishedSettings && settings.unreadable) {
     // Unreadable settings are not "all off": keep the one-time to-do list for the next call.
     notes.push(t('prSettingsLater'));
@@ -3094,7 +3095,7 @@ async function prCardTool(args, callId) {
   if (applyPublishedSettings && !settings.unreadable && !status.err) {
     card.settingsApplied = true;
     card.renameRequested = settings.autoRename;
-    if (settings.autoFollow && a.following !== false && canFollow && card.pending !== 'stop' && !card.following && !card.scheduleId) {
+    if (settings.autoFollow && !card.skipPublishedFollow && canFollow && card.pending !== 'stop' && !card.following && !card.scheduleId) {
       card.pending = 'follow';
       nativeStart = hasCardScheduler();
       if (!nativeStart) todo.push(t('prTodoFollow', { url: card.pr.url }));

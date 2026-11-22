@@ -132,7 +132,6 @@ test('a follow click rechecks a previously opened MR that has since become a dra
   assert.equal(r.schedules.size, 0);
 });
 
-
 test('reusing a publish card to view an existing MR leaves automatic actions idle', async () => {
   const r = runtime();
   const ask = await r.show({ project_path: 'group/sub/repo', instance: 'team', head: 'fix' });
@@ -145,21 +144,31 @@ test('reusing a publish card to view an existing MR leaves automatic actions idl
   }
 });
 
-test('confirmed publication survives temporary settings failure without reapplying on refresh', async () => {
-  const r = runtime();
-  const ask = await r.show({ project_path: 'group/sub/repo', instance: 'team', head: 'fix' });
-  r.setSettingsReadable(false);
-  const published = await r.show({ card_id: ask.card_id, mr: url, published: true });
-  assert.equal(published.todo, undefined);
-  assert.equal(r.schedules.size, 0);
-  r.setSettingsReadable(true);
-  const recovered = await r.show({ card_id: ask.card_id });
-  assert.equal(recovered.follow_state, 'active');
-  assert.ok(recovered.todo?.length);
-  const refreshed = await r.show({ card_id: ask.card_id, renamed: true });
-  assert.equal(refreshed.todo, undefined);
-  assert.equal(r.schedules.size, 1);
-});
+for (const publishOnly of [false, true]) {
+  test('publication follow choice survives settings failure (publish only: ' + publishOnly + ')', async () => {
+    const r = runtime();
+    const ask = await r.show({ project_path: 'group/sub/repo', instance: 'team', head: 'fix' });
+    const args = { card_id: ask.card_id, mr: url, published: true };
+    r.setSettingsReadable(false);
+    const published = await r.show(publishOnly ? { ...args, following: false } : args);
+    assert.equal(published.todo, undefined);
+    assert.equal(r.schedules.size, 0);
+    // A repeated publication report may omit the opt-out, just like a later refresh.
+    await r.show(args);
+    r.setSettingsReadable(true);
+    const recovered = await r.show({ card_id: ask.card_id });
+    assert.equal(recovered.follow_state, publishOnly ? undefined : 'active');
+    assert.equal(recovered.todo?.length, 1);
+    assert.equal(r.schedules.size, publishOnly ? 0 : 1);
+    const refreshed = await r.show({ card_id: ask.card_id, renamed: true });
+    assert.equal(refreshed.todo, undefined);
+    assert.equal(r.schedules.size, publishOnly ? 0 : 1);
+    if (publishOnly) {
+      await r.click(ask.card_id, 'pr:follow');
+      assert.equal(r.schedules.size, 1);
+    }
+  });
+}
 
 for (const end of ['merged', 'closed', 'draft']) {
   test('a ' + end + ' MR cleans up its created but unverified schedule', async () => {
