@@ -1,0 +1,5 @@
+{
+  "name": "DeepSeek Harness",
+  "description": "把本机安装的 DeepSeek Harness（dsh）作为执行引擎，在 Cindy 里运行任务。",
+  "whenToUse": "需要通过本机 dsh 使用 DeepSeek Harness 执行 Cindy 任务时使用。"
+}

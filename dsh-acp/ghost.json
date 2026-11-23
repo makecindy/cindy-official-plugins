@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 3,
+  "id": "dsh-acp",
+  "name": "DeepSeek Harness",
+  "description": "Run Cindy tasks with the DeepSeek Harness (dsh) installed on this computer.",
+  "version": "0.3.1",
+  "releaseNotes": "Install DeepSeek Harness from the official Cindy plugin marketplace.",
+  "minCindyVersion": "0.1.143",
+  "icon": "icon.png",
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "entry": "main.js",
+  "launch": "resident",
+  "settingsHtml": "settings.html",
+  "node": {
+    "entry": "worker.js",
+    "protocol": "json-rpc-stdio",
+    "lifecycle": "on-demand",
+    "idleTimeoutSeconds": 30,
+    "entries": [
+      "dsh-acp.js"
+    ]
+  },
+  "harnesses": [
+    {
+      "id": "dsh",
+      "name": "DeepSeek Harness",
+      "description": "Runs tasks with the dsh command-line agent installed on this computer.",
+      "protocol": "acp",
+      "entry": "dsh-acp.js",
+      "locales": {
+        "zh-CN": {
+          "name": "DeepSeek Harness",
+          "description": "使用本机安装的 dsh 命令行 Agent 运行任务。"
+        }
+      }
+    }
+  ],
+  "author": "MagicLizi",
+  "whenToUse": "Use when running Cindy tasks with DeepSeek Harness through the local dsh CLI."
+}

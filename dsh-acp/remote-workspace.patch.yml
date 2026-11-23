@@ -1,0 +1,25 @@
+# Remote-workspace overlay for Cindy (`dsh --profile acp --patch remote-workspace.patch.yml`).
+#
+# Cindy starts the engine this way for a task whose files and commands are on another computer
+# of the same account. dsh's own tools could only reach the computer dsh runs on, so every tool
+# that reads or writes files, runs commands or runs model-written code here is switched off for
+# this one process. The file and command tools Cindy passes over MCP take their place and run on
+# the task's computer. This overlay is applied per launch; the user's dsh profile is not changed.
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-jobs
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+- id: tool-working-directory
+  disabled: true
+- id: tool-workflow
+  disabled: true
+- id: tool-executor-ptc
+  disabled: true
+- id: tool-plugin-manager
+  disabled: true

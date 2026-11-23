@@ -44,6 +44,7 @@ permission gate.
 |  | Plugin | Directory | Description |
 | --- | --- | --- | --- |
 | <img src="./agy-acp/icon.png" width="22" alt=""> | Antigravity | [`agy-acp`](./agy-acp) | Run Cindy tasks with the local agy CLI. Requires your own Google account. |
+| <img src="./dsh-acp/icon.png" width="22" alt=""> | DeepSeek Harness | [`dsh-acp`](./dsh-acp) | Run Cindy tasks with the local dsh CLI. Requires your own DeepSeek API key. |
 | <img src="./cindy-art/assets/icon.png" width="22" alt=""> | Art | [`cindy-art`](./cindy-art) | Image / short-video generation, with edits and restyling based on previously generated images |
 | <img src="./opendesign-trial/assets/icon.png" width="22" alt=""> | OpenDesign | [`opendesign-trial`](./opendesign-trial) | Session-owned HTML design previews, element annotations and manual editing using Cindy’s conversation model |
 | <img src="./cindy-github/assets/icon.png" width="22" alt=""> | GitHub | [`cindy-github`](./cindy-github) | Full GitHub workflow: issues / PRs / code review / Actions / releases |
