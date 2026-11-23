@@ -502,6 +502,12 @@ function validateReleaseDiff({ cwd = root, base = process.env.BASE_SHA, head = p
   ]).trim().length > 0;
   for (const pluginDir of baseRoots) {
     const afterDir = renamedRoots.get(pluginDir) ?? pluginDir;
+    // #356: the official submission from #312 was rejected. Limit removal to
+    // that unpublished copy; a later reintroduction has a different commit.
+    if (pluginDir === 'misakanet' && !targetRoots.has(pluginDir) &&
+        gitAt(['log', '-1', '--format=%H', base, '--', pluginDir]).trim() === 'bfadffb3de352576d431a3279409cca82ad20dbc') {
+      continue;
+    }
     assert.ok(targetRoots.has(afterDir), `${pluginDir}: deleting or renaming an official plugin requires an explicit Server migration`);
     const before = JSON.parse(gitAt(['show', `${base}:${pluginDir}/ghost.json`]));
     const after = readJson(path.join(cwd, afterDir, 'ghost.json'), MAX_MANIFEST_BYTES);
