@@ -7,7 +7,10 @@
 
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -229,7 +232,7 @@ function makeFixture(t, { withAgy = true, extraEnv = {} } = {}) {
 /** Real installs in fixed system directories would make "not installed" untestable. */
 function systemHasAgy() {
   if (isWin) return false;
-  return ['/usr/local/bin', '/opt/homebrew/bin'].some((dir) => fs.existsSync(path.join(dir, 'agy')));
+  return ['/usr/bin', '/bin', '/usr/local/bin', '/opt/homebrew/bin'].some((dir) => fs.existsSync(path.join(dir, 'agy')));
 }
 
 function samePath(a, b) {
@@ -2352,4 +2355,56 @@ process.stdout.write('', () => process.exit(0));
     assert.equal(code, 0, `exit code (stderr: ${bridge.stderr.text()})`);
     assert.ok(exitMs < flushTimeoutMs / 2, `the bridge took ${exitMs} ms to exit after Cindy read everything; the flush timeout is ${flushTimeoutMs} ms`);
   });
+});
+
+test('a disconnected input rejects pending and subsequent ACP calls', async () => {
+  const { connect } = await import(pathToFileURL(path.join(root, 'agy-client.js')));
+  const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough() });
+  const call = connect(child);
+  const first = call('initialize', {});
+  child.stdin.destroy(new Error('closed pipe'));
+  await assert.rejects(first, /closed pipe/);
+  await assert.rejects(call('session/new', {}), /closed pipe/);
+});
+
+test('closing a short-lived ACP connection reaps a CLI that ignores EOF and SIGTERM', { skip: isWin }, async t => {
+  const fixture = makeFixture(t, { extraEnv: { FAKE_AGY_IGNORE_TERM: '1', FAKE_AGY_IGNORE_EOF: '1' } });
+  const { openAgy } = await import(pathToFileURL(path.join(root, 'agy-client.js')));
+  const connection = await openAgy({ env: fixture.env });
+  t.after(() => connection.child.kill('SIGKILL'));
+  connection.close();
+  await waitFor(() => connection.child.signalCode === 'SIGKILL', 6000, 'CLI shutdown');
+});
+
+test('installation verifies the archive and staged CLI before activating it', {
+  skip: isWin || systemHasAgy(),
+}, t => {
+  const fixture = makeFixture(t, { withAgy: false });
+  const cli = path.join(fixture.dir, 'antigravity');
+  fs.writeFileSync(cli, '#!/bin/sh\necho "agy 1.5.14"\n', { mode: 0o755 });
+  const archive = execFileSync('/usr/bin/tar', ['-czf', '-', '-C', fixture.dir, 'antigravity']);
+  const archivePath = path.join(fixture.dir, 'release.tar.gz');
+  fs.writeFileSync(archivePath, archive);
+  const digest = createHash('sha512').update(archive).digest('hex');
+  const target = path.join(fixture.env.HOME, '.local/bin/agy');
+  const script = `
+    const [installer, archive, sha512] = process.argv.slice(1);
+    const url = 'https://storage.googleapis.com/antigravity-public/antigravity-cli/fixture.tar.gz';
+    global.fetch = async target => {
+      if (target.href === url) return new Response(require('node:fs').readFileSync(archive));
+      if (target.origin !== 'https://antigravity-cli-auto-updater-974169037036.us-central1.run.app') throw Error('unexpected host');
+      return Response.json({ url, version: '1.5.14', sha512 });
+    };
+    require(installer)({ action: 'install' }).then(result => console.log(JSON.stringify(result)));
+  `;
+  const install = hash => JSON.parse(execFileSync(process.execPath, ['-e', script,
+    path.join(root, 'cli-installer.cjs'), archivePath, hash], { env: fixture.env, encoding: 'utf8' }));
+  assert.deepEqual(install('0'.repeat(128)), { error: 'integrity' });
+  assert.equal(fs.existsSync(target), false);
+  fs.mkdirSync(target);
+  assert.deepEqual(install(digest), { error: 'operation' });
+  assert.deepEqual(fs.readdirSync(path.dirname(target)), ['agy']);
+  fs.rmdirSync(target);
+  assert.deepEqual(install(digest), { state: 'installed', version: '1.5.14' });
+  assert.deepEqual(fs.readFileSync(target), fs.readFileSync(cli));
 });

@@ -39,7 +39,9 @@ function connect(child) {
   let buffer = '';
   let nextId = 1;
   const pending = new Map();
+  let disconnectError;
   const failAll = (error) => {
+    disconnectError ??= error;
     for (const { reject, timer } of pending.values()) {
       clearTimeout(timer);
       reject(error);
@@ -71,9 +73,14 @@ function connect(child) {
       }
     }
   });
+  child.stdin.on('error', failAll);
   child.on('exit', () => failAll(new Error('agy exited')));
   child.on('error', (error) => failAll(error));
   return (method, params, timeoutMs) => new Promise((resolve, reject) => {
+    if (disconnectError) {
+      reject(disconnectError);
+      return;
+    }
     const id = nextId++;
     const timer = setTimeout(() => {
       pending.delete(id);
@@ -98,7 +105,7 @@ async function openAgy(options) {
   const close = () => {
     try { child.stdin.end(); } catch { /* already closed */ }
     if (child.exitCode !== null || child.signalCode !== null) return;
-    const timer = setTimeout(() => killTree(child), STOP_GRACE_MS);
+    const timer = setTimeout(() => killTree(child, 'SIGKILL'), STOP_GRACE_MS);
     if (typeof timer.unref === 'function') timer.unref();
     child.once('exit', () => clearTimeout(timer));
   };

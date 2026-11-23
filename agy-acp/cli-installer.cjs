@@ -78,10 +78,10 @@ async function install(release, current, report) {
     }
     if (!win) await fs.chmod(executable, 0o755);
     report.step('probe');
-    const { stdout } = await run(executable, ['--version'], {
+    const { stdout, stderr } = await run(executable, ['--version'], {
       timeout: 15000, env: { ...process.env, AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
     });
-    if (stdout.trim().replace(/^v/, '') !== release.version) fail('verify');
+    if ((stdout.trim() || stderr.trim()).replace(/^(?:agy\s+)?v?/i, '') !== release.version) fail('verify');
     report.note('probe', { version: release.version });
     report.step('activate');
     await fs.rename(executable, target).catch(error => {

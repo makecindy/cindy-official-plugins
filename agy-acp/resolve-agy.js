@@ -40,7 +40,9 @@ for (const arg of CONSTANT_ARGS) {
  * double quotes with inner quotes as \" (the target's C runtime turns it back into the constant).
  */
 function cmdArg(arg) {
-  return SAFE_ARG.test(arg) ? arg : '"' + arg.replace(/"/g, '\\"') + '"';
+  // The allowlisted constants contain no backslashes or control characters. JSON string
+  // quoting generates exactly the enclosing quotes and escaped inner quotes they require.
+  return SAFE_ARG.test(arg) ? arg : JSON.stringify(arg);
 }
 /** How Cindy starts agy: session settings (no paid credits), ACP mode, no telemetry. */
 const ACP_ARGS = Object.freeze(['--settings', SESSION_SETTINGS, 'acp', '--disable-telemetry']);
