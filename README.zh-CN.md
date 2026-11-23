@@ -36,7 +36,7 @@
 
 |  | 插件 | 目录 | 说明 |
 | --- | --- | --- | --- |
-| <img src="./agy-acp/icon.png" width="22" alt=""> | Antigravity | [`agy-acp`](./agy-acp) | 通过本机 agy 执行 Cindy 任务，需自备 Google 账号。 |
+| <img src="./cindy-antigravity-acp/icon.png" width="22" alt=""> | Antigravity | [`cindy-antigravity-acp`](./cindy-antigravity-acp) | 通过本机 agy 执行 Cindy 任务，需自备 Google 账号。 |
 | <img src="./dsh-acp/icon.png" width="22" alt=""> | DeepSeek Harness | [`dsh-acp`](./dsh-acp) | 通过本机 dsh 执行 Cindy 任务，需自备 DeepSeek API Key。 |
 | <img src="./cindy-art/assets/icon.png" width="22" alt=""> | Art | [`cindy-art`](./cindy-art) | 图片 / 短视频生成，支持基于已生成图片的改图与风格化 |
 | <img src="./opendesign-trial/assets/icon.png" width="22" alt=""> | OpenDesign | [`opendesign-trial`](./opendesign-trial) | 复用 Cindy 会话模型的 HTML 设计稿、固定会话预览、元素批注和手动编辑 |
@@ -195,6 +195,8 @@ cindy-art/
 自绘设置页正独立迁移到同一套宿主语言契约，运行时报错文案目前仍以中文单语为主。
 
 ## 自动提交与审核
+
+已撤回的 Antigravity 个人投稿 ID（`agy-acp`）不参与 Global 提交。
 
 Chrome 扩展使用独立的[商店自动发布流程](./docs/chrome-webstore-publishing.zh-CN.md)：
 将更高的扩展版本合入 `main` 后自动提交 Google 审核，通过后自动发布。

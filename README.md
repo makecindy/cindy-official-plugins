@@ -43,7 +43,7 @@ permission gate.
 
 |  | Plugin | Directory | Description |
 | --- | --- | --- | --- |
-| <img src="./agy-acp/icon.png" width="22" alt=""> | Antigravity | [`agy-acp`](./agy-acp) | Run Cindy tasks with the local agy CLI. Requires your own Google account. |
+| <img src="./cindy-antigravity-acp/icon.png" width="22" alt=""> | Antigravity | [`cindy-antigravity-acp`](./cindy-antigravity-acp) | Run Cindy tasks with the local agy CLI. Requires your own Google account. |
 | <img src="./dsh-acp/icon.png" width="22" alt=""> | DeepSeek Harness | [`dsh-acp`](./dsh-acp) | Run Cindy tasks with the local dsh CLI. Requires your own DeepSeek API key. |
 | <img src="./cindy-art/assets/icon.png" width="22" alt=""> | Art | [`cindy-art`](./cindy-art) | Image / short-video generation, with edits and restyling based on previously generated images |
 | <img src="./opendesign-trial/assets/icon.png" width="22" alt=""> | OpenDesign | [`opendesign-trial`](./opendesign-trial) | Session-owned HTML design previews, element annotations and manual editing using Cindy’s conversation model |
@@ -241,6 +241,8 @@ to the same host-driven locale contract, while runtime error copy is still
 primarily Chinese-only.
 
 ## Automated submission and review
+
+The withdrawn personal Antigravity ID (`agy-acp`) is excluded from all Global submissions.
 
 The Chrome extension has a separate [automatic store publishing workflow](./docs/chrome-webstore-publishing.md):
 merge a higher extension version to `main` to submit it for Google review and publish after approval.

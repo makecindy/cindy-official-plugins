@@ -1,0 +1,5 @@
+{
+  "name": "Antigravity",
+  "description": "Run Cindy tasks with the Google Antigravity CLI (agy) installed on this computer.",
+  "whenToUse": "Use when running Cindy tasks with Antigravity through the local agy CLI."
+}

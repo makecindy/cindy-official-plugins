@@ -18,7 +18,9 @@ import readline from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import vm from 'node:vm';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../agy-acp');
+const official = new URL(import.meta.url).searchParams.has('official');
+const pluginId = official ? 'cindy-antigravity-acp' : 'agy-acp';
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..', pluginId);
 const isWin = process.platform === 'win32';
 
 const RESULT_JSON =
@@ -641,7 +643,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
       body: { harnesses: [{ id: 'agy', available: false, reason: 'not-installed', message: ZH }] },
     });
 
-    const page = new TrackedChannel('agy-acp');
+    const page = new TrackedChannel(pluginId);
     const received = [];
     page.onmessage = (event) => received.push(event.data);
     putStatus = 204;
@@ -720,7 +722,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
 
     // Signed in, then "Check again": listed right away (no one-minute wait) and published with the modes.
     signedIn = true;
-    const page = new Channel('agy-acp');
+    const page = new Channel(pluginId);
     const received = [];
     page.onmessage = (event) => received.push(event.data);
     page.postMessage({ type: 'detect-request', reqId: 'r1' });
@@ -826,7 +828,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     vm.runInContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context, { filename: 'main.js' });
     await waitFor(() => finishFirstListing, 3_000, 'start-up listing');
 
-    const page = new Channel('agy-acp');
+    const page = new Channel(pluginId);
     const received = [];
     page.onmessage = (event) => received.push(event.data);
     const result = (reqId) => received.find((m) => m.type === 'account-result' && m.reqId === reqId);
@@ -891,7 +893,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
         json: async () => (url === '/app-context' ? { context: { uiLocale: 'zh-CN' } } : { state: 'on' }) }),
     });
     // Stands in for main.js: agy is installed and signed in.
-    const main = new Channel('agy-acp');
+    const main = new Channel(pluginId);
     const requests = [];
     const maintenance = [];
     let version = '1.5.11';
@@ -1161,7 +1163,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.deepEqual(validateCustomPath('relative/agy', { platform: 'darwin', env: { HOME: '/tmp' } }), { ok: false, error: 'not-absolute' });
     assert.equal(
       configFilePath({ platform: 'win32', env: { APPDATA: 'C:\\Users\\a\\AppData\\Roaming', LOCALAPPDATA: 'C:\\Users\\a\\AppData\\Local' } }),
-      'C:\\Users\\a\\AppData\\Local\\cindy-agy-acp\\config.json',
+      path.win32.join('C:\\Users\\a\\AppData\\Local', official ? pluginId : 'cindy-agy-acp', 'config.json'),
     );
     if (!isWin) {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-perm-'));
@@ -1237,7 +1239,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     vm.runInContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context, { filename: 'main.js' });
     await waitFor(() => listCount === 1, 3_000, 'initial listModels for A in flight');
 
-    const page = new Channel('agy-acp');
+    const page = new Channel(pluginId);
     const received = [];
     page.onmessage = (event) => received.push(event.data);
 
@@ -1304,7 +1306,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
       document: { getElementById: element, documentElement: {}, visibilityState: 'visible', addEventListener() {} },
       fetch: async (url) => ({ ok: true, json: async () => (url === '/app-context' ? { context: { uiLocale: currentLocale } } : { state: 'on' }) }),
     });
-    const main = new Channel('agy-acp');
+    const main = new Channel(pluginId);
     const savedPaths = [];
     const cliActions = [];
     const account = { signedIn: true, canSignIn: true, canSignOut: true, busy: null };
@@ -1564,7 +1566,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     vm.runInContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context, { filename: 'main.js' });
     await waitFor(() => puts.length > 0, 3_000, 'initial publish');
 
-    const page = new Channel('agy-acp');
+    const page = new Channel(pluginId);
     const received = [];
     page.onmessage = (event) => received.push(event.data);
 
@@ -1687,7 +1689,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     vm.runInContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context, { filename: 'main.js' });
     await waitFor(() => puts.length > 0, 3_000, 'initial publish');
 
-    const page = new Channel('agy-acp');
+    const page = new Channel(pluginId);
     const received = [];
     page.onmessage = (event) => received.push(event.data);
     const resultOf = (reqId) => received.find((m) => m.type === 'account-result' && m.reqId === reqId);
@@ -1793,7 +1795,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
       document: { getElementById: element, documentElement: {}, visibilityState: 'visible', addEventListener() {} },
       fetch: async (url) => ({ ok: true, json: async () => (url === '/app-context' ? { context: { uiLocale: 'en' } } : { state: 'on' }) }),
     });
-    const main = new Channel('agy-acp');
+    const main = new Channel(pluginId);
     const account = { signedIn: true, canSignIn: true, canSignOut: true, busy: null };
     const snapshotFor = (version, customPath) => ({ ok: true, account,
       result: { available: true, version, path: customPath || '/usr/local/bin/agy', ...(customPath ? { customPath, customPathConfigured: true } : {}) },
@@ -1980,7 +1982,7 @@ process.stdin.on('end', () => process.exit(0));
         return { ok: true, json: async () => (url === '/app-context' ? { context: { uiLocale: 'en' } } : { state: 'on' }) };
       },
     });
-    const main = new Channel('agy-acp');
+    const main = new Channel(pluginId);
     const account = { signedIn: true, canSignIn: true, canSignOut: true, busy: null };
     const snapshotFor = (generation, version) => ({ ok: true, account, generation,
       result: { available: true, version, path: '/usr/local/bin/agy' }, signInRequired: false, publish: { status: 'published' }, checkedAt: 1 });
@@ -2097,7 +2099,7 @@ process.stdin.on('end', () => process.exit(0));
       });
       vm.runInContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context, { filename: 'main.js' });
       await waitFor(() => puts.length > 0, 3_000, 'initial publish');
-      const page = new Channel('agy-acp');
+      const page = new Channel(pluginId);
       const received = [];
       page.onmessage = (event) => received.push(event.data);
       page.postMessage({ type: 'detect-request', reqId: 'detect' });
@@ -2130,7 +2132,7 @@ test('usage polling returns quota and skips CLI self-update on Windows', async (
 });
 
 test('native /usage preserves exhausted groups and ignores model turns and disabled buckets', async () => {
-  const { usageFromReport } = await import('../../agy-acp/agy-usage.js');
+  const { usageFromReport } = await import(pathToFileURL(path.join(root, 'agy-usage.js')));
   const command = { name: 'usage', data: { groups: [{ name: 'Gemini', buckets: [
     { window: 'weekly', remaining_fraction: 0, reset_time: '2030-01-01T00:00:00Z' },
     { window: '5h', remaining_fraction: 0.5, disabled: true },
@@ -2146,7 +2148,7 @@ test('native /usage preserves exhausted groups and ignores model turns and disab
 
 async function localRelay(t) {
   const { PassThrough } = await import('node:stream');
-  const { default: steering } = await import('../../agy-acp/agy-steering.js');
+  const { default: steering } = await import(pathToFileURL(path.join(root, 'agy-steering.js')));
   const source = new PassThrough();
   const output = new PassThrough();
   const child = { stdin: new PassThrough(), stdout: new PassThrough() };
