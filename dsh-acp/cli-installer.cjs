@@ -5,6 +5,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { createMaintenance, fail, json, run, stream, versionPattern } = require('./cli-maintenance.cjs');
 const { candidateDirs, detectDsh, managedDshRoot } = require('./resolve-dsh.js');
+const { installIds, pruneRetired, readBootId } = require('./cli-retention.cjs');
 
 const registry = 'https://registry.npmjs.org';
 const win = process.platform === 'win32';
@@ -16,6 +17,7 @@ async function latest() {
 }
 
 async function installed() {
+  await pruneRetired(managedDshRoot()).catch(() => {});
   const check = await detectDsh({ timeoutMs: 10000 });
   return { present: !!check.path, runnable: check.available, version: check.version };
 }
@@ -76,8 +78,10 @@ async function install(release, current, report) {
     if (![probe.stdout, probe.stderr].join(' ').includes(release.version)) fail('verify');
     report.note('probe', { version: release.version });
     report.step('activate');
+    const boot = await readBootId().catch(() => '');
+    const older = await installIds(root);
     await fs.rename(stage, destination);
-    await fs.writeFile(marker, JSON.stringify({ id, node: runtime.node }), { mode: 0o600, flag: 'wx' });
+    await fs.writeFile(marker, JSON.stringify({ id, node: runtime.node, boot, older }), { mode: 0o600, flag: 'wx' });
     await fs.rename(marker, path.join(root, 'current.json'));
     activated = true;
   } finally {

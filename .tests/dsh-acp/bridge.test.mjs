@@ -656,6 +656,54 @@ describe('dsh-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.deepEqual(modelsFromConfigOptions(undefined), []);
   });
 
+  test('a disconnected model probe leaves its worker available for detection', async (t) => {
+    const fixture = makeFixture(t);
+    const script = path.join(fixture.dir, 'fake-dsh.js');
+    fs.writeFileSync(script, `
+      if (process.argv.includes('--version')) { console.log('dsh 0.2.2'); return; }
+      require('node:fs').closeSync(0);
+      // Ask the client to reply on the closed pipe before this process exits.
+      setTimeout(() => console.log(JSON.stringify({ jsonrpc: '2.0', method: 'ping', id: 99 })), 50);
+      setTimeout(() => process.exit(1), 300);
+    `);
+    const worker = startWorker(fixture.env);
+    t.after(() => worker.close());
+    const result = await worker.call({ jsonrpc: '2.0', id: 1, method: 'listModels' });
+    assert.equal(result.result.error, 'list-failed');
+    const detect = await worker.call({ jsonrpc: '2.0', id: 2, method: 'detect' });
+    assert.equal(detect.result.version, '0.2.2');
+  });
+
+  test('slow but responsive model switches share one deadline and the probe is reaped', async (t) => {
+    const fixture = makeFixture(t);
+    const script = path.join(fixture.dir, 'fake-dsh.js');
+    const switches = path.join(fixture.dir, 'switches');
+    fs.writeFileSync(script, `
+      const fs = require('node:fs');
+      fs.writeFileSync(process.env.FAKE_DSH_PIDFILE, String(process.pid));
+      const options = Array.from({length: 60}, (_, i) => ({value: String(i), name: String(i)}));
+      const configOptions = [{id: 'model', type: 'select', currentValue: '0', options}];
+      require('node:readline').createInterface({input: process.stdin}).on('line', line => {
+        const {id, method} = JSON.parse(line);
+        const reply = result => console.log(JSON.stringify({jsonrpc: '2.0', id, result}));
+        if (method === 'initialize') return reply({});
+        if (method === 'session/new') return reply({sessionId: 'probe', configOptions});
+        fs.appendFileSync(process.env.FAKE_SWITCHES, 'x');
+        setTimeout(() => reply({configOptions}), 150);
+      });
+      process.on('SIGTERM', () => {});
+      setInterval(() => {}, 1000);
+    `);
+    fixture.env.FAKE_SWITCHES = switches;
+    const { listModels } = await import(pathToFileURL(path.join(root, 'dsh-models.js')).href);
+    await assert.rejects(listModels({}, { env: fixture.env, probeTimeoutMs: 1500 }), /did not answer|timed out/);
+    const count = fs.readFileSync(switches, 'utf8').length;
+    assert.ok(count > 0 && count < 59);
+    const pid = readPid(fixture.pidFile);
+    await waitFor(() => !isAlive(pid), 6_000, 'the probe to exit after its deadline');
+    assert.equal(fs.readFileSync(switches, 'utf8').length, count);
+  });
+
   // 2026-11-19 实测 dsh 的 reasoning_effort 是 off / low / high / max；Cindy 没有 off。
   test('reasoning levels come from the thought_level option, keeping only Cindy level ids', async () => {
     const { effortsFromConfigOptions } = await import(pathToFileURL(path.join(root, 'dsh-models.js')).href);

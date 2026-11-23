@@ -21,6 +21,8 @@ const { killTree, resolveDsh, spawnDsh } = require('./resolve-dsh.js');
 
 const PROBE_FOLDER = 'cindy-dsh-model-list';
 const REQUEST_TIMEOUT_MS = 45_000;
+// The logic page waits 90 seconds, including transport and child shutdown.
+const PROBE_TIMEOUT_MS = 80_000;
 const STOP_GRACE_MS = 3_000;
 const MAX_MODELS = 200;
 const MAX_TEXT = 200;
@@ -89,11 +91,13 @@ function probeFolder() {
 }
 
 /** Minimal JSON-RPC client over dsh's stdio (one message per line). */
-function connect(child) {
+function connect(child, deadline) {
   let buffer = '';
   let nextId = 1;
   const pending = new Map();
+  let disconnectError;
   const failAll = (error) => {
+    disconnectError ??= error;
     for (const { reject, timer } of pending.values()) {
       clearTimeout(timer);
       reject(error);
@@ -114,22 +118,26 @@ function connect(child) {
         const entry = pending.get(message.id);
         pending.delete(message.id);
         clearTimeout(entry.timer);
-        if (message.error) entry.reject(new Error(message.error.message || 'dsh returned an error'));
+        if (message.error) entry.reject(Object.assign(new Error(message.error.message || 'dsh returned an error'), { rpcError: true }));
         else entry.resolve(message.result || {});
-      } else if (message && message.id !== undefined && typeof message.method === 'string') {
+      } else if (!disconnectError && message && message.id !== undefined && typeof message.method === 'string') {
         // A request from dsh (e.g. a permission prompt) is never expected here; decline it.
         child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Not supported' } }) + '\n');
       }
     }
   });
+  child.stdin.on('error', failAll);
   child.on('exit', () => failAll(new Error('dsh exited')));
-  child.on('error', (error) => failAll(error));
+  child.on('error', failAll);
   return (method, params) => new Promise((resolve, reject) => {
+    if (disconnectError) return reject(disconnectError);
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) return reject(new Error('dsh model probe timed out'));
     const id = nextId++;
     const timer = setTimeout(() => {
       pending.delete(id);
       reject(new Error(`dsh did not answer ${method}`));
-    }, REQUEST_TIMEOUT_MS);
+    }, Math.min(remaining, REQUEST_TIMEOUT_MS));
     pending.set(id, { resolve, reject, timer });
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
   });
@@ -145,7 +153,7 @@ async function listModels(params, options) {
   const cwd = probeFolder();
   const child = spawnDsh(dshPath, ['--profile', 'acp'], options);
   child.stderr.resume();
-  const call = connect(child);
+  const call = connect(child, performance.now() + (options?.probeTimeoutMs ?? PROBE_TIMEOUT_MS));
   try {
     const init = await call('initialize', {
       protocolVersion: 1,
@@ -160,7 +168,8 @@ async function listModels(params, options) {
       try {
         result = await call('session/resume', { sessionId: previous, cwd, mcpServers: [] });
         sessionId = previous;
-      } catch {
+      } catch (error) {
+        if (!error.rpcError) throw error;
         result = null;
       }
     }
@@ -176,7 +185,10 @@ async function listModels(params, options) {
       if (!options && sessionId && modelOption) {
         // Switching the probe session's model is the only way ACP shows another model's levels.
         const switched = await call('session/set_config_option', { sessionId, configId: modelOption.id, value: model.id })
-          .catch(() => null);
+          .catch(error => {
+            if (!error.rpcError) throw error;
+            return null;
+          });
         options = switched && Array.isArray(switched.configOptions) ? switched.configOptions : null;
       }
       Object.assign(model, effortsFromConfigOptions(options));
@@ -185,9 +197,11 @@ async function listModels(params, options) {
     return { supported: true, models, ...(sessionId ? { sessionId } : {}) };
   } finally {
     try { child.stdin.end(); } catch { /* already closed */ }
-    const timer = setTimeout(() => killTree(child), STOP_GRACE_MS);
-    if (typeof timer.unref === 'function') timer.unref();
-    child.once('exit', () => clearTimeout(timer));
+    if (child.exitCode === null && child.signalCode === null) {
+      const timer = setTimeout(() => killTree(child, 'SIGKILL'), STOP_GRACE_MS);
+      timer.unref();
+      child.once('exit', () => clearTimeout(timer));
+    }
   }
 }
 
