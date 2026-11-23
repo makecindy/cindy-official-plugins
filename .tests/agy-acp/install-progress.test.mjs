@@ -16,11 +16,13 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../agy-acp');
+const official = new URL(import.meta.url).searchParams.has('official');
+const pluginId = official ? 'cindy-antigravity-acp' : 'agy-acp';
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..', pluginId);
 const require = createRequire(import.meta.url);
 const { createMaintenance, stream } = require(path.join(root, 'cli-maintenance.cjs'));
 const MAIN = 'main.js';
-const CHANNEL = 'agy-acp';
+const CHANNEL = pluginId;
 
 async function waitFor(predicate, timeoutMs, what) {
   const deadline = Date.now() + timeoutMs;
