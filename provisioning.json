@@ -127,9 +127,6 @@
         "emails": []
       }
     },
-    "misakanet": {
-      "audience": { "emails": [] }
-    },
     "agentcompass": {
       "audience": {
         "emails": []
