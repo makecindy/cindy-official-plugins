@@ -43,6 +43,11 @@ if (isRemote && process.env.FAKE_DSH_NO_PATCH === '1') {
   process.exit(1);
 }
 if (isRemote && args.length === 5 && args[4] === '--dump-config') {
+  if (process.env.FAKE_DSH_DELAY_DUMP) {
+    fs.writeFileSync(process.env.FAKE_DSH_DELAY_DUMP, JSON.stringify({ pid: process.pid, cwd: process.cwd() }));
+    setTimeout(() => process.exit(1), 15000);
+    return;
+  }
   // The composed tree as dsh prints it: the overlay file in the working directory decides what is off.
   const overlay = fs.readFileSync(args[3], 'utf8');
   // The overlay may be checked out with CRLF line endings; dsh reads it either way.
@@ -248,8 +253,8 @@ export class LocalCredentialProvider {
   return { storeFile: path.join(fixture.dir, 'credentials.json'), configFile: path.join(fixture.dir, 'provider-config.json') };
 }
 
-function startBridge(env, args = []) {
-  const child = spawn(process.execPath, [path.join(root, 'dsh-acp.js'), ...args], { env, cwd: os.tmpdir(), stdio: 'pipe' });
+function startBridge(env, args = [], stdio = 'pipe') {
+  const child = spawn(process.execPath, [path.join(root, 'dsh-acp.js'), ...args], { env, cwd: os.tmpdir(), stdio });
   return { child, stdout: collect(child.stdout), stderr: collect(child.stderr), closed: waitClose(child) };
 }
 
@@ -340,6 +345,24 @@ describe('dsh-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.equal(code, 0);
     assert.ok(!fs.existsSync(launch.cwd), 'the private directory is removed when the task ends');
   });
+
+  for (const mode of ['remote', 'guest']) {
+    test(`cancelling the ${mode} precheck stops DSH and removes the launch directory`, async t => {
+      const fixture = makeFixture(t);
+      const marker = path.join(fixture.dir, 'precheck.json');
+      fixture.env.FAKE_DSH_DELAY_DUMP = marker;
+      const bridge = startBridge(fixture.env, [`--cindy-${mode}-workspace`], ['pipe', 'pipe', 'pipe', 'ipc']);
+      await waitFor(() => fs.existsSync(marker) && fs.statSync(marker).size > 0, 8_000, 'DSH precheck');
+      const { pid, cwd } = JSON.parse(fs.readFileSync(marker, 'utf8'));
+      const exited = new Promise(resolve => bridge.child.once('exit', resolve));
+      if (mode === 'remote' && !isWin) bridge.child.kill('SIGTERM');
+      else bridge.child.disconnect();
+      await waitFor(() => !isAlive(pid), 3_000, 'precheck to stop');
+      assert.equal(await exited, 143);
+      assert.equal(readPid(fixture.pidFile), null, 'ACP did not launch after cancellation');
+      assert.equal(fs.existsSync(cwd), false);
+    });
+  }
 
   // Why: the overlay only names the tools known today. A tool it does not switch off (a newer dsh,
   // or a plugin in the user's profile) would touch this computer, so the launch must not happen.

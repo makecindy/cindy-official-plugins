@@ -3,7 +3,7 @@
   "id": "dsh-acp",
   "name": "DeepSeek Harness",
   "description": "Run Cindy tasks with the DeepSeek Harness (dsh) installed on this computer.",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "releaseNotes": "Install DeepSeek Harness from the official Cindy plugin marketplace.",
   "minCindyVersion": "0.1.143",
   "icon": "icon.png",

@@ -19,6 +19,7 @@
  */
 
 const fs = require('node:fs');
+const { killTree } = require('./resolve-dsh.js');
 const os = require('node:os');
 const path = require('node:path');
 
@@ -177,6 +178,8 @@ function verifyRemoteWorkspace(spawnDsh, dshPath, cwd, timeoutMs, options) {
       resolve({ ok: false, detail: `could not run dsh (${error && error.message ? error.message : error})` });
       return;
     }
+    const stopCheck = () => killTree(child, 'SIGKILL');
+    process.once('exit', stopCheck);
     const chunks = [];
     let size = 0;
     let settled = false;
@@ -184,16 +187,18 @@ function verifyRemoteWorkspace(spawnDsh, dshPath, cwd, timeoutMs, options) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      process.off('exit', stopCheck);
       resolve(result);
     };
     const timer = setTimeout(() => {
-      try { child.kill('SIGKILL'); } catch { /* already gone */ }
+      stopCheck();
       settle({ ok: false, detail: 'dsh did not print its configuration in time' });
     }, timeoutMs || CHECK_TIMEOUT_MS);
     child.stdout.on('data', (chunk) => {
+      if (settled) return;
       size += chunk.length;
       if (size > MAX_CONFIG_BYTES) {
-        try { child.kill('SIGKILL'); } catch { /* already gone */ }
+        stopCheck();
         settle({ ok: false, detail: 'dsh printed an unexpectedly large configuration' });
         return;
       }
@@ -202,6 +207,7 @@ function verifyRemoteWorkspace(spawnDsh, dshPath, cwd, timeoutMs, options) {
     child.stderr.on('data', () => { /* diagnostics of the check run are not relayed */ });
     child.on('error', (error) => settle({ ok: false, detail: `could not run dsh (${error.message})` }));
     child.on('close', (code) => {
+      if (settled) return;
       if (code !== 0) {
         settle({ ok: false, detail: `this dsh version does not accept the remote-workspace overlay (exit code ${code})` });
         return;

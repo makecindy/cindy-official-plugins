@@ -57,6 +57,18 @@ function exitCodeFor(code, signal) {
   return 1;
 }
 
+function listenForStop(stop) {
+  const signals = ['SIGTERM', 'SIGINT', 'SIGHUP'];
+  if (process.platform === 'win32') signals.push('SIGBREAK');
+  const disconnect = () => stop('SIGTERM');
+  for (const signal of signals) process.on(signal, stop);
+  process.on('disconnect', disconnect);
+  return () => {
+    for (const signal of signals) process.off(signal, stop);
+    process.off('disconnect', disconnect);
+  };
+}
+
 function run(dshPath, args, cwd, options) {
   const guest = Boolean(options && options.guest);
   let child;
@@ -183,10 +195,7 @@ function run(dshPath, args, cwd, options) {
     stop('SIGTERM');
   });
 
-  const signals = ['SIGTERM', 'SIGINT', 'SIGHUP'];
-  if (process.platform === 'win32') signals.push('SIGBREAK');
-  for (const signal of signals) process.on(signal, () => stop(signal));
-  process.on('disconnect', () => stop('SIGTERM'));
+  listenForStop(stop);
   process.on('uncaughtException', (error) => {
     try {
       process.stderr.write(`[dsh-acp] internal error: ${describe(error)}\n`);
@@ -213,8 +222,11 @@ function runRemoteWorkspace(dshPath, guest) {
     exitAfterStderr(`[dsh-acp] Could not prepare the remote-workspace launch (${describe(error)}). DeepSeek Harness was not started.`, REMOTE_WORKSPACE_EXIT_CODE);
     return;
   }
-  process.on('exit', () => remoteWorkspace.removeLaunchDir(dir));
-  remoteWorkspace.verifyRemoteWorkspace(spawnDsh, dshPath, dir, undefined, { guest }).then((check) => {
+  const stopListening = listenForStop(signal => process.exit(exitCodeFor(null, signal)));
+  const verification = remoteWorkspace.verifyRemoteWorkspace(spawnDsh, dshPath, dir, undefined, { guest });
+  process.once('exit', () => remoteWorkspace.removeLaunchDir(dir));
+  verification.then((check) => {
+    stopListening();
     if (!check.ok) {
       exitAfterStderr(`[dsh-acp] DeepSeek Harness cannot run a task whose files are on another computer: ${check.detail}. It was not started.`, REMOTE_WORKSPACE_EXIT_CODE);
       return;
