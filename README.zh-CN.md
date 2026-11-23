@@ -36,6 +36,7 @@
 
 |  | 插件 | 目录 | 说明 |
 | --- | --- | --- | --- |
+| <img src="./agy-acp/icon.png" width="22" alt=""> | Antigravity | [`agy-acp`](./agy-acp) | 通过本机 agy 执行 Cindy 任务，需自备 Google 账号。 |
 | <img src="./cindy-art/assets/icon.png" width="22" alt=""> | Art | [`cindy-art`](./cindy-art) | 图片 / 短视频生成，支持基于已生成图片的改图与风格化 |
 | <img src="./opendesign-trial/assets/icon.png" width="22" alt=""> | OpenDesign | [`opendesign-trial`](./opendesign-trial) | 复用 Cindy 会话模型的 HTML 设计稿、固定会话预览、元素批注和手动编辑 |
 | <img src="./cindy-github/assets/icon.png" width="22" alt=""> | GitHub | [`cindy-github`](./cindy-github) | GitHub issue / PR / code review / Actions / release 全流程操作 |
