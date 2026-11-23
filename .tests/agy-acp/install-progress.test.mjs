@@ -180,7 +180,14 @@ describe('CLI install progress', () => {
       plan: () => ['download'],
       install: async (release, current, report) => {
         report.step('download');
-        await stream(process.execPath, ['-e', 'console.log("fetching"); console.error("E404 Not Found"); process.exit(3)'],
+        const updater = [
+          'console.log("fetching")',
+          'console.error("Authorization: Bearer fixture-bearer")',
+          'console.error("Authorization: Basic Zml4dHVyZQ==")',
+          'console.error("E404 Not Found")',
+          'process.exit(3)',
+        ].join(';');
+        await stream(process.execPath, ['-e', updater],
           { timeout: 10_000, onLine: report.log });
       },
     });
@@ -192,6 +199,9 @@ describe('CLI install progress', () => {
     assert.equal(element('cli-progress').hidden, true);
     const log = element('cli-log-lines').textContent;
     assert.match(log, /fetching/);
+    assert.match(log, /Authorization: \*\*\*/);
+    assert.doesNotMatch(log, /fixture-bearer/);
+    assert.doesNotMatch(log, /Zml4dHVyZQ==/);
     assert.match(log, /E404 Not Found/);
     assert.match(log, /Exited with 3/);
     assert.match(log, /未完成：安装或更新未完成，请重试。$/);

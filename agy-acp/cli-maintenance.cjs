@@ -110,7 +110,7 @@ function watch(child, { timeout = 30000, onLine, kill = target => target.kill() 
       output.setEncoding('utf8');
       output.on('data', chunk => {
         const lines = (rest + chunk).split(/\r\n|\n|\r/);
-        rest = lines.pop().slice(-64 * 1024);
+        rest = lines.pop().slice(0, 64 * 1024);
         lines.forEach(emit);
       });
       output.on('end', () => { emit(rest); rest = ''; });
@@ -141,8 +141,10 @@ function cleanLine(text) {
   if (homePattern) line = line.replace(homePattern, '~');
   line = line
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, '$1***@')
-    .replace(/((?:auth|token|password|passwd|secret|api[_-]?key|authorization)[\w-]*["']?\s*[:=]\s*)("?)[^\s"',;]+/gi, '$1$2***')
+    // Multi-part Authorization values must be removed before generic key/value masking.
+    .replace(/(\bauthorization["']?\s*[:=]\s*).*/gi, '$1***')
     .replace(/\b(?:Bearer|Basic)\s+[\w.~+/=-]+/gi, '***')
+    .replace(/((?:auth|token|password|passwd|secret|api[_-]?key)[\w-]*["']?\s*[:=]\s*)("?)[^\s"',;]+/gi, '$1$2***')
     .replace(/\b(?:npm_[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|sk-[A-Za-z0-9_-]{16,})/g, '***');
   return line.length > 240 ? line.slice(0, 239) + '…' : line;
 }
