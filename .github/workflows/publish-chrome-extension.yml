@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: chrome-webstore-production
@@ -128,3 +129,33 @@ jobs:
         env:
           CWS_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: node .github/scripts/chrome-webstore.mjs publish "${RUNNER_TEMP}/chrome-package"
+
+  notify-failure:
+    if: >-
+      ${{ always() && (needs.check.result == 'failure' || needs.package.result == 'failure' || needs.publish.result == 'failure') }}
+    needs: [check, package, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: my-browser/extension/manifest.json
+      - name: Notify Dash about the failed Chrome publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK_RESULT: ${{ needs.check.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+        run: |
+          version=$(node -p "require('./my-browser/extension/manifest.json').version")
+          failed_stage=check
+          [ "$PACKAGE_RESULT" = failure ] && failed_stage=package
+          [ "$PUBLISH_RESULT" = failure ] && failed_stage=publish
+          gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "[Chrome Web Store] Cindy $version 发布失败 · run $GITHUB_RUN_NUMBER" \
+            --body "@dashhuang，Cindy Chrome 扩展 $version 的商店发布流水线失败。\n\n失败阶段：$failed_stage\n检查结果：check=$CHECK_RESULT，package=$PACKAGE_RESULT，publish=$PUBLISH_RESULT\n流水线：$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\n\n请处理后关闭此 Issue。"
