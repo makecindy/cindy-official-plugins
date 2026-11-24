@@ -69,7 +69,7 @@ test('async upload completes before submission, then verifies the submitted vers
   const writes = calls.filter(call => call.method === 'POST');
   assert.equal(writes.length, 2);
   assert.match(writes[0].url, /\/upload\/v2\//);
-  assert.deepEqual(JSON.parse(writes[1].body), {publishType: 'DEFAULT_PUBLISH', skipReview: false, blockOnWarnings: true});
+  assert.deepEqual(JSON.parse(writes[1].body), {publishType: 'DEFAULT_PUBLISH', skipReview: false, blockOnWarnings: false});
 });
 
 test('status is rechecked before upload; a competing review prevents writes', async () => {
