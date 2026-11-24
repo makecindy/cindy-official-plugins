@@ -7,6 +7,9 @@
     "agy-acp": {
       "audience": { "emails": [] }
     },
+    "dsh-acp": {
+      "audience": { "emails": [] }
+    },
     "herdr": {
       "audience": { "emails": [] }
     },
