@@ -3,8 +3,8 @@
   "id": "cindy-antigravity-acp",
   "name": "Antigravity",
   "description": "Run Cindy tasks with the Google Antigravity CLI (agy) installed on this computer.",
-  "version": "0.4.5",
-  "releaseNotes": "Install Antigravity from the official Cindy plugin marketplace.",
+  "version": "0.5.0",
+  "releaseNotes": "Shows the current Antigravity plan and quota window lengths in supported Cindy versions. Existing sign-in and custom agy paths are retained.",
   "minCindyVersion": "0.1.143",
   "icon": "icon.png",
   "locales": {

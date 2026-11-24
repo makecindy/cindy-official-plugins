@@ -222,7 +222,11 @@
   /** Only metadata leaves the plugin: never the executable path or a command. */
   function harnessEntry(result) {
     var entry = { id: HARNESS_ID, available: result.available === true && !signInRequired };
-    if (entry.available) entry.reportsUsage = true;
+    if (entry.available) {
+      entry.reportsUsage = true;
+      // The worker reports the single local agy login. Older hosts ignore this field.
+      entry.accounts = { methods: [] };
+    }
     if (entry.available && supportsRemoteWorkspace(result.version)) {
       entry.remoteWorkspace = true;
       entry.guestWorkspace = true;
@@ -859,9 +863,16 @@
     }
   });
 
+  // Restore the saved probe session before publishing the engine so its first account read can use it.
+  function shareModelSession() {
+    if (!modelSessionId) return;
+    return nodeCall('adoptModelSession', { params: { sessionId: modelSessionId }, timeoutMs: 10000 });
+  }
+
   // Start-up: republish with the saved model list; list from agy only when none was saved yet.
   stateLoaded
     .then(refreshLocale)
+    .then(shareModelSession)
     .then(detect)
     .then(function () { return refreshModels('if-missing'); });
 })();

@@ -91,6 +91,27 @@ async function status(params, options) {
   }
 }
 
+/** Cindy's engine-account limit for `plan`. */
+const MAX_PLAN = 64;
+
+/**
+ * The current login as Cindy's engine accounts read it (`accountStatus`): signed in or out, and the
+ * tier name as `plan` when the plugin's model-list session is known (resuming it reports the tier).
+ * agy keeps one Google sign-in per computer, so this is the only account; ACP does not report the
+ * email, so there is no identity. Null when agy is not installed.
+ * @returns {Promise<{ state: 'signed-in', plan?: string } | { state: 'signed-out' } | null>}
+ */
+async function accountStatus(params, options) {
+  const current = await status(params, options);
+  if (!current.supported) return null;
+  if (!current.signedIn) return { state: 'signed-out' };
+  const name = current.tier && current.tier.name;
+  const plan = typeof name === 'string' && !/[\u0000-\u001f\u007f-\u009f]/.test(name)
+    ? name.slice(0, MAX_PLAN).trim()
+    : '';
+  return { state: 'signed-in', ...(plan ? { plan } : {}) };
+}
+
 /**
  * agy's Google sign-in: agy opens the browser and this resolves when the user finished there,
  * cancelled (cancelLogin) or after 5 minutes. `onProgress` runs every 10 s while waiting.
@@ -156,4 +177,4 @@ async function logout(options) {
   }
 }
 
-module.exports = { GOOGLE_METHOD, cancelLogin, login, logout, status };
+module.exports = { GOOGLE_METHOD, accountStatus, cancelLogin, login, logout, status };
