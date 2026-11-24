@@ -181,7 +181,7 @@ async function api(opts) {
   }
   if (r.status < 200 || r.status >= 300) {
     var snippet = typeof r.body === 'string' ? r.body.slice(0, 300) : '';
-    return { err: classifyStatus(r.status, snippet) };
+    return { err: classifyStatus(r.status, snippet), status: r.status };
   }
   if (opts.text) return { data: typeof r.body === 'string' ? r.body : '', status: r.status, headers: r.headers || {} };
   var data = null;
@@ -1594,6 +1594,15 @@ var MESSAGES = {
     "prFollow": "自动跟进到合并",
     "prFollowStarting": "正在开启跟进",
     "prMarkReady": "转为正式 MR",
+    "prMerge": "合并",
+    "prMergeConfirm": "确认合并",
+    "prMergeCancel": "取消",
+    "prMergePrompt": "将提交 {sha} 合并到 {base}？",
+    "prMergeMethod_squash": "压缩合并",
+    "prMergeChanged": "未发送合并请求：提交、目标分支、账号或可合并状态已变化，或现在无法核实。",
+    "prMergeRejected": "平台拒绝了合并，本次未合并。请在原站查看状态。",
+    "prMergeUnknown": "无法确认上次合并结果，请核对状态。不会自动重试。",
+    "prMergeRecheck": "核对状态",
     "prMarkingReady": "正在转为正式 MR",
     "prScheduleFailed": "未能确认后台跟进状态（{detail}）",
     "prReadyFailed": "没能转为正式 MR：{detail}",
@@ -1697,6 +1706,15 @@ var MESSAGES = {
     "prFollow": "Auto-follow until merged",
     "prFollowStarting": "Starting to follow",
     "prMarkReady": "Mark ready for review",
+    "prMerge": "Merge",
+    "prMergeConfirm": "Confirm merge",
+    "prMergeCancel": "Cancel",
+    "prMergePrompt": "Merge commit {sha} into {base}?",
+    "prMergeMethod_squash": "Squash and merge",
+    "prMergeChanged": "Merge not sent: the commit, target branch, account or eligibility changed or could not be verified.",
+    "prMergeRejected": "The platform rejected the merge. Check the status on the original site.",
+    "prMergeUnknown": "Could not confirm the merge result. Check the status. No automatic retry.",
+    "prMergeRecheck": "Check status",
     "prMarkingReady": "Marking ready for review",
     "prScheduleFailed": "Could not verify background follow-up ({detail})",
     "prReadyFailed": "Could not mark it ready for review: {detail}",
@@ -1800,6 +1818,15 @@ var MESSAGES = {
     "prFollow": "マージまで自動フォロー",
     "prFollowStarting": "フォローを開始しています",
     "prMarkReady": "正式な MR にする",
+    "prMerge": "マージ",
+    "prMergeConfirm": "マージを確認",
+    "prMergeCancel": "キャンセル",
+    "prMergePrompt": "コミット {sha} を {base} にマージしますか？",
+    "prMergeMethod_squash": "スカッシュしてマージ",
+    "prMergeChanged": "コミット、対象ブランチ、アカウントまたはマージ可否が変わったか確認できないため、マージを要求しませんでした。",
+    "prMergeRejected": "プラットフォームがマージを拒否しました。元のサイトで状態を確認してください。",
+    "prMergeUnknown": "マージ結果を確認できません。状態を確認してください。自動再試行は行いません。",
+    "prMergeRecheck": "状態を確認",
     "prMarkingReady": "正式な MR に切り替えています",
     "prScheduleFailed": "バックグラウンドフォローを確認できませんでした（{detail}）",
     "prReadyFailed": "正式な MR にできませんでした：{detail}",
@@ -1903,6 +1930,15 @@ var MESSAGES = {
     "prFollow": "병합까지 자동 팔로우",
     "prFollowStarting": "팔로우 시작 중",
     "prMarkReady": "정식 MR로 전환",
+    "prMerge": "병합",
+    "prMergeConfirm": "병합 확인",
+    "prMergeCancel": "취소",
+    "prMergePrompt": "커밋 {sha}을(를) {base}에 병합할까요?",
+    "prMergeMethod_squash": "스쿼시 후 병합",
+    "prMergeChanged": "커밋, 대상 브랜치, 계정 또는 병합 가능 여부가 변경되었거나 확인되지 않아 병합을 요청하지 않았습니다.",
+    "prMergeRejected": "플랫폼에서 병합을 거부했습니다. 원본 사이트에서 상태를 확인하세요.",
+    "prMergeUnknown": "병합 결과를 확인할 수 없습니다. 상태를 확인하세요. 자동으로 재시도하지 않습니다.",
+    "prMergeRecheck": "상태 확인",
     "prMarkingReady": "정식 MR로 전환 중",
     "prScheduleFailed": "백그라운드 팔로우를 확인하지 못했습니다 ({detail})",
     "prReadyFailed": "정식 MR로 전환하지 못했습니다: {detail}",
@@ -2275,13 +2311,26 @@ function mrApiArgs(repo, number) {
   return { instance: repo.slice(0, slash), project_path: repo.slice(slash + 1), iid: number };
 }
 
+async function fetchPrMergeTarget(args, mr, callId) {
+  if (mr.state !== 'opened' || (mr.draft !== false && mr.work_in_progress !== false) ||
+      mr.draft === true || mr.work_in_progress === true || mr.has_conflicts === true ||
+      mr.detailed_merge_status !== 'mergeable' || !mr.user || mr.user.can_merge !== true ||
+      !Number.isSafeInteger(mr.id) || !mr.target_branch || !/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(mr.sha)) return null;
+  var viewer = await OPS.get_current_user.run({ instance: args.instance }, callId);
+  return !viewer.err && viewer.data && Number.isSafeInteger(viewer.data.id) ? {
+    id: mr.id, actor: viewer.data.id, base: mr.target_branch, sha: mr.sha, squash: mr.squash === true,
+  } : null;
+}
+
 async function fetchPrStatus(repo, number, callId) {
-  var result = await OPS.get_merge_request.run(mrApiArgs(repo, number), callId);
+  var args = mrApiArgs(repo, number);
+  var result = await OPS.get_merge_request.run(args, callId);
   if (result.err) return result;
   var mr = result.data;
   if (!mr || mr.iid !== number || ['opened', 'merged', 'closed', 'locked'].indexOf(mr.state) < 0)
     return { err: t('status404') };
   var pipeline = mr.head_pipeline && mr.head_pipeline.status;
+  var merge = await fetchPrMergeTarget(args, mr, callId).catch(function () { return null; });
   return { pr: {
     number: number, title: mr.title, url: 'https://' + repo + '/-/merge_requests/' + number,
     state: mr.state === 'opened' ? 'open' : mr.state === 'merged' ? 'merged' : 'closed',
@@ -2290,6 +2339,7 @@ async function fetchPrStatus(repo, number, callId) {
       /^(running|pending|created|preparing|waiting_for_resource)$/.test(pipeline) ? 'PENDING' : null,
     openThreads: null, // The REST blocking flag does not count every unresolved discussion.
     mergeState: mr.has_conflicts === true ? 'DIRTY' : mr.detailed_merge_status === 'mergeable' ? 'CLEAN' : null,
+    merge: merge,
   } };
 }
 
@@ -2701,6 +2751,76 @@ function prHasSettings(card) {
   return card.stage === 'ask' || card.stage === 'open' || card.stage === 'merged' || card.stage === 'closed';
 }
 
+
+function prMayMerge(card) {
+  return card.stage === 'open' && card.pr && !card.pr.draft && card.pr.merge && !card.pending && !card.mergeUncertain;
+}
+
+function samePrMerge(left, right) {
+  return !!left && !!right && JSON.stringify(left) === JSON.stringify(right);
+}
+
+function updatePrMergeStatus(card, status) {
+  if (status.pr) card.pr = status.pr;
+  else if (card.pr) card.pr.merge = null;
+  if (card.mergeConfirmation && !samePrMerge(card.mergeConfirmation.target, card.pr.merge)) card.mergeConfirmation = null;
+  if (status.pr && status.pr.state !== 'open') card.mergeUncertain = false;
+}
+
+async function readPrMergeStatus(card) {
+  var latest = await fetchPrStatus(card.repo, card.pr.number).catch(function () { return {}; });
+  updatePrMergeStatus(card, latest);
+  if (latest.pr) card.stage = latest.pr.state;
+}
+
+async function prMergeAction(card, settings, msg, action) {
+  if (!msg.userActionToken || !card.pr || card.stage !== 'open') return;
+  var confirmation = card.mergeConfirmation;
+  var attempted = false;
+  if (action === 'pr:merge' && prMayMerge(card) && !confirmation) {
+    card.mergeRevision = (card.mergeRevision || 0) + 1;
+    card.mergeConfirmation = { revision: card.mergeRevision, target: card.pr.merge };
+    card.note = null;
+  } else if (confirmation && action === 'pr:merge-cancel:' + confirmation.revision) {
+    card.mergeConfirmation = null;
+  } else if (confirmation && prMayMerge(card) && action === 'pr:merge-confirm:' + confirmation.revision) {
+    card.mergeConfirmation = null;
+    await readPrMergeStatus(card);
+    if (!prMayMerge(card) || !samePrMerge(confirmation.target, card.pr.merge)) {
+      if (card.stage === 'open') card.note = t('prMergeChanged');
+    } else {
+      card.mergeUncertain = true;
+      if (!await savePrCard(card)) {
+        card.mergeUncertain = false;
+        card.note = t('prSaveFailed');
+      } else {
+        attempted = true;
+        var result = await OPS.merge_merge_request.run(Object.assign(mrApiArgs(card.repo, card.pr.number), { sha: confirmation.target.sha })).catch(function () { return {}; });
+        if (result.data && result.data.state === 'merged' && result.data.iid === card.pr.number) {
+          card.stage = card.pr.state = 'merged';
+          card.pr.merge = null;
+          card.mergeUncertain = false;
+          card.note = null;
+        } else if (/^(400|401|403|404|405|409|422|429)$/.test(result.status)) {
+          card.mergeUncertain = false;
+          card.pr.merge = null;
+          card.note = t('prMergeRejected');
+        } else {
+          await readPrMergeStatus(card);
+        }
+      }
+    }
+  } else if (action === 'pr:merge-recheck' && card.mergeUncertain) {
+    await readPrMergeStatus(card);
+  } else {
+    return;
+  }
+  if (card.stage !== 'open' && hasCardScheduler() && (card.scheduleId || card.scheduleAction)) {
+    await syncCardSchedule(card, settings, false);
+  }
+  if (await savePrCardRetry(card) || attempted) await sendPrCard(card, settings, null);
+}
+
 function renderPrCard(card, settings) {
   var tile, title, meta, left, actions = '';
   var gear = prHasSettings(card);
@@ -2749,6 +2869,21 @@ function renderPrCard(card, settings) {
                 : pr.draft
                   ? (card.readyUncertain ? '' : prCtaButton('pr:ready', t('prMarkReady')))
                   : prPillButton('pr:follow', t('prFollow'));
+      if (card.mergeUncertain) {
+        left += '<div>' + prEsc(t('prMergeUnknown')) + '</div>';
+        actions += prPillButton('pr:merge-recheck', t('prMergeRecheck'));
+      } else if (prMayMerge(card)) {
+        var confirmation = card.mergeConfirmation;
+        if (confirmation) {
+          var target = confirmation.target;
+          left += '<div style="overflow-wrap:anywhere">' + prEsc(t('prMergePrompt', { base: target.base, sha: target.sha.slice(0, 12) })) +
+            (target.squash ? ' · ' + prEsc(t('prMergeMethod_squash')) : '') + '</div>';
+          actions = prPillButton('pr:merge-cancel:' + confirmation.revision, t('prMergeCancel')) +
+            prCtaButton('pr:merge-confirm:' + confirmation.revision, t('prMergeConfirm'));
+        } else {
+          actions += prCtaButton('pr:merge', t('prMerge'));
+        }
+      }
     } else {
       tile = card.stage === 'merged' ? prTile('merged', 'merged') : prTile('closed', 'muted');
       meta = [prEsc(card.repo), prEsc(card.stage === 'merged' ? t('prStateMerged') : t('prStateClosed'))];
@@ -3037,8 +3172,9 @@ async function prCardTool(args, callId) {
       // 读不到这条 PR 的状态又没有旧快照时不凭空画一张「开放、非草稿」的卡:状态未知,让 Agent 稍后重试。
       if (!card.pr || card.pr.number !== number) return fail(t('prFetchFailed', { detail: status.err }));
       notes.push(t('prFetchFailed', { detail: status.err }));
-    } else {
-      card.pr = status.pr;
+    }
+    updatePrMergeStatus(card, status);
+    if (status.pr) {
       card.readyUncertain = false;
       // The PR was read: a 'ready' left by a mark-ready flow whose last save was lost is over (nothing runs concurrently).
       if (card.pending === 'ready') card.pending = null;
@@ -3338,6 +3474,7 @@ async function prCardAction(msg) {
     await sendPrCard(card, settings, null);
     return;
   }
+  if (action.startsWith('pr:merge')) return prMergeAction(card, settings, msg, action);
   // Card actions run one at a time, so a mark-ready flow cannot be running now: a 'ready' left in the record
   // means its final save was lost. Read the PR again to find the real state before acting.
   if (card.pending === 'ready' && card.pr) {

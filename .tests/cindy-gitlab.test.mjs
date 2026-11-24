@@ -8,8 +8,10 @@ const url = 'https://git.team.test/group/sub/repo/-/merge_requests/2';
 
 function runtime(draft = false, followModel = null) {
   let handler, card, result, call = 0;
-  const files = new Map(), schedules = new Map(), requests = [];
+  const files = new Map(), schedules = new Map(), requests = [], merges = [];
   const failures = new Set();
+  const viewer = { id: 19 };
+  let mergeOutcome = 'merged';
   let settingsReadable = true;
   const mr = { iid: 2, title: 'Fix rendering', state: 'opened', draft, target_branch: 'main', source_branch: 'fix' };
   let kv = { prCard: { autoFollow: true, autoRename: true, autoArchive: true, followModel } };
@@ -29,6 +31,17 @@ function runtime(draft = false, followModel = null) {
       request: async () => ({ ok: true, context: { locale: 'en' } }),
       async fetch(req) {
         requests.push(req.url);
+        if (req.url === 'https://git.team.test/api/v4/user') {
+          return { ok: true, status: 200, body: JSON.stringify(viewer) };
+        }
+        if (req.method === 'PUT' && req.url.endsWith('/merge')) {
+          assert.equal(req.url, 'https://git.team.test/api/v4/projects/group%2Fsub%2Frepo/merge_requests/2/merge');
+          merges.push(JSON.parse(req.body));
+          if (mergeOutcome === 'unknown') return { ok: false, message: 'connection lost' };
+          if (mergeOutcome === 'conflict') return { ok: true, status: 409, body: '{}' };
+          mr.state = 'merged';
+          return { ok: true, status: 200, body: JSON.stringify(mr) };
+        }
         if (req.method === 'POST' && req.url.endsWith('/merge_requests/2/notes')) {
           assert.deepEqual(JSON.parse(req.body), { body: '/ready' });
           mr.draft = false;
@@ -66,7 +79,9 @@ function runtime(draft = false, followModel = null) {
     },
   });
   return {
-    files, schedules, mr, requests, failures,
+    files, schedules, mr, viewer, requests, failures, merges,
+    setMergeOutcome(value) { mergeOutcome = value; },
+    lastCard: () => card,
     setSettingsReadable(value) { settingsReadable = value; },
     async show(args, session = 's1') {
       result = null;
@@ -75,11 +90,89 @@ function runtime(draft = false, followModel = null) {
       assert.equal(result?.ok, true, result?.message);
       return { ...result.result, html: card.html, anchor: card.callId };
     },
-    async click(callId, actionId) {
-      await handler({ type: 'event', name: 'card-action', sessionId: 's1', callId, actionId, userActionToken: 'click' });
+    async click(callId, actionId, extra = {}) {
+      await handler({ type: 'event', name: 'card-action', sessionId: 's1', callId, actionId, userActionToken: 'click', ...extra });
     },
   };
 }
+
+function mergeableMrRuntime() {
+  const workspace = runtime();
+  Object.assign(workspace.mr, { id: 82, sha: 'a'.repeat(40), detailed_merge_status: 'mergeable',
+    user: { can_merge: true }, squash: true });
+  return workspace;
+}
+
+test('the MR merge button appears only when GitLab explicitly permits the current account to merge', async () => {
+  const workspace = mergeableMrRuntime();
+  workspace.mr.user.can_merge = false;
+  const view = await workspace.show({ mr: url });
+  const button = /data-ghost-action="pr:merge"/;
+  assert.doesNotMatch(view.html, button);
+  workspace.mr.user.can_merge = true;
+  assert.match((await workspace.show({ card_id: view.card_id })).html, button);
+  for (const changes of [
+    { detailed_merge_status: 'not_approved' }, { detailed_merge_status: 'checking' },
+    { draft: true }, { has_conflicts: true }, { state: 'closed' }, { user: {} },
+  ]) {
+    const original = Object.fromEntries(Object.keys(changes).map((key) => [key, workspace.mr[key]]));
+    Object.assign(workspace.mr, changes);
+    assert.doesNotMatch((await workspace.show({ card_id: view.card_id })).html, button);
+    Object.assign(workspace.mr, original);
+  }
+  assert.equal(workspace.merges.length, 0);
+});
+
+test('the MR merge confirmation sends the checked head to the exact instance and ends follow-up', async () => {
+  const workspace = mergeableMrRuntime();
+  const view = await workspace.show({ mr: url, published: true });
+  assert.equal(workspace.schedules.size, 1);
+  await workspace.click(view.anchor, 'pr:merge');
+  const confirmation = workspace.lastCard().html;
+  assert.match(confirmation, /data-ghost-action="pr:merge-confirm:1" aria-label="Confirm merge"/);
+  assert.match(confirmation, /Merge commit aaaaaaaaaaaa into main\? · Squash and merge/);
+  assert.equal(workspace.merges.length, 0);
+  await workspace.click(view.anchor, 'pr:merge-confirm:1', { userActionToken: undefined });
+  assert.equal(workspace.merges.length, 0);
+  await Promise.all([workspace.click(view.anchor, 'pr:merge-confirm:1'), workspace.click(view.anchor, 'pr:merge-confirm:1')]);
+  assert.deepEqual(workspace.merges, [{ sha: workspace.mr.sha }]);
+  assert.equal(workspace.schedules.size, 0);
+  assert.match(workspace.lastCard().html, /data-ghost-task-archive-state="merged"/);
+  assert.doesNotMatch(workspace.lastCard().html, /data-ghost-action="pr:merge/);
+});
+
+test('the MR merge confirmation does not merge a different commit or an ineligible MR', async () => {
+  for (const change of [
+    (workspace) => { workspace.mr.sha = 'b'.repeat(40); },
+    (workspace) => { workspace.mr.detailed_merge_status = 'not_approved'; },
+    (workspace) => { workspace.mr.user.can_merge = false; },
+    (workspace) => { workspace.viewer.id = 21; },
+  ]) {
+    const workspace = mergeableMrRuntime();
+    const view = await workspace.show({ mr: url });
+    await workspace.click(view.anchor, 'pr:merge');
+    change(workspace);
+    await workspace.click(view.anchor, 'pr:merge-confirm:1');
+    assert.equal(workspace.merges.length, 0);
+    assert.match(workspace.lastCard().html, /Merge not sent/);
+  }
+});
+
+test('the MR merge card does not repeat writes when the result is unknown', async () => {
+  const workspace = mergeableMrRuntime();
+  const view = await workspace.show({ mr: url });
+  workspace.setMergeOutcome('unknown');
+  await workspace.click(view.anchor, 'pr:merge');
+  await workspace.click(view.anchor, 'pr:merge-confirm:1');
+  assert.match(workspace.lastCard().html, /Could not confirm the merge result/);
+  assert.doesNotMatch(workspace.lastCard().html, /data-ghost-action="pr:merge"/);
+  await workspace.click(view.anchor, 'pr:merge-recheck');
+  assert.equal(workspace.merges.length, 1);
+  workspace.mr.state = 'merged';
+  await workspace.click(view.anchor, 'pr:merge-recheck');
+  assert.match(workspace.lastCard().html, /data-ghost-task-archive-state="merged"/);
+  assert.equal(workspace.merges.length, 1);
+});
 
 test('published MR uses its host and original card, claims one follow-up, stops on verified merge', async () => {
   const r = runtime();
