@@ -378,6 +378,31 @@ test('163 搜索在服务端返回空时匹配发件人、主题和解码后的�
   assert.deepEqual(bodyFetches, [[2, 1]]);
 });
 
+test('163 搜索优先匹配纯文本，找不到时继续匹配 HTML 正文', async () => {
+  const source = Buffer.from('body');
+  const { deps } = createWorkerHarness({
+    async search(query) { return query.all ? [1, 2] : []; },
+    async fetchAll() {
+      return [1, 2].map((uid) => ({ uid, envelope: { subject: '普通邮件' }, size: source.length }));
+    },
+    async *fetch() {
+      yield { uid: 2, source };
+      yield { uid: 1, source };
+    },
+  });
+  const parts = [
+    {
+      text: '找到关键词',
+      get html() { assert.fail('纯文本已命中时无需检查 HTML'); },
+    },
+    { text: '普通正文', html: '<div>找到<b>关键词</b></div>' },
+  ];
+  deps.parseMessage = async () => parts.shift();
+  const result = await runSearch({ text: '关键词' }, deps);
+  assert.deepEqual(result.messages.map((message) => message.uid), [2, 1]);
+  assert.equal(result.search_scope.complete, true);
+});
+
 test('163 搜索保留服务端命中和无条件列表路径', async () => {
   const queries = [];
   const { deps } = createWorkerHarness({

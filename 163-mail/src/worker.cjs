@@ -320,10 +320,11 @@ async function searchRecent(client, criteria, folder, maxResults, deps) {
         continue;
       }
       scanned += 1;
-      const htmlText = typeof parsed.html === 'string'
-        ? parsed.html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
-        : '';
-      if (containsKeyword(parsed.text, keyword) || containsKeyword(htmlText, keyword)) matches.push(message);
+      if (
+        containsKeyword(parsed.text, keyword)
+        || (typeof parsed.html === 'string'
+          && containsKeyword(parsed.html.replace(/<[^<>]*>/g, ' ').replace(/\s+/g, ' '), keyword))
+      ) matches.push(message);
     }
   }
 
