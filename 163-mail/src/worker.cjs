@@ -313,18 +313,22 @@ async function searchRecent(client, criteria, folder, maxResults, deps) {
       const message = checkBody.get(uid);
       if (!message || !Buffer.isBuffer(source) || source.length !== message.size) continue;
       checkBody.delete(uid);
-      let parsed;
       try {
-        parsed = await deps.parseMessage(source);
+        const parsed = await deps.parseMessage(source);
+        if (containsKeyword(parsed.text, keyword)) {
+          matches.push(message);
+        } else if (typeof parsed.html === 'string' && parsed.html) {
+          const htmlSource = Buffer.from(
+            'Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n'
+            + Buffer.from(parsed.html).toString('base64'),
+          );
+          const converted = await deps.parseMessage(htmlSource);
+          if (containsKeyword(converted.text, keyword)) matches.push(message);
+        }
+        scanned += 1;
       } catch {
         continue;
       }
-      scanned += 1;
-      if (
-        containsKeyword(parsed.text, keyword)
-        || (typeof parsed.html === 'string'
-          && containsKeyword(parsed.html.replace(/<[^<>]*>/g, ' ').replace(/\s+/g, ' '), keyword))
-      ) matches.push(message);
     }
   }
 

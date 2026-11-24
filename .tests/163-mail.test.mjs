@@ -380,24 +380,38 @@ test('163 搜索在服务端返回空时匹配发件人、主题和解码后的�
 
 test('163 搜索优先匹配纯文本，找不到时继续匹配 HTML 正文', async () => {
   const source = Buffer.from('body');
+  const multipart = Buffer.from([
+    'Content-Type: multipart/alternative; boundary="test"',
+    '',
+    '--test',
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    '请查看 HTML',
+    '--test',
+    'Content-Type: text/html; charset=utf-8',
+    '',
+    '<div>关<b>键</b>&#35789;</div>',
+    '--test--',
+    '',
+  ].join('\r\n'));
   const { deps } = createWorkerHarness({
     async search(query) { return query.all ? [1, 2] : []; },
     async fetchAll() {
-      return [1, 2].map((uid) => ({ uid, envelope: { subject: '普通邮件' }, size: source.length }));
+      return [
+        { uid: 1, envelope: { subject: '普通邮件' }, size: multipart.length },
+        { uid: 2, envelope: { subject: '普通邮件' }, size: source.length },
+      ];
     },
     async *fetch() {
       yield { uid: 2, source };
-      yield { uid: 1, source };
+      yield { uid: 1, source: multipart };
     },
   });
-  const parts = [
-    {
-      text: '找到关键词',
-      get html() { assert.fail('纯文本已命中时无需检查 HTML'); },
-    },
-    { text: '普通正文', html: '<div>找到<b>关键词</b></div>' },
-  ];
-  deps.parseMessage = async () => parts.shift();
+  const { parseMessage } = worker.createRuntimeDeps();
+  deps.parseMessage = async (input) => input === source ? {
+    text: '找到关键词',
+    get html() { assert.fail('纯文本已命中时无需检查 HTML'); },
+  } : parseMessage(input);
   const result = await runSearch({ text: '关键词' }, deps);
   assert.deepEqual(result.messages.map((message) => message.uid), [2, 1]);
   assert.equal(result.search_scope.complete, true);
