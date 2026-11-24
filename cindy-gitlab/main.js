@@ -1573,6 +1573,463 @@ bc.onmessage = function (ev) {
   })();
 };
 
+/* ── 自动化事件(routineEvents) ─────────────────────────────────────────
+ *
+ * GitLab 没有推送给本机的通道,这里按自动化的订阅轮询:每个周期先问宿主
+ * 「哪些自动化在等我的哪些事件」(routine-request subscriptions,只有事件类型与
+ * 「只看」条件),只去盯被选中的对象——
+ * - 条件里有 project + iid:只读这一个 MR / Issue(含流水线状态);
+ * - 只有 project:读这个项目里有更新的 MR / Issue;
+ * - 都没有:读与连接账号相关的 MR / Issue(我创建的、指派给我的、请我审阅的)。
+ * 第一次看到的对象只记基线不发事件;之后按状态变化、新提交、新评论等发布事件。
+ * 匹配和要不要处理仍由宿主与自动化决定,这里不替用户丢弃(包括自己发的评论,
+ * 用 fromSelf 标出)。电脑休眠或插件停止期间的变化不补发。
+ * 旧宿主不认识 subscriptions 时整段不运行。
+ */
+
+var EVENTS_POLL_MS = 60 * 1000;
+/** 没有订阅时也每分钟问一次:用户刚建好的自动化最多等一分钟就开始监听。 */
+var EVENTS_IDLE_POLL_MS = 60 * 1000;
+/** 每个周期最多发布多少条(宿主单插件 60 次/分钟),剩下的留到下个周期。 */
+var EVENTS_PUBLISH_PER_CYCLE = 40;
+var EVENTS_MAX_TARGETS = 50;
+var EVENTS_MAX_CHANGED_PER_TARGET = 20;
+var EVENTS_SNAPSHOT_LIMIT = 2000;
+/** 流水线只在出结果时发事件(排队、运行中不发,避免一次流水线叫醒多轮)。 */
+var EVENTS_PIPELINE_DONE = { success: 1, failed: 1, canceled: 1, skipped: 1 };
+var EVENTS_PIPELINE_LOOKUPS = 10;
+
+var eventsState = {
+  stopped: false,
+  timer: null,
+  running: false,
+  status: null,
+  snapshots: {},
+  snapshotKeys: [],
+  cursors: {},
+  pending: [],
+  users: {},
+};
+
+function eventsTimeMs(iso) {
+  var t = iso ? Date.parse(iso) : NaN;
+  return isFinite(t) ? t : 0;
+}
+
+function eventsTextHash(text) {
+  var s = typeof text === 'string' ? text : '';
+  var h = 0;
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return s.length + ':' + h;
+}
+
+function eventsRemember(key, snap) {
+  if (!Object.prototype.hasOwnProperty.call(eventsState.snapshots, key)) {
+    eventsState.snapshotKeys.push(key);
+    if (eventsState.snapshotKeys.length > EVENTS_SNAPSHOT_LIMIT) {
+      delete eventsState.snapshots[eventsState.snapshotKeys.shift()];
+    }
+  }
+  eventsState.snapshots[key] = snap;
+}
+
+/** 订阅 → 要盯的对象。只认 equals 条件里的 host / project / iid / kind。 */
+function eventsTargetsFrom(subscriptions) {
+  var byKey = {};
+  var list = [];
+  for (var i = 0; i < subscriptions.length; i++) {
+    var sub = subscriptions[i] || {};
+    var eq = {};
+    var filters = Array.isArray(sub.filters) ? sub.filters : [];
+    for (var j = 0; j < filters.length; j++) {
+      var f = filters[j];
+      if (f && f.operator === 'equals' && (f.field === 'host' || f.field === 'project' || f.field === 'iid' || f.field === 'kind')) {
+        eq[f.field] = String(f.value).trim().toLowerCase();
+      }
+    }
+    var events = Array.isArray(sub.events) ? sub.events : [];
+    var pipelines = !events.length || events.indexOf('merge_request.pipeline') >= 0;
+    var kinds = {};
+    if (eq.kind === 'mr' || eq.kind === 'issue') kinds[eq.kind] = true;
+    else if (events.length) {
+      for (var k = 0; k < events.length; k++) {
+        if (String(events[k]).indexOf('merge_request.') === 0) kinds.mr = true;
+        else if (String(events[k]).indexOf('issue.') === 0) kinds.issue = true;
+      }
+    } else {
+      kinds.mr = true;
+      kinds.issue = true;
+    }
+    if (!kinds.mr && !kinds.issue) continue;
+    var iid = eq.project && /^[1-9][0-9]{0,9}$/.test(eq.iid || '') ? eq.iid : '';
+    var key = (eq.host || '*') + '|' + (eq.project || '@me') + '|' + iid;
+    var target = byKey[key];
+    if (!target) {
+      if (list.length >= EVENTS_MAX_TARGETS) continue;
+      target = { key: key, host: eq.host || '', project: eq.project || '', iid: iid, kinds: {}, pipelines: false };
+      byKey[key] = target;
+      list.push(target);
+    }
+    if (kinds.mr) target.kinds.mr = true;
+    if (kinds.issue) target.kinds.issue = true;
+    if (kinds.mr && pipelines) target.pipelines = true;
+  }
+  return list;
+}
+
+async function eventsConnections() {
+  var list = await (await fetch('/connections')).json();
+  for (var i = 0; Array.isArray(list) && i < list.length; i++) {
+    if (list[i] && list[i].key === CONNECTION_KEY && Array.isArray(list[i].connections)) return list[i].connections;
+  }
+  return [];
+}
+
+/** 指定 host 用对应连接;只给项目时用默认(或唯一)连接;都没有时所有连接。 */
+function eventsConnectionsFor(target, conns) {
+  if (target.host) return conns.filter(function (c) { return c.host === target.host; });
+  if (!target.project) return conns;
+  for (var i = 0; i < conns.length; i++) if (conns[i].isDefault) return [conns[i]];
+  return conns.length === 1 ? [conns[0]] : [];
+}
+
+async function eventsMe(conn) {
+  if (eventsState.users[conn.id]) return eventsState.users[conn.id];
+  var r = await api({ url: 'https://' + conn.host + '/api/v4/user' });
+  if (r.err || !r.data || !r.data.username) return null;
+  eventsState.users[conn.id] = { id: r.data.id, username: String(r.data.username) };
+  return eventsState.users[conn.id];
+}
+
+function eventsQueue(event) {
+  for (var i = 0; i < eventsState.pending.length; i++) if (eventsState.pending[i].id === event.id) return;
+  if (eventsState.pending.length >= 500) eventsState.pending.shift();
+  eventsState.pending.push(event);
+}
+
+function eventsBase(conn, kind, item, me) {
+  var project = String((item.references && item.references.full ? item.references.full.replace(/[!#][0-9]+$/, '') : '') ||
+    (item.web_url ? item.web_url.replace(/^https?:\/\/[^/]+\//, '').replace(/\/-\/.*$/, '') : '')).toLowerCase();
+  var data = {
+    host: conn.host,
+    project: project,
+    iid: Number(item.iid),
+    kind: kind,
+    state: String(item.state || ''),
+    url: String(item.web_url || ''),
+  };
+  if (item.author && item.author.username) {
+    data.author = String(item.author.username);
+    if (me) data.authorIsSelf = data.author === me.username;
+  }
+  if (Array.isArray(item.labels) && item.labels.length) data.labels = item.labels.join(',').slice(0, 500);
+  if (kind === 'mr') {
+    if (item.source_branch) data.sourceBranch = String(item.source_branch);
+    if (item.target_branch) data.targetBranch = String(item.target_branch);
+    if (item.sha) data.sha = String(item.sha);
+    data.draft = Boolean(item.draft || item.work_in_progress);
+  }
+  return data;
+}
+
+function eventsRef(data) {
+  return data.project + (data.kind === 'mr' ? '!' : '#') + data.iid;
+}
+
+function eventsPush(type, idSuffix, verb, item, data, extra, occurredAt) {
+  var payload = {};
+  for (var k in data) payload[k] = data[k];
+  for (var e in (extra || {})) payload[e] = extra[e];
+  var title = String(item.title || '').slice(0, 120);
+  eventsQueue({
+    id: data.host + '/' + eventsRef(data) + ':' + idSuffix,
+    type: (data.kind === 'mr' ? 'merge_request.' : 'issue.') + type,
+    occurredAt: occurredAt || Date.now(),
+    subject: (eventsRef(data) + ' ' + verb + (title ? ':' + title : '')).slice(0, 200),
+    data: payload,
+  });
+}
+
+/** 一个对象的变化 → 事件(不含评论)。prev 为空时只按时间戳判断「新建 / 合并 / 关闭」。 */
+function eventsDiff(conn, kind, item, me, prev, since) {
+  var data = eventsBase(conn, kind, item, me);
+  var updatedAt = eventsTimeMs(item.updated_at);
+  var snap = {
+    state: data.state,
+    updatedAt: String(item.updated_at || ''),
+    sha: data.sha || '',
+    title: String(item.title || ''),
+    desc: eventsTextHash(item.description),
+    labels: data.labels || '',
+    draft: Boolean(data.draft),
+    notes: Number(item.user_notes_count) || 0,
+    pipeline: item.head_pipeline ? String(item.head_pipeline.id) + ':' + String(item.head_pipeline.status) : (prev ? prev.pipeline : ''),
+  };
+  var actor = function (who) {
+    var extra = {};
+    if (who && who.username) {
+      extra.actor = String(who.username);
+      if (me) extra.fromSelf = extra.actor === me.username;
+    }
+    return extra;
+  };
+  if (!prev) {
+    if (eventsTimeMs(item.created_at) >= since) eventsPush('opened', 'opened', '新建', item, data, actor(item.author), eventsTimeMs(item.created_at));
+    if (data.state === 'merged' && eventsTimeMs(item.merged_at) >= since) eventsPush('merged', 'merged', '已合并', item, data, actor(item.merged_by || item.merge_user), eventsTimeMs(item.merged_at));
+    else if (data.state === 'closed' && eventsTimeMs(item.closed_at) >= since) eventsPush('closed', 'closed:' + item.closed_at, '已关闭', item, data, actor(item.closed_by), eventsTimeMs(item.closed_at));
+    return snap;
+  }
+  if (prev.state !== data.state) {
+    if (data.state === 'merged') eventsPush('merged', 'merged', '已合并', item, data, actor(item.merged_by || item.merge_user), eventsTimeMs(item.merged_at) || updatedAt);
+    else if (data.state === 'closed') eventsPush('closed', 'closed:' + (item.closed_at || item.updated_at), '已关闭', item, data, actor(item.closed_by), eventsTimeMs(item.closed_at) || updatedAt);
+    else if (data.state === 'opened' && prev.state === 'closed') eventsPush('reopened', 'reopened:' + item.updated_at, '重新打开', item, data, {}, updatedAt);
+  } else if (prev.sha !== snap.sha || prev.title !== snap.title || prev.desc !== snap.desc || prev.labels !== snap.labels || prev.draft !== snap.draft) {
+    var changes = [];
+    if (prev.sha !== snap.sha) changes.push('commits');
+    if (prev.title !== snap.title) changes.push('title');
+    if (prev.desc !== snap.desc) changes.push('description');
+    if (prev.labels !== snap.labels) changes.push('labels');
+    if (prev.draft !== snap.draft) changes.push('draft');
+    eventsPush('updated', 'updated:' + item.updated_at, prev.sha !== snap.sha ? '有新提交' : '有更新', item, data, { changes: changes.join(',') }, updatedAt);
+  }
+  if (kind === 'mr' && snap.pipeline && prev.pipeline && snap.pipeline !== prev.pipeline && item.head_pipeline &&
+    EVENTS_PIPELINE_DONE[String(item.head_pipeline.status)]) {
+    eventsPush('pipeline', 'pipeline:' + snap.pipeline, '流水线' + String(item.head_pipeline.status), item, data, {
+      pipelineId: Number(item.head_pipeline.id),
+      pipelineStatus: String(item.head_pipeline.status),
+    }, updatedAt);
+  }
+  return snap;
+}
+
+/** 新评论(以及 MR 的「批准」系统消息)。since 之前的评论不发。 */
+async function eventsNotes(conn, kind, item, me, since) {
+  var data = eventsBase(conn, kind, item, me);
+  var seg = kind === 'mr' ? 'merge_requests' : 'issues';
+  var r = await api({
+    url: 'https://' + conn.host + '/api/v4/projects/' + encodeURIComponent(item.project_id) + '/' + seg + '/' + item.iid +
+      '/notes' + qs({ sort: 'desc', order_by: 'created_at', per_page: 20 }),
+  });
+  if (r.err || !Array.isArray(r.data)) return;
+  for (var i = r.data.length - 1; i >= 0; i--) {
+    var note = r.data[i];
+    var at = eventsTimeMs(note && note.created_at);
+    if (!note || at <= since) continue;
+    var author = note.author && note.author.username ? String(note.author.username) : '';
+    var extra = { noteId: Number(note.id), actor: author };
+    if (me) extra.fromSelf = author === me.username;
+    if (note.system) {
+      if (kind === 'mr' && /^approved this merge request/i.test(String(note.body || ''))) {
+        eventsQueue({
+          id: conn.host + ':note:' + note.id,
+          type: 'merge_request.approved',
+          occurredAt: at,
+          subject: (eventsRef(data) + ' 已批准(' + author + ')').slice(0, 200),
+          data: Object.assign({}, data, extra),
+        });
+      }
+      continue;
+    }
+    extra.body = String(note.body || '').slice(0, 1000);
+    eventsQueue({
+      id: conn.host + ':note:' + note.id,
+      type: (kind === 'mr' ? 'merge_request.' : 'issue.') + 'comment',
+      occurredAt: at,
+      subject: (eventsRef(data) + ' 新评论(' + author + '):' + String(note.body || '').replace(/\s+/g, ' ')).slice(0, 200),
+      data: Object.assign({}, data, extra),
+    });
+  }
+}
+
+async function eventsHandle(conn, kind, item, me, since) {
+  var key = conn.host + '|' + kind + '|' + item.id;
+  var prev = eventsState.snapshots[key] || null;
+  if (prev && prev.updatedAt === String(item.updated_at || '') &&
+    !(item.head_pipeline && prev.pipeline !== String(item.head_pipeline.id) + ':' + String(item.head_pipeline.status))) {
+    return;
+  }
+  var snap = eventsDiff(conn, kind, item, me, prev, since);
+  // A new comment bumps updated_at; read the latest notes only when it moved.
+  if (prev ? snap.updatedAt !== prev.updatedAt : eventsTimeMs(item.updated_at) >= since) {
+    await eventsNotes(conn, kind, item, me, prev ? eventsTimeMs(prev.updatedAt) : since);
+  }
+  eventsRemember(key, snap);
+}
+
+async function eventsList(url) {
+  var r = await api({ url: url });
+  if (r.err) throw new Error(r.err);
+  return Array.isArray(r.data) ? r.data : [];
+}
+
+/** 一个对象(project + iid)或一组对象(项目 / 与我相关)。返回本轮是否出错。 */
+async function eventsPollTarget(target, conn, me) {
+  var base = 'https://' + conn.host + '/api/v4';
+  var kinds = [];
+  if (target.kinds.mr) kinds.push('mr');
+  if (target.kinds.issue) kinds.push('issue');
+  for (var i = 0; i < kinds.length; i++) {
+    var kind = kinds[i];
+    var seg = kind === 'mr' ? 'merge_requests' : 'issues';
+    var cursorKey = conn.host + '|' + target.key + '|' + kind;
+    var firstRun = !Object.prototype.hasOwnProperty.call(eventsState.cursors, cursorKey);
+    var since = firstRun ? Date.now() : eventsState.cursors[cursorKey];
+    if (target.iid) {
+      var one = await api({ url: base + '/projects/' + encodeURIComponent(target.project) + '/' + seg + '/' + target.iid });
+      if (one.err) {
+        // 「指定 MR」也可能其实是 Issue(或反过来):编号不存在不算故障。
+        if (/HTTP 404|不存在/.test(one.err)) { eventsState.cursors[cursorKey] = since; continue; }
+        throw new Error(one.err);
+      }
+      if (firstRun) eventsRemember(conn.host + '|' + kind + '|' + one.data.id, eventsDiff(conn, kind, one.data, me, null, Infinity));
+      else await eventsHandle(conn, kind, one.data, me, since);
+      eventsState.cursors[cursorKey] = Date.now();
+      continue;
+    }
+    var after = new Date((firstRun ? Date.now() : since) - 2 * 60 * 1000).toISOString();
+    var common = { updated_after: after, order_by: 'updated_at', sort: 'asc', per_page: 50 };
+    var items = [];
+    if (target.project) {
+      items = await eventsList(base + '/projects/' + encodeURIComponent(target.project) + '/' + seg + qs(Object.assign({ scope: 'all' }, common)));
+    } else {
+      var scopes = [qs(Object.assign({ scope: 'created_by_me' }, common)), qs(Object.assign({ scope: 'assigned_to_me' }, common))];
+      if (kind === 'mr' && me) scopes.push(qs(Object.assign({ scope: 'all', reviewer_username: me.username }, common)));
+      var seen = {};
+      for (var s = 0; s < scopes.length; s++) {
+        var page = await eventsList(base + '/' + seg + scopes[s]);
+        for (var p = 0; p < page.length; p++) {
+          if (page[p] && !seen[page[p].id]) { seen[page[p].id] = 1; items.push(page[p]); }
+        }
+      }
+    }
+    var handled = 0;
+    for (var n = 0; n < items.length && handled < EVENTS_MAX_CHANGED_PER_TARGET; n++) {
+      var item = items[n];
+      if (!item || item.id === undefined) continue;
+      if (firstRun) {
+        eventsRemember(conn.host + '|' + kind + '|' + item.id, eventsDiff(conn, kind, item, me, null, Infinity));
+        continue;
+      }
+      handled++;
+      await eventsHandle(conn, kind, item, me, since);
+    }
+    eventsState.cursors[cursorKey] = Date.now();
+  }
+}
+
+/** 整个项目:读有更新的流水线,出结果的找到对应 MR 后发「流水线」事件。 */
+async function eventsPollPipelines(target, conn, me) {
+  var base = 'https://' + conn.host + '/api/v4/projects/' + encodeURIComponent(target.project);
+  var cursorKey = conn.host + '|' + target.key + '|pipelines';
+  var firstRun = !Object.prototype.hasOwnProperty.call(eventsState.cursors, cursorKey);
+  var since = firstRun ? Date.now() : eventsState.cursors[cursorKey];
+  var pipelines = await eventsList(base + '/pipelines' + qs({
+    updated_after: new Date(since - 2 * 60 * 1000).toISOString(), order_by: 'updated_at', sort: 'asc', per_page: 50,
+  }));
+  var lookups = 0;
+  for (var i = 0; i < pipelines.length; i++) {
+    var p = pipelines[i];
+    if (!p || p.id === undefined) continue;
+    var key = conn.host + '|pipeline|' + p.id;
+    var prev = eventsState.snapshots[key];
+    var status = String(p.status || '');
+    eventsRemember(key, { status: status });
+    if (firstRun || (prev && prev.status === status) || !EVENTS_PIPELINE_DONE[status]) continue;
+    if (!prev && eventsTimeMs(p.updated_at) < since) continue;
+    if (lookups >= EVENTS_PIPELINE_LOOKUPS) break;
+    lookups++;
+    var m = /^refs\/merge-requests\/([0-9]+)\//.exec(String(p.ref || ''));
+    var item = null;
+    if (m) {
+      var one = await api({ url: base + '/merge_requests/' + m[1] });
+      item = one.err ? null : one.data;
+    } else if (p.ref) {
+      var found = await eventsList(base + '/merge_requests' + qs({ source_branch: p.ref, state: 'opened', per_page: 1 }));
+      item = found[0] || null;
+    }
+    if (!item || item.iid === undefined) continue;
+    var data = eventsBase(conn, 'mr', item, me);
+    eventsPush('pipeline', 'pipeline:' + p.id + ':' + status, '流水线' + status, item, data, {
+      pipelineId: Number(p.id),
+      pipelineStatus: status,
+    }, eventsTimeMs(p.updated_at) || Date.now());
+  }
+  eventsState.cursors[cursorKey] = Date.now();
+}
+
+async function eventsReport(status) {
+  if (eventsState.status === status) return;
+  var r = await cindy.send({ type: 'routine-request', action: 'status', status: status });
+  if (r && r.ok) eventsState.status = status;
+}
+
+async function eventsFlush() {
+  var sent = 0;
+  while (eventsState.pending.length && sent < EVENTS_PUBLISH_PER_CYCLE) {
+    var event = eventsState.pending[0];
+    var r = await cindy.send({ type: 'routine-request', action: 'publish', event: event });
+    if (!r || !r.ok) return; // 保留投递 ID,下个周期重试
+    eventsState.pending.shift();
+    sent++;
+  }
+}
+
+/** 一个轮询周期;返回下次间隔,null 表示宿主不支持订阅、停止轮询。 */
+async function eventsCycle() {
+  var res = await cindy.send({ type: 'routine-request', action: 'subscriptions' });
+  if (!res || !res.ok) {
+    if (res && /Unknown routine operation|not declared/.test(String(res.message || ''))) return null;
+    return EVENTS_POLL_MS;
+  }
+  var targets = eventsTargetsFrom(Array.isArray(res.subscriptions) ? res.subscriptions : []);
+  if (!targets.length) {
+    await eventsFlush();
+    return EVENTS_IDLE_POLL_MS;
+  }
+  var conns = await eventsConnections();
+  if (!conns.length) {
+    await eventsReport('disconnected');
+    return EVENTS_POLL_MS;
+  }
+  var failed = 0;
+  var attempted = 0;
+  for (var i = 0; i < targets.length; i++) {
+    var picked = eventsConnectionsFor(targets[i], conns);
+    for (var j = 0; j < picked.length; j++) {
+      attempted++;
+      try {
+        var me = await eventsMe(picked[j]);
+        await eventsPollTarget(targets[i], picked[j], me);
+        if (targets[i].pipelines && targets[i].project && !targets[i].iid) await eventsPollPipelines(targets[i], picked[j], me);
+      } catch (e) {
+        failed++;
+      }
+    }
+  }
+  await eventsReport(attempted === 0 ? 'disconnected' : failed === attempted ? 'error' : 'listening');
+  await eventsFlush();
+  return EVENTS_POLL_MS;
+}
+
+function eventsSchedule(delay) {
+  if (eventsState.stopped) return;
+  eventsState.timer = setTimeout(function () {
+    if (eventsState.running) return eventsSchedule(EVENTS_POLL_MS);
+    eventsState.running = true;
+    eventsCycle().then(function (next) {
+      eventsState.running = false;
+      if (next === null) { eventsState.stopped = true; return; }
+      eventsSchedule(next);
+    }, function () {
+      eventsState.running = false;
+      eventsSchedule(EVENTS_POLL_MS);
+    });
+  }, delay);
+}
+
+if (typeof cindy !== 'undefined' && cindy && typeof cindy.send === 'function' && typeof setTimeout === 'function') eventsSchedule(3000);
+
+
 /* ── 派单 ──────────────────────────────────────────────────────────── */
 
 cindy.onHostMessage(async function (msg) {

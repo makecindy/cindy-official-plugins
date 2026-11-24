@@ -4,7 +4,7 @@
   "name": "GitLab",
   "description": "内置的 GitLab 服务插件:支持自建与多实例 GitLab——在主界面侧边栏「插件」→「GitLab」详情页添加实例地址与 Personal Access Token(api scope)即可读写 issue / MR / code review / 仓库 / CI / release / 搜索等 107 个操作(两段式目录)。token 由主机加密保管,只注入对应实例的 API 请求。",
   "whenToUse": "只管 GitLab 实例(gitlab.com/公司/自建),github.com 的链接不归我、找 GitHub。需要查/建/改 GitLab issue 或 MR,提交/回复/发布 code review,合并或 rebase MR,查仓库/分支/commit/文件内容,查 CI pipeline 与 job 日志,管理 release / tag / 分支,搜索全实例内容,或下载仓库归档时找我(需先在主界面侧边栏「插件」→「GitLab」详情页添加实例与 token)。",
-  "version": "1.2.3",
+  "version": "1.3.0",
   "minCindyVersion": "0.1.64",
   "locales": {
     "en": "locales/en.json",
@@ -30,6 +30,75 @@
           "format": "{value}"
         },
         "maxConnections": 8
+      }
+    ]
+  },
+  "routineEvents": {
+    "events": [
+      {
+        "type": "merge_request.opened",
+        "name": "MR 新建",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft", "actor", "fromSelf"]
+      },
+      {
+        "type": "merge_request.updated",
+        "name": "MR 有新提交或更新",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft", "changes"]
+      },
+      {
+        "type": "merge_request.comment",
+        "name": "MR 新评论",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft", "actor", "fromSelf", "noteId", "body"]
+      },
+      {
+        "type": "merge_request.approved",
+        "name": "MR 被批准",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft", "actor", "fromSelf", "noteId"]
+      },
+      {
+        "type": "merge_request.pipeline",
+        "name": "MR 流水线出结果",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft", "pipelineId", "pipelineStatus"]
+      },
+      {
+        "type": "merge_request.merged",
+        "name": "MR 已合并",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft", "actor", "fromSelf"]
+      },
+      {
+        "type": "merge_request.closed",
+        "name": "MR 已关闭",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft", "actor", "fromSelf"]
+      },
+      {
+        "type": "merge_request.reopened",
+        "name": "MR 重新打开",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft"]
+      },
+      {
+        "type": "issue.opened",
+        "name": "Issue 新建",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "actor", "fromSelf"]
+      },
+      {
+        "type": "issue.updated",
+        "name": "Issue 有更新",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "changes"]
+      },
+      {
+        "type": "issue.comment",
+        "name": "Issue 新评论",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "actor", "fromSelf", "noteId", "body"]
+      },
+      {
+        "type": "issue.closed",
+        "name": "Issue 已关闭",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "actor", "fromSelf"]
+      },
+      {
+        "type": "issue.reopened",
+        "name": "Issue 重新打开",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels"]
       }
     ]
   },
@@ -70,7 +139,9 @@
             "description": "可选:把完整结果 JSON 写进会话工作目录的该相对路径(如 tmp/gl-result.json),只返回文件路径——结果大、要交给脚本处理时用。结果超 50KB 时即使不传也会自动落盘返回路径"
           }
         },
-        "required": ["name"]
+        "required": [
+          "name"
+        ]
       }
     }
   ]
