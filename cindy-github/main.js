@@ -3406,9 +3406,6 @@ async function prMergeAction(card, settings, msg, action) {
   } else {
     return;
   }
-  if (card.stage !== 'open' && hasCardScheduler() && (card.scheduleId || card.scheduleAction)) {
-    await syncCardSchedule(card, settings, false);
-  }
   if (await savePrCardRetry(card) || attempted) await sendPrCard(card, settings, null);
 }
 

@@ -86,7 +86,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.36');
+  assert.equal(manifest.version, '1.5.37');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -740,7 +740,7 @@ function createPrRuntime(options = {}) {
   };
 }
 
-function mergeablePrRuntime() {
+function mergeablePrRuntime(options = {}) {
   const pr = {
     id: 'PR_node', number: 42, title: 'Mergeable PR', url: 'https://github.com/octo/repo/pull/42',
     state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN',
@@ -753,6 +753,7 @@ function mergeablePrRuntime() {
   const writes = [];
   let outcome = 'merged';
   const runtime = createPrRuntime({
+    ...options,
     github(request) {
       if (request.method === 'PUT') {
         assert.equal(request.url, 'https://api.github.com/repos/octo/repo/pulls/42/merge');
@@ -1899,6 +1900,35 @@ function followScheduler(options = {}) {
   };
   return { hostApi, calls, rows };
 }
+
+test('a merge from the PR card preserves the existing follow-up for the terminal round', async () => {
+  for (const outcome of ['merged', 'unknown']) {
+    const { hostApi, calls, rows } = followScheduler();
+    const runtime = mergeablePrRuntime({ hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await runtime.tool({ repo: 'octo/repo', pr: 42, published: true });
+    const cardId = opened.reply.result.card_id;
+    assert.equal(opened.reply.result.follow_state, 'active');
+
+    runtime.setOutcome(outcome);
+    await runtime.click(cardId, 'pr:merge');
+    await runtime.click(cardId, 'pr:merge-confirm:1');
+    if (outcome === 'unknown') {
+      runtime.pr.state = 'MERGED';
+      runtime.pr.merged = true;
+      await runtime.click(cardId, 'pr:merge-recheck');
+    }
+    assert.match(runtime.lastCard(cardId).html, /data-ghost-task-archive-state="merged"/);
+    assert.equal(rows.get('sch-1').status, 'active');
+    assert.equal(calls.includes('schedule_delete'), false);
+    assert.equal(calls.filter(call => call === 'schedule_create').length, 1);
+    assert.equal((await runtime.tool({ card_id: cardId })).reply.result.stage, 'merged');
+    assert.equal(rows.get('sch-1').status, 'active');
+
+    rows.delete('sch-1');
+    const finished = await runtime.tool({ card_id: cardId, following: false });
+    assert.equal(finished.reply.result.follow_state, 'stopped');
+  }
+});
 
 test('publication starts exactly one verified follow-up without a model turn and stop removes it', async () => {
   const { hostApi, calls, rows } = followScheduler({ loseCreateReceipt: true });
