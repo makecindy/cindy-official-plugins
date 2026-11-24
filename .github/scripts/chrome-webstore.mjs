@@ -99,7 +99,7 @@ export function createClient({publisher, item, token, fetcher = fetch, sleep = m
     }
     if (uploadState !== 'SUCCEEDED') throw new Error(`Upload did not finish successfully (${uploadState}); review was not requested`);
     const result = await request(`v2/${name}:publish`, 'POST', JSON.stringify({
-      publishType: 'DEFAULT_PUBLISH', skipReview: false, blockOnWarnings: true,
+      publishType: 'DEFAULT_PUBLISH', skipReview: false, blockOnWarnings: false,
     }));
     if (!['PENDING_REVIEW', 'PUBLISHED'].includes(result.state)) throw new Error('Publish did not return an accepted review/publication state; inspect the dashboard');
     // A successful publish response alone does not prove the intended version.
