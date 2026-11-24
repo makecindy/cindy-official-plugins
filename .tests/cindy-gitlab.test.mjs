@@ -6,10 +6,10 @@ import { runInNewContext } from 'node:vm';
 const source = readFileSync(new URL('../cindy-gitlab/main.js', import.meta.url), 'utf8');
 const url = 'https://git.team.test/group/sub/repo/-/merge_requests/2';
 
-function runtime(draft = false, followModel = null) {
+function runtime(draft = false, followModel = null, nativeScheduler = true) {
   let handler, card, result, call = 0;
   const files = new Map(), schedules = new Map(), requests = [], merges = [];
-  const failures = new Set();
+  const failures = new Set(), handoffs = [];
   const viewer = { id: 19 };
   let mergeOutcome = 'merged';
   let settingsReadable = true;
@@ -63,7 +63,8 @@ function runtime(draft = false, followModel = null) {
         }
         return { ok: true };
       },
-      host: { async call(server, tool, args) {
+      agent: { async run(message) { handoffs.push(message); return { ok: true }; } },
+      host: nativeScheduler ? { async call(server, tool, args) {
         assert.equal(server, 'cindy_scheduler');
         if (failures.delete(tool)) throw new Error(tool + ' unavailable');
         let data;
@@ -75,11 +76,11 @@ function runtime(draft = false, followModel = null) {
         else if (tool === 'schedule_delete') { schedules.delete(args.id); data = true; }
         else throw new Error(tool);
         return { content: [{ type: 'text', text: JSON.stringify({ ok: true, data }) }] };
-      } },
+      } } : undefined,
     },
   });
   return {
-    files, schedules, mr, viewer, requests, failures, merges,
+    files, schedules, mr, viewer, requests, failures, merges, handoffs,
     setMergeOutcome(value) { mergeOutcome = value; },
     lastCard: () => card,
     setSettingsReadable(value) { settingsReadable = value; },
@@ -158,6 +159,18 @@ test('the MR merge confirmation does not merge a different commit or an ineligib
   }
 });
 
+test('confirming a merge after the MR becomes a draft stops its follow-up without merging', async () => {
+  const workspace = mergeableMrRuntime();
+  const view = await workspace.show({ mr: url, published: true });
+  assert.equal(workspace.schedules.size, 1);
+  await workspace.click(view.anchor, 'pr:merge');
+  workspace.mr.draft = true;
+  await workspace.click(view.anchor, 'pr:merge-confirm:1');
+  assert.equal(workspace.merges.length, 0);
+  assert.equal(workspace.schedules.size, 0);
+  assert.match(workspace.lastCard().html, /data-ghost-action="pr:ready"/);
+});
+
 test('the MR merge card does not repeat writes when the result is unknown', async () => {
   const workspace = mergeableMrRuntime();
   const view = await workspace.show({ mr: url });
@@ -219,6 +232,20 @@ test('marking a published draft ready starts one schedule with the model configu
   assert.equal(r.schedules.get('schedule')?.effort, 'high');
   assert.equal(r.schedules.get('schedule')?.targetSessionId, 's1');
 });
+
+for (const nativeScheduler of [false, true]) {
+  test('mark ready keeps the publish-only choice and accepts manual follow (scheduler: ' + nativeScheduler + ')', async () => {
+    const r = runtime(true, null, nativeScheduler);
+    const view = await r.show({ mr: url, published: true, following: false });
+    await r.click(view.anchor, 'pr:ready');
+    assert.equal(r.mr.draft, false);
+    assert.equal(r.schedules.size, 0);
+    assert.equal(r.handoffs.length, 0);
+    await r.click(view.anchor, 'pr:follow');
+    assert.equal(r.schedules.size, nativeScheduler ? 1 : 0);
+    assert.equal(r.handoffs.length, nativeScheduler ? 0 : 1);
+  });
+}
 
 test('a follow click rechecks a previously opened MR that has since become a draft', async () => {
   const r = runtime();

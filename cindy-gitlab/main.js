@@ -2752,8 +2752,25 @@ function prHasSettings(card) {
 }
 
 
+function prCanFollow(card) {
+  return card.stage === 'open' && !!card.pr && !card.pr.draft;
+}
+
+function prCanStartFollow(card) {
+  return prCanFollow(card) && card.pending !== 'stop' && !card.following && !card.scheduleId;
+}
+
+function prShouldAutoFollow(card, settings) {
+  return settings.autoFollow && !card.skipPublishedFollow && prCanStartFollow(card);
+}
+
+function prShouldStopSchedule(card, verified) {
+  return hasCardScheduler() && (card.scheduleAction === 'stop' ||
+    (verified && !prCanFollow(card) && (card.scheduleAction === 'start' || !!card.scheduleId)));
+}
+
 function prMayMerge(card) {
-  return card.stage === 'open' && card.pr && !card.pr.draft && card.pr.merge && !card.pending && !card.mergeUncertain;
+  return prCanFollow(card) && card.pr.merge && !card.pending && !card.mergeUncertain;
 }
 
 function samePrMerge(left, right) {
@@ -2771,12 +2788,14 @@ async function readPrMergeStatus(card) {
   var latest = await fetchPrStatus(card.repo, card.pr.number).catch(function () { return {}; });
   updatePrMergeStatus(card, latest);
   if (latest.pr) card.stage = latest.pr.state;
+  return !!latest.pr;
 }
 
 async function prMergeAction(card, settings, msg, action) {
   if (!msg.userActionToken || !card.pr || card.stage !== 'open') return;
   var confirmation = card.mergeConfirmation;
   var attempted = false;
+  var verified = false;
   if (action === 'pr:merge' && prMayMerge(card) && !confirmation) {
     card.mergeRevision = (card.mergeRevision || 0) + 1;
     card.mergeConfirmation = { revision: card.mergeRevision, target: card.pr.merge };
@@ -2785,7 +2804,7 @@ async function prMergeAction(card, settings, msg, action) {
     card.mergeConfirmation = null;
   } else if (confirmation && prMayMerge(card) && action === 'pr:merge-confirm:' + confirmation.revision) {
     card.mergeConfirmation = null;
-    await readPrMergeStatus(card);
+    verified = await readPrMergeStatus(card);
     if (!prMayMerge(card) || !samePrMerge(confirmation.target, card.pr.merge)) {
       if (card.stage === 'open') card.note = t('prMergeChanged');
     } else {
@@ -2797,6 +2816,7 @@ async function prMergeAction(card, settings, msg, action) {
         attempted = true;
         var result = await OPS.merge_merge_request.run(Object.assign(mrApiArgs(card.repo, card.pr.number), { sha: confirmation.target.sha })).catch(function () { return {}; });
         if (result.data && result.data.state === 'merged' && result.data.iid === card.pr.number) {
+          verified = true;
           card.stage = card.pr.state = 'merged';
           card.pr.merge = null;
           card.mergeUncertain = false;
@@ -2806,17 +2826,19 @@ async function prMergeAction(card, settings, msg, action) {
           card.pr.merge = null;
           card.note = t('prMergeRejected');
         } else {
-          await readPrMergeStatus(card);
+          verified = await readPrMergeStatus(card);
         }
       }
     }
   } else if (action === 'pr:merge-recheck' && card.mergeUncertain) {
-    await readPrMergeStatus(card);
+    verified = await readPrMergeStatus(card);
   } else {
     return;
   }
-  if (card.stage !== 'open' && hasCardScheduler() && (card.scheduleId || card.scheduleAction)) {
+  if (prShouldStopSchedule(card, verified)) {
+    var mergeNote = card.note;
     await syncCardSchedule(card, settings, false);
+    if (!card.note) card.note = mergeNote;
   }
   if (await savePrCardRetry(card) || attempted) await sendPrCard(card, settings, null);
 }
@@ -3187,9 +3209,8 @@ async function prCardTool(args, callId) {
     card.stage = 'ask';
   }
 
-  var canFollow = card.stage === 'open' && !card.pr.draft;
-  var stopSchedule = hasCardScheduler() && (card.scheduleAction === 'stop' ||
-    (!!status && !status.err && !canFollow && (card.scheduleAction === 'start' || !!card.scheduleId)));
+  var canFollow = prCanFollow(card);
+  var stopSchedule = prShouldStopSchedule(card, !!status && !status.err);
   if (card.stage !== 'open' && !card.scheduleAction && !stopSchedule) card.pending = null;
   if (!stopSchedule && card.scheduleId && hasCardScheduler() && !card.scheduleAction) {
     try {
@@ -3240,7 +3261,7 @@ async function prCardTool(args, callId) {
   if (applyPublishedSettings && !settings.unreadable && !status.err) {
     card.settingsApplied = true;
     card.renameRequested = settings.autoRename;
-    if (settings.autoFollow && !card.skipPublishedFollow && canFollow && card.pending !== 'stop' && !card.following && !card.scheduleId) {
+    if (prShouldAutoFollow(card, settings)) {
       card.pending = 'follow';
       nativeStart = hasCardScheduler();
       if (!nativeStart) todo.push(t('prTodoFollow', { url: card.pr.url }));
@@ -3316,7 +3337,7 @@ async function prCardTool(args, callId) {
 var PR_AGENT_ACTIONS = {
   'pr:publish': function (card) { return card.stage === 'ask'; },
   'pr:draft': function (card) { return card.stage === 'ask'; },
-  'pr:follow': function (card) { return card.stage === 'open' && !card.pr.draft && !card.following && !card.scheduleId && !card.pending; },
+  'pr:follow': function (card) { return prCanStartFollow(card) && !card.pending; },
   'pr:stop': function (card) { return card.stage === 'open' && (card.following || card.scheduleId) && !card.pending; },
 };
 
@@ -3424,9 +3445,9 @@ async function markPrReadyInner(card, settings, msg, progress) {
     card.note = uncertain
       ? t('prReadyUnknown')
       : t('prReadyFailed', { detail: String(err || fresh.err || '').slice(0, 160) });
-  } else if (settings.autoFollow && card.stage === 'open' && hasCardScheduler()) {
+  } else if (prShouldAutoFollow(card, settings) && hasCardScheduler()) {
     await syncCardSchedule(card, settings, true);
-  } else if (settings.autoFollow && card.stage === 'open') {
+  } else if (prShouldAutoFollow(card, settings)) {
     // Record "following is starting" before handing it to the agent, as the first step does for "ready":
     // if that cannot be saved, nothing is sent, so a later click can never send it a second time.
     card.pending = 'follow';
@@ -3541,7 +3562,7 @@ async function prCardAction(msg) {
       else {
         card.pr = latest.pr;
         card.stage = latest.pr.state;
-        if (card.stage === 'open' && !card.pr.draft) await syncCardSchedule(card, settings, true);
+        if (prCanFollow(card)) await syncCardSchedule(card, settings, true);
       }
     }
   } else if (PR_AGENT_ACTIONS[action] && PR_AGENT_ACTIONS[action](card)) {
