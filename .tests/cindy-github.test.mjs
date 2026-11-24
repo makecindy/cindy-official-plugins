@@ -86,7 +86,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.35');
+  assert.equal(manifest.version, '1.5.36');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -739,6 +739,121 @@ function createPrRuntime(options = {}) {
     }),
   };
 }
+
+function mergeablePrRuntime() {
+  const pr = {
+    id: 'PR_node', number: 42, title: 'Mergeable PR', url: 'https://github.com/octo/repo/pull/42',
+    state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN',
+    headRefOid: 'a'.repeat(40), baseRefName: 'main', mergeQueue: null,
+    baseRef: { name: 'main', branchProtectionRule: null, rules: { nodes: [], pageInfo: { hasNextPage: false } } },
+  };
+  const repository = { id: 'REPO_node', viewerPermission: 'WRITE', viewerDefaultMergeMethod: 'SQUASH',
+    mergeCommitAllowed: true, squashMergeAllowed: true, rebaseMergeAllowed: false, pullRequest: pr };
+  const viewer = { id: 'VIEWER_node' };
+  const writes = [];
+  let outcome = 'merged';
+  const runtime = createPrRuntime({
+    github(request) {
+      if (request.method === 'PUT') {
+        assert.equal(request.url, 'https://api.github.com/repos/octo/repo/pulls/42/merge');
+        writes.push(JSON.parse(request.body));
+        if (outcome === 'unknown') return { ok: false, message: 'connection lost' };
+        if (outcome === 'conflict') return jsonResponse({ message: 'Head changed' }, 409);
+        pr.state = 'MERGED';
+        pr.merged = true;
+        return jsonResponse({ merged: true });
+      }
+      assert.equal(request.url, 'https://api.github.com/graphql');
+      const { query, variables } = JSON.parse(request.body);
+      assert.deepEqual(variables, { owner: 'octo', name: 'repo', number: 42 });
+      return jsonResponse({ data: query.includes('viewerDefaultMergeMethod') ? { viewer, repository } : { repository: { pullRequest: pr } } });
+    },
+  });
+  return { ...runtime, pr, repository, viewer, writes, setOutcome(value) { outcome = value; } };
+}
+
+test('the PR merge button requires a clean direct merge and write permission on the base branch', async () => {
+  const runtime = mergeablePrRuntime();
+  runtime.repository.viewerPermission = 'READ';
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  const button = /data-ghost-action="pr:merge"/;
+  assert.doesNotMatch(runtime.lastCard(cardId).html, button);
+  runtime.repository.viewerPermission = 'WRITE';
+  await runtime.tool({ card_id: cardId });
+  assert.match(runtime.lastCard(cardId).html, button);
+  for (const changes of [
+    { mergeStateStatus: 'BLOCKED' }, { isDraft: true }, { state: 'CLOSED' },
+    { mergeQueue: { id: 'queue' } },
+    { baseRef: { ...runtime.pr.baseRef, branchProtectionRule: { restrictsPushes: true, lockBranch: false } } },
+    { baseRef: { ...runtime.pr.baseRef, rules: { nodes: [{ type: 'UPDATE' }], pageInfo: { hasNextPage: false } } } },
+  ]) {
+    const original = Object.fromEntries(Object.keys(changes).map((key) => [key, runtime.pr[key]]));
+    Object.assign(runtime.pr, changes);
+    await runtime.tool({ card_id: cardId });
+    assert.doesNotMatch(runtime.lastCard(cardId).html, button);
+    Object.assign(runtime.pr, original);
+  }
+  assert.equal(runtime.writes.length, 0);
+});
+
+test('the PR merge confirmation is unique, checks the expected head and uses an allowed method', async () => {
+  const runtime = mergeablePrRuntime();
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  await runtime.click(cardId, 'pr:merge');
+  const confirmation = runtime.lastCard(cardId).html;
+  assert.match(confirmation, /data-ghost-action="pr:merge-confirm:1" aria-label="确认合并"/);
+  assert.ok(visibleText(confirmation).includes('将提交 aaaaaaaaaaaa 合并到 main？ · 压缩合并'));
+  assert.equal(runtime.writes.length, 0);
+  await runtime.click(cardId, 'pr:merge-cancel:1');
+  await runtime.click(cardId, 'pr:merge');
+  await runtime.click(cardId, 'pr:merge-confirm:1');
+  await runtime.click(cardId, 'pr:merge-confirm:2', { userActionToken: undefined });
+  assert.equal(runtime.writes.length, 0);
+  await Promise.all([runtime.click(cardId, 'pr:merge-confirm:2'), runtime.click(cardId, 'pr:merge-confirm:2')]);
+  assert.deepEqual(runtime.writes, [{ sha: runtime.pr.headRefOid, merge_method: 'squash' }]);
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-task-archive-state="merged"/);
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge/);
+  assert.equal(runtime.agentRuns.length, 0);
+});
+
+test('the PR merge confirmation is invalidated by a changed commit, base, account or permission', async () => {
+  for (const change of [
+    (runtime) => { runtime.pr.headRefOid = 'b'.repeat(40); },
+    (runtime) => { runtime.pr.baseRef.name = runtime.pr.baseRefName = 'release'; },
+    (runtime) => { runtime.viewer.id = 'DIFFERENT_viewer'; },
+    (runtime) => { runtime.repository.viewerPermission = 'READ'; },
+  ]) {
+    const runtime = mergeablePrRuntime();
+    const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+    await runtime.click(cardId, 'pr:merge');
+    change(runtime);
+    await runtime.click(cardId, 'pr:merge-confirm:1');
+    assert.equal(runtime.writes.length, 0);
+    assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prMergeChanged));
+  }
+});
+
+test('the PR merge card distinguishes definitive refusal from a lost receipt', async () => {
+  for (const outcome of ['conflict', 'unknown']) {
+    const runtime = mergeablePrRuntime();
+    const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+    runtime.setOutcome(outcome);
+    await runtime.click(cardId, 'pr:merge');
+    await runtime.click(cardId, 'pr:merge-confirm:1');
+    const expected = outcome === 'conflict' ? zhCopy.prMergeRejected : zhCopy.prMergeUnknown;
+    assert.ok(visibleText(runtime.lastCard(cardId).html).includes(expected));
+    assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge"/);
+    if (outcome === 'unknown') {
+      await runtime.click(cardId, 'pr:merge-recheck');
+      assert.ok(visibleText(runtime.lastCard(cardId).html).includes(expected));
+      runtime.pr.state = 'MERGED';
+      runtime.pr.merged = true;
+      await runtime.click(cardId, 'pr:merge-recheck');
+      assert.match(runtime.lastCard(cardId).html, /data-ghost-task-archive-state="merged"/);
+    }
+    assert.equal(runtime.writes.length, 1);
+  }
+});
 
 test('pr_card asks first, hands the click to the task agent, then updates the same card with the PR', async () => {
   const runtime = createPrRuntime({ github: prGraphql() });
