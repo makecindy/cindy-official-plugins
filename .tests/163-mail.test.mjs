@@ -390,7 +390,7 @@ test('163 搜索优先匹配纯文本，找不到时继续匹配 HTML 正文', a
     '--test',
     'Content-Type: text/html; charset=utf-8',
     '',
-    '<div>关<b>键</b>&#35789;</div>',
+    `<div>关<b>键</b>&#35789;</div><div>${'x'.repeat(72)} project update</div>`,
     '--test--',
     '',
   ].join('\r\n'));
@@ -415,6 +415,12 @@ test('163 搜索优先匹配纯文本，找不到时继续匹配 HTML 正文', a
   const result = await runSearch({ text: '关键词' }, deps);
   assert.deepEqual(result.messages.map((message) => message.uid), [2, 1]);
   assert.equal(result.search_scope.complete, true);
+  const phrase = await runSearch({ text: 'project update', subject: '普通邮件' }, {
+    ...deps,
+    parseMessage,
+  });
+  assert.deepEqual(phrase.messages.map((message) => message.uid), [1]);
+  assert.equal(phrase.search_scope.complete, true);
 });
 
 test('163 搜索保留服务端命中和无条件列表路径', async () => {

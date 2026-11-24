@@ -307,6 +307,7 @@ async function searchRecent(client, criteria, folder, maxResults, deps) {
   }
 
   if (checkBody.size) {
+    const bodyKeyword = keyword.replace(/\s+/g, ' ');
     const maxLength = Math.max(...Array.from(checkBody.values(), (message) => message.size));
     const sources = client.fetch([...checkBody.keys()], { source: { maxLength } }, { uid: true });
     for await (const { uid, source } of sources) {
@@ -315,7 +316,7 @@ async function searchRecent(client, criteria, folder, maxResults, deps) {
       checkBody.delete(uid);
       try {
         const parsed = await deps.parseMessage(source);
-        if (containsKeyword(parsed.text, keyword)) {
+        if (containsKeyword(parsed.text?.replace(/\s+/g, ' '), bodyKeyword)) {
           matches.push(message);
         } else if (typeof parsed.html === 'string' && parsed.html) {
           const htmlSource = Buffer.from(
@@ -323,7 +324,7 @@ async function searchRecent(client, criteria, folder, maxResults, deps) {
             + Buffer.from(parsed.html).toString('base64'),
           );
           const converted = await deps.parseMessage(htmlSource);
-          if (containsKeyword(converted.text, keyword)) matches.push(message);
+          if (containsKeyword(converted.text?.replace(/\s+/g, ' '), bodyKeyword)) matches.push(message);
         }
         scanned += 1;
       } catch {
