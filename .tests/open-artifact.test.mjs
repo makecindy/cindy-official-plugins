@@ -47,11 +47,11 @@ test('an adoption requires a positive host confirmation for the destination task
     const { calls, onMessage } = harness({ confirmation });
     await onMessage({
       type: 'event', name: 'node-notification', method: 'artifact/confirm-adopt',
-      params: { id: 'confirm-one', session: 'task-b', title: 'Design draft', existing: true },
+      params: { id: 'confirm-one', session: 'task-b', title: 'Design draft', owner: 'cindy:task-a' },
     });
     const request = calls.find(([type]) => type === 'confirm')?.[1];
     assert.match(request?.body, /Design draft/);
-    assert.match(request.body, /task-b/);
+    assert.match(request.body, /from task task-a to task task-b/);
     assert.equal(calls.at(-1)[1].method, 'host/complete');
     assert.equal(calls.at(-1)[1].params.answer, expected);
   }

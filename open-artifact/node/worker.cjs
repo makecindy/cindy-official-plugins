@@ -113,41 +113,52 @@ async function connect(scope) {
   return runtime;
 }
 
-async function findWorkspaceArtifact(harness, caller, find) {
+async function* artifactPages(harness, caller, scope) {
   let cursor;
   do {
-    const page = await harness.call('Artifact', { action: 'list', scope: 'mine', limit: 200, cursor }, caller);
-    const artifact = await find(page.artifacts ?? []);
-    if (artifact) return { ...artifact, root: await resolveWorkspacePath(caller.workspace, artifact.root) };
+    const page = await harness.call('Artifact', { action: 'list', scope, limit: 200, cursor }, caller);
+    if (page?.error || !Array.isArray(page?.artifacts)) throw new Error('Artifact listing is unavailable');
+    yield page.artifacts;
     cursor = page.next_cursor;
   } while (cursor);
-  return null;
 }
 
 async function workspaceArtifact(harness, url, caller) {
-  const artifact = await findWorkspaceArtifact(harness, caller, items => items.find(item => item.url === url));
-  if (!artifact) throw new Error('Artifact is unavailable in the task workspace');
-  return artifact;
+  for await (const items of artifactPages(harness, caller, 'mine')) {
+    const artifact = items.find(item => item.url === url);
+    if (artifact) return { ...artifact, root: await resolveWorkspacePath(caller.workspace, artifact.root) };
+  }
+  throw new Error('Artifact is unavailable in the task workspace');
 }
 
 async function adoptionTarget(harness, args, caller) {
-  if (args.url) return workspaceArtifact(harness, args.url, caller);
-  const root = await resolveWorkspacePath(caller.workspace, args.folder);
-  const artifact = await findWorkspaceArtifact(harness, caller, async items => {
+  const root = args.url ? null : await resolveWorkspacePath(caller.workspace, args.folder);
+  let found;
+  // The upstream `mine` filter can omit another task's work at the exact workspace root.
+  for await (const items of artifactPages(harness, caller, 'all')) {
     for (const item of items) {
-      const registeredRoot = await resolveWorkspacePath(caller.workspace, item.root).catch(() => null);
-      if (registeredRoot === root) return item;
+      if (args.url && item.url !== args.url) continue;
+      const resolved = await resolveWorkspacePath(caller.workspace, item.root).catch(error => {
+        if (args.url || path.resolve(item.root) === root) throw error;
+        return null;
+      });
+      if (!args.url && resolved !== root) continue;
+      if (found || typeof item.url !== 'string' || !item.url || typeof item.owner !== 'string' || !item.owner.trim()) {
+        throw new Error('Artifact ownership is unavailable or ambiguous');
+      }
+      found = { ...item, root: resolved };
+      if (args.url) return found;
     }
-    return null;
-  });
-  return artifact ?? { root, url: null, owner: null, title: path.basename(root) };
+  }
+  if (args.url) throw new Error('Artifact is unavailable in the task workspace');
+  return found ?? { root, url: null, owner: null, title: path.basename(root) };
 }
 
 async function adopt(harness, args, caller) {
   if (!args.url && !args.folder) return { error: { message: 'Choose a work or folder to adopt.' } };
   const before = await adoptionTarget(harness, args, caller);
   const answer = await callHost('artifact/confirm-adopt', {
-    session: caller.session, title: before.title || path.basename(before.root), existing: before.url !== null,
+    session: caller.session, title: before.title || path.basename(before.root), owner: before.owner,
   }, false, 95000);
   if (answer !== true) return { error: { message: 'Adoption was not confirmed.' } };
 
@@ -194,8 +205,9 @@ async function run({ method, params, id }) {
       return;
     }
     const harness = await connect(params.scope);
+    const adopting = params.tool === 'Artifact' && args.action === 'adopt';
     try {
-      args = await checkArtifactArguments(harness, params.tool, args, caller);
+      if (!adopting) args = await checkArtifactArguments(harness, params.tool, args, caller);
     } catch {
       send({ id, error: { code: -32602, message: 'The artifact or file is unavailable in the task workspace.' } });
       return;
@@ -213,7 +225,7 @@ async function run({ method, params, id }) {
       ? setInterval(() => send({ method: 'artifact/progress', params: {} }), 45000)
       : undefined;
     try {
-      const result = params.tool === 'Artifact' && args.action === 'adopt'
+      const result = adopting
         ? await adopt(harness, args, caller)
         : await harness.call(params.tool, args, caller);
       send({ id, result });

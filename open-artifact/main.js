@@ -43,11 +43,13 @@ async function answerHost({ method, params }) {
     } else if (method === 'artifact/confirm-adopt') {
       const target = await cindy.targets.resolve({ session });
       if (target?.kind === 'task' && target.id === session) {
-        const title = params.title.replace(/[\p{Cc}\p{Cf}]/gu, ' ').trim().slice(0, 100) || 'Untitled work';
-        const destination = session.slice(0, 80);
+        const title = params.title.replace(/[\p{Cc}\p{Cf}]/gu, ' ').trim().slice(0, 70) || 'Untitled work';
+        const destination = session.slice(0, 64);
+        const previous = params.owner?.replace(/^cindy:/, '').replace(/[\p{Cc}\p{Cf}]/gu, ' ').slice(0, 64);
+        const action = previous ? `Transfer “${title}” from task ${previous} to task ${destination}?` : `Adopt “${title}” into task ${destination}?`;
         const consent = await cindy.confirm({
-          body: `${params.existing ? 'Transfer' : 'Adopt'} “${title}” into task ${destination}? New comments and edit requests will go to that task.`,
-          danger: params.existing,
+          body: `${action} New comments and edit requests will go to that task.`,
+          danger: params.owner !== null,
         });
         if (consent?.ok === true && consent.confirmed === true) {
           const current = await cindy.targets.resolve({ session });
