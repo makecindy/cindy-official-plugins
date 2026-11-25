@@ -113,10 +113,11 @@ async function connect(scope) {
   return runtime;
 }
 
-async function* artifactPages(harness, caller, scope) {
+async function* artifactPages(harness, caller) {
   let cursor;
   do {
-    const page = await harness.call('Artifact', { action: 'list', scope, limit: 200, cursor }, caller);
+    // The upstream `mine` filter can omit another task's work at the exact workspace root.
+    const page = await harness.call('Artifact', { action: 'list', scope: 'all', limit: 200, cursor }, caller);
     if (page?.error || !Array.isArray(page?.artifacts)) throw new Error('Artifact listing is unavailable');
     yield page.artifacts;
     cursor = page.next_cursor;
@@ -124,33 +125,36 @@ async function* artifactPages(harness, caller, scope) {
 }
 
 async function workspaceArtifact(harness, url, caller) {
-  for await (const items of artifactPages(harness, caller, 'mine')) {
+  for await (const items of artifactPages(harness, caller)) {
     const artifact = items.find(item => item.url === url);
     if (artifact) return { ...artifact, root: await resolveWorkspacePath(caller.workspace, artifact.root) };
   }
   throw new Error('Artifact is unavailable in the task workspace');
 }
 
+function requireAdoptionOwner(artifact) {
+  if (typeof artifact.url !== 'string' || !artifact.url ||
+      typeof artifact.owner !== 'string' || !artifact.owner.trim()) {
+    throw new Error('Artifact ownership is unavailable');
+  }
+  return artifact;
+}
+
 async function adoptionTarget(harness, args, caller) {
-  const root = args.url ? null : await resolveWorkspacePath(caller.workspace, args.folder);
+  if (args.url) return requireAdoptionOwner(await workspaceArtifact(harness, args.url, caller));
+  const root = await resolveWorkspacePath(caller.workspace, args.folder);
   let found;
-  // The upstream `mine` filter can omit another task's work at the exact workspace root.
-  for await (const items of artifactPages(harness, caller, 'all')) {
+  for await (const items of artifactPages(harness, caller)) {
     for (const item of items) {
-      if (args.url && item.url !== args.url) continue;
       const resolved = await resolveWorkspacePath(caller.workspace, item.root).catch(error => {
-        if (args.url || path.resolve(item.root) === root) throw error;
+        if (path.resolve(item.root) === root) throw error;
         return null;
       });
-      if (!args.url && resolved !== root) continue;
-      if (found || typeof item.url !== 'string' || !item.url || typeof item.owner !== 'string' || !item.owner.trim()) {
-        throw new Error('Artifact ownership is unavailable or ambiguous');
-      }
-      found = { ...item, root: resolved };
-      if (args.url) return found;
+      if (resolved !== root) continue;
+      if (found) throw new Error('Artifact ownership is ambiguous');
+      found = requireAdoptionOwner({ ...item, root: resolved });
     }
   }
-  if (args.url) throw new Error('Artifact is unavailable in the task workspace');
   return found ?? { root, url: null, owner: null, title: path.basename(root) };
 }
 
