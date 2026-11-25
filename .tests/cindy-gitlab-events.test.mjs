@@ -31,9 +31,9 @@ function mr(overrides = {}) {
 function harness({ subscriptions = [], routes = {}, subscriptionsReply } = {}) {
   const sent = [];
   const requests = [];
-  const state = { routes };
+  const state = { routes, handler: null };
   const cindy = {
-    onHostMessage() {},
+    onHostMessage(fn) { state.handler = fn; },
     async fetch(req) {
       const url = String(req.url);
       requests.push(url);
@@ -69,6 +69,8 @@ function harness({ subscriptions = [], routes = {}, subscriptionsReply } = {}) {
     state,
     requests,
     cycle: () => vm.runInContext('eventsCycle()', context),
+    push: (subscriptions) => state.handler({ type: 'routine-subscriptions', subscriptions }),
+    pulls: () => sent.filter((m) => m.action === 'subscriptions').length,
     published: () => sent.filter((m) => m.action === 'publish').map((m) => m.event),
     statuses: () => sent.filter((m) => m.action === 'status').map((m) => m.status),
   };
@@ -95,7 +97,7 @@ test('manifest declares the published events with every field they carry', () =>
 
 test('does nothing without subscriptions and stops on hosts without the subscriptions operation', async () => {
   const idle = harness();
-  assert.equal(await idle.cycle(), 60 * 1000);
+  assert.equal(await idle.cycle(), 'idle', 'no subscriptions: no timer, wait for the host to push');
   assert.deepEqual(idle.requests, []);
   const old = harness({ subscriptionsReply: { ok: false, message: 'Unknown routine operation' } });
   assert.equal(await old.cycle(), null);
@@ -146,10 +148,19 @@ test('a chosen MR: baseline first, then merged, new comments and pipeline change
 test('a whole project: new MRs after the baseline become opened events', async () => {
   const h = harness({
     subscriptions: [{ events: ['merge_request.opened'], filters: [{ field: 'project', operator: 'equals', value: 'group/app' }] }],
-    routes: { '/api/v4/user': { id: 1, username: 'me' }, '/projects/group%2Fapp/merge_requests?': [mr()] },
+    routes: {
+      '/api/v4/user': { id: 1, username: 'me' },
+      '/projects/group%2Fapp/events': [{ id: 1 }],
+      '/projects/group%2Fapp/merge_requests?': [mr()],
+    },
   });
   await h.cycle();
   assert.deepEqual(h.published(), []);
+  // Quiet project: one look at its activity, no merge request list.
+  const before = h.requests.length;
+  await h.cycle();
+  assert.deepEqual(h.requests.slice(before).map((url) => url.includes('/events')), [true]);
+  h.state.routes['/projects/group%2Fapp/events'] = [{ id: 2 }];
   const fresh = new Date(Date.now() + 1000).toISOString();
   h.state.routes['/projects/group%2Fapp/merge_requests?'] = [mr(), mr({ id: 502, iid: 8, created_at: fresh, updated_at: fresh, references: { full: 'group/app!8' } })];
   h.state.routes['/merge_requests/8/notes'] = [];
@@ -173,6 +184,7 @@ test('a whole project: finished pipelines are reported on their MR, running ones
     subscriptions: [{ events: ['merge_request.pipeline'], filters: [{ field: 'project', operator: 'equals', value: 'group/app' }] }],
     routes: {
       '/api/v4/user': { id: 1, username: 'me' },
+      '/projects/group%2Fapp/events': [{ id: 1 }],
       '/projects/group%2Fapp/pipelines?': [pipeline('running', '2026-01-01T00:00:00Z')],
       '/projects/group%2Fapp/merge_requests?': [mr()],
       '/projects/group%2Fapp/merge_requests/7': mr(),
@@ -186,4 +198,29 @@ test('a whole project: finished pipelines are reported on their MR, running ones
   h.state.routes['/projects/group%2Fapp/pipelines?'] = [pipeline('failed', later)];
   await h.cycle();
   assert.deepEqual(h.published().map((e) => [e.type, e.data.iid, e.data.pipelineStatus]), [['merge_request.pipeline', 7, 'failed']]);
+});
+
+test('subscriptions are read once, then pushed by the host; a push wakes the watcher', async () => {
+  const h = harness({ subscriptions: [], routes: { '/api/v4/user': { id: 1, username: 'me' }, '/projects/group%2Fapp/merge_requests/7': mr() } });
+  assert.equal(await h.cycle(), 'idle');
+  assert.equal(await h.cycle(), 'idle');
+  assert.equal(h.pulls(), 1, 'no repeated asking');
+  h.push(watchMr);
+  assert.equal(await h.cycle(), 60 * 1000);
+  assert.equal(h.pulls(), 1);
+  assert.ok(h.requests.some((url) => url.includes('/merge_requests/7')), 'pushed subscription is watched');
+});
+
+test('a whole project is fully re-checked every few minutes even without new activity', async () => {
+  const h = harness({
+    subscriptions: [{ events: ['merge_request.updated'], filters: [{ field: 'project', operator: 'equals', value: 'group/app' }] }],
+    routes: {
+      '/api/v4/user': { id: 1, username: 'me' },
+      '/projects/group%2Fapp/events': [{ id: 1 }],
+      '/projects/group%2Fapp/merge_requests?': [mr()],
+    },
+  });
+  for (let i = 0; i < 6; i += 1) await h.cycle();
+  const lists = h.requests.filter((url) => url.includes('/merge_requests?')).length;
+  assert.equal(lists, 2, 'baseline + one sweep in six quiet minutes');
 });

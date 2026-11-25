@@ -1575,11 +1575,13 @@ bc.onmessage = function (ev) {
 
 /* ── 自动化事件(routineEvents) ─────────────────────────────────────────
  *
- * GitLab 没有推送给本机的通道,这里按自动化的订阅轮询:每个周期先问宿主
- * 「哪些自动化在等我的哪些事件」(routine-request subscriptions,只有事件类型与
- * 「只看」条件),只去盯被选中的对象——
+ * GitLab 没有推送给本机的通道,这里按自动化的订阅轮询。订阅(只有事件类型与
+ * 「只看」条件)启动时向宿主取一次(routine-request subscriptions),之后用户改
+ * 自动化时宿主主动推送(routine-subscriptions),插件不再反复询问;没有订阅时
+ * 不轮询。只去盯被选中的对象——
  * - 条件里有 project + iid:只读这一个 MR / Issue(含流水线状态);
- * - 只有 project:读这个项目里有更新的 MR / Issue;
+ * - 只有 project:先读一次项目动态,有新动态才读有更新的 MR / Issue 和流水线;
+ *   动态不记录的改动(改标题、标签,重跑流水线等)每 5 分钟完整核对一次补上;
  * - 都没有:读与连接账号相关的 MR / Issue(我创建的、指派给我的、请我审阅的)。
  * 第一次看到的对象只记基线不发事件;之后按状态变化、新提交、新评论等发布事件。
  * 匹配和要不要处理仍由宿主与自动化决定,这里不替用户丢弃(包括自己发的评论,
@@ -1588,8 +1590,10 @@ bc.onmessage = function (ev) {
  */
 
 var EVENTS_POLL_MS = 60 * 1000;
-/** 没有订阅时也每分钟问一次:用户刚建好的自动化最多等一分钟就开始监听。 */
-var EVENTS_IDLE_POLL_MS = 60 * 1000;
+/** 整个项目:每隔几个周期不看项目动态、完整核对一次。 */
+var EVENTS_SWEEP_EVERY = 5;
+/** 还没出结果的流水线状态:有这样的流水线时每个周期都看流水线。 */
+var EVENTS_PIPELINE_ACTIVE = { created: 1, waiting_for_resource: 1, preparing: 1, pending: 1, running: 1 };
 /** 每个周期最多发布多少条(宿主单插件 60 次/分钟),剩下的留到下个周期。 */
 var EVENTS_PUBLISH_PER_CYCLE = 40;
 var EVENTS_MAX_TARGETS = 50;
@@ -1609,6 +1613,12 @@ var eventsState = {
   cursors: {},
   pending: [],
   users: {},
+  /** 宿主给的订阅;null 表示还没拿到。 */
+  subscriptions: null,
+  wake: false,
+  cycle: 0,
+  activity: {},
+  pipelinesActive: {},
 };
 
 function eventsTimeMs(iso) {
@@ -1927,9 +1937,11 @@ async function eventsPollPipelines(target, conn, me) {
     updated_after: new Date(since - 2 * 60 * 1000).toISOString(), order_by: 'updated_at', sort: 'asc', per_page: 50,
   }));
   var lookups = 0;
+  var active = false;
   for (var i = 0; i < pipelines.length; i++) {
     var p = pipelines[i];
     if (!p || p.id === undefined) continue;
+    if (EVENTS_PIPELINE_ACTIVE[String(p.status || '')]) active = true;
     var key = conn.host + '|pipeline|' + p.id;
     var prev = eventsState.snapshots[key];
     var status = String(p.status || '');
@@ -1954,7 +1966,22 @@ async function eventsPollPipelines(target, conn, me) {
       pipelineStatus: status,
     }, eventsTimeMs(p.updated_at) || Date.now());
   }
+  eventsState.pipelinesActive[cursorKey] = active;
   eventsState.cursors[cursorKey] = Date.now();
+}
+
+/** 项目动态最新一条有没有变;第一次看到项目时算有变(要先记基线)。 */
+async function eventsProjectActive(target, conn) {
+  var key = conn.host + '|' + target.key;
+  var r = await api({
+    url: 'https://' + conn.host + '/api/v4/projects/' + encodeURIComponent(target.project) + '/events' + qs({ per_page: 1 }),
+  });
+  if (r.err) throw new Error(r.err);
+  var top = Array.isArray(r.data) && r.data[0] ? String(r.data[0].id) : '';
+  var known = Object.prototype.hasOwnProperty.call(eventsState.activity, key);
+  var changed = !known || eventsState.activity[key] !== top;
+  eventsState.activity[key] = top;
+  return changed;
 }
 
 async function eventsReport(status) {
@@ -1975,17 +2002,26 @@ async function eventsFlush() {
 }
 
 /** 一个轮询周期;返回下次间隔,null 表示宿主不支持订阅、停止轮询。 */
+/**
+ * 一个轮询周期;返回下次间隔。null:宿主不支持订阅,停止;'idle':没有订阅,
+ * 等宿主推送新订阅再开始。
+ */
 async function eventsCycle() {
-  var res = await cindy.send({ type: 'routine-request', action: 'subscriptions' });
-  if (!res || !res.ok) {
-    if (res && /Unknown routine operation|not declared/.test(String(res.message || ''))) return null;
-    return EVENTS_POLL_MS;
+  if (eventsState.subscriptions === null) {
+    var res = await cindy.send({ type: 'routine-request', action: 'subscriptions' });
+    if (!res || !res.ok) {
+      if (res && /Unknown routine operation|not declared/.test(String(res.message || ''))) return null;
+      return EVENTS_POLL_MS;
+    }
+    // 宿主在这之后推送的订阅更新,优先于这次取到的(异步期间可能已经到了)。
+    if (eventsState.subscriptions === null) eventsState.subscriptions = Array.isArray(res.subscriptions) ? res.subscriptions : [];
   }
-  var targets = eventsTargetsFrom(Array.isArray(res.subscriptions) ? res.subscriptions : []);
+  var targets = eventsTargetsFrom(eventsState.subscriptions);
   if (!targets.length) {
     await eventsFlush();
-    return EVENTS_IDLE_POLL_MS;
+    return eventsState.pending.length ? EVENTS_POLL_MS : 'idle';
   }
+  var sweep = eventsState.cycle++ % EVENTS_SWEEP_EVERY === 0;
   var conns = await eventsConnections();
   if (!conns.length) {
     await eventsReport('disconnected');
@@ -1999,8 +2035,14 @@ async function eventsCycle() {
       attempted++;
       try {
         var me = await eventsMe(picked[j]);
-        await eventsPollTarget(targets[i], picked[j], me);
-        if (targets[i].pipelines && targets[i].project && !targets[i].iid) await eventsPollPipelines(targets[i], picked[j], me);
+        var target = targets[i];
+        var whole = Boolean(target.project && !target.iid);
+        var changed = whole ? await eventsProjectActive(target, picked[j]) : true;
+        if (changed || sweep) await eventsPollTarget(target, picked[j], me);
+        var pipelineKey = picked[j].host + '|' + target.key + '|pipelines';
+        if (whole && target.pipelines && (changed || sweep || eventsState.pipelinesActive[pipelineKey])) {
+          await eventsPollPipelines(target, picked[j], me);
+        }
       } catch (e) {
         failed++;
       }
@@ -2013,18 +2055,28 @@ async function eventsCycle() {
 
 function eventsSchedule(delay) {
   if (eventsState.stopped) return;
+  if (eventsState.timer) clearTimeout(eventsState.timer);
   eventsState.timer = setTimeout(function () {
-    if (eventsState.running) return eventsSchedule(EVENTS_POLL_MS);
+    eventsState.timer = null;
+    if (eventsState.running) { eventsState.wake = true; return; }
     eventsState.running = true;
-    eventsCycle().then(function (next) {
+    eventsState.wake = false;
+    var done = function (next) {
       eventsState.running = false;
       if (next === null) { eventsState.stopped = true; return; }
-      eventsSchedule(next);
-    }, function () {
-      eventsState.running = false;
-      eventsSchedule(EVENTS_POLL_MS);
-    });
+      // 运行期间宿主推来了新订阅:马上按新订阅再跑一轮。
+      if (eventsState.wake) return eventsSchedule(0);
+      if (next !== 'idle') eventsSchedule(next);
+    };
+    eventsCycle().then(done, function () { done(EVENTS_POLL_MS); });
   }, delay);
+}
+
+/** 宿主推送的订阅(用户新建、修改、暂停或删除了相关自动化)。 */
+function eventsSubscriptionsChanged(subscriptions) {
+  eventsState.subscriptions = subscriptions;
+  if (eventsState.running) eventsState.wake = true;
+  else eventsSchedule(0);
 }
 
 if (typeof cindy !== 'undefined' && cindy && typeof cindy.send === 'function' && typeof setTimeout === 'function') eventsSchedule(3000);
@@ -2033,6 +2085,10 @@ if (typeof cindy !== 'undefined' && cindy && typeof cindy.send === 'function' &&
 /* ── 派单 ──────────────────────────────────────────────────────────── */
 
 cindy.onHostMessage(async function (msg) {
+  if (msg && msg.type === 'routine-subscriptions' && Array.isArray(msg.subscriptions)) {
+    eventsSubscriptionsChanged(msg.subscriptions);
+    return;
+  }
   if (!msg || msg.type !== 'tool-call') return;
   try {
     var r;
