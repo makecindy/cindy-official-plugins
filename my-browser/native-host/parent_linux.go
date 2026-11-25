@@ -8,6 +8,8 @@ import (
 	"syscall"
 )
 
+func browserName() (string, error) { return "", nil }
+
 func browserParent() error {
 	exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", os.Getppid()))
 	if err != nil {

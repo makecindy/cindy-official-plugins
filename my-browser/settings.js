@@ -74,6 +74,12 @@ function renderBrowsers(result) {
     button.disabled=setupBusy || live;
     button.onclick=() => setup(item.browser,mode);card.prepend(name,status);card.append(button);target.append(card);
   }
+  const devTabbit=$('#dev-browser option[value="tabbit"]');
+  if (devTabbit) {
+    const available=(result.installation?.browsers||[]).some(b=>b.browser==='tabbit'&&b.supported);
+    devTabbit.hidden=!available;devTabbit.disabled=!available;
+    if(!available&&$('#dev-browser').value==='tabbit')$('#dev-browser').value='chrome';
+  }
   const profiles=$('#profiles');profiles.replaceChildren();
   for (const client of result.clients || []) {
     const row=document.createElement('div');row.className='profile';

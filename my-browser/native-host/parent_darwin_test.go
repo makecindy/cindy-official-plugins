@@ -102,6 +102,28 @@ func TestVerifyParentRejectsDiaWithAnotherTeam(t *testing.T) {
 	}
 }
 
+func TestBrowserNameMapsSignedIdentifiers(t *testing.T) {
+	cases := []struct{ id, want string }{
+		{"com.google.Chrome", "chrome"},
+		{"com.microsoft.edgemac", "edge"},
+		{"com.brave.Browser", "brave"},
+		{"company.thebrowser.dia", "dia"},
+		{"com.tab-browser.Tabbit", "tabbit"},
+		{"com.example.app", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.id, func(t *testing.T) {
+			codesign = func(args ...string) ([]byte, error) {
+				return []byte("Executable=/Applications/App.app/Contents/MacOS/App\nIdentifier=" + c.id + "\nTeamIdentifier=2DE8QTFYGR\n"), nil
+			}
+			got, err := browserName()
+			if err != nil || got != c.want {
+				t.Fatalf("got %q, %v; want %q", got, err, c.want)
+			}
+		})
+	}
+}
+
 func TestVerifyParentRejectsTabbitWithAnotherTeam(t *testing.T) {
 	codesign = func(args ...string) ([]byte, error) {
 		if args[0] == "-d" {

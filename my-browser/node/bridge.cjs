@@ -35,7 +35,7 @@ function createBridge(options = {}) {
   const authenticatedCredential = c => !!c.publicKey && c.authenticated && boundCredential(c);
   const sessionReady = c => c.trusted && (c.version !== WIRE_VERSION ? pins.some(p=>sameIdentity(p,c)) : authenticatedCredential(c));
   const connected = () => [...clients.values()].filter(c => sessionReady(c) && live(c) && compatible(c.version));
-  const publicClient = c => ({id:c.id,browser:c.browser,version:c.installedVersion,protocolVersion:c.version,connected:sessionReady(c) && live(c) && compatible(c.version),trusted:sessionReady(c),identitySupported:approved(c),nativeBindingRequired:official(c)&&!boundCredential(c),origin:c.origin,extensionId:c.extensionId,...(c.publicKey ? {publicKey:c.publicKey} : {})});
+  const publicClient = c => ({id:c.id,browser:c.browserLabel||c.browser,version:c.installedVersion,protocolVersion:c.version,connected:sessionReady(c) && live(c) && compatible(c.version),trusted:sessionReady(c),identitySupported:approved(c),nativeBindingRequired:official(c)&&!boundCredential(c),origin:c.origin,extensionId:c.extensionId,...(c.publicKey ? {publicKey:c.publicKey} : {})});
   const normalizePublicKey = value => {
     if (typeof value !== 'string' || value.length > 2048) return null;
     try {
@@ -128,6 +128,9 @@ function createBridge(options = {}) {
          typeof supplied!=='string'||Buffer.byteLength(supplied)!==71||!crypto.timingSafeEqual(Buffer.from(supplied),Buffer.from('Bearer '+expected)))return send(res,failure('FORBIDDEN','Native binding required.'),403);
       const b=await body(req),c=clients.get(b.clientId);
       if(!c||!official(c)||!c.authenticated||c.origin!==b.origin||normalizePublicKey(b.publicKey)!==c.publicKey)return send(res,failure('FORBIDDEN','Binding does not match the authenticated profile.'),403);
+      // A verified native caller may carry a canonical browser label. Transport
+      // family is only a hint and cannot distinguish Chromium forks like Tabbit.
+      if(['chrome','edge','tabbit'].includes(b.browser)) c.browserLabel=b.browser;
       nativeBindings.set(c.id,c.publicKey);
       return send(res,{ok:true});
     }

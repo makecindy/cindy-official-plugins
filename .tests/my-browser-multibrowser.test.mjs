@@ -24,9 +24,9 @@ async function fixture(t) {
     const pairNow=async()=>{pinned.push(record);await bridge.request('setTrustedClients',{clients:[...pinned]});};
     if(paired)await pairNow();
     const health=async()=>{let r=await request('/health');if(r.challenge){const proof=Buffer.from(await webcrypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},pair.privateKey,new TextEncoder().encode(r.challenge))).toString('base64url');const response=await fetch('http://127.0.0.1:'+port+'/health',{headers:{'X-My-Browser-Extension':extensionId,'X-My-Browser-Origin':origin,'X-My-Browser-Client':id,'X-My-Browser-Version':version,'X-My-Browser-Family':browser,'X-My-Browser-Key':publicKey,'X-My-Browser-Proof':proof}});r={status:response.status,...await response.json()};}if(native && r.native_binding_required){await fetch('http://127.0.0.1:'+port+'/native/bind',{method:'POST',headers:{Authorization:'Bearer '+nativeToken},body:JSON.stringify({clientId:id,origin,publicKey})});r=await request('/health');}session=r.session;return r;};
-    return {id,origin,extensionId,request,health,pair:pairNow};
+    return {id,origin,extensionId,publicKey,request,health,pair:pairNow};
   }
-  return {bridge,client};
+  return {bridge,client,nativeToken};
 }
 test('official store and bundled extensions authenticate after native registration without manual pairings',async t=>{
   const {bridge,client}=await fixture(t);
@@ -75,6 +75,16 @@ test('unknown Chromium extension identities are not silently trusted',async t=>{
   assert.equal((await bridge.request('status')).clients[0].identitySupported,false);
   assert.equal((await bridge.request('status')).extension_connected,false);
 });
+test('native binding can label a Chromium-family connection as Tabbit for settings cards',async t=>{
+  const {bridge,client,nativeToken}=await fixture(t);
+  const c=await client('chrome');await c.health();
+  const bind=async browser=>fetch('http://127.0.0.1:'+(await bridge.request('status')).port+'/native/bind',{method:'POST',headers:{Authorization:'Bearer '+nativeToken,'Content-Type':'application/json'},body:JSON.stringify({clientId:c.id,origin:c.origin,publicKey:c.publicKey,browser})});
+  assert.equal((await bind('tabbit')).status,200);
+  assert.equal((await bridge.request('status')).clients.find(x=>x.id===c.id).browser,'tabbit');
+  assert.equal((await bind('unknown-browser')).status,200);
+  assert.equal((await bridge.request('status')).clients.find(x=>x.id===c.id).browser,'tabbit');
+});
+
 test('consumer install is honestly blocked until published; local developer setup never claims installation',async()=>{
   const calls=[];const i=createInstallation({platform:'darwin',distribution:{chrome:{storeUrl:null},edge:{storeUrl:null},safari:{appStoreUrl:null}},exists:p=>p.includes('Chrome') || p.includes('Safari'),run:async(...args)=>calls.push(args)});
   assert.equal(i.status().browsers.find(b=>b.browser==='edge').installed,false);

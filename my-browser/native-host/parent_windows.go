@@ -8,6 +8,8 @@ import (
 	"syscall"
 )
 
+func browserName() (string, error) { return "", nil }
+
 func browserParent() error {
 	// Query the immediate parent and verify its Authenticode publisher. No path or
 	// script text comes from the extension message or command-line origin.

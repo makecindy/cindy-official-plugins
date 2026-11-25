@@ -30,6 +30,30 @@ func browserParent() error {
 	return verifyParent(fmt.Sprint(os.Getppid()))
 }
 
+// browserName returns the canonical Cindy browser key of the verified caller.
+// It is used only to label the connection; browserParent remains the trust check.
+func browserName() (string, error) {
+	out, err := codesign("-d", "-vv", fmt.Sprint(os.Getppid()))
+	if err != nil {
+		return "", err
+	}
+	_, identifier, _ := signedIdentity(out)
+	switch identifier {
+	case "com.google.Chrome", "com.google.Chrome.forTesting":
+		return "chrome", nil
+	case "com.microsoft.edgemac":
+		return "edge", nil
+	case "com.brave.Browser", "com.brave.Browser.origin":
+		return "brave", nil
+	case "company.thebrowser.dia":
+		return "dia", nil
+	case "com.tab-browser.Tabbit":
+		return "tabbit", nil
+	default:
+		return "", nil
+	}
+}
+
 // verifyParent validates the kernel process identity of the caller, never argv or ps paths.
 func verifyParent(pid string) error {
 	out, err := codesign("--verify", "-R", "="+browserRequirement, pid)

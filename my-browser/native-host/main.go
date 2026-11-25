@@ -22,9 +22,10 @@ const hostName = "com.makecindy.browser"
 var identity = regexp.MustCompile(`^chrome-extension://[a-p]{32}/$`)
 
 type binding struct {
-	Port   int    `json:"port"`
-	Client string `json:"clientId"`
-	Key    string `json:"publicKey"`
+	Port    int    `json:"port"`
+	Client  string `json:"clientId"`
+	Key     string `json:"publicKey"`
+	Browser string `json:"browser,omitempty"`
 }
 type endpoint struct {
 	Token string `json:"token"`
@@ -53,6 +54,9 @@ func run() error {
 	if err := browserParent(); err != nil {
 		return errors.New("BROWSER_CALLER_UNVERIFIED")
 	}
+	// The verified caller's browser identity is canonical; extension-reported family
+	// is only a transport hint and cannot distinguish a Chromium fork from Chrome.
+	browser, _ := browserName()
 	var size uint32
 	if binary.Read(os.Stdin, binary.LittleEndian, &size) != nil || size == 0 || size > 8192 {
 		return errors.New("size")
@@ -79,7 +83,11 @@ func run() error {
 	if json.Unmarshal(raw, &ep) != nil || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(ep.Token) {
 		return errors.New("token")
 	}
-	payload, _ := json.Marshal(map[string]any{"clientId": b.Client, "publicKey": b.Key, "origin": strings.TrimSuffix(os.Args[1], "/")})
+	bind := map[string]any{"clientId": b.Client, "publicKey": b.Key, "origin": strings.TrimSuffix(os.Args[1], "/")}
+	if browser != "" {
+		bind["browser"] = browser
+	}
+	payload, _ := json.Marshal(bind)
 	req, _ := http.NewRequest("POST", "http://127.0.0.1:"+strconv.Itoa(b.Port)+"/native/bind", bytes.NewReader(payload))
 	req.Header.Set("Authorization", "Bearer "+ep.Token)
 	req.Header.Set("Content-Type", "application/json")
