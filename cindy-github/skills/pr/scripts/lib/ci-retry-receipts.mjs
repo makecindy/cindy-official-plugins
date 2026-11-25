@@ -6,23 +6,35 @@ import path from 'node:path';
 // The injected filesystem is for tests; the CLI always uses Node's real fs.
 export function createCiRetryReceiptIO(io = fs) {
   // Invocation-local observations, never a cached receipt or durable marker.
-  const confirmedDirectories = new Set();
+  const confirmedDirectories = new Map();
+  function observeDirectory(dir, stat) {
+    if (!stat.isDirectory() || typeof stat.dev !== 'bigint' || typeof stat.ino !== 'bigint' || stat.dev < 0n || stat.ino <= 0n) {
+      throw new Error('receipt directory identity is unknown');
+    }
+    const known = confirmedDirectories.get(dir);
+    if (known && (known.dev !== stat.dev || known.ino !== stat.ino)) throw new Error('receipt directory identity changed');
+    confirmedDirectories.set(dir, { dev: stat.dev, ino: stat.ino });
+  }
   function syncDirectories(dir) {
-    for (let current = path.resolve(dir);;) {
+    const target = path.resolve(dir);
+    for (let current = target;;) {
       const fd = io.openSync(current, 'r');
-      try { io.fsyncSync(fd); } finally { io.closeSync(fd); }
-      confirmedDirectories.add(current);
+      try {
+        observeDirectory(current, io.fstatSync(fd, { bigint: true }));
+        io.fsyncSync(fd);
+      } finally { io.closeSync(fd); }
       const parent = path.dirname(current);
-      if (parent === current) return;
+      if (parent === current) break;
       current = parent;
     }
+    observeDirectory(target, io.statSync(target, { bigint: true }));
   }
 
   function confirmParent(dir) {
     let current = path.resolve(dir);
     for (;;) {
       try {
-        if (!io.statSync(current).isDirectory()) throw new Error('receipt parent is not a directory');
+        observeDirectory(current, io.statSync(current, { bigint: true }));
         break;
       }
       catch (error) {
@@ -49,7 +61,7 @@ export function createCiRetryReceiptIO(io = fs) {
       try { io.mkdirSync(current); }
       catch (error) {
         if (error.code !== 'EEXIST') throw error;
-        if (!io.statSync(current).isDirectory()) throw new Error('receipt parent is not a directory');
+        observeDirectory(current, io.statSync(current, { bigint: true }));
       }
       syncDirectories(current);
     }

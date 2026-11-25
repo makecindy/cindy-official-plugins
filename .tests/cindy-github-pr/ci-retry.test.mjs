@@ -1321,12 +1321,12 @@ test('second reservation stops if prepare loses the already-consumed store befor
   fs.writeFileSync(loader, `import fs from 'node:fs';
 import path from 'node:path';
 const handles = new Map(), open = fs.openSync, close = fs.closeSync, read = fs.readFileSync, stat = fs.statSync;
-let sawFirst = false, afterReadStats = 0, preparing = false, moved = false;
+let sawFirst = false, preparing = false, moved = false;
 fs.openSync = (file, ...args) => { const fd = open(file, ...args); handles.set(fd, String(file)); return fd; };
 fs.closeSync = fd => { close(fd); handles.delete(fd); };
 fs.readFileSync = (file, ...args) => { const result = read(file, ...args); if (handles.get(file)?.endsWith('-1.slot')) sawFirst = true; return result; };
-fs.statSync = (file, ...args) => { const result = stat(file, ...args); if (sawFirst && path.resolve(String(file)) === path.resolve(process.env.TEST_RECEIPT_DIR) && ++afterReadStats === 2) preparing = true; return result; };
-// After first-slot read: first stat confirms absent slot2; second is prepare.
+fs.statSync = (file, ...args) => { const result = stat(file, ...args); if (sawFirst && path.resolve(String(file)) === path.resolve(process.env.TEST_RECEIPT_DIR) && new Error().stack.includes('at prepare (')) preparing = true; return result; };
+// Arm only inside prepare after first-slot read, independent of stat count.
 // Root is prepare confirmation's last flush, immediately before mkdir.
 fs.fsyncSync = fd => { if (preparing && !moved && handles.get(fd) === path.parse(process.env.TEST_RECEIPT_DIR).root) { moved = true; fs.renameSync(process.env.TEST_RECEIPT_DIR, process.env.TEST_MOVED_DIR); } };
 const { runGate } = await import(process.argv[2]);
@@ -1341,4 +1341,59 @@ process.exitCode = await runGate(process.argv.slice(3));
   assert.equal(fs.existsSync(fx.retryDir), false);
   assert.equal(fs.readFileSync(path.join(moved, name), 'utf8'), raw);
   assert.deepEqual(fs.readdirSync(moved), [name]);
+});
+
+
+test('same-path store replacement stops actual status and reservation without new quota', async t => {
+  for (const mode of ['--ci-retry-status', '--reserve-ci-retry']) await t.test(mode, t => {
+    const fx = fixture(t), moved = path.join(fx.root, 'replaced-store'); fs.mkdirSync(fx.retryDir, { recursive: true });
+    const name = path.basename(ciRetryFilePath(fx.retryDir, prNodeId)) + '-1.slot';
+    const raw = JSON.stringify({ prNodeId, failure, sourceHead: oldHead, reservedAt: 123 }); fs.writeFileSync(path.join(fx.retryDir, name), raw);
+    const loader = path.join(fx.root, 'replace-store.mjs');
+    fs.writeFileSync(loader, `import fs from 'node:fs';
+fs.fsyncSync = () => {}; // supported-sync model, no real user receipts
+const open = fs.openSync; let swapped = false;
+fs.openSync = (file, ...args) => {
+  if (!swapped && String(file).endsWith('.slot')) { swapped = true; fs.renameSync(process.env.TEST_RECEIPT_DIR, process.env.TEST_MOVED_DIR); fs.mkdirSync(process.env.TEST_RECEIPT_DIR); }
+  return open(file, ...args);
+};
+const { runGate } = await import(process.argv[2]);
+process.exitCode = await runGate(process.argv.slice(3));
+`);
+    const result = spawnSync(process.execPath, [loader, pathToFileURL(gate).href, ...fx.args([mode, ...(mode === '--reserve-ci-retry' ? [oldHead] : [])])], {
+      env: { ...fx.env, TEST_RECEIPT_DIR: fx.retryDir, TEST_MOVED_DIR: moved }, encoding: 'utf8',
+    });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /directory identity changed/);
+    assert.doesNotMatch(result.stdout, /"available":true|ci-retry-reserved/);
+    assert.deepEqual(fs.readdirSync(fx.retryDir), []);
+    assert.equal(fs.readFileSync(path.join(moved, name), 'utf8'), raw);
+  });
+});
+
+test('a pinned original committer line is rejected before consuming a no-op amend attempt', async t => {
+  for (const same of [true, false]) await t.test(same ? 'same complete ident' : 'new committer date', t => {
+    const fx = fixture(t), work = path.join(fx.root, 'pinned-date'); fs.mkdirSync(work);
+    const global = path.join(fx.root, 'global'); fs.writeFileSync(global, '');
+    const originalDate = '2026-01-02T00:00:00Z';
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_DATE: originalDate, GIT_COMMITTER_DATE: originalDate };
+    const git = (args, extra = {}) => execFileSync('git', args, { cwd: work, env: { ...env, ...extra }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    git(['init', '-b', 'main']);
+    for (const [name, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgSign', 'false']]) git(['config', name, value]);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'parent\n'); git(['add', 'code.txt']); git(['commit', '-s', '-m', 'parent'], { GIT_AUTHOR_DATE: '2026-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' });
+    fs.writeFileSync(path.join(work, 'code.txt'), 'nonempty head\n'); git(['add', 'code.txt']); git(['commit', '-s', '-m', 'original']);
+    const original = git(['rev-parse', 'HEAD']), raw = git(['--no-replace-objects', 'cat-file', 'commit', original]);
+    const header = raw.slice(0, raw.indexOf('\n\n')).match(/^committer (.+)$/m)[1];
+    const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    const actualEnv = same ? {} : { GIT_COMMITTER_DATE: '2026-01-02T00:01:00Z' };
+    assert.equal(git(plan.committerIdentArgs, actualEnv) === header, same);
+    git(plan.amendArgs, actualEnv); // native counterexample/contrast, no reservation or remote
+    assert.equal(git(['rev-parse', 'HEAD']) === original, same);
+    assert.equal(git(['config', '--get', 'user.name']), 'Ada Example');
+    assert.equal(env.GIT_COMMITTER_DATE, originalDate, 'never mutate caller environment');
+    assert.equal(fs.existsSync(fx.retryDir), false);
+    const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    assert.match(guide, /Require the complete resolved committer line to differ from the original raw committer header before quota or amend/);
+  });
 });

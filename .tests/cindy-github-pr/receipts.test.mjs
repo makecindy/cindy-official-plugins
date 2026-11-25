@@ -138,3 +138,62 @@ test('write preparation cannot recreate a confirmed directory lost after its fin
     assert.equal(handles.size, 0);
   });
 });
+
+
+test('same-path replacement of a confirmed store or ancestor cannot grant empty receipts', async t => {
+  for (const target of ['store', 'ancestor']) await t.test(target, t => {
+    const f = fixture(t), parent = path.join(f.root, 'parent'), dir = path.join(parent, 'store'), file = path.join(dir, 'one.slot');
+    fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(file, 'consumed one');
+    const source = path.join(f.root, 'legacy'); fs.writeFileSync(source, 'old bytes');
+    assert.equal(f.io.read(file), 'consumed one');
+    const replaced = target === 'store' ? dir : parent, moved = path.join(f.root, 'moved');
+    const original = fs.statSync(replaced, { bigint: true });
+    fs.renameSync(replaced, moved); fs.mkdirSync(dir, { recursive: true });
+    const next = fs.statSync(replaced, { bigint: true });
+    assert.notDeepEqual([next.dev, next.ino], [original.dev, original.ino]);
+    assert.throws(() => f.io.read(file), /directory identity changed/);
+    assert.throws(() => f.io.writeExclusive(file, 'new consumption'), /directory identity changed/);
+    assert.throws(() => f.io.copyExclusive(source, file), /directory identity changed/);
+    assert.deepEqual(fs.readdirSync(dir), []);
+    assert.equal(fs.readFileSync(path.join(moved, target === 'store' ? '' : 'store', 'one.slot'), 'utf8'), 'consumed one');
+    assert.equal(f.handles.size, 0);
+  });
+});
+
+test('unknown directory identity stops before any receipt write', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-receipt-unknown-id-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const io = createCiRetryReceiptIO({ ...fs,
+    fstatSync(fd, options) {
+      const stat = fs.fstatSync(fd, options);
+      return Object.assign(Object.create(stat), { ino: 0n });
+    },
+    fsyncSync() {}, // supported-sync model with unavailable identity
+  });
+  assert.throws(() => io.writeExclusive(path.join(root, 'new', 'one.slot'), 'consumed'), /directory identity.*unknown/);
+  assert.equal(fs.existsSync(path.join(root, 'new')), false);
+});
+
+
+test('replacement during ancestor flush is rejected before a receipt read succeeds', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-receipt-flush-swap-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dir = path.join(root, 'store'), moved = path.join(root, 'moved'); fs.mkdirSync(dir);
+  const file = path.join(dir, 'one.slot'); fs.writeFileSync(file, 'consumed one');
+  const handles = new Map(); let armed = false, swapped = false;
+  const io = createCiRetryReceiptIO({ ...fs,
+    openSync(file, ...args) { const fd = fs.openSync(file, ...args); handles.set(fd, path.resolve(file)); return fd; },
+    closeSync(fd) { fs.closeSync(fd); handles.delete(fd); },
+    fsyncSync(fd) {
+      if (armed && handles.get(fd) === path.parse(dir).root) {
+        armed = false; swapped = true; fs.renameSync(dir, moved); fs.mkdirSync(dir);
+      }
+    },
+  });
+  io.confirmParent(dir); armed = true;
+  assert.throws(() => io.read(file), /directory identity changed/);
+  assert.equal(swapped, true);
+  assert.deepEqual(fs.readdirSync(dir), []);
+  assert.equal(fs.readFileSync(path.join(moved, 'one.slot'), 'utf8'), 'consumed one');
+  assert.equal(handles.size, 0);
+});

@@ -204,6 +204,16 @@ Recheck immediately before amend/push; changed or unknown identity stops without
 refund or repair. Compare the replacement's raw committer name/email with the
 recorded identity too (its timestamp may change); retain the original author.
 
+Require the complete resolved committer line to differ from the original raw committer header before quota or amend.
+Compare the whole original header value (before the first blank line), including
+name, email, epoch seconds and timezone, with Git's resolved ident. Equality is
+ineligible even when the identity/date is valid: unchanged unsigned metadata can
+reproduce the same object. Apply this conservative rule to signed heads too;
+do not rely on re-signing randomness. Recheck at each execution boundary, keep
+name/email stable, and allow the date to advance naturally. Never change a
+pinned date/configuration, inject a nonce or probe an amend to qualify. The later
+new-SHA and raw-payload checks remain mandatory.
+
 Before quota or amend, reject an empty root or single-parent head. Use the
 original raw parent count, never a replacement-aware or shallow view. For one
 parent, read that pinned parent's raw commit with the same argument boundary
@@ -314,7 +324,13 @@ boundary. The single receipt I/O owner syncs file contents and every parent
 directory through the filesystem root, including newly created ancestors,
 before returning success. New slots, raw exclusive legacy copies, migration
 and re-read receipts share this boundary. A missing file at open means unused only after rechecking its parents. The
-existing I/O owner remembers directories successfully confirmed in this process;
+existing I/O owner remembers each observed directory's lossless device/inode
+identity in this process. Both pathname stats and opened directory handles must
+match that identity at confirmation/sync; the target is checked again after its
+ancestor flushes. Unknown/zero identity or a changed directory stops rather than
+accepting a same-path replacement. This replaces the existing path-only facts,
+not a new durable registry or a cached quota. Every check still reads the real
+filesystem;
 if any such directory disappears, read and preparation fail closed rather than
 walking above it, returning null or recreating it. Preparation never calls
 recursive mkdir: an already-existing target needs no mkdir; only a confirmed

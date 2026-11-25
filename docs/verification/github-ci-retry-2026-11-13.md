@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.50, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.51, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1295,3 +1295,52 @@ and 19 existing skips remain. Forge package/content check passed: **29 files,
 package removed/read back absent. Eight staged files match validated source;
 version exceeds fetched main 1.5.35. Preflight no blockers; unrelated old artifacts
 and ordinary main movement were left untouched. No install or live quota action.
+
+
+## Directory identity and productive committer metadata — 2026-11-25 (source 1.5.51, not installed)
+
+Round 42 groups the two open findings into receipt-store identity and productive
+amend prerequisites. The existing process-local directory observations now retain
+lossless device/inode values rather than path-only presence. Actual pathname
+stats and opened directory handles are checked against those observations; the
+target is checked again after ancestor synchronization. Unknown/zero identities
+or changed identities fail closed. No long-lived handle, watcher, lock, marker,
+root registry or quota cache is added. Existing non-recursive creation remains.
+These checks are not an atomic filesystem transaction or recovery from external
+erasure before invocation; known lost/unknown outcomes still stop reconciliation.
+
+Ten core regressions first failed on 79553e67. The combined focused group passes
+**16 tests (4.07 s)** including earlier prepare-window coverage. Store/ancestor
+rename plus same-path recreation now rejects read, exclusive write and raw copy;
+actual CLI status/reserve model cases retain the moved original slot and leave
+the replacement empty. Unknown inode and a swap during ancestor flush also stop,
+with all handles closed. Directory identity values come from actual local stats,
+while successful directory flushes are modeled; this is not new Cindy/GitHub,
+native Linux or power-loss acceptance. The older prepare injection now identifies
+its actual call phase rather than counting stats, preserving that window after
+the added identity checks.
+
+The Agent must compare the complete resolved committer line with the original
+raw header before quota/amend, including epoch and timezone. Equality is rejected
+for unsigned and conservatively for signed heads, rather than relying on signature
+randomness. Rechecks keep name/email stable and allow date to advance naturally;
+no pinned date/config override, nonce or probe is used to qualify. Native nonempty
+single-parent fixtures show a pinned original ident yields exactly the same SHA,
+while a different already-selected date yields a new SHA. No quota or remote
+operation occurs in those fixtures; prior raw-payload/new-SHA checks remain.
+
+Source/package 1.5.51 was not installed; actually tested local remains 1.5.45.
+There was no real preference/credential/permission/quota change, repeated recovery,
+retired fixture use or blocked cleanup retry. UI/locales, fixed slots, root
+selection and Git argument arrays are unchanged. Existing version-limited trial,
+current UI/disable/signed-head live acceptance gaps, causal-attribution limitation
+and maintainer Verify approval/review remain prerequisites.
+
+Final mandatory four suites plus plugin: **513 passed, 36 skipped, 0 failed
+(246.23 s)**. The 17 unsupported native positive quota cases and 19 existing
+skips remain; the full suite retains every directory-link/file/ancestor sync
+failure check. Forge package/content check passed: **29 files, 241427 bytes**,
+exact non-manifest bytes and semantic manifest equality. The new 1.5.51 package
+was removed and confirmed absent. Eight staged files match the validated source;
+version exceeds fetched main 1.5.35. No unrelated work or installed runtime was
+changed. Current-head maintainer review and matching Verify approval remain.
