@@ -62,10 +62,11 @@ func TestSignedIdentityParsesCodesignOutput(t *testing.T) {
 	}
 }
 
-func TestVerifyParentAcceptsBraveOriginAndDia(t *testing.T) {
+func TestVerifyParentAcceptsBraveOriginDiaAndTabbit(t *testing.T) {
 	cases := []struct{ id, team, exe string }{
 		{"com.brave.Browser.origin", "KL8N8XSYF4", "/Applications/Brave Origin.app/Contents/MacOS/Brave Origin"},
 		{"company.thebrowser.dia", "S6N382Y83G", "/Applications/Dia.app/Contents/MacOS/Dia"},
+		{"com.tab-browser.Tabbit", "2DE8QTFYGR", "/Applications/Tabbit Browser.app/Contents/MacOS/Tabbit Browser"},
 	}
 	for _, c := range cases {
 		t.Run(c.id, func(t *testing.T) {
@@ -93,6 +94,18 @@ func TestVerifyParentRejectsDiaWithAnotherTeam(t *testing.T) {
 	codesign = func(args ...string) ([]byte, error) {
 		if args[0] == "-d" {
 			return []byte("Executable=/Applications/Dia.app/Contents/MacOS/Dia\nIdentifier=company.thebrowser.dia\nTeamIdentifier=EQHXZ8M8AV\n"), nil
+		}
+		return []byte("the code on disk does not match what is running"), errors.New("exit status 1")
+	}
+	if err := verifyParent("4242"); err == nil {
+		t.Fatal("wrong team was accepted")
+	}
+}
+
+func TestVerifyParentRejectsTabbitWithAnotherTeam(t *testing.T) {
+	codesign = func(args ...string) ([]byte, error) {
+		if args[0] == "-d" {
+			return []byte("Executable=/Applications/Tabbit Browser.app/Contents/MacOS/Tabbit Browser\nIdentifier=com.tab-browser.Tabbit\nTeamIdentifier=EQHXZ8M8AV\n"), nil
 		}
 		return []byte("the code on disk does not match what is running"), errors.New("exit status 1")
 	}

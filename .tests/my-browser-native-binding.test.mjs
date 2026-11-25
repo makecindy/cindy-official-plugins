@@ -68,6 +68,15 @@ test('one browser directory failure does not abort native installation',async t=
  await assert.rejects(fs.readFile(path.join(bad,host)));
  await n.close();
 });
+test('macOS native registration includes Tabbit Browser without a local shim',async t=>{
+ const {dir,binary}=await fixture(t);const home=path.join(dir,'home');
+ const n=createNativeBinding({root:path.join(dir,'native'),binary,platform:'darwin',home});
+ assert.equal((await n.install(18819,['a'.repeat(32)])).ok,true);
+ const file=path.join(home,'Library/Application Support/Tabbit Browser/NativeMessagingHosts',HOST+'.json');
+ assert.equal(JSON.parse(await fs.readFile(file)).name,HOST);
+ await n.close();
+});
+
 test('native installation still fails when every browser directory fails',async t=>{
  const {dir,binary}=await fixture(t);
  const a=path.join(dir,'a'),b=path.join(dir,'b');

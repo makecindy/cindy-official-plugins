@@ -88,6 +88,16 @@ test('published install URL is allowlisted and Windows launch uses argv, not a s
   const r=await i.open('chrome');assert.equal(r.ok,true);assert.equal(r.installed,false);assert.match(calls[0][0],/chrome\.exe$/);assert.deepEqual(calls[0][1],[catalog.chrome.storeUrl]);
   catalog.chrome.storeUrl='https://example.test/';assert.throws(()=>i.status(),/Invalid packaged store URL/);
 });
+test('Tabbit uses the Chrome Web Store route and chrome://extensions fallback',async()=>{
+  const calls=[];
+  const catalog={chrome:{storeUrl:'https://chromewebstore.google.com/detail/'+'a'.repeat(32)},edge:{storeUrl:null},safari:{appStoreUrl:null}};
+  const i=createInstallation({platform:'darwin',exists:p=>p.includes('Tabbit'),distribution:catalog,run:async(...args)=>calls.push(args)});
+  const tabbit=i.status().browsers.find(b=>b.browser==='tabbit');
+  assert.equal(tabbit.supported,true);assert.equal(tabbit.installed,true);assert.equal(tabbit.published,true);
+  let r=await i.open('tabbit');assert.equal(r.ok,true);assert.equal(calls[0][1].at(-1),catalog.chrome.storeUrl);
+  calls.length=0;r=await i.open('tabbit','developer');assert.equal(r.ok,true);assert.equal(calls[0][1].at(-1),'chrome://extensions/');
+});
+
 test('OS launch failure is unknown and never automatically retried',async()=>{
   let calls=0;const i=createInstallation({platform:'darwin',exists:()=>true,run:async()=>{calls++;throw new Error('failed');}});
   const r=await i.open('chrome','reload');assert.equal(r.execution,'unknown');assert.equal(calls,1);

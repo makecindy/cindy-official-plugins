@@ -9,7 +9,7 @@ import (
 )
 
 // Signed browsers allowed to drive the binding; the team is the certificate's subject.OU.
-const browserRequirement = `anchor apple generic and ((certificate leaf[subject.OU] = "EQHXZ8M8AV" and (identifier "com.google.Chrome" or identifier "com.google.Chrome.forTesting")) or (certificate leaf[subject.OU] = "UBF8T346G9" and identifier "com.microsoft.edgemac") or (certificate leaf[subject.OU] = "KL8N8XSYF4" and (identifier "com.brave.Browser" or identifier "com.brave.Browser.origin")) or (certificate leaf[subject.OU] = "S6N382Y83G" and identifier "company.thebrowser.dia"))`
+const browserRequirement = `anchor apple generic and ((certificate leaf[subject.OU] = "EQHXZ8M8AV" and (identifier "com.google.Chrome" or identifier "com.google.Chrome.forTesting")) or (certificate leaf[subject.OU] = "UBF8T346G9" and identifier "com.microsoft.edgemac") or (certificate leaf[subject.OU] = "KL8N8XSYF4" and (identifier "com.brave.Browser" or identifier "com.brave.Browser.origin")) or (certificate leaf[subject.OU] = "S6N382Y83G" and identifier "company.thebrowser.dia") or (certificate leaf[subject.OU] = "2DE8QTFYGR" and identifier "com.tab-browser.Tabbit"))`
 
 var browserIdentities = map[string]string{
 	"com.google.Chrome":            "EQHXZ8M8AV",
@@ -18,6 +18,7 @@ var browserIdentities = map[string]string{
 	"com.brave.Browser":            "KL8N8XSYF4",
 	"com.brave.Browser.origin":     "KL8N8XSYF4",
 	"company.thebrowser.dia":       "S6N382Y83G",
+	"com.tab-browser.Tabbit":       "2DE8QTFYGR",
 }
 
 // codesign runs the system tool; tests substitute it.

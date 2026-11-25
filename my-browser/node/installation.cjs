@@ -22,7 +22,7 @@ function createInstallation(options = {}) {
   });
   function app(browser) {
     if (platform === 'darwin') {
-      const name = {chrome:'Google Chrome',edge:'Microsoft Edge',safari:'Safari'}[browser];
+      const name = {chrome:'Google Chrome',edge:'Microsoft Edge',safari:'Safari',tabbit:'Tabbit Browser'}[browser];
       return ['/Applications/'+name+'.app','/System/Applications/'+name+'.app',path.join(options.home || os.homedir(),'Applications',name+'.app')].find(exists);
     }
     if (platform === 'win32' && browser !== 'safari') {
@@ -32,21 +32,22 @@ function createInstallation(options = {}) {
     if (platform === 'linux' && browser !== 'safari') return (browser === 'chrome' ? ['/usr/bin/google-chrome','/usr/bin/chromium','/usr/bin/chromium-browser'] : ['/usr/bin/microsoft-edge']).find(exists);
   }
   function storeUrl(browser) {
-    const url = browser === 'safari' ? catalog.safari.appStoreUrl : catalog[browser]?.storeUrl;
+    const source = browser === 'tabbit' ? catalog.chrome : catalog[browser];
+    const url = browser === 'safari' ? catalog.safari.appStoreUrl : source?.storeUrl;
     if (!url) return null;
     const u = new URL(url);
-    const host = {chrome:'chromewebstore.google.com',edge:'microsoftedge.microsoft.com',safari:'apps.apple.com'}[browser];
+    const host = {chrome:'chromewebstore.google.com',tabbit:'chromewebstore.google.com',edge:'microsoftedge.microsoft.com',safari:'apps.apple.com'}[browser];
     if (u.protocol !== 'https:' || u.hostname !== host || u.username || u.password) throw new Error('Invalid packaged store URL.');
     return u.href;
   }
   function status() {
-    return {platform,browsers:['chrome','edge','safari'].map(browser => {
-      const supported = browser !== 'safari' || platform === 'darwin';
+    return {platform,browsers:['chrome','edge','tabbit','safari'].map(browser => {
+      const supported = (browser === 'safari' || browser === 'tabbit') ? platform === 'darwin' : true;
       return {browser,supported,installed:supported && !!app(browser),published:!!storeUrl(browser),bundled:browser === 'safari' && platform === 'darwin' && exists(safariApp)};
     })};
   }
   async function open(browser,mode = 'store') {
-    if (!['chrome','edge','safari'].includes(browser) || !['store','developer','reload'].includes(mode)) return {ok:false,error:'INVALID_INSTALL_TARGET',execution:'not_executed'};
+    if (!['chrome','edge','tabbit','safari'].includes(browser) || !['store','developer','reload'].includes(mode)) return {ok:false,error:'INVALID_INSTALL_TARGET',execution:'not_executed'};
     const executable = app(browser);
     if (!executable) return {ok:false,error:'BROWSER_NOT_INSTALLED',execution:'not_executed'};
     if (browser === 'safari' && mode === 'store' && exists(safariApp)) {
@@ -54,7 +55,8 @@ function createInstallation(options = {}) {
       try {await run('/usr/bin/open',[safariApp]);return {ok:true,execution:'executed',stage:'awaiting_browser_confirmation',installed:false};}
       catch {return {ok:false,error:'OPEN_OUTCOME_UNKNOWN',execution:'unknown'};}
     }
-    const url = mode === 'store' ? storeUrl(browser) : browser === 'safari' ? null : browser+ '://extensions/';
+    const managerUrl = browser === 'tabbit' ? 'chrome://extensions/' : browser+'://extensions/';
+    const url = mode === 'store' ? storeUrl(browser) : browser === 'safari' ? null : managerUrl;
     if (!url) return {ok:false,error:'RELEASE_REQUIRED',message:'The publisher must provide an approved extension store release / signed Safari app. Developer loading is not a finished installation.',execution:'not_executed'};
     try {
       if (platform === 'darwin') await run('/usr/bin/open',['-a',executable,url]);
