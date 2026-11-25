@@ -51,6 +51,7 @@ const reserveArgs = [gatePath, prUrl, '--state-dir', observationStateDir,
 const statusArgs = [gatePath, prUrl, '--state-dir', observationStateDir, '--ci-retry-status',
   '--ci-retry-id', prNodeId, '--ci-retry-failure', diagnosisPath, '--json'];
 const hooksPathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'hooks'];
+const pushSigningConfigArgs = ['--no-replace-objects', 'config', '--includes', '--type=bool', '--get', 'push.gpgSign'];
 const hookConfigArgs = ['--no-replace-objects', 'config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^hook[.]'];
 const encodingConfigArgs = ['--no-replace-objects', 'config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^i18n[.](commitencoding|logoutputencoding)$'];
 const hookListArgs = ['pre-commit', 'prepare-commit-msg', 'commit-msg', 'post-commit',
@@ -107,65 +108,57 @@ extra writes or unknown behavior stops recovery. Do not change configuration
 or replace a helper to make it eligible. The existing task tool remains the
 only executor; no resolver, hook runner or storage is added.
 
-### Supported checkout: inspected hooks, no history overlays
+Before quota or amend, require push.gpgSign unset or false. Read the effective
+value with `pushSigningConfigArgs` in the same checkout/environment, following
+includes and normal Git scope precedence. Only a confirmed missing key (exit 1,
+no output/diagnostics) or successful `false` result is eligible. `true`,
+`if-asked`, invalid/unknown values or failed reads stop recovery before budget
+status/reservation, amend and push. Recheck at all three boundaries. A signed
+commit does not imply a usable signed-push capability or signer. Do not change
+configuration, pass `--no-signed`, sign a probe or query/execute a new transport
+to gain eligibility; an ordinary authorized contribution uses its own workflow.
+
+### Supported checkout: no effective hooks or history overlays
 
 The same eligibility boundary applies before **any Git status/object work or
 budget operation**, immediately before amend, and immediately before push.
 First use read-only configuration/path inspection, not a trial commit or hook.
 An executable extension or object-view override with unknown execution effects
 stops CI-only recovery; do not run it as a probe.
-Unknown hooks or hooks capable of extra remote writes stop recovery before quota or amend.
-Inspect every non-sample entry in the effective hooks directory and the executable
-and configuration it delegates to. A familiar filename, marker or `git lfs`
-substring does not prove standard content. Symlinks, unreadable paths, arbitrary
-dispatchers and uncertain activation stop this route. This covers pre-commit,
+Any effective Git hook, including standard Git LFS and DCO, stops recovery before quota or amend.
+Keep the original commit and retry count unchanged; do not invoke a hook to
+probe its behavior. This applies even when its complete content is trusted,
+the message already has a sign-off, or LFS objects were previously uploaded.
+No body inspection grants an exception for this CI-only recovery.
+
+Use `hooksPathArgs` to resolve Git's effective directory, including
+`core.hooksPath` and linked worktrees; never assume `.git` is a directory.
+Inspect every non-sample entry for activation without executing it. Symlinks,
+unreadable paths or uncertain activation stop recovery. This covers pre-commit,
 prepare-commit-msg, commit-msg, post-commit, post-rewrite, reference-transaction,
-pre-push and other hooks, not just the final push hook. Use `hooksPathArgs` to
-resolve Git's effective directory, including `core.hooksPath` and linked
-worktrees; never assume `.git` is a directory. Require `core.fsmonitor` unset
-or false too: a status/monitor command with unknown effects is not supported.
-Do not disable, rename, chmod, rewrite or bypass hooks to become eligible.
-Ordinary authorized fixes remain governed by their repository rules; this
-restriction is for the optional CI-only recovery, not normal contribution.
+post-index-change, pre-auto-gc and pre-push, plus any other event the operation
+can trigger. Require `core.fsmonitor` unset or false too: a status/monitor
+command with unknown effects is not supported. Do not disable, rename, chmod,
+rewrite or bypass hooks to become eligible. Ordinary authorized contributions
+remain governed by their repository rules.
 
 The effective hook set includes configuration-registered hooks, not only files.
 Before quota/reservation, amend and push, read `hookConfigArgs` using the same
 checkout/environment as the intended Git operation. Preserve origin, scope and
 all multi-values, including conditional includes, worktree/global/system config
-and command-scope settings. Inspect command, event and enabled values without
-executing command strings. With Git 2.54+, use every `hookListArgs` event to have
+and command-scope settings. With Git 2.54+, use every `hookListArgs` event to have
 Git resolve effective registration order, last-command-wins, event resets and
-disabled entries; include any additional event delegated commands can invoke.
+disabled entries. Any active listed command stops recovery without execution.
 Git list returns 1 for a known event with no hooks and its explicit no-hooks
-diagnostic; that is different from an unsupported command, config parse failure
-or unreadable include. Inspect every listed configured command and delegated
-binary under the same policy as directory hooks. Do not eval a command or run
-`git hook run` to discover whether it is safe. If enumeration is unsupported,
-continue with legacy directory inspection only when the full successful config
-read establishes no registered hooks; otherwise stop before quota/amend/push.
-Never unset configuration or disable a registered hook to gain eligibility.
-Record and compare the effective lists and complete configuration fingerprints
-at every execution boundary; a new/changed/unverifiable entry stops recovery.
-Reports use hashes and redacted origin/scope; never retain embedded credentials.
+diagnostic; that differs from an unsupported command, config parse failure
+or unreadable include. Do not eval commands or use `git hook run` as a probe.
+If enumeration is unsupported, continue with legacy directory inspection only
+when the full successful config read establishes no registered hooks; otherwise
+stop before quota/amend/push. Never unset configuration to gain eligibility.
+Recheck the effective lists and configuration at every execution boundary;
+new/changed/unverifiable facts stop recovery. Reports use hashes and redacted
+origin/scope; never retain embedded credentials.
 [Git hook 2.54](https://git-scm.com/docs/git-hook/2.54.0) defines these semantics.
-
-Inspected standard Git LFS and DCO hooks may run normally. For a repository DCO
-hook, compare its entire content with the trusted source at the pinned original
-commit, review that source, and require the original message already to contain
-the configured committer's exact sign-off. It must leave that message unchanged;
-the post-amend raw-message check still applies. For Git LFS, compare all installed
-hook bodies with the standard templates from the installed, verified Git LFS
-release and inspect effective LFS/filter configuration. Require no custom transfer
-agent, extension, push URL or LFS endpoint outside the same verified head repository.
-Require all LFS objects needed by the unchanged original tree already present at
-that destination, established from the original successful push/task evidence;
-otherwise wait for a normal authorized contribution rather than uploading objects
-as part of this recovery. Standard hook checks/local bookkeeping may run, but
-no new LFS object, tag, release, child repository or extra ref write is authorized.
-Record inspected hook bytes and delegated binary identity, and compare them again
-before amend and push. Changed content/configuration or unknown effects stop the
-route without consuming another attempt. Do not install or replace a hook or
-dependency just to make this checkout eligible.
 
 Any replace ref or legacy graft makes this checkout ineligible before quota.
 Require `replaceRefsArgs` to return no entries and the file at `graftPathArgs`
@@ -213,7 +206,7 @@ the later raw-message comparison remains required for supported UTF-8 inputs.
 
 | Event | Action |
 | --- | --- |
-| Uninspected/changed hook, extra remote effect, overlay, shallow state or unknown inspection before budget | Stop without budget, amend or push |
+| Any effective hook, overlay, shallow state or unknown inspection before budget | Stop without budget, amend or push |
 | Hook/configuration/history facts change before amend | Stop; keep any consumed receipt, no refund |
 | Raw tree/parents/author differ, or a history boundary/unverified hook appears after amend | Leave the new local commit unpushed and report; never reset user work |
 | Earlier hook may already have written externally | Reconcile all suspected destinations read-only; unknown is not unexecuted |
@@ -282,7 +275,7 @@ auto-merge, queue operations, direct main pushes, permission changes or bypasses
 
 Use the current `<skill-dir>` and this PR's existing observation-cache directory
 for the gate. Both budget status and reservation use the platform's receipt I/O
-boundary. On POSIX, the single receipt I/O owner syncs file contents and every parent
+boundary. The single receipt I/O owner syncs file contents and every parent
 directory through the filesystem root, including newly created ancestors,
 before returning success. New slots, raw exclusive legacy copies, migration
 and re-read receipts share this boundary. Only an absent file at open means
@@ -291,26 +284,17 @@ There is no error-swallowing fallback, refund, removal, alternate directory or
 automatic retry. Keep observation cache and all receipts on any error; an
 unsupported store cannot confirm migration or grant available quota.
 
-On Windows, Node cannot perform the POSIX directory fsync used above. The Windows
-backend instead opens each receipt with O_SYNC (libuv FILE_FLAG_WRITE_THROUGH),
-retains exclusive creation, and fsyncs the file before reporting success. Legacy
-copies use that same write-through owner rather than an unflushed copyFile target.
-Read-back flushes the winning receipt too; any failed/unknown file operation
-stops recovery. Receipt paths, immutable slots, migration and limits are unchanged.
-This confirms Windows file writes and their associated metadata flush, not a
-separate flush of every newly created ancestor directory. Abrupt power loss may
-therefore lose a newly created directory/name and its consumption record; do not
-claim the earlier POSIX parent-chain guarantee on Windows. Known power loss or an
-uncertain prior recovery outcome still requires reconciliation, never fresh quota.
-This Windows policy is an explicit change to the earlier durability contract and
-requires maintainer review before merge. A runtime test using it requires the
-owner to accept that narrower guarantee; installation alone is not acceptance.
-Successful OS acknowledgements and process-restart tests are not hardware
-power-loss evidence. Microsoft documents write-through metadata behavior in
-[CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew#caching-behavior).
+The same file-and-complete-parent-chain requirement applies on every platform.
+When Node or the filesystem cannot confirm directory synchronization (including
+Windows configurations returning EPERM), stop before claiming available quota
+or reserving an attempt, even when no receipt or quota directory exists yet.
+There is no Windows write-through/file-only fallback. Do not change storage,
+configuration or credentials to make this route eligible. Process-restart
+checks and successful OS acknowledgements are not hardware power-loss evidence.
 
 Status separates unused quota from confirmed receipt I/O. `available: true`
-means a quota slot is unused; it does not establish storage capability.
+means a quota slot is unused after required directory confirmation; it does
+not establish receipt-file flush capability.
 `receipt_flush_confirmed: false` with empty slots means no receipt-file flush
 has been exercised, even if an ancestor directory exists. Status creates no
 probe file or directory. A true value means stored receipt evidence was read
@@ -458,8 +442,7 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    recovery; migration never grants two fresh attempts on top of old history.
 4. Recheck eligibility 6 (no approval, queue or auto-merge; all states known),
    the PR is open, the preference is enabled, and local/index/remote
-   facts still match, including the inspected hook bytes/configuration and absence
-   of every history overlay.
+   facts still match, including absence of any effective hook and every history overlay.
    Use `git` with `amendArgs` only after those checks. The shared
    `--cleanup=verbatim` argument preserves the raw message regardless
    of local/global cleanup or comment-character settings. Keep it for unsigned

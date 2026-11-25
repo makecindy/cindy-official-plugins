@@ -1614,7 +1614,7 @@ async function gateMain(args, ctx) {
   // This is a budget receipt only; the agent must read live plugin preferences and
   // establish every safety condition in references/ci-retry.md before any Git write.
   if (args.ciRetryRequested) {
-    // Directory existence is not a file-flush capability probe on Windows.
+    // Parent directory confirmation is not a receipt-file flush capability probe.
     // Keep status read-only and report whether returned receipt evidence was
     // actually flushed; the reservation itself must flush before any Git write.
     ciRetryReceiptIO.confirmParent(args.ciRetryDir);

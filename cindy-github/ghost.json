@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.46",
-  "releaseNotes": "新增默认关闭、本机所有仓库/PR 共用的受限 CI 恢复授权，可随时关闭；引用卡也可撤权。仅确认临时故障且正常 rerun 明确被权限拒绝时，允许对独占功能分支受限改写 SHA：同一故障一次、每 PR/电脑累计两次，到上限停止。回执在 POSIX 同步文件及父目录；Windows 使用 write-through 加文件 flush，不承诺完整父目录链抗断电，实测前须接受该差异。恢复覆盖目录和 Git 配置注册的全部有效 hooks，允许完整核验的标准 LFS/DCO，拒绝未知或额外远端写入；空额度状态不冒充存储已验证，预留须确认回执已 flush；预留前排除消息编码头、非 UTF-8 或未知编码配置；仍禁止 replace/graft/shallow，核对原始对象和一致签名身份；固定已验证 SHA 与精确 lease，禁止标签跟随和子模块递归。保留上游网络恢复复查：同一 PR 的状态事件可提前重读 DNS/超时故障，失败不延后原计划，完整读取后清告警；限流及登录失败保留原退避。",
+  "version": "1.5.47",
+  "releaseNotes": "新增默认关闭、本机所有仓库/PR 共用的受限 CI 恢复授权，可随时关闭；引用卡也可撤权。仅确认临时故障且正常 rerun 明确被权限拒绝时，允许对独占功能分支受限改写 SHA：同一故障一次、每 PR/电脑累计两次，到上限停止。回执必须同步文件及完整父目录链，任何平台不支持均停止，不使用 Windows 文件级降级。恢复覆盖目录和 Git 配置注册的全部有效 hooks，任何有效 hook（包括标准 LFS/DCO）都在消耗次数和改写前停止；空额度状态不冒充存储已验证，预留须确认回执已 flush；预留前排除消息编码头、非 UTF-8 或未知编码配置；仍禁止 replace/graft/shallow，核对原始对象和一致签名身份；固定已验证 SHA 与精确 lease，禁止标签跟随和子模块递归。保留上游网络恢复复查：同一 PR 的状态事件可提前重读 DNS/超时故障，失败不延后原计划，完整读取后清告警；限流及登录失败保留原退避。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",

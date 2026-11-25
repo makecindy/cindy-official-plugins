@@ -2,6 +2,8 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
+Current publication policy: **1.5.47, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
 The marketplace instance and its preferences were left unchanged.
@@ -1080,3 +1082,69 @@ The empty-store regression uses a separate test-only process whose real file flu
 Required four suites plus plugin: 541 passed, 1 environment failure, 20 skipped in 268.67 s after adding the already-existing official jq 1.8.2 helper to this test process's PATH (release asset digest independently matched). The sole remaining failure was native Node lookup of unzip. Adding the already-installed Git usr/bin directory only to the test process fixed that packaging case; the combined targeted packaging/hook/status/encoding run passed all six checks. No production/test-code workaround or tool installation was made. Forge packaging passed; source 1.5.46 is not installed, while live local remains the actually tested 1.5.45. The added guard/output metadata does not change receipt writes, slots, amend or push arguments, so the 1.5.45 real transport observation is reused with that explicit version limit.
 
 The owner explicitly accepts successful repush/new CI startup as the recovery test outcome and does not require #12846 CI's final result. This round does not poll that CI or consume another real attempt. The Windows weaker power-loss guarantee and inspected LFS/DCO exception remain proposed publishing policy: the earlier maintainer approval required directory durability, and acceptance of the one local trial does not approve release. Those two review threads stay open for a maintainer decision. The timing-flake diagnosis is still not direct runner/infrastructure evidence; do not widen eligibility or manufacture a fault to make the experiment count as proof of that diagnosis. No merge, live-plugin update, preference/credential/permission change, retired-fixture recreation or blocked-cleanup retry occurred.
+
+
+## Publication policy restored — 2026-11-25 (source 1.5.47, not installed)
+
+This section supersedes the 1.5.45/1.5.46 publication proposals above. In round 38,
+we grouped feedback into Git execution eligibility and receipt durability, and
+removed both trial exceptions instead of adding another runner or storage path.
+[The maintainer's explicit hook decision](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-7163889502)
+requires every effective hook, including trusted standard Git LFS/DCO, to stop
+CI-only recovery before quota, amend or push. Effective directory and Git 2.54
+configuration-registered hooks are still enumerated read-only. No hook body audit
+can grant an exception; hooks and user configuration remain untouched.
+
+The single receipt I/O owner again requires file and complete ancestor-directory
+synchronization on every platform, as required by the
+[existing durability decision](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-7036436492)
+and reaffirmed in [this review](https://github.com/makecindy/cindy-official-plugins/pull/332#pullrequestreview-6058435334).
+The Windows write-through constant, platform branch and file-only copy path were
+removed. Unsupported directory confirmation stops status/reservation before
+claiming unused quota; no directory, attempt or Git mutation is granted. Existing
+paths, exclusive slots, raw legacy evidence and the two-total/one-per-failure cap
+are retained. Empty status still distinguishes quota from receipt-file flush;
+its file-flush regression models supported directory synchronization, while the
+native Windows refusal case covers the actual unsupported environment.
+
+Standard enabled DCO and locally installed Git LFS regressions first failed on
+1.5.46, then passed against the strict guide. They verify native discovery,
+unchanged original SHA/raw object/hook bytes, and no quota file; they never invoke
+reservation, amend or push. This is native recognition plus the Agent contract,
+not a mechanical recovery executor or real GitHub recovery evidence. An injected
+unsupported-directory regression also failed first on the Windows trial branch,
+then passed; all 62 file/directory sync-failure locations remain covered.
+
+Installed local **1.5.45 remains unchanged**. Its actual #12846 denied-rerun,
+one consumed attempt, exact leased rewrite and new CI startup remain historical
+trial evidence, accepted by the owner as the requested trial outcome. They do
+not demonstrate that source 1.5.47 can recover in that Windows/hook-enabled
+checkout: publication policy now refuses that environment before quota/amend.
+The timing race still lacks direct runner/infrastructure attribution; successful
+transport is not a causal diagnosis. No further live rewrite, quota use,
+installation, preference change or #12846 final-CI polling occurred. Disabling
+mid-recovery, current unknown-panel/header/read-order integration and signed-head
+live recovery remain unverified. A fresh review of this publication candidate
+and its own required checks remain necessary; there is no merge authorization.
+
+New same-family feedback [4695859488](https://github.com/makecindy/cindy-official-plugins/pull/332#discussion_r4695859488)
+is included in this batch: inherited `push.gpgSign` must be confirmed unset/false
+before quota/amend and rechecked before push. True, if-asked, invalid or unknown
+values stop without config changes or a `--no-signed` bypass. The native bare
+receiver reproduced the signed-push refusal using the original SHA; the new
+preflight-contract regression failed first. No reservation or amend is used in
+that counterexample.
+
+Final mandatory four suites plus plugin: **466 passed, 36 skipped, 0 failed
+(389.68 s)**. The 17 native positive quota cases remain skipped because this
+Windows backend cannot confirm directory sync; 19 existing skips remain.
+Focused refusal/status/hook/signed-push checks: **6 passed (13.53 s)**; receipt
+I/O checks: **66 passed (2.57 s)** including all 62 injected sync points. An
+initial full run exposed CRLF introduced by editing the guide, causing its LF
+code-block extractor to fail; restoring repository LF fixed this without a
+production/test bypass. The final required run above passes as a whole.
+Forge 1.5.47 validation/package checks pass: **29 files, 238913 bytes**; every
+non-manifest archive byte equals source and manifest semantics match. All 13
+staged files match the validated working bytes. The newly generated package
+was removed and its absence verified; old blocked cleanup artifacts and durable
+quota remain untouched. Source 1.5.47 exceeds freshly fetched main 1.5.35.

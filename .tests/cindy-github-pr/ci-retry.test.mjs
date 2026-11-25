@@ -15,8 +15,8 @@ const prNodeId = 'PR_exampleImmutableId';
 const oldHead = 'a'.repeat(40), newHead = 'b'.repeat(40);
 const failure = { workflow: '.github/workflows/verify.yml', job: 'verify', step: 'install dependencies', cause: 'package store unavailable' };
 
-// Probe the actual receipt backend, including Windows write-through. This is
-// native I/O evidence, never a claim of power-loss or ancestor durability.
+// Probe the actual file-and-directory receipt contract. OS acknowledgements
+// are native I/O observations, never proof of hardware power-loss durability.
 const nativeReceiptSync = (() => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-receipt-capability-'));
   try { createCiRetryReceiptIO().writeExclusive(path.join(dir, 'probe'), 'probe'); return { supported: true }; }
@@ -144,7 +144,7 @@ function guideArguments(values) {
   const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
   const source = guide.match(/```js\n(\/\/ Argument lists for the existing task execution tool\.[\s\S]*?)\n```/)?.[1];
   assert.ok(source, 'the recovery guide must define argument lists, not shell command templates');
-  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, encodingConfigArgs: typeof encodingConfigArgs === "undefined" ? undefined : encodingConfigArgs, hookConfigArgs: typeof hookConfigArgs === "undefined" ? undefined : hookConfigArgs, hookListArgs: typeof hookListArgs === "undefined" ? undefined : hookListArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, shallowStateArgs: typeof shallowStateArgs === "undefined" ? undefined : shallowStateArgs, shallowPathArgs: typeof shallowPathArgs === "undefined" ? undefined : shallowPathArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs })', values);
+  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, encodingConfigArgs: typeof encodingConfigArgs === "undefined" ? undefined : encodingConfigArgs, pushSigningConfigArgs: typeof pushSigningConfigArgs === "undefined" ? undefined : pushSigningConfigArgs, hookConfigArgs: typeof hookConfigArgs === "undefined" ? undefined : hookConfigArgs, hookListArgs: typeof hookListArgs === "undefined" ? undefined : hookListArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, shallowStateArgs: typeof shallowStateArgs === "undefined" ? undefined : shallowStateArgs, shallowPathArgs: typeof shallowPathArgs === "undefined" ? undefined : shallowPathArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs })', values);
 }
 
 test('recovery guide passes dynamic refs, remotes and paths as literal argument data', () => {
@@ -282,10 +282,10 @@ quotaTest('same failure budget survives changed SHAs, observation resets, casing
 test('empty quota status does not claim receipt flush support when file flush is unavailable', t => {
   const fx = fixture(t), loader = path.join(fx.root, 'no-file-flush.mjs');
   fs.writeFileSync(loader, `import fs from 'node:fs';
-const original = fs.fsyncSync;
+// Supported-directory model; the native unsupported-store test covers refusal.
 fs.fsyncSync = fd => {
   if (fs.fstatSync(fd).isFile()) throw Object.assign(new Error('file flush unavailable'), { code: 'ENOTSUP' });
-  return original(fd);
+  return undefined;
 };
 const { runGate } = await import(process.argv[2]);
 process.exitCode = await runGate(process.argv.slice(3));
@@ -892,50 +892,40 @@ test('recovery binds signature identity even when two different SSH keys both ve
 
 // These are native demonstrations of excluded configurations, not recovery
 // execution or a mechanical implementation of the Agent's eligibility judgment.
-test('inspected standard LFS and DCO hooks preserve an unchanged signed-off amend and exact push', {
-  skip: spawnSync('git', ['lfs', 'version'], { encoding: 'utf8' }).status !== 0 ? 'Git LFS unavailable' : false,
-}, t => {
-  const fx = fixture(t), work = path.join(fx.root, 'work'), remote = path.join(fx.root, 'parent.git');
-  const global = path.join(fx.root, 'isolated-global'); fs.writeFileSync(global, '');
-  const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
-  const git = (cwd, args, vars = {}) => execFileSync('git', args, { cwd, env: { ...env, ...vars }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-  git(fx.root, ['init', '--bare', '-b', 'main', remote]);
-  git(fx.root, ['clone', remote, work]);
-  for (const [key, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false']]) git(work, ['config', key, value]);
-  git(work, ['lfs', 'install', '--local']);
-  const hooks = git(work, ['rev-parse', '--path-format=absolute', '--git-path', 'hooks']);
-  const dco = path.join(hooks, 'prepare-commit-msg');
-  fs.writeFileSync(dco, '#!/bin/sh\ngit interpret-trailers --if-exists addIfDifferent --if-missing add --trailer "Signed-off-by: Ada Example <ada@example.test>" --in-place "$1"\n');
-  fs.chmodSync(dco, 0o755);
-  fs.writeFileSync(path.join(work, '.gitattributes'), '*.bin filter=lfs diff=lfs merge=lfs -text\n');
-  fs.writeFileSync(path.join(work, 'fixture.bin'), 'placeholder fixture bytes\n');
-  git(work, ['add', '.gitattributes', 'fixture.bin']);
-  git(work, ['commit', '-s', '-m', 'original'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' });
-  const original = git(work, ['rev-parse', 'HEAD']);
-  git(work, ['push', '--no-follow-tags', '--recurse-submodules=no', '--', 'origin', original + ':refs/heads/main']);
-  const hooksBefore = Object.fromEntries(fs.readdirSync(hooks).filter(n => !n.endsWith('.sample')).map(n => [n, fs.readFileSync(path.join(hooks, n))]));
-  const inventory = dir => fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true }).filter(n => fs.statSync(path.join(dir, n)).isFile()).sort() : [];
-  const objectsDir = path.join(remote, 'lfs', 'objects'), objectsBefore = inventory(objectsDir);
-  assert.ok(objectsBefore.length > 0, 'original push already provided the LFS object');
-  const rawBefore = git(work, ['cat-file', 'commit', original]);
-  const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
-    gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
-  git(work, plan.amendArgs, { GIT_COMMITTER_DATE: '2026-01-01T00:00:01Z' });
-  const replacement = git(work, ['rev-parse', 'HEAD']), rawAfter = git(work, ['cat-file', 'commit', replacement]);
-  assert.notEqual(replacement, original);
-  const invariants = raw => ({ headers: raw.split('\n\n')[0].split('\n').filter(l => /^(tree|parent|author) /.test(l)), message: raw.slice(raw.indexOf('\n\n') + 2) });
-  assert.deepEqual(invariants(rawAfter), invariants(rawBefore));
-  git(work, guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: replacement,
-    gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir }).pushArgs);
-  assert.equal(git(remote, ['rev-parse', 'refs/heads/main']), replacement);
-  assert.equal(git(remote, ['for-each-ref', '--format=%(refname)']), 'refs/heads/main');
-  assert.deepEqual(inventory(objectsDir), objectsBefore, 'recovery adds no new LFS objects');
-  for (const [name, bytes] of Object.entries(hooksBefore)) assert.deepEqual(fs.readFileSync(path.join(hooks, name)), bytes);
-  assert.equal(fs.existsSync(fx.retryDir), false, 'native transport fixture does not consume recovery quota');
-  const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
-  assert.match(guide, /Inspected standard Git LFS and DCO hooks may run normally/);
-  assert.match(guide, /compare all installed hook bodies/);
-  assert.match(guide, /before amend and push/);
+test('standard enabled LFS and DCO hooks stop recovery before quota or amend', async t => {
+  for (const kind of ['DCO', 'LFS']) await t.test(kind, {
+    skip: kind === 'LFS' && spawnSync('git', ['lfs', 'version'], { encoding: 'utf8' }).status !== 0 ? 'Git LFS unavailable' : false,
+  }, t => {
+    const fx = fixture(t), work = path.join(fx.root, 'work');
+    const global = path.join(fx.root, 'isolated-global'); fs.writeFileSync(global, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
+    const git = args => execFileSync('git', args, { cwd: work, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    fs.mkdirSync(work); git(['init', '-b', 'main']);
+    for (const [key, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false']]) git(['config', key, value]);
+    git(['commit', '--allow-empty', '-s', '-m', 'original']);
+    const original = git(['rev-parse', 'HEAD']), raw = git(['cat-file', 'commit', original]);
+    const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    const directory = git(plan.hooksPathArgs);
+    if (kind === 'LFS') git(['lfs', 'install', '--local']);
+    else {
+      const file = path.join(directory, 'prepare-commit-msg');
+      fs.writeFileSync(file, '#!/bin/sh\ngit interpret-trailers --if-exists addIfDifferent --if-missing add --trailer "Signed-off-by: Ada Example <ada@example.test>" --in-place "$1"\n');
+      fs.chmodSync(file, 0o755);
+    }
+    const hooks = fs.readdirSync(directory).filter(n => !n.endsWith('.sample'));
+    assert.ok(hooks.includes(kind === 'LFS' ? 'pre-push' : 'prepare-commit-msg'));
+    const bytes = hooks.map(n => [n, fs.readFileSync(path.join(directory, n))]);
+    const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    // Native recognition + Agent contract, not a mechanical recovery executor:
+    // the forbidden reserve/amend/push operations are never invoked here.
+    assert.match(guide, /Any effective Git hook, including standard Git LFS and DCO, stops recovery before quota or amend/);
+    assert.doesNotMatch(guide, /Inspected standard Git LFS and DCO hooks may run normally/);
+    assert.equal(git(['rev-parse', 'HEAD']), original);
+    assert.equal(git(['cat-file', 'commit', original]), raw);
+    assert.equal(fs.existsSync(fx.retryDir), false);
+    for (const [name, content] of bytes) assert.deepEqual(fs.readFileSync(path.join(directory, name)), content);
+  });
 });
 
 test('CI recovery excludes hooks with extra remote writes before quota and amend', async t => {
@@ -971,7 +961,7 @@ test('CI recovery excludes hooks with extra remote writes before quota and amend
       assert.deepEqual(fs.readFileSync(hookPath), hookBytes, 'never disable or rewrite a user hook');
       assert.equal(fs.existsSync(fx.retryDir), false, 'demonstration must not consume real or simulated recovery quota');
       const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
-      assert.ok(/Unknown hooks or hooks capable of extra remote writes stop recovery before quota or amend/.test(guide));
+      assert.ok(/Any effective Git hook, including standard Git LFS and DCO, stops recovery before quota or amend/.test(guide));
       assert.ok(/post-commit.*post-rewrite.*reference-transaction/.test(guide), 'scope must include all amend/ref hooks');
     });
   }
@@ -1140,4 +1130,35 @@ test('CI recovery excludes shallow head and ancestor boundaries before quota or 
     const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
     if (depth !== null) assert.ok(/Any shallow checkout makes this checkout ineligible before quota or amend/.test(guide), 'all shallow histories must be rejected before mutation');
   });
+});
+
+
+test('inherited signed-push requirements are rejected before quota and amend', t => {
+  const fx = fixture(t), work = path.join(fx.root, 'work'), remote = path.join(fx.root, 'parent.git');
+  const global = path.join(fx.root, 'isolated-global'); fs.writeFileSync(global, '');
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
+  const git = (cwd, args) => execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git(fx.root, ['init', '--bare', '-b', 'main', remote]);
+  git(fx.root, ['clone', remote, work]);
+  for (const [key, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false']]) git(work, ['config', key, value]);
+  git(work, ['commit', '--allow-empty', '-s', '-m', 'original']);
+  const original = git(work, ['rev-parse', 'HEAD']), raw = git(work, ['cat-file', 'commit', 'HEAD']);
+  const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+    gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+  git(work, ['config', '--file', global, 'push.gpgSign', 'true']);
+  // Native counterexample: same original SHA, no reservation or amend. A local
+  // bare receiver lacks signed-push capability, so the inherited request fails.
+  assert.throws(() => git(work, plan.pushArgs), /does not support --signed push/);
+  assert.deepEqual(Array.from(plan.pushSigningConfigArgs ?? []), ['--no-replace-objects', 'config', '--includes', '--type=bool', '--get', 'push.gpgSign']);
+  assert.equal(git(work, plan.pushSigningConfigArgs), 'true');
+  git(work, ['config', '--file', global, 'push.gpgSign', 'if-asked']);
+  assert.throws(() => git(work, plan.pushSigningConfigArgs), /bad boolean/);
+  const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  assert.match(guide, /Before quota or amend, require push.gpgSign unset or false/);
+  assert.match(guide, /if-asked.*unknown.*stop/i);
+  assert.equal(git(work, ['rev-parse', 'HEAD']), original);
+  assert.equal(git(work, ['cat-file', 'commit', 'HEAD']), raw);
+  assert.equal(git(remote, ['for-each-ref']), '');
+  assert.equal(fs.existsSync(fx.retryDir), false);
+  assert.equal(git(work, ['config', '--get', 'push.gpgSign']), 'if-asked', 'no bypass or configuration rewrite by recovery');
 });
