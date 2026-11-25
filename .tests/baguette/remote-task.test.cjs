@@ -392,7 +392,7 @@ test('remote operation failure keeps execution evidence across immediate and del
   }
 });
 
-for (const language of ['en', 'zh-CN']) test(`remote boot/shutdown outcome advice stays conservative in ${language}`, async () => {
+for (const language of ['en', 'zh-CN']) test(`remote mutation outcome advice stays conservative in ${language}`, async () => {
   const nodes = new Map(), calls = [];
   const get = id => {
     if (!nodes.has(id)) nodes.set(id, {children: [], replaceChildren(...children) {this.children = children;}, append(...children) {this.children.push(...children);}});
@@ -421,13 +421,17 @@ for (const language of ['en', 'zh-CN']) test(`remote boot/shutdown outcome advic
   const flatten = n => [n, ...(n.children || []).filter(Boolean).flatMap(flatten)];
   const shown = () => get('inner').children.flatMap(flatten);
   const text = () => shown().map(n => n.props?.text).filter(Boolean);
-  const conservative = language === 'en'
+  const operationConservative = language === 'en'
     ? 'Could not confirm whether the operation completed. Check the device on the remote computer before taking further action.'
     : '无法确认操作是否完成。请先检查远程电脑上的设备状态，再决定下一步。';
-  const mutationCount = () => calls.filter(c => ['task_boot', 'shutdown'].includes(c.params.call)).length;
-  for (const action of ['task_boot', 'shutdown']) {
+  const bindingConservative = language === 'en'
+    ? 'Could not confirm whether the device was switched. Check this task’s device binding on the remote computer before taking further action.'
+    : '无法确认设备是否已切换。请先检查远程电脑上该任务的设备绑定，再决定下一步。';
+  const mutationCount = () => calls.filter(c => ['task_boot', 'shutdown', 'task_bind'].includes(c.params.call)).length;
+  for (const action of ['task_boot', 'shutdown', 'task_bind']) {
+    const conservative = action === 'task_bind' ? bindingConservative : operationConservative;
     for (const execution of ['unknown', 'executed', undefined, 'invalid', 'not_executed']) {
-      for (const route of ['immediate', 'poll', 'response', 'throw']) {
+      for (const route of (action === 'task_bind' ? ['response', 'throw'] : ['immediate', 'poll', 'response', 'throw'])) {
         const failure = {ok: false, errorCode: 'FAILED', execution};
         const terminal = {...state, operation: {call: action, udid: device.udid, state: 'failed', ...failure}};
         reading = state;
@@ -443,7 +447,7 @@ for (const language of ['en', 'zh-CN']) test(`remote boot/shutdown outcome advic
         reading = state;
         await vm.runInContext('refresh()', context);
         assert.equal(mutationCount(), before + 1, 'reading after failure never replays the mutation');
-        assert.equal(calls.some(c => ['task_boot', 'shutdown'].includes(c.action)), false, 'no local mutation fallback');
+        assert.equal(calls.some(c => ['task_boot', 'shutdown', 'task_bind'].includes(c.action)), false, 'no local mutation fallback');
       }
     }
     for (const errorCode of ['TIMEOUT', 'NODE_UNAVAILABLE', 'DEVICE_OFFLINE']) {
@@ -467,7 +471,7 @@ for (const language of ['en', 'zh-CN']) test(`remote boot/shutdown outcome advic
     reading = state;
     await vm.runInContext(`act('${action}', {udid:'SIM-1'}, 'SIM-1')`, context);
     await settle();
-    assert.ok(text().includes(conservative), `${action}/actual-post-read-failure`);
+    assert.ok(text().includes(operationConservative), `${action}/actual-post-read-failure`);
     assert.equal(world.provider.calls.filter(r => ['boot','settings_shutdown'].includes(r.method)).length, 1);
     assert.equal(shown().find(n => n.tag === 'button' && n.props.text === (language === 'en' ? 'Open' : '打开'))?.props.disabled, false);
   }
@@ -475,7 +479,7 @@ for (const language of ['en', 'zh-CN']) test(`remote boot/shutdown outcome advic
   vm.runInContext('note = null', context);
   reading = () => {throw {errorCode: 'DEVICE_OFFLINE'};};
   await vm.runInContext('refresh()', context);
-  assert.equal(text().includes(conservative), false);
+  assert.equal(text().includes(operationConservative) || text().includes(bindingConservative), false);
 });
 
 test('post-operation observation failures never borrow read execution evidence or replay a mutation', async () => {
@@ -512,4 +516,44 @@ test('post-operation observation failures never borrow read execution evidence o
       assert.equal(world.viewer.calls.some(r => ['boot', 'settings_shutdown', 'settings_restart', 'task_bind'].includes(r.method)), false);
     }
   }
+});
+
+// This regression fails on 0.3.61: a saved binding followed by a read failure still suggests retrying.
+for (const language of ['en', 'zh-CN']) for (const failure of ['returned', 'rejected']) test(`saved remote binding uses conservative advice and recovers without replay in ${language}/${failure}`, async () => {
+    let bound = SIM, unreadable = false;
+    const world = computers({providerWorker: async r => {
+      if (r.method === 'task_bind') {bound = OFF; unreadable = true; return {ok:true, execution:'executed'};}
+      if (r.method === 'remote_task_state') {
+        if (unreadable) {
+          if (failure === 'rejected') throw Error('read rejected');
+          return {ok:false,errorCode:'TASK_BINDINGS_UNREADABLE',execution:'not_executed'};
+        }
+        return {ok:true,device:bound,devices:[SIM,OFF],settings:{enabled:true}};
+      }
+      return {ok:true};
+    }});
+    await world.viewer.ask({call:'task_state',sessionId:'task-1',view:false});
+    const nodes = new Map();
+    const get = id => {
+      if (!nodes.has(id)) nodes.set(id,{children:[],replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);}});
+      return nodes.get(id);
+    };
+    const context = {URL,URLSearchParams,location:{search:'?session=task-1&device=studio'},
+      localStorage:{getItem(){},setItem(){}},addEventListener(){},setInterval(){},
+      document:{hidden:false,documentElement:{},getElementById:get,addEventListener(){}},
+      CindySimPages:{locale:async()=>language,h:(tag,props,children=[])=>({tag,props,children}),GLYPH:{},onPush(){},memoryPicker(){},memoryBadge(){},memoryArgs:()=>({}),
+        rpc:async(action,params)=>action==='manage_state'?{ok:true,devices:[]}:world.viewer.ask({...params,view:false})},
+      CindySimModel:{runtimeLabel:()=>'',deviceRows:()=>[],createResourceSummary:()=>({prune(){},label(){},update(){}})}};
+    vm.createContext(context);vm.runInContext(fs.readFileSync('cindy-simulator/task.js','utf8'),context);await settle(50);
+    await vm.runInContext("act('task_bind',{udid:'SIM-2'},'SIM-2')",context);await settle(50);
+    const notice = vm.runInContext('note.text',context);
+    assert.ok(!notice.includes(language==='en'?'try again':'重试'), `${failure}: saved binding must not suggest retry: ${notice}`);
+    assert.equal(notice, language === 'en'
+      ? 'Could not confirm whether the device was switched. Check this task’s device binding on the remote computer before taking further action.'
+      : '无法确认设备是否已切换。请先检查远程电脑上该任务的设备绑定，再决定下一步。');
+    assert.equal(vm.runInContext('busy',context),null,'device actions remain usable');
+    unreadable = false;await vm.runInContext('refresh()',context);await settle(30);
+    assert.equal(vm.runInContext('state.device.udid',context),'SIM-2');
+    assert.equal(world.provider.calls.filter(r=>r.method==='task_bind').length,1);
+    assert.equal(world.viewer.calls.some(r=>r.method==='task_bind'),false);
 });

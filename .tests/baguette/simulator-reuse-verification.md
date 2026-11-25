@@ -483,3 +483,36 @@ Required repository suites and simulator aggregate: 935 passed, 0 failed
 Focused transport/page suite: 17 passed before the final integrated page addition;
 the full aggregate above validates that addition. Syntax and whitespace passed.
 No new dual-computer runtime result is claimed; existing authorization persists.
+
+## Round 18 binding outcome checkpoint (2026-11-25)
+
+Invariant: only explicit not_executed for the requested remote mutation may
+suggest retrying it. A saved binding followed by failed observation is unknown,
+not a failed binding. The user approved the bilingual binding-specific notice.
+The page's existing operationErrorText owns all mutation advice; remoteServe
+owns the operation/read evidence boundary. No additional state or mechanism.
+
+| Binding result / observation | Page advice | Recovery |
+| --- | --- | --- |
+| Explicit not_executed | Existing failure/retry hint | User may choose again |
+| Unknown, executed failure, absent or invalid evidence | Inspect this task's binding on the remote computer | Read only; no replay |
+| Saved binding, state read returns failure or rejects | Same conservative binding notice | Show saved binding once reading recovers |
+| Timeout, unavailable, offline | Same conservative binding notice | Buttons stay usable |
+| Successful binding | Existing success path | Existing refresh |
+
+The shared bilingual page matrix now includes binding response failures and
+exceptions across five execution values, plus timeout/unavailable/offline.
+Four integrated provider/channel/page regressions cover a saved binding followed
+by returned/rejected reads in both languages: exact approved copy, usable actions,
+recovered SIM-2 binding, exactly one provider bind and no viewing-side bind.
+All four fail against 9a62bbce's task.js, so they discriminate the previous fix.
+Deleting the existing outcome projection would violate the original correct-device
+operation guarantee; this fix only extends its single page formatter. No queues,
+locks, caches, persistence or retries were introduced. Real dual-computer memory
+mode restart remains separate and authorized; these are VM/page regressions.
+
+Validation: focused remote-task suite 21 passed, 0 failed (8.75 seconds).
+Required repository suites plus simulator aggregate: 939 passed, 0 failed
+(80.00 seconds). Four integrated counterexamples fail on the prior task.js.
+Syntax, whitespace and preflight passed. Forge validated and packaged 0.3.62;
+no installation, Cindy restart, simulator restart or merge was performed.
