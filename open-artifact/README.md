@@ -4,6 +4,8 @@ In a local desktop task with a writable workspace, type `/artifacts` and describ
 
 Edit and export in the editor. Send your comment or ask for a change in the page to queue a message to the task that owns the artifact. Collaborator or system notices are kept in Open Artifact. Works stay in the task workspace. After restarting Cindy, reopen the artifact from its task.
 
+To adopt a folder or move an existing work to another task, run `adopt` in the destination task and confirm in Cindy. Comments and edit requests go to the destination task after the move succeeds.
+
 The plugin starts its bundled Open Artifact runtime on first use. No Node installation, runtime download, external account, or automatic cloud publishing is needed. The plugin needs approval for its local Node worker, localhost previews and task delivery. Disabling it stops the worker and its daemon.
 
 Artifact folders and tool-supplied import and export paths must resolve inside the task workspace. The plugin checks extracted runtime files against the bundled integrity inventory before reuse.

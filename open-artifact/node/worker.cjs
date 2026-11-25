@@ -20,13 +20,13 @@ function send(frame) {
   process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...frame }) + '\n');
 }
 
-function callHost(method, params, timedOutValue) {
+function callHost(method, params, timedOutValue, timeoutMs = 20000) {
   return new Promise(resolve => {
     const id = crypto.randomUUID();
     const timer = setTimeout(() => {
       hostRequests.delete(id);
       resolve(timedOutValue);
-    }, 20000);
+    }, timeoutMs);
     hostRequests.set(id, answer => {
       clearTimeout(timer);
       hostRequests.delete(id);
@@ -113,15 +113,51 @@ async function connect(scope) {
   return runtime;
 }
 
-async function workspaceArtifact(harness, url, caller) {
+async function findWorkspaceArtifact(harness, caller, find) {
   let cursor;
   do {
     const page = await harness.call('Artifact', { action: 'list', scope: 'mine', limit: 200, cursor }, caller);
-    const artifact = page.artifacts?.find(item => item.url === url);
+    const artifact = await find(page.artifacts ?? []);
     if (artifact) return { ...artifact, root: await resolveWorkspacePath(caller.workspace, artifact.root) };
     cursor = page.next_cursor;
   } while (cursor);
-  throw new Error('Artifact is unavailable in the task workspace');
+  return null;
+}
+
+async function workspaceArtifact(harness, url, caller) {
+  const artifact = await findWorkspaceArtifact(harness, caller, items => items.find(item => item.url === url));
+  if (!artifact) throw new Error('Artifact is unavailable in the task workspace');
+  return artifact;
+}
+
+async function adoptionTarget(harness, args, caller) {
+  if (args.url) return workspaceArtifact(harness, args.url, caller);
+  const root = await resolveWorkspacePath(caller.workspace, args.folder);
+  const artifact = await findWorkspaceArtifact(harness, caller, async items => {
+    for (const item of items) {
+      const registeredRoot = await resolveWorkspacePath(caller.workspace, item.root).catch(() => null);
+      if (registeredRoot === root) return item;
+    }
+    return null;
+  });
+  return artifact ?? { root, url: null, owner: null, title: path.basename(root) };
+}
+
+async function adopt(harness, args, caller) {
+  if (!args.url && !args.folder) return { error: { message: 'Choose a work or folder to adopt.' } };
+  const before = await adoptionTarget(harness, args, caller);
+  const answer = await callHost('artifact/confirm-adopt', {
+    session: caller.session, title: before.title || path.basename(before.root), existing: before.url !== null,
+  }, false, 95000);
+  if (answer !== true) return { error: { message: 'Adoption was not confirmed.' } };
+
+  const after = await adoptionTarget(harness, args, caller);
+  if (after.root !== before.root || after.url !== before.url || after.owner !== before.owner ||
+      sessions.get(caller.session) !== caller.workspace) {
+    return { error: { message: 'The work or task changed while confirming. Reopen the work and try again if you still want to move it.' } };
+  }
+  const selection = after.url ? { url: after.url } : { folder: after.root };
+  return harness.call('Artifact', { ...args, ...selection }, caller);
 }
 
 async function checkArtifactArguments(harness, tool, args, caller) {
@@ -177,7 +213,9 @@ async function run({ method, params, id }) {
       ? setInterval(() => send({ method: 'artifact/progress', params: {} }), 45000)
       : undefined;
     try {
-      const result = await harness.call(params.tool, args, caller);
+      const result = params.tool === 'Artifact' && args.action === 'adopt'
+        ? await adopt(harness, args, caller)
+        : await harness.call(params.tool, args, caller);
       send({ id, result });
     } finally {
       if (pulse) clearInterval(pulse);

@@ -6,13 +6,14 @@ import test from 'node:test';
 
 const source = await readFile(new URL('../open-artifact/main.js', import.meta.url), 'utf8');
 
-function harness({ accepted = true, openDuringCall = true } = {}) {
+function harness({ accepted = true, openDuringCall = true, confirmation = { ok: true, confirmed: true } } = {}) {
   let onMessage;
   const calls = [];
   const cindy = {
     onHostMessage(fn) { onMessage = fn; },
     async send(frame) { calls.push(['result', frame]); },
     async preview(args) { calls.push(['preview', args]); return { ok: true }; },
+    async confirm(args) { calls.push(['confirm', args]); return confirmation; },
     targets: {
       async resolve({ session }) { return { kind: 'task', id: session }; },
       async send(args) { calls.push(['send', args]); return { accepted }; },
@@ -36,6 +37,25 @@ function harness({ accepted = true, openDuringCall = true } = {}) {
   });
   return { calls, onMessage };
 }
+
+test('an adoption requires a positive host confirmation for the destination task', async () => {
+  for (const [confirmation, expected] of [
+    [{ ok: true, confirmed: false }, false],
+    [{ ok: false, confirmed: true }, false],
+    [{ ok: true, confirmed: true }, true],
+  ]) {
+    const { calls, onMessage } = harness({ confirmation });
+    await onMessage({
+      type: 'event', name: 'node-notification', method: 'artifact/confirm-adopt',
+      params: { id: 'confirm-one', session: 'task-b', title: 'Design draft', existing: true },
+    });
+    const request = calls.find(([type]) => type === 'confirm')?.[1];
+    assert.match(request?.body, /Design draft/);
+    assert.match(request.body, /task-b/);
+    assert.equal(calls.at(-1)[1].method, 'host/complete');
+    assert.equal(calls.at(-1)[1].params.answer, expected);
+  }
+});
 
 test('the tool uses the verified task and opens the work in that task with reuse', async () => {
   const { calls, onMessage } = harness();

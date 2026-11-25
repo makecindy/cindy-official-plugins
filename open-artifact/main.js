@@ -32,13 +32,27 @@ function request(method, params, options = {}) {
 
 async function answerHost({ method, params }) {
   const { id, session, url, text, requestKey } = params;
-  let answer = method === 'artifact/open' ? false : 'failed';
+  let answer = method === 'artifact/wake' ? 'failed' : false;
   try {
     if (method === 'artifact/open') {
       // The Node worker checks the attached task before sending this event.
       if (typeof session === 'string' && session) {
         const opened = await cindy.preview({ url, sessionId: session, reuseExisting: true });
         answer = opened?.ok === true;
+      }
+    } else if (method === 'artifact/confirm-adopt') {
+      const target = await cindy.targets.resolve({ session });
+      if (target?.kind === 'task' && target.id === session) {
+        const title = params.title.replace(/[\p{Cc}\p{Cf}]/gu, ' ').trim().slice(0, 100) || 'Untitled work';
+        const destination = session.slice(0, 80);
+        const consent = await cindy.confirm({
+          body: `${params.existing ? 'Transfer' : 'Adopt'} “${title}” into task ${destination}? New comments and edit requests will go to that task.`,
+          danger: params.existing,
+        });
+        if (consent?.ok === true && consent.confirmed === true) {
+          const current = await cindy.targets.resolve({ session });
+          answer = current?.kind === 'task' && current.id === session;
+        }
       }
     } else {
       const target = await cindy.targets.resolve({ session });
@@ -56,7 +70,7 @@ async function answerHost({ method, params }) {
 
 cindy.onHostMessage(async msg => {
   if (msg.type === 'event' && msg.name === 'node-notification' &&
-      (msg.method === 'artifact/open' || msg.method === 'artifact/wake')) {
+      (msg.method === 'artifact/open' || msg.method === 'artifact/wake' || msg.method === 'artifact/confirm-adopt')) {
     await answerHost(msg).catch(() => {});
     return;
   }
