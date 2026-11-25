@@ -35,14 +35,24 @@ export function createCiRetryReceiptIO(io = fs) {
       }
     }
     syncDirectories(current);
+    return current;
   }
 
   function prepare(file) {
-    const dir = path.dirname(file);
-    confirmParent(dir);
-    io.mkdirSync(dir, { recursive: true });
-    // Includes ancestors: a recursive mkdir can introduce several new links.
-    syncDirectories(dir);
+    const dir = path.resolve(path.dirname(file));
+    let current = confirmParent(dir);
+    // Existing directories need no mkdir. Create only the missing suffix,
+    // one non-recursive link at a time: a lost parent must cause ENOENT,
+    // never recursive reconstruction of an already-confirmed store.
+    for (const part of path.relative(current, dir).split(path.sep).filter(Boolean)) {
+      current = path.join(current, part);
+      try { io.mkdirSync(current); }
+      catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        if (!io.statSync(current).isDirectory()) throw new Error('receipt parent is not a directory');
+      }
+      syncDirectories(current);
+    }
   }
 
   function read(file) {

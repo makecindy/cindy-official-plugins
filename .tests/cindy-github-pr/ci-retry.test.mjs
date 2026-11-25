@@ -1310,3 +1310,35 @@ test('missing committer identity is rejected read-only before reservation', t =>
   const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
   assert.match(guide, /Before quota or amend, resolve the committer identity with committerIdentArgs/);
 });
+
+
+test('second reservation stops if prepare loses the already-consumed store before mkdir', t => {
+  const fx = fixture(t), moved = path.join(fx.root, 'moved-after-read'); fs.mkdirSync(fx.retryDir, { recursive: true });
+  const name = path.basename(ciRetryFilePath(fx.retryDir, prNodeId)) + '-1.slot';
+  const raw = JSON.stringify({ prNodeId, failure, sourceHead: oldHead, reservedAt: 123 }); fs.writeFileSync(path.join(fx.retryDir, name), raw);
+  fs.writeFileSync(fx.diagnosis, JSON.stringify({ ...failure, cause: 'different runner network timeout' }));
+  const loader = path.join(fx.root, 'lose-prepare.mjs');
+  fs.writeFileSync(loader, `import fs from 'node:fs';
+import path from 'node:path';
+const handles = new Map(), open = fs.openSync, close = fs.closeSync, read = fs.readFileSync, stat = fs.statSync;
+let sawFirst = false, afterReadStats = 0, preparing = false, moved = false;
+fs.openSync = (file, ...args) => { const fd = open(file, ...args); handles.set(fd, String(file)); return fd; };
+fs.closeSync = fd => { close(fd); handles.delete(fd); };
+fs.readFileSync = (file, ...args) => { const result = read(file, ...args); if (handles.get(file)?.endsWith('-1.slot')) sawFirst = true; return result; };
+fs.statSync = (file, ...args) => { const result = stat(file, ...args); if (sawFirst && path.resolve(String(file)) === path.resolve(process.env.TEST_RECEIPT_DIR) && ++afterReadStats === 2) preparing = true; return result; };
+// After first-slot read: first stat confirms absent slot2; second is prepare.
+// Root is prepare confirmation's last flush, immediately before mkdir.
+fs.fsyncSync = fd => { if (preparing && !moved && handles.get(fd) === path.parse(process.env.TEST_RECEIPT_DIR).root) { moved = true; fs.renameSync(process.env.TEST_RECEIPT_DIR, process.env.TEST_MOVED_DIR); } };
+const { runGate } = await import(process.argv[2]);
+process.exitCode = await runGate(process.argv.slice(3));
+`);
+  const result = spawnSync(process.execPath, [loader, pathToFileURL(gate).href, ...fx.args(['--reserve-ci-retry', newHead])], {
+    env: { ...fx.env, TEST_RECEIPT_DIR: fx.retryDir, TEST_MOVED_DIR: moved }, encoding: 'utf8',
+  });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /durability could not be confirmed/);
+  assert.doesNotMatch(result.stdout, /ci-retry-reserved|"pr_remaining":1/);
+  assert.equal(fs.existsSync(fx.retryDir), false);
+  assert.equal(fs.readFileSync(path.join(moved, name), 'utf8'), raw);
+  assert.deepEqual(fs.readdirSync(moved), [name]);
+});

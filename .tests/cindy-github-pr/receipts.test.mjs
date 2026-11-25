@@ -106,3 +106,35 @@ test('a confirmed receipt parent or ancestor disappearing never becomes fresh st
   const fresh = fixture(t); assert.equal(fresh.io.read(path.join(fresh.root, 'never-created', 'one.slot')), null);
   assert.equal(fs.existsSync(path.join(fresh.root, 'never-created')), false, 'fresh status remains read-only');
 });
+
+
+test('write preparation cannot recreate a confirmed directory lost after its final sync', async t => {
+  for (const operation of ['slot', 'copy', 'missing-chain']) await t.test(operation, t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-receipt-prepare-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const parent = path.join(root, 'confirmed'), moved = path.join(root, 'moved'); fs.mkdirSync(parent);
+    const first = path.join(parent, 'one.slot'); fs.writeFileSync(first, 'consumed one');
+    const source = path.join(root, 'legacy'); fs.writeFileSync(source, 'old evidence');
+    const target = operation === 'missing-chain' ? path.join(parent, 'new', 'nested', 'two.slot') : path.join(parent, 'two.slot');
+    const handles = new Map(); let armed = false, injected = false;
+    const io = createCiRetryReceiptIO({ ...fs,
+      openSync(file, ...args) { const fd = fs.openSync(file, ...args); handles.set(fd, path.resolve(file)); return fd; },
+      closeSync(fd) { fs.closeSync(fd); handles.delete(fd); },
+      fsyncSync(fd) {
+        // Supported-filesystem model. Root is the last flush of confirmParent;
+        // move the already-read store immediately after that acknowledgment.
+        if (armed && handles.get(fd) === path.parse(parent).root) {
+          armed = false; injected = true; fs.renameSync(parent, moved);
+        }
+      },
+    });
+    assert.equal(io.read(first), 'consumed one'); armed = true;
+    assert.throws(() => operation === 'copy' ? io.copyExclusive(source, target) : io.writeExclusive(target, 'second consumption'), /durability could not be confirmed/);
+    assert.equal(injected, true);
+    assert.equal(fs.existsSync(parent), false, 'never recreate the confirmed parent or its children');
+    assert.equal(fs.readFileSync(path.join(moved, 'one.slot'), 'utf8'), 'consumed one');
+    assert.deepEqual(fs.readdirSync(moved), ['one.slot']);
+    assert.equal(fs.readFileSync(source, 'utf8'), 'old evidence');
+    assert.equal(handles.size, 0);
+  });
+});

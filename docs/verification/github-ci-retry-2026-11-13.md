@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.49, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.50, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1254,3 +1254,44 @@ and full archive/source comparison passed: **29 files, 240499 bytes**. The new
 source. Version exceeds freshly fetched main 1.5.35. Preflight had no blockers;
 old untracked task artifacts and ordinary main progress were left untouched.
 No new install, live evidence claim, cleanup retry or workflow/merge operation.
+
+
+## Non-recursive receipt preparation — 2026-11-25 (source 1.5.50, not installed)
+
+Round 41 removes the remaining directory-reconstruction primitive for the same
+lost-store family. confirmParent returns the existing ancestor it synchronized.
+Preparation does no mkdir when the target already exists. For genuinely missing
+suffixes it creates one component at a time with non-recursive mkdir, accepts
+EEXIST only for a directory, and synchronizes each new link/ancestor chain. A
+parent moved after confirmation therefore causes ENOENT instead of recursive
+recreation. Exclusive slot writes and raw legacy copies share this preparation;
+no repair loop, new marker, lock, registry, cache or storage backend is added.
+The process observations and non-atomic/external-erasure limitations documented
+for 1.5.49 remain.
+
+Five focused regressions first failed on 3ced279f, then passed (0.31 s). The actual
+CLI model starts with a valid consumed first slot and a different diagnosis,
+reads that slot, and moves the store after prepare's final directory confirmation
+but before its mkdir/write. Reservation now fails with no success receipt or
+recreated path; only the original unchanged slot remains at the moved fixture
+path. Direct I/O cases cover slot write, raw copy and a missing multi-component
+suffix after the same window. They use real temporary folder moves with supported
+sync acknowledgments modeled; they are not new Cindy/GitHub, native Linux or
+power-loss acceptance. Existing fresh-directory creation and every resulting
+file/directory synchronization failure position remain covered by the suite.
+
+Source/package 1.5.50 is NOT installed. Local remains actually tested 1.5.45;
+there was no new recovery, real quota/preference/credential/permission change,
+retired fixture use or blocked cleanup retry. Runtime evidence gaps and the
+maintainer's current-head Verify approval/review remain prerequisites. UI,
+locales, root selection, fixed slots, Git arguments and identity checks unchanged.
+
+Final mandatory four suites plus plugin: **502 passed, 36 skipped, 0 failed
+(238.59 s)**. Focused new regression group: **5 passed (0.31 s)** after all five
+failed first. The expanded per-sync failure scan covers every new directory-link
+flush as well as file/ancestor failures. The 17 unsupported native positive cases
+and 19 existing skips remain. Forge package/content check passed: **29 files,
+240790 bytes**, exact non-manifest bytes/semantic manifest match; temporary 1.5.50
+package removed/read back absent. Eight staged files match validated source;
+version exceeds fetched main 1.5.35. Preflight no blockers; unrelated old artifacts
+and ordinary main movement were left untouched. No install or live quota action.

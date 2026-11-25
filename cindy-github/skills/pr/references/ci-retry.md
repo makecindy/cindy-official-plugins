@@ -316,7 +316,12 @@ before returning success. New slots, raw exclusive legacy copies, migration
 and re-read receipts share this boundary. A missing file at open means unused only after rechecking its parents. The
 existing I/O owner remembers directories successfully confirmed in this process;
 if any such directory disappears, read and preparation fail closed rather than
-walking above it, returning null or recreating it. Never-created storage may
+walking above it, returning null or recreating it. Preparation never calls
+recursive mkdir: an already-existing target needs no mkdir; only a confirmed
+ancestor's missing suffix is created one component at a time with non-recursive
+mkdir, synchronizing each new link. If that parent disappears before creation,
+ENOENT stops instead of rebuilding it. Exclusive slot/copy writes still stop
+if their confirmed parent disappears after preparation. Never-created storage may
 still return unused after confirming the nearest existing ancestor, without
 creating a probe. These are transient observations, not a receipt cache, lock
 or persistent marker; they do not make filesystem checks atomic or reconstruct
