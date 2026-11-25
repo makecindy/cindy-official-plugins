@@ -66,6 +66,77 @@ test('cloud publishing reports only a confirmed remote receipt as published', as
   }
 });
 
+test('artifact writes preserve uncertain outcomes and pending feedback', async () => {
+  const url = 'open-artifact://artifact/art_test';
+  const feedback = 'A comment is waiting for the task.';
+  for (const [tool, args] of [
+    ['artifact_data', { action: 'str_replace', url }],
+    ['artifact_comments', { action: 'reply', url }],
+    ['artifact', { action: 'call', name: 'update', url }],
+  ]) {
+    for (const [nodeResponse, status, hasFeedback] of [
+      [() => { throw new Error('Runtime disconnected'); }, 'unknown'],
+      [() => ({ ok: true, result: null }), 'unknown'],
+      [() => ({ ok: false, data: { messages: [feedback] } }), 'unknown', true],
+      [() => ({ ok: false, message: 'Workspace unavailable', data: { executionStatus: 'not_executed', messages: [feedback] } }), 'not_executed', true],
+      [() => ({ ok: true, result: { error: { code: 'connect_failed', fix: 'Try the write again.' }, messages: [feedback] } }), 'unknown', true],
+      [() => ({ ok: true, result: { changed: true, messages: [feedback] } }), 'completed', true],
+    ]) {
+      const { calls, onMessage } = harness({ nodeResponse });
+      await onMessage({
+        type: 'tool-call', tool, callId: 'write', args: {
+          ...args, session_context: { session_id: 'task-one', workdir: '/project', workdir_is_local: true },
+        },
+      });
+      const reply = calls.at(-1)[1];
+      assert.equal(reply.result?.executionStatus, status);
+      assert.equal(reply.ok, status === 'completed');
+      if (status === 'unknown') {
+        assert.match(reply.message, /check .* before trying again/i);
+        assert.equal(reply.result.error, undefined);
+      }
+      assert.deepEqual(reply.result.messages, hasFeedback ? [feedback] : undefined);
+      const node = calls.filter(([type]) => type === 'node');
+      assert.equal(node.length, 1);
+      assert.equal(node[0][1].params.statusField, 'executionStatus');
+    }
+  }
+});
+
+test('a read that fails after lookup still returns pending feedback', async () => {
+  const messages = ['A comment is waiting for the task.'];
+  const { calls, onMessage } = harness({ nodeResponse: () => ({
+    ok: false, message: 'Artifact unavailable', data: { messages },
+  }) });
+  await onMessage({
+    type: 'tool-call', tool: 'artifact', callId: 'read', args: {
+      action: 'read', url: 'open-artifact://artifact/art_test',
+      session_context: { session_id: 'task-one', workdir: '/project', workdir_is_local: true },
+    },
+  });
+  const reply = calls.at(-1)[1];
+  assert.equal(reply.ok, false);
+  assert.deepEqual(reply.result.messages, messages);
+});
+
+test('a local file conflict retains the current content for resolving the edit', async () => {
+  const url = 'open-artifact://artifact/art_test';
+  const current = { 'Draft.md': { sha256: 'current', content: 'Edited draft' } };
+  const { calls, onMessage } = harness({ nodeResponse: () => ({
+    ok: true, result: { url, current, error: { code: 'conflict', message: 'The draft changed.' } },
+  }) });
+  await onMessage({
+    type: 'tool-call', tool: 'artifact', callId: 'patch-files', args: {
+      action: 'publish', url, files: { 'Draft.md': 'Next draft' },
+      session_context: { session_id: 'task-one', workdir: '/project', workdir_is_local: true },
+    },
+  });
+  const reply = calls.at(-1)[1];
+  assert.equal(reply.ok, false);
+  assert.equal(reply.result?.executionStatus, 'not_executed');
+  assert.deepEqual(reply.result.current, current);
+});
+
 test('an adoption requires a positive host confirmation for the destination task', async () => {
   for (const [confirmation, expected] of [
     [{ ok: true, confirmed: false }, false],
@@ -159,6 +230,27 @@ test('workspace paths resolve to authorized local files, including through symli
   await symlink(parent, join(workspace, 'linked'), 'junction');
   await assert.rejects(workspaceArguments('ArtifactData', { writes: [{ file_path: 'linked/file.json' }] }, workspace));
   await assert.rejects(workspaceArguments('ArtifactData', { out_file: '../outside.json' }, workspace));
+});
+
+test('artifact file arguments use the same relative paths for validation and forwarding', async () => {
+  const { mkdtemp, mkdir } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { artifactFileArguments } = await import('../open-artifact/node/safety.cjs');
+  const parent = await mkdtemp(join(tmpdir(), 'oa-relative-files-'));
+  const root = join(parent, 'artifact');
+  await mkdir(root);
+
+  const checked = await artifactFileArguments({
+    path: 'notes\\Draft.md', paths: ['/notes/Readme.md'],
+    files: { 'notes\\Draft.md': 'draft' }, if_match: { 'notes\\Metadata.md': null },
+  }, root);
+  assert.equal(checked.path, 'notes/Draft.md');
+  assert.deepEqual(checked.paths, ['notes/Readme.md']);
+  assert.deepEqual(checked.files, { 'notes/Draft.md': 'draft' });
+  assert.deepEqual(checked.if_match, { 'notes/Metadata.md': null });
+  await assert.rejects(artifactFileArguments({ if_match: { '': null } }, root), /Invalid artifact file path/);
+  await assert.rejects(artifactFileArguments({ files: { 'A.md': 'one', '/A.md': 'two' } }, root), /Duplicate artifact file path/);
 });
 
 test('artifact actions resolve import, upload and export paths within the task workspace', async () => {

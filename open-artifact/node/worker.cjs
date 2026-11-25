@@ -3,7 +3,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
-const { artifactActionArguments, resolveWorkspacePath, verifyRuntime, workspaceArguments } = require('./safety.cjs');
+const { artifactActionArguments, artifactFileArguments, resolveWorkspacePath, verifyRuntime, workspaceArguments } = require('./safety.cjs');
 const runtimeInventory = require('../vendor/runtime-integrity.json');
 
 const version = '0.14.6';
@@ -113,19 +113,19 @@ async function connect(scope) {
   return runtime;
 }
 
-async function* artifactPages(harness, caller) {
+async function* artifactPages(call) {
   let cursor;
   do {
     // The upstream `mine` filter can omit another task's work at the exact workspace root.
-    const page = await harness.call('Artifact', { action: 'list', scope: 'all', limit: 200, cursor }, caller);
+    const page = await call('Artifact', { action: 'list', scope: 'all', limit: 200, cursor });
     if (page?.error || !Array.isArray(page?.artifacts)) throw new Error('Artifact listing is unavailable');
     yield page.artifacts;
     cursor = page.next_cursor;
   } while (cursor);
 }
 
-async function workspaceArtifact(harness, url, caller) {
-  for await (const items of artifactPages(harness, caller)) {
+async function workspaceArtifact(call, url, caller) {
+  for await (const items of artifactPages(call)) {
     const artifact = items.find(item => item.url === url);
     if (artifact) return { ...artifact, root: await resolveWorkspacePath(caller.workspace, artifact.root) };
   }
@@ -141,11 +141,11 @@ function requireAdoptionOwner(artifact) {
   return artifact;
 }
 
-async function adoptionTarget(harness, args, caller) {
-  if (args.url) return requireAdoptionOwner(await workspaceArtifact(harness, args.url, caller));
+async function adoptionTarget(call, args, caller) {
+  if (args.url) return requireAdoptionOwner(await workspaceArtifact(call, args.url, caller));
   const root = await resolveWorkspacePath(caller.workspace, args.folder);
   let found;
-  for await (const items of artifactPages(harness, caller)) {
+  for await (const items of artifactPages(call)) {
     for (const item of items) {
       const resolved = await resolveWorkspacePath(caller.workspace, item.root).catch(error => {
         if (path.resolve(item.root) === root) throw error;
@@ -159,41 +159,45 @@ async function adoptionTarget(harness, args, caller) {
   return found ?? { root, url: null, owner: null, title: path.basename(root) };
 }
 
-async function adopt(harness, args, caller) {
+async function adopt(call, args, caller) {
   if (!args.url && !args.folder) return { error: { message: 'Choose a work or folder to adopt.' } };
-  const before = await adoptionTarget(harness, args, caller);
+  const before = await adoptionTarget(call, args, caller);
   const answer = await callHost('artifact/confirm-adopt', {
     session: caller.session, title: before.title || path.basename(before.root), owner: before.owner,
   }, false, 95000);
   if (answer !== true) return { error: { message: 'Adoption was not confirmed.' } };
 
-  const after = await adoptionTarget(harness, args, caller);
+  const after = await adoptionTarget(call, args, caller);
   if (after.root !== before.root || after.url !== before.url || after.owner !== before.owner ||
       sessions.get(caller.session) !== caller.workspace) {
     return { error: { message: 'The work or task changed while confirming. Reopen the work and try again if you still want to move it.' } };
   }
   const selection = after.url ? { url: after.url } : { folder: after.root };
-  return harness.call('Artifact', { ...args, ...selection }, caller);
+  return call('Artifact', { ...args, ...selection });
 }
 
-async function checkArtifactArguments(harness, tool, args, caller) {
+async function checkArtifactArguments(call, tool, args, caller) {
   if (!args.url) return args;
-  const artifact = await workspaceArtifact(harness, args.url, caller);
+  const artifact = await workspaceArtifact(call, args.url, caller);
   if (tool !== 'Artifact') return args;
-  const paths = [args.path, ...(Array.isArray(args.paths) ? args.paths : []),
-    ...Object.keys(args.files ?? {})].filter(value => value !== undefined);
-  await Promise.all(paths.map(file => resolveWorkspacePath(artifact.root, file)));
-  if (args.action !== 'call') return args;
-  const checked = await artifactActionArguments(args.name, args.args, caller.workspace, artifact);
-  return { ...args, args: checked };
+  const checked = await artifactFileArguments(args, artifact.root);
+  if (checked.action === 'call') {
+    checked.args = await artifactActionArguments(checked.name, checked.args, caller.workspace, artifact);
+  }
+  return checked;
 }
 
 async function run({ method, params, id }) {
-  let publicationStatus = params?.tool === 'Artifact' && params.args?.action === 'share' &&
-    params.args.cloud !== undefined ? 'not_executed' : null;
-  const fail = (code, message) => send({ id, error: {
-    code, message, ...(publicationStatus ? { data: { publicationStatus } } : {}),
-  } });
+  const statusField = params?.statusField;
+  const messages = [];
+  let dispatched = false;
+  function fail(code, message) {
+    const data = messages.length ? { messages } : {};
+    if (statusField === 'publicationStatus' || statusField === 'executionStatus') {
+      data[statusField] = dispatched ? 'unknown' : 'not_executed';
+    }
+    send({ id, error: { code, message, ...(Object.keys(data).length ? { data } : {}) } });
+  }
   try {
     if (method === 'host/complete') {
       hostRequests.get(params.id)?.(params.answer);
@@ -214,14 +218,20 @@ async function run({ method, params, id }) {
       fail(-32602, 'Use files and directories inside the task workspace.');
       return;
     }
-    if (publicationStatus && !args.url) {
+    if (statusField === 'publicationStatus' && !args.url) {
       fail(-32602, 'Choose an artifact to publish.');
       return;
     }
     const harness = await connect(params.scope);
+    // Each upstream tool call can drain the task inbox, including the internal listing pages.
+    const call = async (tool, input) => {
+      const result = await harness.call(tool, input, caller);
+      if (Array.isArray(result?.messages)) messages.push(...result.messages);
+      return result;
+    };
     const adopting = params.tool === 'Artifact' && args.action === 'adopt';
     try {
-      if (!adopting) args = await checkArtifactArguments(harness, params.tool, args, caller);
+      if (!adopting) args = await checkArtifactArguments(call, params.tool, args, caller);
     } catch {
       fail(-32602, 'The artifact or file is unavailable in the task workspace.');
       return;
@@ -229,7 +239,10 @@ async function run({ method, params, id }) {
     if (sessions.get(caller.session) !== caller.workspace) {
       sessions.set(caller.session, caller.workspace);
       try {
-        await harness.attach(caller);
+        const { inbox } = await harness.attach(caller);
+        for (const item of inbox) {
+          if (typeof item?.text === 'string') messages.push(item.text);
+        }
       } catch (error) {
         sessions.delete(caller.session);
         throw error;
@@ -239,11 +252,12 @@ async function run({ method, params, id }) {
       ? setInterval(() => send({ method: 'artifact/progress', params: {} }), 45000)
       : undefined;
     try {
-      if (publicationStatus) publicationStatus = 'unknown';
+      dispatched = true;
       const result = adopting
-        ? await adopt(harness, args, caller)
-        : await harness.call(params.tool, args, caller);
-      send({ id, result });
+        ? await adopt(call, args, caller)
+        : await call(params.tool, args);
+      if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error('Invalid Open Artifact result');
+      send({ id, result: messages.length ? { ...result, messages } : result });
     } finally {
       if (pulse) clearInterval(pulse);
     }

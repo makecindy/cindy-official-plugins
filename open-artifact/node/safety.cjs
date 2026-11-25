@@ -56,6 +56,37 @@ async function workspaceArguments(tool, args, workspace) {
   return checked;
 }
 
+async function artifactFileArguments(args, root) {
+  const checked = { ...args };
+  async function relativeFile(input) {
+    if (typeof input !== 'string' || input.includes('\0')) throw new Error('Invalid artifact file path');
+    // Match the bundled runtime's relative-path interpretation before resolving filesystem links.
+    const file = input.replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!file.trim()) throw new Error('Invalid artifact file path');
+    await resolveWorkspacePath(root, file);
+    return file;
+  }
+  async function fileMap(input) {
+    const entries = await Promise.all(Object.entries(input).map(async ([file, value]) =>
+      [await relativeFile(file), value]));
+    const result = Object.fromEntries(entries);
+    if (Object.keys(result).length !== entries.length) throw new Error('Duplicate artifact file path');
+    return result;
+  }
+
+  if (Object.hasOwn(checked, 'path')) checked.path = await relativeFile(checked.path);
+  if (Array.isArray(checked.paths)) checked.paths = await Promise.all(checked.paths.map(relativeFile));
+  if (Array.isArray(checked.files)) {
+    checked.files = await Promise.all(checked.files.map(async file => ({ ...file, path: await relativeFile(file?.path) })));
+  } else if (checked.files && typeof checked.files === 'object') {
+    checked.files = await fileMap(checked.files);
+  }
+  if (checked.if_match && typeof checked.if_match === 'object' && !Array.isArray(checked.if_match)) {
+    checked.if_match = await fileMap(checked.if_match);
+  }
+  return checked;
+}
+
 function exportFilename(title, part, extension) {
   const stem = [title, part].filter(Boolean).join(' - ')
     .replace(/[\u0000-\u001f\u007f<>:"/\\|?*]/g, ' ')
@@ -132,4 +163,4 @@ async function verifyRuntime(root, inventory) {
   if (remaining.size) fail();
 }
 
-module.exports = { artifactActionArguments, resolveWorkspacePath, verifyRuntime, workspaceArguments };
+module.exports = { artifactActionArguments, artifactFileArguments, resolveWorkspacePath, verifyRuntime, workspaceArguments };
