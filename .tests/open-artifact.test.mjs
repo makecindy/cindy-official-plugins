@@ -217,6 +217,75 @@ test('a wake acknowledges queue acceptance and retains the same request key on r
   }
 });
 
+test('the worker returns pending comments immediately and waits only when none are available', { timeout: 5000 }, async t => {
+  const { spawn } = await import('node:child_process');
+  const { copyFile, mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { createInterface } = await import('node:readline');
+  const plugin = new URL('../open-artifact/', import.meta.url);
+  const { dependencies: [{ version }] } = JSON.parse(await readFile(new URL('binary-dependencies.json', plugin), 'utf8'));
+  const fixture = await mkdtemp(join(tmpdir(), 'oa-wait-test-'));
+  const scope = '00000000-0000-4000-8000-000000000000';
+  await mkdir(join(fixture, '.cindy-open-artifact', scope, `runtime-${version}`), { recursive: true });
+  await mkdir(join(fixture, 'node'));
+  await mkdir(join(fixture, 'vendor'));
+  for (const file of ['node/worker.cjs', 'node/safety.cjs']) {
+    await copyFile(new URL(file, plugin), join(fixture, file));
+  }
+  await writeFile(join(fixture, 'vendor', 'runtime-integrity.json'), '{}');
+  await writeFile(join(fixture, 'vendor', 'adapter.mjs'), `
+    export function createHarness() {
+      return {
+        async call(tool, args, caller) {
+          if (tool === 'Artifact') {
+            const artifact = { url: 'open-artifact://artifact/art_test', root: caller.workspace };
+            if (caller.session !== 'lookup') return { artifacts: [artifact] };
+            return args.cursor
+              ? { artifacts: [artifact], messages: ['Second page comment'] }
+              : { artifacts: [], next_cursor: '1', messages: ['First page comment'] };
+          }
+          return caller.session === 'later'
+            ? { messages: ['New comment'] }
+            : { messages: [], timedOut: true };
+        },
+        async attach({ session }) {
+          return { inbox: ['lookup', 'attach'].includes(session) ? [{ text: 'Attached comment' }] : [] };
+        },
+        close() {},
+      };
+    }
+  `);
+  const worker = spawn(process.execPath, [join(fixture, 'node', 'worker.cjs')], {
+    env: { ...process.env, HOME: fixture, USERPROFILE: fixture },
+    stdio: ['pipe', 'pipe', 'inherit'],
+  });
+  const lines = createInterface({ input: worker.stdout });
+  t.after(() => {
+    lines.close();
+    worker.stdin.end();
+    worker.kill();
+  });
+  const replies = lines[Symbol.asyncIterator]();
+  let requestId = 0;
+  async function wait(session, url) {
+    const id = ++requestId;
+    const params = { scope, session, workspace: fixture, tool: 'ArtifactComments', args: { action: 'wait', url } };
+    worker.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method: 'artifact/call', params }) + '\n');
+    const reply = await replies.next();
+    assert.equal(reply.done, false);
+    const frame = JSON.parse(reply.value);
+    assert.equal(frame.id, id);
+    assert.equal(frame.error, undefined);
+    return frame.result;
+  }
+  const url = 'open-artifact://artifact/art_test';
+  assert.deepEqual(await wait('lookup', url), { messages: ['First page comment', 'Second page comment', 'Attached comment'] });
+  assert.deepEqual(await wait('attach'), { messages: ['Attached comment'] });
+  assert.deepEqual(await wait('empty', url), { messages: [], timedOut: true });
+  assert.deepEqual(await wait('later'), { messages: ['New comment'] });
+});
+
 test('workspace paths resolve to authorized local files, including through symlinks', async () => {
   const { mkdtemp, mkdir, symlink } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');

@@ -248,7 +248,12 @@ async function run({ method, params, id }) {
         throw error;
       }
     }
-    const pulse = params.tool === 'ArtifactComments' && params.args?.action === 'wait'
+    const waitingForComments = params.tool === 'ArtifactComments' && args.action === 'wait';
+    if (waitingForComments && messages.length) {
+      send({ id, result: { messages } });
+      return;
+    }
+    const pulse = waitingForComments
       ? setInterval(() => send({ method: 'artifact/progress', params: {} }), 45000)
       : undefined;
     try {
