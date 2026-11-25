@@ -48,6 +48,7 @@ function createInstallation(options = {}) {
   }
   async function open(browser,mode = 'store') {
     if (!['chrome','edge','tabbit','safari'].includes(browser) || !['store','developer','reload'].includes(mode)) return {ok:false,error:'INVALID_INSTALL_TARGET',execution:'not_executed'};
+    if ((browser === 'tabbit' || browser === 'safari') && platform !== 'darwin') return {ok:false,error:'BROWSER_NOT_INSTALLED',execution:'not_executed'};
     const executable = app(browser);
     if (!executable) return {ok:false,error:'BROWSER_NOT_INSTALLED',execution:'not_executed'};
     if (browser === 'safari' && mode === 'store' && exists(safariApp)) {

@@ -108,6 +108,15 @@ test('Tabbit uses the Chrome Web Store route and chrome://extensions fallback',a
   calls.length=0;r=await i.open('tabbit','developer');assert.equal(r.ok,true);assert.equal(calls[0][1].at(-1),'chrome://extensions/');
 });
 
+test('Tabbit setup is rejected outside macOS',async()=>{
+  for (const platform of ['win32','linux']) {
+    const calls=[];
+    const i=createInstallation({platform,env:{PROGRAMFILES:'C:\\Program Files',WINDIR:'C:\\Windows'},exists:()=>true,run:async(...args)=>calls.push(args)});
+    const r=await i.open('tabbit','developer');
+    assert.equal(r.error,'BROWSER_NOT_INSTALLED');assert.equal(r.execution,'not_executed');assert.equal(calls.length,0);
+  }
+});
+
 test('OS launch failure is unknown and never automatically retried',async()=>{
   let calls=0;const i=createInstallation({platform:'darwin',exists:()=>true,run:async()=>{calls++;throw new Error('failed');}});
   const r=await i.open('chrome','reload');assert.equal(r.execution,'unknown');assert.equal(calls,1);

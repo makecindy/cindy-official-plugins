@@ -40,7 +40,7 @@ The on-demand workflow manual is `manual/browser/MANUAL.md`. Parameter names and
 | Browser | Code/artifact | Verification and release status |
 | --- | --- | --- |
 | Chrome | Shared MV3 extension, Chrome 120+ | Real Chromium integration; everyday Chrome 0.2.0 reads verified. 0.3.0 real Cindy/everyday Chrome X extraction also verified. |
-| Tabbit | Shared MV3 extension, macOS only | Tabbit 1.23.15.0 (Chromium 157.0.8103.51) verified with the published extension from the Chrome Web Store; native binding and page reads survived Cindy restarts. |
+| Tabbit | Shared MV3 extension, macOS only | macOS identity verified; native registration and settings support added. Packaged runtime verification is still pending until a CI-built release is installed. |
 | Edge | Shared Chromium extension, separate store artifact and profile routing | Protocol and Windows launcher tests; no real Windows/Edge device verification yet. |
 | Safari | WebExtension adapter + generated macOS container app | Universal arm64/x86_64 Release build and identity-pairing tests; no signed consumer installation or real Safari extension execution yet. |
 

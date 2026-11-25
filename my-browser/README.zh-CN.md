@@ -40,7 +40,7 @@
 | 浏览器 | 代码／产物 | 验证和分发状态 |
 | --- | --- | --- |
 | Chrome | 共用 MV3 扩展，Chrome 120+ | 真实 Chromium 集成；0.2.0 日常 Chrome 读取已通过，0.3.0 真实 Cindy／日常 Chrome 的 X 提取也已验证。 |
-| Tabbit | 共用 MV3 扩展，仅 macOS | 已在 Tabbit 1.23.15.0（Chromium 157.0.8103.51）安装商店扩展验证；原生绑定和网页读取在 Cindy 重启后仍可恢复。 |
+| Tabbit | 共用 MV3 扩展，仅 macOS | 已核实 macOS 签名身份并加入原生注册与设置支持；CI 构建包安装后的运行时验收仍待完成。 |
 | Edge | 共用 Chromium 扩展，独立商店产物和配置路由 | 协议与 Windows 启动器测试；尚无真实 Windows／Edge 设备验证。 |
 | Safari | WebExtension 适配＋生成的 macOS 宿主应用 | arm64/x86_64 通用 Release 构建及身份配对测试；尚无已签名普通用户安装、真实 Safari 扩展运行验证。 |
 

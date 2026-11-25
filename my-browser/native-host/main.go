@@ -56,7 +56,10 @@ func run() error {
 	}
 	// The verified caller's browser identity is canonical; extension-reported family
 	// is only a transport hint and cannot distinguish a Chromium fork from Chrome.
-	browser, _ := browserName()
+	browser, err := browserName()
+	if err != nil {
+		return errors.New("BROWSER_CALLER_UNVERIFIED")
+	}
 	var size uint32
 	if binary.Read(os.Stdin, binary.LittleEndian, &size) != nil || size == 0 || size > 8192 {
 		return errors.New("size")
