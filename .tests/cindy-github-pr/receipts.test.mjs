@@ -88,3 +88,21 @@ test('unsupported directory confirmation stops before creating quota directories
   assert.throws(() => io.writeExclusive(target, 'consumed'), /durability could not be confirmed.*stop recovery/);
   assert.equal(fs.existsSync(path.join(root, 'new')), false);
 });
+
+
+test('a confirmed receipt parent or ancestor disappearing never becomes fresh storage', async t => {
+  for (const leafExists of [true, false]) await t.test(leafExists ? 'receipt directory' : 'nearest existing ancestor', t => {
+    const f = fixture(t), parent = path.join(f.root, 'parent'), dir = path.join(parent, 'receipts'), file = path.join(dir, 'one.slot');
+    fs.mkdirSync(leafExists ? dir : parent, { recursive: true });
+    if (leafExists) fs.writeFileSync(file, 'already consumed');
+    f.io.confirmParent(dir);
+    const moved = path.join(f.root, 'moved'); fs.renameSync(parent, moved);
+    assert.throws(() => f.io.read(file), /durability could not be confirmed.*disappeared/);
+    assert.throws(() => f.io.writeExclusive(file, 'fresh attempt'), /durability could not be confirmed.*disappeared/);
+    assert.equal(fs.existsSync(parent), false, 'do not recreate a lost confirmed directory');
+    if (leafExists) assert.equal(fs.readFileSync(path.join(moved, 'receipts', 'one.slot'), 'utf8'), 'already consumed');
+    assert.equal(f.handles.size, 0);
+  });
+  const fresh = fixture(t); assert.equal(fresh.io.read(path.join(fresh.root, 'never-created', 'one.slot')), null);
+  assert.equal(fs.existsSync(path.join(fresh.root, 'never-created')), false, 'fresh status remains read-only');
+});

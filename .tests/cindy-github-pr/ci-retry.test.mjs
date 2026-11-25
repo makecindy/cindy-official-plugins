@@ -144,7 +144,7 @@ function guideArguments(values) {
   const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
   const source = guide.match(/```js\n(\/\/ Argument lists for the existing task execution tool\.[\s\S]*?)\n```/)?.[1];
   assert.ok(source, 'the recovery guide must define argument lists, not shell command templates');
-  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, encodingConfigArgs: typeof encodingConfigArgs === "undefined" ? undefined : encodingConfigArgs, pushSigningConfigArgs: typeof pushSigningConfigArgs === "undefined" ? undefined : pushSigningConfigArgs, hookConfigArgs: typeof hookConfigArgs === "undefined" ? undefined : hookConfigArgs, hookListArgs: typeof hookListArgs === "undefined" ? undefined : hookListArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, shallowStateArgs: typeof shallowStateArgs === "undefined" ? undefined : shallowStateArgs, shallowPathArgs: typeof shallowPathArgs === "undefined" ? undefined : shallowPathArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs })', values);
+  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, encodingConfigArgs: typeof encodingConfigArgs === "undefined" ? undefined : encodingConfigArgs, committerIdentArgs: typeof committerIdentArgs === "undefined" ? undefined : committerIdentArgs, pushSigningConfigArgs: typeof pushSigningConfigArgs === "undefined" ? undefined : pushSigningConfigArgs, hookConfigArgs: typeof hookConfigArgs === "undefined" ? undefined : hookConfigArgs, hookListArgs: typeof hookListArgs === "undefined" ? undefined : hookListArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, shallowStateArgs: typeof shallowStateArgs === "undefined" ? undefined : shallowStateArgs, shallowPathArgs: typeof shallowPathArgs === "undefined" ? undefined : shallowPathArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs })', values);
 }
 
 test('recovery guide passes dynamic refs, remotes and paths as literal argument data', () => {
@@ -1251,4 +1251,62 @@ process.exitCode = await runGate(process.argv.slice(3));
   }
   assert.equal(fs.readFileSync(path.join(alternate, 'unknown.slot'), 'utf8'), 'unknown earlier outcome');
   });
+});
+
+
+test('lost confirmed receipt directory stops actual status and reservation instead of granting quota', async t => {
+  for (const mode of ['--ci-retry-status', '--reserve-ci-retry']) await t.test(mode, t => {
+    const fx = fixture(t), moved = path.join(fx.root, 'moved-receipts'); fs.mkdirSync(fx.retryDir, { recursive: true });
+    const name = path.basename(ciRetryFilePath(fx.retryDir, prNodeId)) + '-1.slot';
+    const raw = JSON.stringify({ prNodeId, failure, sourceHead: oldHead, reservedAt: 123 });
+    fs.writeFileSync(path.join(fx.retryDir, name), raw);
+    const loader = path.join(fx.root, 'lose-parent.mjs');
+    fs.writeFileSync(loader, `import fs from 'node:fs';
+// Supported-filesystem model; never alters real user receipts.
+fs.fsyncSync = () => {};
+const open = fs.openSync; let moved = false;
+fs.openSync = (file, ...rest) => {
+  if (!moved && String(file).endsWith('.slot')) { moved = true; fs.renameSync(process.env.TEST_RECEIPT_DIR, process.env.TEST_MOVED_DIR); }
+  return open(file, ...rest);
+};
+const { runGate } = await import(process.argv[2]);
+process.exitCode = await runGate(process.argv.slice(3));
+`);
+    const result = spawnSync(process.execPath, [loader, pathToFileURL(gate).href, ...fx.args([mode, ...(mode === '--reserve-ci-retry' ? [oldHead] : [])])], {
+      env: { ...fx.env, TEST_RECEIPT_DIR: fx.retryDir, TEST_MOVED_DIR: moved }, encoding: 'utf8',
+    });
+    assert.equal(result.status, 1); assert.match(result.stderr, /confirmed.*directory disappeared/);
+    assert.doesNotMatch(result.stdout, /"available":true|ci-retry-reserved/);
+    assert.equal(fs.existsSync(fx.retryDir), false);
+    assert.equal(fs.readFileSync(path.join(moved, name), 'utf8'), raw);
+    assert.equal(fs.readdirSync(moved).length, 1);
+  });
+});
+
+test('missing committer identity is rejected read-only before reservation', t => {
+  const fx = fixture(t), work = path.join(fx.root, 'identity'); fs.mkdirSync(work);
+  const global = path.join(fx.root, 'global'); fs.writeFileSync(global, '');
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
+  for (const key of ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'EMAIL']) delete env[key];
+  const identity = { GIT_AUTHOR_NAME: 'Ada Example', GIT_AUTHOR_EMAIL: 'ada@example.test', GIT_COMMITTER_NAME: 'Ada Example', GIT_COMMITTER_EMAIL: 'ada@example.test' };
+  const git = (args, extra = {}) => spawnSync('git', args, { cwd: work, env: { ...env, ...extra }, encoding: 'utf8' });
+  assert.equal(git(['init', '-b', 'main']).status, 0);
+  assert.equal(git(['config', 'user.useConfigOnly', 'true']).status, 0);
+  assert.equal(git(['config', 'commit.gpgSign', 'false']).status, 0);
+  fs.writeFileSync(path.join(work, 'code.txt'), 'original code\n'); assert.equal(git(['add', 'code.txt']).status, 0);
+  assert.equal(git(['commit', '-s', '-m', 'original'], identity).status, 0);
+  const original = git(['rev-parse', 'HEAD']).stdout.trim();
+  const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+    gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+  const expected = ['--no-replace-objects', 'var', 'GIT_COMMITTER_IDENT'];
+  assert.notEqual(git(expected).status, 0);
+  const amend = git(plan.amendArgs); assert.notEqual(amend.status, 0); assert.match(amend.stderr, /identity unknown|empty ident|unable to auto-detect/i);
+  assert.equal(git(['rev-parse', 'HEAD']).stdout.trim(), original);
+  assert.equal(git(expected, identity).status, 0, 'environment-only identity is supported without changing config');
+  assert.notEqual(git(expected, { ...identity, GIT_COMMITTER_DATE: 'invalid date' }).status, 0);
+  assert.equal(git(['config', '--get', 'user.name']).status, 1);
+  assert.equal(fs.existsSync(fx.retryDir), false);
+  assert.deepEqual(Array.from(plan.committerIdentArgs ?? []), expected);
+  const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  assert.match(guide, /Before quota or amend, resolve the committer identity with committerIdentArgs/);
 });

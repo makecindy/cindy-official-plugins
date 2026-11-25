@@ -5,10 +5,13 @@ import path from 'node:path';
 // fallback, deletion or retry: unsupported/uncertain sync must stop recovery.
 // The injected filesystem is for tests; the CLI always uses Node's real fs.
 export function createCiRetryReceiptIO(io = fs) {
+  // Invocation-local observations, never a cached receipt or durable marker.
+  const confirmedDirectories = new Set();
   function syncDirectories(dir) {
     for (let current = path.resolve(dir);;) {
       const fd = io.openSync(current, 'r');
       try { io.fsyncSync(fd); } finally { io.closeSync(fd); }
+      confirmedDirectories.add(current);
       const parent = path.dirname(current);
       if (parent === current) return;
       current = parent;
@@ -23,6 +26,9 @@ export function createCiRetryReceiptIO(io = fs) {
         break;
       }
       catch (error) {
+        if (error.code === 'ENOENT' && confirmedDirectories.has(current)) {
+          throw new Error('previously confirmed receipt directory disappeared');
+        }
         const parent = path.dirname(current);
         if (error.code !== 'ENOENT' || parent === current) throw error;
         current = parent;
@@ -42,7 +48,11 @@ export function createCiRetryReceiptIO(io = fs) {
   function read(file) {
     let fd;
     try { fd = io.openSync(file, 'r+'); }
-    catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+    catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      confirmParent(path.dirname(file));
+      return null;
+    }
     let raw;
     try { raw = io.readFileSync(fd, 'utf8'); io.fsyncSync(fd); }
     finally { io.closeSync(fd); }

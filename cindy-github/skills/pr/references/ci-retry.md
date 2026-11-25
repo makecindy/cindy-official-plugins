@@ -51,6 +51,7 @@ const reserveArgs = [gatePath, prUrl, '--state-dir', observationStateDir,
 const statusArgs = [gatePath, prUrl, '--state-dir', observationStateDir, '--ci-retry-status',
   '--ci-retry-id', prNodeId, '--ci-retry-failure', diagnosisPath, '--json'];
 const hooksPathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'hooks'];
+const committerIdentArgs = ['--no-replace-objects', 'var', 'GIT_COMMITTER_IDENT'];
 const pushSigningConfigArgs = ['--no-replace-objects', 'config', '--includes', '--type=bool', '--get', 'push.gpgSign'];
 const hookConfigArgs = ['--no-replace-objects', 'config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^hook[.]'];
 const encodingConfigArgs = ['--no-replace-objects', 'config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^i18n[.](commitencoding|logoutputencoding)$'];
@@ -191,6 +192,18 @@ author and message/trailers from that payload. After amend compare the raw new
 payload against this same original baseline, not two replacement-aware views
 or `%P`/symbolic lookups. Signature identity checks remain mandatory.
 
+Before quota or amend, resolve the committer identity with committerIdentArgs
+in exactly the environment and checkout intended for amend. Require exit zero
+and one valid Git committer-ident line, including a usable date; record its
+resolved name/email as the intended committer. This reads effective config and
+environment, including user.useConfigOnly and GIT_COMMITTER_*; original author
+or user.name/user.email lookups alone do not prove it is usable. Missing, failed
+or ambiguous output stops before budget status/reservation. Never set config,
+identity variables or dates, and never create a probe commit, to gain eligibility.
+Recheck immediately before amend/push; changed or unknown identity stops without
+refund or repair. Compare the replacement's raw committer name/email with the
+recorded identity too (its timestamp may change); retain the original author.
+
 Before quota or amend, reject an empty root or single-parent head. Use the
 original raw parent count, never a replacement-aware or shallow view. For one
 parent, read that pinned parent's raw commit with the same argument boundary
@@ -300,8 +313,15 @@ for the gate. Both budget status and reservation use the platform's receipt I/O
 boundary. The single receipt I/O owner syncs file contents and every parent
 directory through the filesystem root, including newly created ancestors,
 before returning success. New slots, raw exclusive legacy copies, migration
-and re-read receipts share this boundary. Only an absent file at open means
-unused: a later ENOENT, failed/unsupported sync or unknown outcome stops recovery.
+and re-read receipts share this boundary. A missing file at open means unused only after rechecking its parents. The
+existing I/O owner remembers directories successfully confirmed in this process;
+if any such directory disappears, read and preparation fail closed rather than
+walking above it, returning null or recreating it. Never-created storage may
+still return unused after confirming the nearest existing ancestor, without
+creating a probe. These are transient observations, not a receipt cache, lock
+or persistent marker; they do not make filesystem checks atomic or reconstruct
+external erasure before the invocation. Known lost/uncertain history still stops.
+A later ENOENT, failed/unsupported sync or unknown outcome also stops recovery.
 There is no error-swallowing fallback, refund, removal, alternate directory or
 automatic retry. Keep observation cache and all receipts on any error; an
 unsupported store cannot confirm migration or grant available quota.

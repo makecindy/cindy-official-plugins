@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.48, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.49, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1204,3 +1204,53 @@ was removed and absence verified. Seven staged files match validated source;
 1.5.48 exceeds freshly fetched main 1.5.35. No dependency/license/permission or
 installed-runtime update occurred. Maintainer-requested current-head review and
 fork workflow approval remain external prerequisites, not retry eligibility.
+
+
+## Lost-directory observations and committer readiness — 2026-11-25 (source 1.5.49, not installed)
+
+Round 40 groups the two findings into unknown receipt outcomes and predictable
+amend prerequisites. The existing I/O owner now retains invocation-local facts
+about successfully synchronized directories. A missing-file open rechecks its
+parents; a previously confirmed directory found missing stops instead of walking
+above it, returning unused quota or recreating it during preparation. Never-seen
+storage can still report unused after confirming the nearest existing ancestor,
+without a probe write. This is not a receipt cache, new durable marker, lock,
+filesystem watcher or atomic filesystem transaction. It cannot reconstruct
+external erasure before invocation or guarantee detection between checks; known
+lost/unknown prior outcomes remain ineligible rather than fresh quota.
+
+Fault regressions first failed on e90274f7: renaming the confirmed receipt parent
+or nearest existing ancestor made read return null; injected disappearance between
+actual gate confirmation and its first slot read made both status/reservation
+succeed as fresh. After the fix, each stops, never recreates the old directory,
+and retains original slot bytes at the moved fixture path. The CLI regressions
+use a supported-directory-sync model on this Windows host, not real Cindy/GitHub
+recovery, native Linux or power-loss evidence. First-ever missing storage remains
+read-only. No real receipt or quota was touched.
+
+Before any quota operation, the Agent now resolves GIT_COMMITTER_IDENT read-only
+through Git in the exact amend environment, requiring a valid result and usable
+date. Config-only missing identities, invalid dates and unknown results stop;
+environment-only identities remain supported. No configuration, identity/date
+override or probe commit is used to qualify. Recheck before amend/push and compare
+the new raw committer name/email while retaining original author and existing
+signature requirements. The native Git fixture reproduced useConfigOnly refusal
+with missing identity and an unchanged HEAD, confirmed environment-only resolution
+and invalid-date refusal, then passed the previously failing argument/guide
+contract. These are local mechanics, no quota or remote push.
+
+Source/package 1.5.49 is not installed; local remains the actually tested 1.5.45.
+No further recovery, real preference/credential/permission/quota change or retired
+fixture use. Existing version-limited trial, strict publication exclusions,
+remaining runtime evidence gaps and maintainer workflow/review prerequisites stay
+in force. UI/locales, selected root namespace and fixed slot allocation are unchanged.
+
+Final mandatory four suites plus plugin: **481 passed, 36 skipped, 0 failed
+(264.01 s)**. Focused new regressions: **7 passed (1.77 s)** after all seven first
+failed on e90274f7. The 17 unsupported native positive quota cases and 19 existing
+skips remain; existing 62 sync-failure positions are retained. Forge validation
+and full archive/source comparison passed: **29 files, 240499 bytes**. The new
+1.5.49 package was removed/read back absent; eight staged files match validated
+source. Version exceeds freshly fetched main 1.5.35. Preflight had no blockers;
+old untracked task artifacts and ordinary main progress were left untouched.
+No new install, live evidence claim, cleanup retry or workflow/merge operation.
