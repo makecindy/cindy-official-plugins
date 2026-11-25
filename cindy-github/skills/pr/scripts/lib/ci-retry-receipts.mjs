@@ -8,7 +8,9 @@ export function createCiRetryReceiptIO(io = fs) {
   // Invocation-local observations, never a cached receipt or durable marker.
   const confirmedDirectories = new Map();
   function observeDirectory(dir, stat) {
-    if (!stat.isDirectory() || typeof stat.dev !== 'bigint' || typeof stat.ino !== 'bigint' || stat.dev < 0n || stat.ino <= 0n) {
+    // Node may expose high-bit filesystem IDs as signed BigInts; compare them
+    // losslessly as opaque values rather than imposing a positive-number range.
+    if (!stat.isDirectory() || typeof stat.dev !== 'bigint' || typeof stat.ino !== 'bigint' || stat.ino === 0n) {
       throw new Error('receipt directory identity is unknown');
     }
     const known = confirmedDirectories.get(dir);

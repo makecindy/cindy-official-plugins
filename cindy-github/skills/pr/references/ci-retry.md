@@ -327,7 +327,9 @@ and re-read receipts share this boundary. A missing file at open means unused on
 existing I/O owner remembers each observed directory's lossless device/inode
 identity in this process. Both pathname stats and opened directory handles must
 match that identity at confirmation/sync; the target is checked again after its
-ancestor flushes. Unknown/zero identity or a changed directory stops rather than
+ancestor flushes. Device/inode BigInts are opaque: signed high-bit values remain
+valid and compare exactly, without a positivity check or Number conversion.
+Missing/non-BigInt identity, zero inode or a changed directory stops rather than
 accepting a same-path replacement. This replaces the existing path-only facts,
 not a new durable registry or a cached quota. Every check still reads the real
 filesystem;

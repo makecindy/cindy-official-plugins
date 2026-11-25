@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.51, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.52, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1344,3 +1344,40 @@ exact non-manifest bytes and semantic manifest equality. The new 1.5.51 package
 was removed and confirmed absent. Eight staged files match the validated source;
 version exceeds fetched main 1.5.35. No unrelated work or installed runtime was
 changed. Current-head maintainer review and matching Verify approval remain.
+
+
+## Opaque signed filesystem identities — 2026-11-26 (source 1.5.52, not installed)
+
+Round 43 removes an unnecessary numeric-range restriction from the existing
+identity check. Invariant: the same lossless device/inode tuple is accepted
+regardless of its signed representation; missing/non-BigInt values, zero inode,
+read/sync failures or a changed tuple stop recovery. One existing I/O owner still
+applies this to path stats and opened directory stats for read, exclusive write
+and raw copy. No conversion through Number, normalization, new backend, lock,
+cache or durable marker was added. Directory-chain sync and replacement checks
+remain required; this is not an atomic filesystem transaction.
+
+The reviewer's Linux 6.18 / Node 24.15.0 overlayfs observation is external evidence,
+not a new environment tested here. Our Windows/Node 22 regression injects signed
+64-bit high-bit inode/device representations into actual local stat results with
+supported directory sync modeled. Both signed-inode and signed-device/inode
+variants first failed on 984c850f; after removing the sign guard they support
+read/first write/exclusive collision/raw copy and still reject a same-path
+replacement, retaining original bytes and closing all handles. Focused receipt
+suite: **97 passed, 0 failed (0.62 s)**; the new parent/two subcases failed first.
+The existing zero/unknown-ID and every file/directory sync-failure case pass too.
+This is not native Linux, power-loss or Cindy/GitHub recovery acceptance.
+
+Source/package 1.5.52 is not installed; local remains actually tested 1.5.45.
+No real quota, preference, credential, permission, hook/configuration, installed
+plugin or retired fixture was changed. Full strict recovery prerequisites,
+existing runtime gaps and maintainer workflow approval/review remain applicable.
+
+Final mandatory four suites plus plugin: **516 passed, 36 skipped, 0 failed
+(249.49 s)**. The 17 unsupported native success cases and 19 pre-existing skips
+remain. Forge validation/full package comparison passed: **29 files, 679645
+uncompressed bytes**; semantic manifest equality and exact remaining bytes. The
+new 1.5.52 package was deleted and read back absent. Seven task files match the
+validated source, version exceeds fetched main 1.5.35; preflight has no blockers.
+Normal upstream movement and unrelated old artifacts were retained. No new
+runtime acceptance is inferred from these checks.
