@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { createContext, Script } from 'node:vm';
@@ -40,7 +42,10 @@ async function testConnection() {
     }
   }
 
-  const fetch = async (url) => { throw new Error(`unexpected fetch: ${url}`); };
+  const fetch = async (url) => {
+    if (url === '/kv') return { ok: true, json: async () => ({}) };
+    throw new Error(`unexpected fetch: ${url}`);
+  };
 
   const cindy = {
     onHostMessage() {},
@@ -76,11 +81,12 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.equal('slots' in manifest, false);
   assert.equal(manifest.notify, true);
   assert.equal(manifest.fs, true);
-  // PR card: the title links to the PR; agent turns only on clicks, no background runs.
+  // The card can manage its saved follow-up directly.
   assert.deepEqual(manifest.card, { externalLinks: true });
-  assert.deepEqual(manifest.agent, {});
+  assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
+  assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.16');
+  assert.equal(manifest.version, '1.5.35');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -165,7 +171,7 @@ function createRuntime(options = {}) {
       return { ok: true, context: { region: 'cn', locale: options.locale ?? 'zh-CN' } };
     },
     onHostMessage(fn) { handler = fn; },
-    send(message) { sent.push(message); return Promise.resolve({ ok: true }); },
+    send(message) { sent.push(message); return Promise.resolve(options.send ? options.send(message) : { ok: true }); },
     async fetch(request) {
       fetches.push(request);
       if (options.github) return options.github(request);
@@ -180,7 +186,10 @@ function createRuntime(options = {}) {
   const context = createContext({
     cindy,
     BroadcastChannel: FakeBroadcastChannel,
-    fetch: async (url) => { throw new Error(`unexpected fetch: ${url}`); },
+    fetch: options.localFetch ?? (async (url) => {
+      assert.equal(url, '/kv');
+      return { ok: true, json: async () => ({}) };
+    }),
     setTimeout: options.setTimeout ?? setTimeout,
     clearTimeout,
     URL,
@@ -655,6 +664,7 @@ function createPrRuntime(options = {}) {
   const agentRuns = [];
   let kv = options.kv ?? {};
   const cindy = {
+    ...options.hostApi,
     ...(options.pickModel ? { pickModel: options.pickModel } : {}),
     async request() { return { ok: true, context: { locale: 'zh-CN' } }; },
     onHostMessage(fn) { handler = fn; },
@@ -702,7 +712,7 @@ function createPrRuntime(options = {}) {
       if (init.method === 'PUT') { kv = JSON.parse(init.body); return { ok: true, status: 204 }; }
       return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(kv)) };
     },
-    setTimeout,
+    setTimeout(fn, delay) { return delay >= 300_000 ? 0 : setTimeout(fn, delay); },
     clearTimeout,
     URL,
     encodeURIComponent,
@@ -888,7 +898,9 @@ test('card settings persist in /kv and become one-time todos once the PR exists'
 test('PR cards carry a hidden host copy-link button for the PR URL', async () => {
   const runtime = createPrRuntime({ github: prGraphql({ number: 7, title: 'Fix login' }) });
   const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '7' })).reply.result.card_id;
-  const button = runtime.lastCard(cardId).html.match(/<button data-ghost-copy-link=[^>]*>/)?.[0] ?? '';
+  const html = runtime.lastCard(cardId).html;
+  assert.match(html, /Fix login<\/a><\/span><button data-ghost-copy-link=/);
+  const button = html.match(/<button data-ghost-copy-link=[^>]*>/)?.[0] ?? '';
   assert.match(button, /^<button data-ghost-copy-link="https:\/\/github\.com\/octo\/repo\/pull\/7" aria-label="复制链接" style="display:none;/);
   assert.doesNotMatch(button, /data-ghost-action|data-ghost-link|data-ghost-task-archive/);
 });
@@ -1066,6 +1078,26 @@ test('when the final save after marking ready fails, the card shows the real sta
   healed = true;
   await runtime.click(cardId, 'pr:follow');
   assert.equal(runtime.agentRuns.at(-1)?.event.action, 'follow');
+});
+
+test('publish and draft clicks replace the buttons before a slow agent handoff completes', async () => {
+  for (const action of ['pr:publish', 'pr:draft']) {
+    let started, finish;
+    const starting = new Promise(resolve => { started = resolve; });
+    const receipt = new Promise(resolve => { finish = resolve; });
+    const runtime = createPrRuntime({ agentRun: () => { started(); return receipt; } });
+    const { callId } = await runtime.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main' });
+    const click = runtime.click(callId, action);
+    await starting;
+    const pending = runtime.lastCard(callId);
+    finish({ ok: true, disposition: 'queued' });
+    await click;
+    assert.equal(pending.state, 'working');
+    assert.doesNotMatch(pending.html, /data-ghost-action="pr:(publish|draft)"/);
+    assert.ok(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prQueuedMeta));
+    await runtime.click(callId, action);
+    assert.equal(runtime.agentRuns.length, 1);
+  }
 });
 
 test('a click is recorded before it is handed over: no record, nothing sent; handed over, a lost save cannot offer it again', async () => {
@@ -1718,4 +1750,682 @@ test('legacy task-entry clicks return only a navigation handoff and retain follo
   await runtime.tool({ repo: 'octo/repo', pr: 42, following: true, session_context: { session_id: 's3' } });
   await runtime.click(ref.callId, 'pr:open-task', { sessionId: 's2' });
   assert.equal(runtime.agentRuns.at(-1).event.task_url, 'cindy://session/s3');
+});
+
+function followScheduler(options = {}) {
+  const rows = new Map();
+  const calls = [];
+  const hostApi = {
+    host: { async call(server, tool, args) {
+      assert.equal(server, 'cindy_scheduler');
+      assert.equal(args.device, 'local');
+      calls.push(tool);
+      let data;
+      if (tool === 'schedule_create') {
+        if (options.reject) throw new Error('scheduler unavailable');
+        data = { ...args, id: 'sch-1', status: 'active' };
+        rows.set(data.id, data);
+        if (options.loseCreateReceipt) throw new Error('lost receipt');
+      } else if (tool === 'schedule_get') {
+        if (options.failGet) throw new Error('cannot verify');
+        data = rows.get(args.id) ?? null;
+      } else if (tool === 'schedule_list') {
+        data = [...rows.values()];
+      } else if (tool === 'schedule_delete') {
+        data = { deleted: args.id };
+        rows.delete(args.id);
+      } else throw new Error('unexpected ' + tool);
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, data }) }] };
+    } },
+    node: { async request({ method }) {
+      assert.equal(method, 'followSkillDir');
+      return { ok: true, result: '/approved skills/agent-skills/skills/_root__cindy-github--pr' };
+    } },
+  };
+  return { hostApi, calls, rows };
+}
+
+test('publication starts exactly one verified follow-up without a model turn and stop removes it', async () => {
+  const { hostApi, calls, rows } = followScheduler({ loseCreateReceipt: true });
+  const runtime = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: {
+    autoFollow: true, followModel: { route: { agentKind: 'cc', providerId: 'chosen', model: 'sonnet',
+      effort: 'high', fastMode: false, agentDeviceId: 'remote' } },
+  } } });
+  const { callId } = await runtime.tool({ repo: 'octo/repo', head: 'topic' });
+  const result = (await runtime.tool({ card_id: callId, pr: 42 })).reply.result;
+  assert.equal(result.follow_state, 'active');
+  assert.equal(result.todo, undefined);
+  const schedule = rows.get('sch-1');
+  assert.equal(schedule.targetSessionId, 's1');
+  assert.equal(schedule.modelAgentKind, 'claude-code');
+  assert.equal(schedule.modelAgentDeviceId, 'remote');
+  assert.equal(schedule.providerId, 'chosen');
+  assert.equal(schedule.model, 'sonnet');
+  assert.equal(schedule.effort, 'high');
+  assert.equal(schedule.intervalMs, 300000);
+  assert.equal(schedule.prTrigger.url, 'https://github.com/octo/repo/pull/42');
+  assert.match(schedule.preRunHook.command, /pr-heartbeat-gate\.mjs" https:\/\/github\.com\/octo\/repo\/pull\/42$/);
+  await runtime.tool({ card_id: callId, pr: 42, published: true });
+  assert.equal(calls.filter(c => c === 'schedule_create').length, 1);
+  await runtime.click(callId, 'pr:stop');
+  assert.equal(rows.size, 0);
+  await runtime.tool({ card_id: callId });
+  assert.equal(rows.size, 0);
+  assert.equal(runtime.agentRuns.length, 0);
+});
+
+test('publication without an ask card is distinct from viewing a PR or declining follow-up', async () => {
+  for (const [args, enabled, expected] of [
+    [{}, true, 0], [{ published: true }, false, 0], [{ published: true, following: false }, true, 0],
+    [{ published: true }, true, 1],
+  ]) {
+    const { hostApi, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: enabled } } });
+    await rt.tool({ repo: 'octo/repo', pr: 42, ...args });
+    assert.equal(rows.size, expected);
+  }
+});
+
+test('rejected creation stays stopped and can be retried from the card', async () => {
+  const fault = { reject: true };
+  const { hostApi, rows } = followScheduler(fault);
+  const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+  assert.equal(opened.reply.result.follow_state, 'failed');
+  assert.match(opened.reply.result.note, /scheduler unavailable/);
+  fault.reject = false;
+  await rt.click(opened.callId, 'pr:follow');
+  assert.equal(rows.size, 1);
+  assert.equal(rt.agentRuns.length, 0);
+});
+
+test('restart after an unreadable receipt reconciles the existing schedule', async () => {
+  const fault = { failGet: true };
+  const { hostApi, calls } = followScheduler(fault);
+  const kv = { prCard: { autoFollow: true } };
+  const rt = createPrRuntime({ github: prGraphql(), hostApi, kv });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+  assert.equal(opened.reply.result.follow_state, 'unverified');
+  fault.failGet = false;
+  const restarted = createPrRuntime({ github: prGraphql(), hostApi, kv, files: rt.files });
+  const result = await restarted.tool({ card_id: opened.callId });
+  assert.equal(result.reply.result.follow_state, 'active');
+  assert.equal(calls.filter(c => c === 'schedule_create').length, 1);
+});
+
+test('a foreign schedule blocks creation while a similarly numbered PR does not', async () => {
+  for (const number of [42, 420]) {
+    const { hostApi, rows, calls } = followScheduler();
+    const url = 'https://github.com/octo/repo/pull/' + number;
+    rows.set('foreign', { id: 'foreign', prompt: 'Follow ' + url, targetSessionId: 'other', status: 'active' });
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_state, number === 42 ? 'failed' : 'active');
+    assert.equal(calls.includes('schedule_create'), number !== 42);
+    assert.equal(rows.get('foreign').targetSessionId, 'other');
+  }
+});
+
+test('an externally stopped follow-up stays stopped after refresh', async () => {
+  const { hostApi, rows, calls } = followScheduler();
+  const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+  rows.clear();
+  const refreshed = await rt.tool({ card_id: opened.callId });
+  assert.equal(refreshed.reply.result.follow_state, 'stopped');
+  assert.equal(calls.filter(c => c === 'schedule_create').length, 1);
+});
+
+test('paused follow-up refreshes, retains its reservation and shows terminal PR status', async () => {
+  const { hostApi, rows, calls } = followScheduler();
+  const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+  rows.get('sch-1').status = 'paused';
+  const paused = await rt.tool({ card_id: opened.callId, claim_follow: true });
+  assert.equal(paused.reply.result.follow_state, 'paused');
+  assert.equal(paused.reply.result.follow_claimed, false);
+  assert.match(rt.lastCard(opened.callId).html, /跟进已暂停/);
+  const peer = await rt.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(peer.reply.result.disposition, 'existing_task');
+  assert.equal(calls.filter(c => c === 'schedule_create').length, 1);
+  rt.setGithub(prGraphql({ merged: true }));
+  const merged = await rt.tool({ card_id: opened.callId });
+  assert.equal(merged.reply.result.stage, 'merged');
+});
+
+function statusWatchFixture(initial = {}, options = {}) {
+  let failRead = options.failBoot;
+  let accountStatus = null;
+  let accountStatusFrom = 1;
+  let accountLimited = null;
+  let accountSwitchAt = null;
+  let accountSwitchTo = null;
+  let userHoldAt = null;
+  let userHoldGate = null;
+  let userCalls = 0;
+  let limitedPath = null;
+  let deniedPath = null;
+  let missingPath = null;
+  let holdKey = null;
+  let holdGate = null;
+  let kvGate = null;
+  let heldKvGate = null;
+  let putGate = null;
+  let heldPutGate = null;
+  let kv = structuredClone(initial);
+  let account = 17;
+  let rateLimited = false;
+  const timers = [];
+  const paths = [];
+  const response = {
+    '/pulls/1': { id: 21, number: 1, state: 'open', comments: 0, body: 'untrusted text' },
+    '/issues/2': { id: 22, number: 2, state: 'open', comments: 1 },
+    '/actions/runs/3': { id: 3, status: 'queued', run_attempt: 1 },
+  };
+  const runtime = createRuntime({
+    setTimeout(fn, delay) {
+      if (delay >= 60_000) timers.push({ fn, delay });
+      return timers.length;
+    },
+    async localFetch(url, init) {
+      assert.equal(url, '/kv');
+      if (init?.method === 'PUT') {
+        if (putGate) { heldPutGate = putGate; putGate = null; await heldPutGate.promise; }
+        kv = JSON.parse(init.body);
+      } else if (failRead) {
+        failRead = false;
+        throw new Error('temporary storage failure');
+      } else if (kvGate) {
+        heldKvGate = kvGate; kvGate = null;
+        await heldKvGate.promise;
+        return { ok: true, json: async () => structuredClone(heldKvGate.snapshot) };
+      }
+      return { ok: true, json: async () => structuredClone(kv) };
+    },
+    send: options.send,
+    async github(request) {
+      const url = new URL(request.url);
+      assert.equal(url.origin, 'https://api.github.com');
+      assert.equal(request.method, 'GET');
+      paths.push(url.pathname);
+      if (url.pathname === '/user') {
+        userCalls++;
+        if (userHoldGate && userCalls === userHoldAt) await userHoldGate.promise;
+        if (accountStatus && userCalls >= accountStatusFrom) return jsonResponse({ message: 'credentials rejected' }, accountStatus);
+        if (accountLimited !== null && userCalls >= accountLimited) return jsonResponse({ message: 'API rate limit exceeded' }, 403);
+        if (accountSwitchAt !== null && userCalls >= accountSwitchAt) return jsonResponse({ id: accountSwitchTo });
+        return jsonResponse({ id: account });
+      }
+      const key = url.pathname.replace('/repos/example/widget', '');
+      if (key === holdKey) await holdGate.promise;
+      if (rateLimited || key === limitedPath) return jsonResponse({ message: 'API rate limit exceeded' }, 403);
+      if (key === deniedPath) return jsonResponse({ message: 'Resource not accessible by integration' }, 403);
+      if (key === missingPath) return jsonResponse({ message: 'Not Found' }, 404);
+      const object = response[key];
+      return object ? jsonResponse(object) : jsonResponse({ message: 'forbidden' }, 403);
+    },
+  });
+  const tool = (action, kind, id) => runtime.tool('status_watch', { action, kind, id, repo: 'Example/Widget' });
+  const makeGate = (snapshot) => {
+    let release;
+    const gate = { promise: new Promise(resolve => { release = resolve; }), release };
+    if (snapshot !== undefined) gate.snapshot = snapshot;
+    return gate;
+  };
+  return { ...runtime, tool, timers, paths, response, saved: () => kv,
+    useAccount: id => { account = id; },
+    failAccount: (value = 401, from = 1) => { accountStatus = value === false ? null : value; accountStatusFrom = from; },
+    switchAccountAt: (n, id) => { accountSwitchAt = n; accountSwitchTo = id; },
+    holdUserAt: n => { userHoldAt = n; userHoldGate = makeGate(); },
+    releaseUser: () => { assert.ok(userHoldGate, 'no held user read'); const gate = userHoldGate; userHoldAt = null; userHoldGate = null; gate.release(); },
+    limitPath: p => { limitedPath = p; }, denyPath: p => { deniedPath = p; },
+    missingPath: p => { missingPath = p; },
+    limitAccountFrom: n => { accountLimited = n; }, limitRequests: () => { rateLimited = true; },
+    holdPath: p => { holdKey = p; holdGate = makeGate(); },
+    releasePath: () => { const gate = holdGate; holdKey = null; holdGate = null; gate.release(); },
+    holdKv: () => { kvGate = makeGate(structuredClone(kv)); },
+    releaseKv: () => { assert.ok(heldKvGate, 'no held KV read'); heldKvGate.release(); },
+    holdPut: () => { putGate = makeGate(); },
+    releasePut: () => { assert.ok(heldPutGate, 'no held KV write'); heldPutGate.release(); } };
+}
+
+test('status watches are opt-in, track three exact states and write before notifying', async () => {
+  const f = statusWatchFixture({ prCard: { autoFollow: true } });
+  await flushAsync();
+  assert.deepEqual(f.paths, []);
+  assert.equal(f.timers.length, 0);
+  for (const [kind, id] of [['pr', 1], ['issue', 2], ['run', 3]]) {
+    assert.equal((await f.tool('add', kind, id)).ok, true);
+  }
+  assert.equal(f.timers.length, 1);
+  assert.equal(f.timers[0].delay, 300_000);
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
+  assert.equal(f.saved().prCard.autoFollow, true);
+  assert.doesNotMatch(JSON.stringify(f.saved()), /untrusted text/);
+  f.response['/pulls/1'].merged = true;
+  f.response['/pulls/1'].state = 'closed';
+  f.response['/issues/2'].comments++;
+  Object.assign(f.response['/actions/runs/3'], { status: 'completed', conclusion: 'success' });
+  await f.timers.shift().fn();
+  assert.deepEqual(f.saved().githubStatusWatches.map(x => x.snapshot),
+    ['merged:ready:0', 'open:ready:2', 'completed:success:1']);
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
+  await f.timers.shift().fn();
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
+  for (const [kind, id] of [['pr', 1], ['issue', 2], ['run', 3]]) {
+    assert.equal((await f.tool('remove', kind, id)).ok, true);
+  }
+  const before = f.paths.length;
+  await f.timers.shift().fn();
+  assert.equal(f.paths.length, before);
+  assert.equal(f.timers.length, 0);
+});
+
+test('status watches resume locally, skip changed GitHub accounts, report permission failures and back off', async () => {
+  const a = statusWatchFixture();
+  assert.equal((await a.tool('add', 'issue', 2)).ok, true);
+  assert.equal((await a.tool('add', 'run', 99)).ok, false);
+  assert.equal(a.saved().githubStatusWatches.length, 1);
+  const f = statusWatchFixture(a.saved());
+  await flushAsync();
+  assert.equal(f.timers.length, 1);
+  f.useAccount(88);
+  await f.timers.shift().fn();
+  assert.deepEqual(f.paths, ['/user', '/user']);
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'account_changed');
+  assert.equal((await f.tool('list', 'issue', 2)).result.watches[0].problem, 'account_changed');
+  assert.equal(f.timers[0].delay, 300_000);
+  await f.timers.shift().fn();
+  assert.deepEqual(f.paths, ['/user', '/user', '/user']);
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'account_changed');
+  f.useAccount(17);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
+  delete f.response['/issues/2'];
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'forbidden');
+  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:1');
+  f.limitRequests();
+  await f.timers.shift().fn();
+  assert.equal(f.timers[0].delay, 900_000);
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
+});
+
+test('an account probe failure marks healthy watches unavailable until reads recover', async () => {
+  const a = statusWatchFixture();
+  assert.equal((await a.tool('add', 'issue', 2)).ok, true);
+  const f = statusWatchFixture(a.saved());
+  await flushAsync();
+  assert.equal(f.timers.length, 1);
+  f.failAccount(503);
+  await f.timers.shift().fn();
+  assert.deepEqual(f.paths, ['/user']);
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'unavailable');
+  assert.equal(f.timers[0].delay, 900_000);
+  assert.equal((await f.tool('list', 'issue', 2)).result.watches[0].problem, 'unavailable');
+  f.failAccount(false);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
+});
+
+test('a rate-limited round persists changes already read before backing off', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  assert.equal((await f.tool('add', 'pr', 1)).ok, true);
+  f.response['/issues/2'].comments = 5;
+  f.limitPath('/pulls/1');
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:5');
+  assert.equal(f.saved().githubStatusWatches[0].noticePending, undefined);
+  assert.equal(f.saved().githubStatusWatches[1].problem, 'unavailable');
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
+  assert.equal(f.timers[0].delay, 900_000);
+});
+
+test('a successful add supersedes a later backoff timer', async () => {
+  const a = statusWatchFixture();
+  assert.equal((await a.tool('add', 'issue', 2)).ok, true);
+  const f = statusWatchFixture(a.saved(), { failBoot: true });
+  await flushAsync();
+  assert.equal(f.timers.length, 1);
+  assert.equal(f.timers[0].delay, 900_000);
+  assert.equal((await f.tool('add', 'pr', 1)).ok, true);
+  assert.equal(f.timers.length, 2);
+  const stale = f.timers.shift();
+  assert.equal(stale.delay, 900_000);
+  const before = f.paths.length;
+  await stale.fn();
+  assert.equal(f.paths.length, before);
+  assert.equal(f.timers[0].delay, 300_000);
+  const beforePoll = f.paths.length;
+  await f.timers.shift().fn();
+  assert.equal(f.paths.length, beforePoll + 3);
+});
+
+test('a rate-limited confirmation probe persists changes and backs off', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.response['/issues/2'].comments = 5;
+  f.limitAccountFrom(4);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:5');
+  assert.equal(f.saved().githubStatusWatches[0].noticePending, undefined);
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
+  assert.equal(f.timers[0].delay, 900_000);
+});
+
+test('an add during an in-flight round keeps the five-minute deadline', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.holdPath('/issues/2');
+  f.limitPath('/issues/2');
+  const poll = f.timers.shift().fn();
+  await flushAsync();
+  assert.equal((await f.tool('add', 'pr', 1)).ok, true);
+  assert.equal(f.timers.length, 0);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  f.releasePath();
+  await poll;
+  assert.equal(f.timers.length, 1);
+  // The armed delay is the remaining time to the add's absolute deadline.
+  assert.ok(f.timers[0].delay < 300_000 && f.timers[0].delay > 290_000, `delay ${f.timers[0].delay}`);
+});
+
+test('an unauthorized account probe surfaces an actionable problem', async () => {
+  const a = statusWatchFixture();
+  assert.equal((await a.tool('add', 'issue', 2)).ok, true);
+  const f = statusWatchFixture(a.saved());
+  await flushAsync();
+  assert.equal(f.timers.length, 1);
+  f.failAccount(401);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'auth_required');
+  assert.equal((await f.tool('list', 'issue', 2)).result.watches[0].problem, 'auth_required');
+  f.failAccount(false);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
+});
+
+test('read failures map to the documented problem classes and clear on recovery', async () => {
+  const cases = [[401, 'auth_required'], [403, 'forbidden'], [404, 'gone'], [410, 'gone'],
+    [429, 'unavailable'], [503, 'unavailable']];
+  for (const [status, expected] of cases) {
+    const a = statusWatchFixture();
+    assert.equal((await a.tool('add', 'issue', 2)).ok, true);
+    const f = statusWatchFixture(a.saved());
+    await flushAsync();
+    f.failAccount(status);
+    await f.timers.shift().fn();
+    assert.equal(f.saved().githubStatusWatches[0].problem, expected, `probe ${status}`);
+    f.failAccount(false);
+    await f.timers.shift().fn();
+    assert.equal(f.saved().githubStatusWatches[0].problem, undefined, `recovery ${status}`);
+  }
+});
+
+test('targets after a rate-limit break cannot claim healthy polling', async () => {
+  const f = statusWatchFixture({ githubStatusWatches: [
+    { kind: 'pr', repo: 'example/widget', id: 1, account: 17, objectId: 21, snapshot: 'open:ready:0' },
+    { kind: 'issue', repo: 'example/widget', id: 2, account: 17, objectId: 22, snapshot: 'open:ready:1' },
+    { kind: 'run', repo: 'example/widget', id: 3, account: 17, objectId: 3, snapshot: 'queued:none:1', problem: 'gone' },
+  ] });
+  await flushAsync();
+  f.limitPath('/pulls/1');
+  await f.timers.shift().fn();
+  const [pr, issue, run] = f.saved().githubStatusWatches;
+  assert.equal(pr.problem, 'unavailable');
+  assert.equal(issue.problem, 'unavailable');
+  assert.equal(run.problem, 'gone');
+  assert.equal(f.timers[0].delay, 900_000);
+});
+
+test('a concurrent modification does not discard an observed change', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  assert.equal((await f.tool('add', 'pr', 1)).ok, true);
+  f.response['/issues/2'].comments = 5;
+  f.holdUserAt(6);
+  const round = f.timers.shift().fn();
+  await flushAsync();
+  assert.equal((await f.tool('remove', 'run', 99)).ok, true);
+  f.releaseUser();
+  await round;
+  assert.equal(f.saved().githubStatusWatches.find(w => w.kind === 'issue').snapshot, 'open:ready:5');
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
+});
+
+test('a concurrent modification during the reads does not abort the round', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  assert.equal((await f.tool('add', 'pr', 1)).ok, true);
+  f.response['/issues/2'].comments = 5;
+  f.holdPath('/issues/2');
+  const round = f.timers.shift().fn();
+  await flushAsync();
+  assert.equal((await f.tool('remove', 'run', 99)).ok, true);
+  f.releasePath();
+  await round;
+  assert.equal(f.saved().githubStatusWatches.find(w => w.kind === 'issue').snapshot, 'open:ready:5');
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
+});
+
+test('a watch re-added during a round keeps its fresh baseline', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.response['/issues/2'].comments = 5;
+  f.holdUserAt(4);
+  const round = f.timers.shift().fn();
+  await flushAsync();
+  f.response['/issues/2'].comments = 7;
+  assert.equal((await f.tool('remove', 'issue', 2)).ok, true);
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.releaseUser();
+  await round;
+  const row = f.saved().githubStatusWatches[0];
+  assert.equal(row.snapshot, 'open:ready:7');
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
+});
+
+test('a watch re-added during a failed probe is not marked stale', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.holdUserAt(3);
+  const round = f.timers.shift().fn();
+  await flushAsync();
+  assert.equal((await f.tool('remove', 'issue', 2)).ok, true);
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.failAccount(503);
+  f.releaseUser();
+  await round;
+  const row = f.saved().githubStatusWatches[0];
+  assert.equal(row.problem, undefined);
+  assert.equal(row.snapshot, 'open:ready:1');
+});
+
+test('a later remove wins over an add still reading its baseline', async () => {
+  const f = statusWatchFixture();
+  f.holdPath('/issues/2');
+  const adding = f.tool('add', 'issue', 2);
+  await flushAsync();
+  const removing = f.tool('remove', 'issue', 2);
+  await flushAsync();
+  f.releasePath();
+  assert.equal((await removing).ok, true);
+  assert.equal((await adding).ok, true);
+  assert.equal(f.saved().githubStatusWatches.length, 0);
+});
+
+test('an account switch at the final check persists account_changed', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.response['/issues/2'].comments = 5;
+  f.switchAccountAt(4, 88);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'account_changed');
+  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:1');
+  assert.equal(f.timers[0].delay, 900_000);
+});
+
+test('a failed final account check persists the failure class', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.response['/issues/2'].comments = 5;
+  f.failAccount(401, 4);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:5');
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'auth_required');
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
+  assert.equal(f.timers[0].delay, 900_000);
+});
+
+test('a newer failure class replaces an older one on the same watch', async () => {
+  const a = statusWatchFixture();
+  assert.equal((await a.tool('add', 'issue', 2)).ok, true);
+  const f = statusWatchFixture(a.saved());
+  await flushAsync();
+  f.missingPath('/issues/2');
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'gone');
+  f.missingPath(null);
+  f.failAccount(401);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'auth_required');
+  f.failAccount(false);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
+});
+
+test('a deleted or inaccessible target is reported as gone', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.missingPath('/issues/2');
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'gone');
+  assert.equal((await f.tool('list', 'issue', 2)).result.watches[0].problem, 'gone');
+  f.missingPath(null);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
+});
+
+test('a permission failure on a watched target is reported as forbidden', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  f.denyPath('/issues/2');
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'forbidden');
+  assert.equal((await f.tool('list', 'issue', 2)).result.watches[0].problem, 'forbidden');
+  f.denyPath(null);
+  await f.timers.shift().fn();
+  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
+});
+
+test('an add racing an empty round still schedules its check', async () => {
+  const f = statusWatchFixture();
+  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
+  assert.equal((await f.tool('remove', 'issue', 2)).ok, true);
+  assert.equal(f.timers.length, 1);
+  f.holdKv();
+  const round = f.timers.shift().fn();
+  await flushAsync();
+  f.holdPut();
+  const adding = f.tool('add', 'pr', 1);
+  await flushAsync();
+  assert.equal(f.timers.length, 0);
+  // Step the empty read to its decision so the round still returns "no watches",
+  // then release the add so its deadline is recorded before the round's finally.
+  f.releaseKv();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  f.releasePut();
+  await adding;
+  await round;
+  assert.equal(f.timers.length, 1);
+  // The empty round must not drop the add's request; the delay is bounded by its deadline.
+  assert.ok(f.timers[0].delay <= 300_000 && f.timers[0].delay > 0, `delay ${f.timers[0].delay}`);
+});
+
+test('status watches cap stored targets and reject a replaced object without advancing its state', async () => {
+  const f = statusWatchFixture();
+  for (let id = 10; id < 16; id++) {
+    f.response['/issues/' + id] = { id: 100 + id, number: id, state: 'open', comments: 0 };
+    assert.equal((await f.tool('add', 'issue', id)).ok, id < 15);
+  }
+  assert.equal(f.saved().githubStatusWatches.length, 5);
+  f.response['/issues/10'] = { id: 200, number: 10, state: 'closed', comments: 1 };
+  const before = f.paths.length;
+  await f.timers.shift().fn();
+  assert.ok(f.paths.length - before <= 7);
+  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:0');
+  assert.equal(f.saved().githubStatusWatches[0].problem, 'target_changed');
+  assert.equal((await f.tool('add', 'issue', 10)).ok, false);
+  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
+});
+
+test('the Cindy Node bootstrap starts the PR follow worker when loading it via require', () => {
+  const entry = fileURLToPath(new URL('../cindy-github/node/follow.cjs', import.meta.url));
+  const request = { id: 1, method: 'unsupported', jsonrpc: '2.0' };
+  const result = spawnSync(process.execPath, ['-e', 'globalThis.__CINDY_NODE__ = {}; require(process.argv[1]);', entry], {
+    input: JSON.stringify(request) + '\n',
+    encoding: 'utf8',
+    timeout: 5000,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    id: 1, jsonrpc: '2.0', error: { code: -32000, message: 'Unsupported method' },
+  });
+});
+
+test('saved status watches recover after the startup KV read fails', async () => {
+  const first = statusWatchFixture();
+  assert.equal((await first.tool('add', 'issue', 2)).ok, true);
+  const restored = statusWatchFixture(first.saved(), { failBoot: true });
+  await flushAsync();
+  assert.equal(restored.timers[0].delay, 900_000);
+  await restored.timers.shift().fn();
+  assert.deepEqual(restored.paths, ['/user', '/repos/example/widget/issues/2']);
+  assert.equal(restored.timers[0].delay, 300_000);
+});
+
+test('a refused status notification stays pending across restart until acknowledged', async () => {
+  const first = statusWatchFixture({}, { send: message => ({ ok: message.type !== 'notify' }) });
+  assert.equal((await first.tool('add', 'issue', 2)).ok, true);
+  first.response['/issues/2'].state = 'closed';
+  await first.timers.shift().fn();
+  assert.equal(first.saved().githubStatusWatches[0].snapshot, 'closed:ready:1');
+  assert.equal(first.saved().githubStatusWatches[0].noticePending, true);
+
+  const restored = statusWatchFixture(first.saved());
+  restored.response['/issues/2'].state = 'closed';
+  await flushAsync();
+  await restored.timers.shift().fn();
+  assert.equal(restored.sent.filter(message => message.type === 'notify').length, 1);
+  assert.equal(restored.saved().githubStatusWatches[0].noticePending, undefined);
+  await restored.timers.shift().fn();
+  assert.equal(restored.sent.filter(message => message.type === 'notify').length, 1);
+});
+
+test('status_watch descriptions define the status format and every problem value in four locales', () => {
+  const states = ['open', 'closed', 'merged', 'draft', 'ready', 'queued', 'in_progress', 'completed', 'none',
+    'success', 'failure', 'cancelled', 'neutral', 'skipped', 'timed_out', 'action_required', 'stale',
+    'startup_failure', 'unknown', 'account_changed', 'target_changed', 'unavailable', 'auth_required',
+    'forbidden', 'gone'];
+  const manifestDescription = manifest.tools.find((tool) => tool.name === 'status_watch').description;
+  assert.ok(manifestDescription.includes('account_changed'), 'ghost.json status_watch description omits account_changed');
+  for (const locale of hostLocales) {
+    const resource = JSON.parse(
+      readFileSync(new URL(`../cindy-github/locales/${locale}.json`, import.meta.url), 'utf8'),
+    );
+    const text = resource.tools.status_watch.description;
+    for (const token of states) {
+      assert.ok(text.includes(token), `${locale} status_watch description omits ${token}`);
+    }
+    assert.match(text, /comment|댓글|コメント|评论/, `${locale} status_watch description omits the comment segment`);
+    assert.match(text, /attempt|시도|回数|第几次/, `${locale} status_watch description omits the attempt segment`);
+    assert.match(text, /remove/, `${locale} status_watch description omits the recovery action`);
+  }
 });

@@ -1,0 +1,5 @@
+{
+  "name": "Antigravity",
+  "description": "把本机安装的 Google Antigravity 命令行（agy）作为执行引擎，在 Cindy 里运行任务。",
+  "whenToUse": "需要通过本机 agy 使用 Antigravity 执行 Cindy 任务时使用。"
+}

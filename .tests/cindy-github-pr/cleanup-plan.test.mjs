@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildCleanupCommands, githubRepoNamesOfRemotes, githubRepoOfUrl, isLongLivedBranch, isPrWorktree, planLocalCleanup, remoteNameForRepo } from '../../cindy-github/skills/pr/scripts/lib/cleanup-plan.mjs';
+import { buildCleanupCommands, buildPrimarySyncCommands, githubRepoNamesOfRemotes, githubRepoOfUrl, isLongLivedBranch, isPrWorktree, planLocalCleanup, remoteNameForRepo } from '../../cindy-github/skills/pr/scripts/lib/cleanup-plan.mjs';
 
 const PRIMARY = '/repo';
 const SIBLING = '/repo-pr-branch';
@@ -69,6 +69,26 @@ test('Cindy-managed worktree is left to its task', () => {
   assert.equal(result.recommendation, 'leave_to_cindy_task');
   assert.equal(result.canCleanupLocal, false);
   assert.ok(result.blockers.includes('cindy_managed_worktree'));
+});
+
+// A Cindy-managed worktree blocks the cleanup, which used to drop the fast-forward with it: the primary
+// checkout then stayed on the pre-merge code and the next change started from it.
+test('a merged PR still fast-forwards a clean primary checkout on the base branch when nothing may be removed', () => {
+  const managed = { cindyManagedWorktree: true, primaryOnBase: true };
+  assert.equal(plan(managed).canFastForwardPrimary, true);
+  assert.deepEqual(
+    commandKinds(buildPrimarySyncCommands({ primaryWorktree: PRIMARY, baseRef: 'main', baseRemote: 'upstream' })),
+    ['pull --ff-only upstream main'],
+  );
+  // Never switch or pull under the user: another branch, local changes, or a PR that did not merge.
+  for (const unsafe of [
+    { primaryOnBase: false },
+    { primaryStatus: { ok: true, dirty: true } },
+    { primaryStatus: { ok: false, dirty: true } },
+    { merged: false },
+  ]) {
+    assert.equal(plan({ ...managed, ...unsafe }).canFastForwardPrimary, false, JSON.stringify(unsafe));
+  }
 });
 
 test('closed unmerged still requires a decision', () => {

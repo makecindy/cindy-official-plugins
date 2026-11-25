@@ -314,6 +314,19 @@ test('reply_all excludes this mailbox, duplicates and Bcc, and keeps Outlook\'s 
   assert.deepEqual(f.box.messages.get(reply.result.draft_id).toRecipients.map(x => x.emailAddress.address), ['sender@example.test']);
 });
 
+test('a Graph reply with an HTML boundary but no text divider keeps the quote separate when editing', async t => {
+  const f = fixture(t);
+  const draft = f.box.add({ id: 'draftAAMk2=', internetMessageHeaders: [{ name: 'In-Reply-To', value: '<parent@example.test>' }], body: { contentType: 'html',
+    content: '<html><body><p>Answer</p><div id="divRplyFwdMsg">From: Sender</div><p>Older text</p></body></html>' } });
+  const r = await f.tool({ action: 'get_draft', draft_id: draft.id });
+  assert.equal(r.ok, true, r.message);
+  assert.equal(r.result.readBack.headers['in-reply-to'], '<parent@example.test>');
+  assert.equal(r.result.readBack.editor.body, 'Answer');
+  assert.match(r.result.readBack.editor.quote, /From: Sender[\s\S]*Older text/);
+  assert.equal(r.result.readBack.editor.bodyHtml, '<p>Answer</p>');
+  assert.ok(r.result.readBack.editor.quoteHtml.includes('Older text'));
+});
+
 test('HTML card edits replace only the body content of the stored document', async t => {
   const f = fixture(t);
   const original = f.box.add({ id: 'origAAMk1=', isDraft: false, subject: 'Plan', from: person('sender@example.test') });

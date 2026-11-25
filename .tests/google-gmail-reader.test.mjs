@@ -10,7 +10,7 @@ function fixture(accounts = [{ id: 'a', email: 'a@example.com', status: 'connect
   const msg = { id: '12345678', payload: { mimeType: 'multipart/mixed', headers: [{ name: 'Subject', value: '中文主题' }, { name: 'From', value: 'sender@example.com' }], parts: [part('text/plain', '中文'), part('text/html', '<p>中文</p><img src="cid:photo">'),
     { partId: '2', mimeType: 'message/rfc822', filename: 'forward.eml', body: {}, parts: [part('text/plain', 'Do not append me')] },
     { partId: '3', mimeType: 'image/png', filename: 'image.png', headers: [{ name: 'Content-ID', value: '<photo>' }], body: { data: 'AQID', size: 3 } } ] } };
-  const ctx = createContext({ URL, TextDecoder, Uint8Array, atob, cindy: { onHostMessage(fn) { handler = fn; },
+  const ctx = createContext({ cindyMail: { version: 1, register: adapter => adapter }, URL, TextDecoder, Uint8Array, atob, cindy: { onHostMessage(fn) { handler = fn; },
     fetch: async r => { calls.push(r); return { ok: true, status: 200, body: JSON.stringify(msg) }; },
     send: async r => { assert.equal(r.kind, 'deposit_media'); return { ok: true, url: 'cindy-media://blobs/' + 'a'.repeat(64) + '.png' }; },
   }});
@@ -477,4 +477,29 @@ test('malformed optional conversation and image JSON only omit optional presenta
   assert.equal(mail.conversationUnavailable, true);
   assert.equal(mail.attachments.at(-1).previewUrl, undefined);
   assert.equal(JSON.stringify(mail).includes('PRIVATE_MAIL_FRAGMENT'), false);
+});
+
+test('restore reads the exact delivered parent from the selected Gmail thread without marking it read', async () => {
+  const f = fixture(), parent = '<parent@example.test>', threadId = 'a1234567';
+  const src = { ...f.msg, id: 'b1234567', threadId, labelIds: ['UNREAD'], payload: { ...f.msg.payload,
+    headers: [...f.msg.payload.headers, { name: 'Message-ID', value: parent }] } };
+  const thread = { id: threadId, messages: [src, { id: 'c1234567', payload: { headers: [] } }] };
+  const requests = [];
+  f.ctx.cindy.fetch = async request => {
+    requests.push(request);
+    assert.equal(request.authAccount, 'a');
+    assert.equal(request.method, undefined);
+    return { ok: true, status: 200, body: JSON.stringify(request.url.includes('/threads/') ? thread : src) };
+  };
+  const restore = () => f.ctx.gmailCompose.readReplyQuote({ record: { account: 'a' },
+    readBack: { threadId, headers: { 'in-reply-to': parent } } });
+  const quote = await restore();
+  assert.match(quote.quote, /> 中文/);
+  assert.match(quote.quoteHtml, /gmail_quote/);
+  assert.doesNotMatch(quote.quote, /Do not append me/);
+  assert.equal(requests.length, 2);
+  assert.ok(requests[1].url.endsWith('/messages/b1234567?format=full'));
+  thread.messages.push({ ...src, id: 'd1234567' });
+  await assert.rejects(restore);
+  assert.equal(requests.length, 3);
 });

@@ -15,6 +15,8 @@ const MAIL_163 = Object.freeze({
 
 const MAX_BODY_CHARS = 20000;
 const MAX_SOURCE_BYTES = 12 * 1024 * 1024;
+const SEARCH_SCAN_LIMIT = 200;
+const SEARCH_SUMMARY_QUERY = Object.freeze({ uid: true, envelope: true, flags: true, internalDate: true, size: true });
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SECRET_KEYS = Object.freeze({
   a: 'mail_163_authorization_code',
@@ -255,20 +257,106 @@ async function listFolders(credentials, deps) {
   });
 }
 
+function containsKeyword(value, keyword) {
+  return typeof value === 'string' && value.toLowerCase().includes(keyword.toLowerCase());
+}
+
+async function searchRecent(client, criteria, folder, maxResults, deps) {
+  const { from, to, subject, seen, since, before, or } = criteria;
+  const dates = {};
+  if (since) dates.since = since;
+  if (before) dates.before = before;
+  const candidates = await client.search(since || before ? dates : { all: true }, { uid: true });
+  if (!Array.isArray(candidates)) throw new Error('SEARCH_FAILED');
+  const selected = [...candidates].sort((left, right) => right - left).slice(0, SEARCH_SCAN_LIMIT);
+  const fetched = selected.length ? await client.fetchAll(selected, SEARCH_SUMMARY_QUERY, { uid: true }) : [];
+  const byUid = new Map(fetched.map((message) => [message.uid, message]));
+  const keyword = or?.[0].subject;
+  const matches = [];
+  const checkBody = new Map();
+  let scanned = 0;
+  let sourceBytes = 0;
+
+  for (const uid of selected) {
+    const message = byUid.get(uid);
+    if (!message?.envelope || (seen !== undefined && !message.flags)) continue;
+    const sender = addressText(message.envelope.from);
+    const recipient = addressText(message.envelope.to);
+    const title = message.envelope.subject;
+    if (
+      (from && !containsKeyword(sender, from))
+      || (to && !containsKeyword(recipient, to))
+      || (subject && !containsKeyword(title, subject))
+      || (seen !== undefined && flagsArray(message.flags).includes('\\Seen') !== seen)
+    ) {
+      scanned += 1;
+      continue;
+    }
+
+    if (!keyword || [title, sender, recipient].some((value) => containsKeyword(value, keyword))) {
+      matches.push(message);
+      scanned += 1;
+      continue;
+    }
+
+    if (!Number.isSafeInteger(message.size) || message.size <= 0 || sourceBytes + message.size > MAX_SOURCE_BYTES) {
+      continue;
+    }
+    checkBody.set(uid, message);
+    sourceBytes += message.size;
+  }
+
+  if (checkBody.size) {
+    const bodyKeyword = keyword.replace(/\s+/g, ' ');
+    const maxLength = Math.max(...Array.from(checkBody.values(), (message) => message.size));
+    const sources = client.fetch([...checkBody.keys()], { source: { maxLength } }, { uid: true });
+    for await (const { uid, source } of sources) {
+      const message = checkBody.get(uid);
+      if (!message || !Buffer.isBuffer(source) || source.length !== message.size) continue;
+      checkBody.delete(uid);
+      try {
+        const parsed = await deps.parseMessage(source);
+        if (containsKeyword(parsed.text?.replace(/\s+/g, ' '), bodyKeyword)) {
+          matches.push(message);
+        } else if (typeof parsed.html === 'string' && parsed.html) {
+          const htmlSource = Buffer.from(
+            'Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n'
+            + Buffer.from(parsed.html).toString('base64'),
+          );
+          const converted = await deps.parseMessage(htmlSource);
+          if (containsKeyword(converted.text?.replace(/\s+/g, ' '), bodyKeyword)) matches.push(message);
+        }
+        scanned += 1;
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  return {
+    folder,
+    total: matches.length,
+    messages: matches.sort((left, right) => right.uid - left.uid).slice(0, maxResults)
+      .map((message) => summaryFromMessage(message, folder)),
+    search_scope: { scanned, candidates: candidates.length, complete: scanned === candidates.length },
+  };
+}
+
 async function search(credentials, action, deps) {
   const folder = action.folder || 'INBOX';
   const maxResults = Number.isInteger(action.max_results)
     ? Math.min(20, Math.max(1, action.max_results))
     : 10;
   return withImap(credentials, deps, (client) => withMailbox(client, folder, async () => {
-    const uids = await client.search(buildSearchCriteria(action), { uid: true });
+    const criteria = buildSearchCriteria(action);
+    const uids = await client.search(criteria, { uid: true });
+    if (!Array.isArray(uids)) throw new Error('SEARCH_FAILED');
+    if (uids.length === 0 && (criteria.from || criteria.to || criteria.subject || criteria.or)) {
+      return searchRecent(client, criteria, folder, maxResults, deps);
+    }
     const selected = uids.slice(-maxResults).reverse();
     if (selected.length === 0) return { folder, total: 0, messages: [] };
-    const messages = await client.fetchAll(
-      selected,
-      { uid: true, envelope: true, flags: true, internalDate: true, size: true },
-      { uid: true },
-    );
+    const messages = await client.fetchAll(selected, SEARCH_SUMMARY_QUERY, { uid: true });
     const byUid = new Map(messages.map((message) => [message.uid, message]));
     return {
       folder,
@@ -568,6 +656,7 @@ function humanizeError(error) {
     return '163 邮箱暂时限制了频繁访问，请稍后再试';
   }
   if (message === 'MESSAGE_NOT_FOUND') return '没有在指定文件夹找到这封邮件，请重新搜索';
+  if (message === 'SEARCH_FAILED') return '163 邮箱服务器未能完成搜索，请稍后重试';
   if (message === 'MESSAGE_TOO_LARGE') return '邮件内容过大，当前版本暂时无法处理';
   if (message === 'DRAFT_FOLDER_NOT_FOUND') {
     return '没有找到 163 邮箱草稿箱，请先调用 list_folders 确认服务器文件夹';

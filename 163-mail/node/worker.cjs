@@ -66351,7 +66351,8 @@ var require_mail_compose = __commonJS({
             to: addressList(headerAddresses(parsed, "to")),
             cc: addressList(headerAddresses(parsed, "cc")),
             bcc: addressList(headerAddresses(parsed, "bcc")),
-            subject: parsed.subject || ""
+            subject: parsed.subject || "",
+            ...DRAFT_ID_RE.test(parsed.inReplyTo || "") ? { "in-reply-to": parsed.inReplyTo } : {}
           },
           editor: draftEditor(bodyText, bodyHtml, supported),
           attachments: snapshotAttachments(parsed)
@@ -67031,6 +67032,8 @@ var require_worker = __commonJS({
     });
     var MAX_BODY_CHARS = 2e4;
     var MAX_SOURCE_BYTES = 12 * 1024 * 1024;
+    var SEARCH_SCAN_LIMIT = 200;
+    var SEARCH_SUMMARY_QUERY = Object.freeze({ uid: true, envelope: true, flags: true, internalDate: true, size: true });
     var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     var SECRET_KEYS = Object.freeze({
       a: "mail_163_authorization_code",
@@ -67238,18 +67241,90 @@ var require_worker = __commonJS({
         };
       });
     }
+    function containsKeyword(value, keyword) {
+      return typeof value === "string" && value.toLowerCase().includes(keyword.toLowerCase());
+    }
+    async function searchRecent(client, criteria, folder, maxResults, deps) {
+      const { from, to, subject, seen, since, before, or } = criteria;
+      const dates = {};
+      if (since) dates.since = since;
+      if (before) dates.before = before;
+      const candidates = await client.search(since || before ? dates : { all: true }, { uid: true });
+      if (!Array.isArray(candidates)) throw new Error("SEARCH_FAILED");
+      const selected = [...candidates].sort((left, right) => right - left).slice(0, SEARCH_SCAN_LIMIT);
+      const fetched = selected.length ? await client.fetchAll(selected, SEARCH_SUMMARY_QUERY, { uid: true }) : [];
+      const byUid = new Map(fetched.map((message) => [message.uid, message]));
+      const keyword = or?.[0].subject;
+      const matches = [];
+      const checkBody = /* @__PURE__ */ new Map();
+      let scanned = 0;
+      let sourceBytes = 0;
+      for (const uid of selected) {
+        const message = byUid.get(uid);
+        if (!message?.envelope || seen !== void 0 && !message.flags) continue;
+        const sender = addressText(message.envelope.from);
+        const recipient = addressText(message.envelope.to);
+        const title = message.envelope.subject;
+        if (from && !containsKeyword(sender, from) || to && !containsKeyword(recipient, to) || subject && !containsKeyword(title, subject) || seen !== void 0 && flagsArray(message.flags).includes("\\Seen") !== seen) {
+          scanned += 1;
+          continue;
+        }
+        if (!keyword || [title, sender, recipient].some((value) => containsKeyword(value, keyword))) {
+          matches.push(message);
+          scanned += 1;
+          continue;
+        }
+        if (!Number.isSafeInteger(message.size) || message.size <= 0 || sourceBytes + message.size > MAX_SOURCE_BYTES) {
+          continue;
+        }
+        checkBody.set(uid, message);
+        sourceBytes += message.size;
+      }
+      if (checkBody.size) {
+        const bodyKeyword = keyword.replace(/\s+/g, " ");
+        const maxLength = Math.max(...Array.from(checkBody.values(), (message) => message.size));
+        const sources = client.fetch([...checkBody.keys()], { source: { maxLength } }, { uid: true });
+        for await (const { uid, source } of sources) {
+          const message = checkBody.get(uid);
+          if (!message || !Buffer.isBuffer(source) || source.length !== message.size) continue;
+          checkBody.delete(uid);
+          try {
+            const parsed = await deps.parseMessage(source);
+            if (containsKeyword(parsed.text?.replace(/\s+/g, " "), bodyKeyword)) {
+              matches.push(message);
+            } else if (typeof parsed.html === "string" && parsed.html) {
+              const htmlSource = Buffer.from(
+                "Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" + Buffer.from(parsed.html).toString("base64")
+              );
+              const converted = await deps.parseMessage(htmlSource);
+              if (containsKeyword(converted.text?.replace(/\s+/g, " "), bodyKeyword)) matches.push(message);
+            }
+            scanned += 1;
+          } catch {
+            continue;
+          }
+        }
+      }
+      return {
+        folder,
+        total: matches.length,
+        messages: matches.sort((left, right) => right.uid - left.uid).slice(0, maxResults).map((message) => summaryFromMessage(message, folder)),
+        search_scope: { scanned, candidates: candidates.length, complete: scanned === candidates.length }
+      };
+    }
     async function search(credentials, action, deps) {
       const folder = action.folder || "INBOX";
       const maxResults = Number.isInteger(action.max_results) ? Math.min(20, Math.max(1, action.max_results)) : 10;
       return withImap(credentials, deps, (client) => withMailbox(client, folder, async () => {
-        const uids = await client.search(buildSearchCriteria(action), { uid: true });
+        const criteria = buildSearchCriteria(action);
+        const uids = await client.search(criteria, { uid: true });
+        if (!Array.isArray(uids)) throw new Error("SEARCH_FAILED");
+        if (uids.length === 0 && (criteria.from || criteria.to || criteria.subject || criteria.or)) {
+          return searchRecent(client, criteria, folder, maxResults, deps);
+        }
         const selected = uids.slice(-maxResults).reverse();
         if (selected.length === 0) return { folder, total: 0, messages: [] };
-        const messages = await client.fetchAll(
-          selected,
-          { uid: true, envelope: true, flags: true, internalDate: true, size: true },
-          { uid: true }
-        );
+        const messages = await client.fetchAll(selected, SEARCH_SUMMARY_QUERY, { uid: true });
         const byUid = new Map(messages.map((message) => [message.uid, message]));
         return {
           folder,
@@ -67505,6 +67580,7 @@ var require_worker = __commonJS({
         return "163 \u90AE\u7BB1\u6682\u65F6\u9650\u5236\u4E86\u9891\u7E41\u8BBF\u95EE\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5";
       }
       if (message === "MESSAGE_NOT_FOUND") return "\u6CA1\u6709\u5728\u6307\u5B9A\u6587\u4EF6\u5939\u627E\u5230\u8FD9\u5C01\u90AE\u4EF6\uFF0C\u8BF7\u91CD\u65B0\u641C\u7D22";
+      if (message === "SEARCH_FAILED") return "163 \u90AE\u7BB1\u670D\u52A1\u5668\u672A\u80FD\u5B8C\u6210\u641C\u7D22\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5";
       if (message === "MESSAGE_TOO_LARGE") return "\u90AE\u4EF6\u5185\u5BB9\u8FC7\u5927\uFF0C\u5F53\u524D\u7248\u672C\u6682\u65F6\u65E0\u6CD5\u5904\u7406";
       if (message === "DRAFT_FOLDER_NOT_FOUND") {
         return "\u6CA1\u6709\u627E\u5230 163 \u90AE\u7BB1\u8349\u7A3F\u7BB1\uFF0C\u8BF7\u5148\u8C03\u7528 list_folders \u786E\u8BA4\u670D\u52A1\u5668\u6587\u4EF6\u5939";

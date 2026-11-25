@@ -1,0 +1,41 @@
+# Guest-workspace overlay for Cindy (`dsh --profile acp --patch guest-workspace.patch.yml`).
+#
+# Cindy starts the engine with `--cindy-remote-workspace --cindy-guest-workspace` when an invited
+# friend (another Cindy account) runs a task on this shared engine. In addition to every local file,
+# shell, job, working-directory, workflow and plugin tool disabled in remote-workspace.patch.yml,
+# this overlay switches off the sharer's local instructions, skills, slash commands and local HTTP
+# web fetch (Cindy runs WebFetch on the guest's own computer over MCP instead).
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-jobs
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+- id: tool-working-directory
+  disabled: true
+- id: tool-workflow
+  disabled: true
+- id: tool-executor-ptc
+  disabled: true
+- id: tool-plugin-manager
+  disabled: true
+- id: plugin-manager
+  disabled: true
+- id: agent-instructions
+  disabled: true
+- id: skill
+  disabled: true
+- id: skill-filesystem
+  disabled: true
+- id: tool-skill
+  disabled: true
+- id: commands
+  disabled: true
+- id: web-fetch-http
+  disabled: true
+- id: tool-web
+  disabled: true

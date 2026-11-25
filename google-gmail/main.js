@@ -563,6 +563,46 @@ var gmailCompose = typeof cindyMail !== 'undefined' && cindyMail.version === 1 ?
     var result = response && response.ok && response.result;
     return result?.ok ? { ...result, data: { deleted: true, draftId: record.draftId } } : result;
   },
+  // Resolve the actual RFC parent, even when a newer message has since arrived.
+  async readReplyQuote({ record, readBack }) {
+    const parent = readBack.headers['in-reply-to'];
+    const threadId = readBack.threadId;
+    if (!parent || !/^[a-f0-9]{8,32}$/i.test(threadId || '')) throw new Error(t('readMessageFailed'));
+    const get = async path => {
+      const response = await cindy.fetch({ url: 'https://gmail.googleapis.com/gmail/v1/users/me/' + path,
+        authAccount: record.account, timeoutMs: 20000 });
+      assertMailReadResponse(response, t('readMessageFailed'));
+      return parseMailReadJson(response.body);
+    };
+    const thread = await get('threads/' + threadId + '?format=metadata&metadataHeaders=Message-ID');
+    const matches = (thread.messages || []).filter(m => !m.labelIds?.includes('DRAFT') &&
+      mailHeader(m.payload || {}, 'message-id').trim() === parent.trim());
+    if (thread.id !== threadId || matches.length !== 1 || !/^[a-f0-9]{8,32}$/i.test(matches[0].id)) throw new Error(t('readThreadFailed'));
+    const source = await get('messages/' + matches[0].id + '?format=full');
+    if (source.id !== matches[0].id || source.threadId !== threadId || source.labelIds?.includes('DRAFT') ||
+        mailHeader(source.payload || {}, 'message-id').trim() !== parent.trim()) throw new Error(t('readMessageFailed'));
+    const { bodies, attachments } = await readMailParts(source, record.account);
+    const html = bodies['text/html'].join('\n');
+    let plain = bodies['text/plain'].join('\n').replace(/\r\n?/g, '\n');
+    if (!plain && html) {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      doc.querySelectorAll('style,script,title').forEach(n => n.remove());
+      doc.querySelectorAll('br').forEach(n => n.replaceWith('\n'));
+      doc.querySelectorAll('p,div,tr,li').forEach(n => n.append('\n'));
+      plain = doc.body.textContent.trim();
+    }
+    const escape = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // A missing quote has no guaranteed CID parts in the draft. Restore its
+    // text alternative when needed instead of inventing attachment references.
+    const inner = html && !attachments.some(a => a.contentId) ? html : escape(plain).replace(/\n/g, '<br>');
+    if (!inner.trim()) return null;
+    const from = mailHeader(source.payload, 'from').replace(/[\r\n]+/g, ' ').trim();
+    const date = mailHeader(source.payload, 'date').replace(/[\r\n]+/g, ' ').trim();
+    const attribution = from ? (date ? 'On ' + date + ', ' : '') + from + ' wrote:' : 'Original message:';
+    return { quote: '\n\n' + attribution + '\n' + plain.split('\n').map(line => '> ' + line).join('\n'),
+      quoteHtml: '<br><br><div class="gmail_quote"><div class="gmail_attr">' + escape(attribution) +
+        '</div><blockquote class="gmail_quote">' + inner + '</blockquote></div>' };
+  },
   async readDraft({ record, sourceCallId }) {
     await ensureLocale(draftOperation(sourceCallId));
     var response = await cindy.node.request({ method: 'run', authAccount: record.account,
@@ -667,6 +707,50 @@ async function lookupMailParticipantPhotos(accountId, headers) {
   return photos.filter(Boolean);
 }
 
+function mailHeader(part, name) { return (part.headers || []).filter(function (h) { return h.name.toLowerCase() === name; }).map(function (h) { return h.value; }).join(', '); }
+async function readMailParts(message, accountId) {
+  function decode(part) {
+    var match = /(?:^|;)\s*charset\s*=\s*(?:"([^"]*)"|'([^']*)'|([^;\s]*))/i.exec(mailHeader(part, 'content-type'));
+    var decoder;
+    try { decoder = new TextDecoder(match && (match[1] || match[2] || match[3]) || 'utf-8'); }
+    catch (_) { decoder = new TextDecoder('utf-8'); }
+    try { return decoder.decode(Uint8Array.from(decodeMailReadBytes(part.body.data), function (c) { return c.charCodeAt(0); })); }
+    catch (_) { throw new Error(t('readParseBody')); }
+  }
+  var bodies = { 'text/plain': [], 'text/html': [] }, attachments = [];
+  var bodyBytes = 0;
+  async function walk(part) {
+    var body = part.body || {}, cid = mailHeader(part, 'content-id').replace(/^<|>$/g, '');
+    // Match mailMime.isAttachmentPart in the Node adapter: inline/CID body
+    // containers and text alternatives are still body, not attached files.
+    var disposition = mailHeader(part, 'content-disposition');
+    var bodyPart = /^multipart\//i.test(part.mimeType) || /^text\/(plain|html)$/i.test(part.mimeType);
+    if (part.filename || /^attachment\b/i.test(disposition) || !bodyPart) {
+      attachments.push({ key: part.partId || 'root', filename: part.filename || (/^message\//i.test(part.mimeType) ? 'message.eml' : 'attachment'), mimeType: part.mimeType,
+        bytes: body.size, contentId: cid, attachmentId: body.attachmentId, inlineData: body.data });
+      return; // Attached .eml messages must never become the outer email body.
+    }
+    if (bodies[part.mimeType]) {
+      if (body.attachmentId && !body.data) {
+        if (!Number.isSafeInteger(body.size) || body.size < 0 || bodyBytes + body.size > 25 * 1024 * 1024) throw new Error(t('readBodyIncomplete'));
+        var loaded = await cindy.fetch({ url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/' + encodeURIComponent(message.id) + '/attachments/' + encodeURIComponent(body.attachmentId),
+          authAccount: accountId, timeoutMs: 20000 });
+        assertMailReadResponse(loaded, t('readBodyFailed'));
+        var content = parseMailReadJson(loaded.body);
+        if (typeof content.data !== 'string' || !/^[A-Za-z0-9_-]*={0,2}$/.test(content.data) || content.size !== body.size
+          || decodeMailReadBytes(content.data).length !== body.size) throw new Error(t('readBodySizeMismatch'));
+        bodyBytes += body.size;
+        body.data = content.data;
+      }
+      if (body.size > 0 && !body.data) throw new Error(t('readBodyIncomplete'));
+      if (typeof body.data === 'string') bodies[part.mimeType].push(decode(part));
+    }
+    for (var child of part.parts || []) await walk(child);
+  }
+  await walk(message.payload);
+  return { bodies, attachments };
+}
+
 async function readMailMessageLink(args, beginOperation, operation) {
   if (args.markRead !== undefined && typeof args.markRead !== 'boolean') throw new Error('Invalid markRead flag');
   var url = new URL(args.url);
@@ -704,7 +788,7 @@ async function readMailMessageLink(args, beginOperation, operation) {
   assertMailReadResponse(response, t('readMessageFailed'));
   var message = parseMailReadJson(response.body);
   if (!/^[a-f0-9]{8,32}$/i.test(message.id || '') || !message.payload) throw new Error('Incomplete Gmail message');
-  var photos = lookupMailParticipantPhotos(selected.accountId, ['from', 'to', 'cc', 'bcc'].map(function (name) { return header(message.payload, name); })).catch(function () { return []; });
+  var photos = lookupMailParticipantPhotos(selected.accountId, ['from', 'to', 'cc', 'bcc'].map(function (name) { return mailHeader(message.payload, name); })).catch(function () { return []; });
   var conversation, conversationUnavailable = false;
   // Read only metadata for the surrounding messages. Cindy requests a body
   // through the same reader when the user expands that message.
@@ -723,51 +807,12 @@ async function readMailMessageLink(args, beginOperation, operation) {
       conversation = { threadId: thread.id || message.threadId || id, messages: members.map(function (m) {
         return { messageId: m.id,
           url: 'https://mail.google.com/mail/?authuser=' + encodeURIComponent(selected.accountEmail) + '&permmsgid=' + encodeURIComponent(m.id) + '#all/' + m.id,
-          from: header(m.payload || {}, 'from'), date: header(m.payload || {}, 'date'),
-          subject: header(m.payload || {}, 'subject'), snippet: String(m.snippet || '').slice(0, 2048) };
+          from: mailHeader(m.payload || {}, 'from'), date: mailHeader(m.payload || {}, 'date'),
+          subject: mailHeader(m.payload || {}, 'subject'), snippet: String(m.snippet || '').slice(0, 2048) };
       }) };
     } catch (_) { conversationUnavailable = true; }
   }
-  function header(part, name) { return (part.headers || []).filter(function (h) { return h.name.toLowerCase() === name; }).map(function (h) { return h.value; }).join(', '); }
-  function decode(part) {
-    var match = /(?:^|;)\s*charset\s*=\s*(?:"([^"]*)"|'([^']*)'|([^;\s]*))/i.exec(header(part, 'content-type'));
-    var decoder;
-    try { decoder = new TextDecoder(match && (match[1] || match[2] || match[3]) || 'utf-8'); }
-    catch (_) { decoder = new TextDecoder('utf-8'); }
-    try { return decoder.decode(Uint8Array.from(decodeMailReadBytes(part.body.data), function (c) { return c.charCodeAt(0); })); }
-    catch (_) { throw new Error(t('readParseBody')); }
-  }
-  var bodies = { 'text/plain': [], 'text/html': [] }, attachments = [];
-  var bodyBytes = 0;
-  async function walk(part) {
-    var body = part.body || {}, cid = header(part, 'content-id').replace(/^<|>$/g, '');
-    // Match mailMime.isAttachmentPart in the Node adapter: inline/CID body
-    // containers and text alternatives are still body, not attached files.
-    var disposition = header(part, 'content-disposition');
-    var bodyPart = /^multipart\//i.test(part.mimeType) || /^text\/(plain|html)$/i.test(part.mimeType);
-    if (part.filename || /^attachment\b/i.test(disposition) || !bodyPart) {
-      attachments.push({ key: part.partId || 'root', filename: part.filename || (/^message\//i.test(part.mimeType) ? 'message.eml' : 'attachment'), mimeType: part.mimeType,
-        bytes: body.size, contentId: cid, attachmentId: body.attachmentId, inlineData: body.data });
-      return; // Attached .eml messages must never become the outer email body.
-    }
-    if (bodies[part.mimeType]) {
-      if (body.attachmentId && !body.data) {
-        if (!Number.isSafeInteger(body.size) || body.size < 0 || bodyBytes + body.size > 25 * 1024 * 1024) throw new Error(t('readBodyIncomplete'));
-        var loaded = await cindy.fetch({ url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/' + encodeURIComponent(message.id) + '/attachments/' + encodeURIComponent(body.attachmentId),
-          authAccount: selected.accountId, timeoutMs: 20000 });
-        assertMailReadResponse(loaded, t('readBodyFailed'));
-        var content = parseMailReadJson(loaded.body);
-        if (typeof content.data !== 'string' || !/^[A-Za-z0-9_-]*={0,2}$/.test(content.data) || content.size !== body.size
-          || decodeMailReadBytes(content.data).length !== body.size) throw new Error(t('readBodySizeMismatch'));
-        bodyBytes += body.size;
-        body.data = content.data;
-      }
-      if (body.size > 0 && !body.data) throw new Error(t('readBodyIncomplete'));
-      if (typeof body.data === 'string') bodies[part.mimeType].push(decode(part));
-    }
-    for (var child of part.parts || []) await walk(child);
-  }
-  await walk(message.payload);
+  var { bodies, attachments } = await readMailParts(message, selected.accountId);
   var preview = await mailImagePreviews({ messageId: message.id, attachments: attachments }, selected.accountId);
   var markReadResult;
   if (args.markRead === true && (message.labelIds || []).includes('UNREAD') && !(message.labelIds || []).includes('DRAFT')) {
@@ -786,10 +831,10 @@ async function readMailMessageLink(args, beginOperation, operation) {
     finishMarkRead?.(markReadResult.execution);
   }
   var participantPhotos = await photos;
-  return { accountId: selected.accountId, messageId: message.id, from: header(message.payload, 'from'),
+  return { accountId: selected.accountId, messageId: message.id, from: mailHeader(message.payload, 'from'),
     ...(participantPhotos.length ? { participantPhotos: participantPhotos } : {}),
-    to: header(message.payload, 'to'), cc: header(message.payload, 'cc'), bcc: header(message.payload, 'bcc'),
-    subject: header(message.payload, 'subject'), date: header(message.payload, 'date'),
+    to: mailHeader(message.payload, 'to'), cc: mailHeader(message.payload, 'cc'), bcc: mailHeader(message.payload, 'bcc'),
+    subject: mailHeader(message.payload, 'subject'), date: mailHeader(message.payload, 'date'),
     bodyText: bodies['text/plain'].join('\n'), bodyHtml: bodies['text/html'].join('\n'),
     ...(conversation ? { conversation: conversation } : {}),
     ...(conversationUnavailable ? { conversationUnavailable: true } : {}),

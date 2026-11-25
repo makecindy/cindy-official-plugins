@@ -321,6 +321,200 @@ test('Worker 构造安全的搜索条件并保留 IMAP folder + UID 身份', () 
   assert.equal(summary.unread, true);
 });
 
+function runSearch(action, deps) {
+  return worker.handleRequest({
+    method: 'mail/action-a',
+    params: { email: 'user@163.com', action: { action: 'search', ...action } },
+    cindy: { secrets: { mail_163_authorization_code: 'abcdefghijklmnop' } },
+  }, deps);
+}
+
+test('163 搜索在服务端返回空时匹配发件人、主题和解码后的正文', async () => {
+  const source = Buffer.from([
+    'Content-Type: text/plain; charset=utf-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    Buffer.from('独有的正文关键词').toString('base64'),
+  ].join('\r\n'));
+  const other = Buffer.from('Content-Type: text/plain\r\n\r\nOther content');
+  const messages = [
+    { uid: 1, envelope: { subject: 'BH016 测试', from: [{ address: 'sender@example.test' }] }, size: other.length },
+    { uid: 2, envelope: { subject: '普通主题' }, size: source.length },
+  ];
+  const queries = [];
+  const bodyFetches = [];
+  const { deps } = createWorkerHarness({
+    async search(query) {
+      queries.push(query);
+      return query.all ? [1, 2] : [];
+    },
+    async fetchAll(uids) {
+      assert.deepEqual(uids, [2, 1]);
+      return messages;
+    },
+    async *fetch(uids, query, options) {
+      bodyFetches.push(uids);
+      assert.deepEqual(options, { uid: true });
+      assert.equal(query.source.maxLength, source.length);
+      yield { uid: 2, source };
+      yield { uid: 1, source: other };
+    },
+  }, worker.createRuntimeDeps().parseMessage);
+
+  for (const [filter, uid] of [
+    [{ from: 'SENDER' }, 1],
+    [{ subject: 'bh016' }, 1],
+    [{ text: 'BH016', from: 'sender' }, 1],
+    [{ text: '正文关键词' }, 2],
+    [{ subject: 'missing' }, undefined],
+  ]) {
+    const result = await runSearch({ folder: '已发送', ...filter }, deps);
+    assert.equal(result.folder, '已发送');
+    assert.equal(result.total, uid ? 1 : 0);
+    assert.deepEqual(result.messages.map((message) => message.uid), uid ? [uid] : []);
+    assert.deepEqual(result.search_scope, { scanned: 2, candidates: 2, complete: true });
+  }
+  assert.equal(queries.filter((query) => query.all).length, 5);
+  assert.deepEqual(bodyFetches, [[2, 1]]);
+});
+
+test('163 搜索优先匹配纯文本，找不到时继续匹配 HTML 正文', async () => {
+  const source = Buffer.from('body');
+  const multipart = Buffer.from([
+    'Content-Type: multipart/alternative; boundary="test"',
+    '',
+    '--test',
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    '请查看 HTML',
+    '--test',
+    'Content-Type: text/html; charset=utf-8',
+    '',
+    `<div>关<b>键</b>&#35789;</div><div>${'x'.repeat(72)} project update</div>`,
+    '--test--',
+    '',
+  ].join('\r\n'));
+  const { deps } = createWorkerHarness({
+    async search(query) { return query.all ? [1, 2] : []; },
+    async fetchAll() {
+      return [
+        { uid: 1, envelope: { subject: '普通邮件' }, size: multipart.length },
+        { uid: 2, envelope: { subject: '普通邮件' }, size: source.length },
+      ];
+    },
+    async *fetch() {
+      yield { uid: 2, source };
+      yield { uid: 1, source: multipart };
+    },
+  });
+  const { parseMessage } = worker.createRuntimeDeps();
+  deps.parseMessage = async (input) => input === source ? {
+    text: '找到关键词',
+    get html() { assert.fail('纯文本已命中时无需检查 HTML'); },
+  } : parseMessage(input);
+  const result = await runSearch({ text: '关键词' }, deps);
+  assert.deepEqual(result.messages.map((message) => message.uid), [2, 1]);
+  assert.equal(result.search_scope.complete, true);
+  const phrase = await runSearch({ text: 'project update', subject: '普通邮件' }, {
+    ...deps,
+    parseMessage,
+  });
+  assert.deepEqual(phrase.messages.map((message) => message.uid), [1]);
+  assert.equal(phrase.search_scope.complete, true);
+});
+
+test('163 搜索保留服务端命中和无条件列表路径', async () => {
+  const queries = [];
+  const { deps } = createWorkerHarness({
+    async search(query) {
+      queries.push(query);
+      return [1, 2];
+    },
+    async fetchAll(uids) {
+      assert.deepEqual(uids, [2]);
+      return [{ uid: 2, envelope: { subject: '目标' } }];
+    },
+  });
+  for (const filter of [{ subject: '目标' }, {}]) {
+    const result = await runSearch({ ...filter, max_results: 1 }, deps);
+    assert.equal(result.total, 2);
+    assert.deepEqual(result.messages.map((message) => message.uid), [2]);
+    assert.equal('search_scope' in result, false);
+  }
+  assert.deepEqual(queries, [{ subject: '目标' }, { all: true }]);
+});
+
+test('163 搜索区分回退窗口内的命中数和全文件夹总数', async () => {
+  const uids = Array.from({ length: 201 }, (_, index) => 201 - index);
+  const { deps } = createWorkerHarness({
+    async search(query) { return query.all ? uids : []; },
+    async fetchAll(selected) {
+      assert.equal(selected.length, 200);
+      assert.deepEqual(selected.slice(0, 2), [201, 200]);
+      assert.equal(selected.includes(1), false);
+      return [...selected].reverse().map((uid) => ({
+        uid,
+        envelope: { subject: uid >= 200 ? '目标' : '其他' },
+      }));
+    },
+  });
+  const result = await runSearch({ subject: '目标', max_results: 1 }, deps);
+  assert.equal(result.total, 2);
+  assert.deepEqual(result.messages.map((message) => message.uid), [201]);
+  assert.deepEqual(result.search_scope, { scanned: 200, candidates: 201, complete: false });
+  const unmatched = await runSearch({ subject: '更早的邮件' }, deps);
+  assert.equal(unmatched.total, 0);
+  assert.deepEqual(unmatched.search_scope, { scanned: 200, candidates: 201, complete: false });
+});
+
+test('163 搜索回退时由服务器判定收信日期，并将未检查的正文标为不完整', async () => {
+  const since = new Date('2026-07-01');
+  const before = new Date('2026-07-02');
+  const { deps } = createWorkerHarness({
+    async search(query) {
+      if (query.or) return [];
+      assert.deepEqual(query, { since, before });
+      return [1, 2, 3];
+    },
+    async fetchAll() {
+      return [
+        { uid: 1, envelope: { subject: '关键词', to: [{ address: 'target@example.test' }] }, flags: new Set(),
+          internalDate: new Date('2026-07-01T01:00:00+08:00') },
+        { uid: 2, envelope: { to: [{ address: 'target@example.test' }] }, flags: new Set(), size: 20 * 1024 * 1024 },
+        { uid: 3, envelope: { subject: '关键词', to: [{ address: 'target@example.test' }] },
+          flags: new Set(['\\Seen']) },
+      ];
+    },
+  });
+  const result = await runSearch({
+    text: '关键词', to: 'target', unread: true, since: '2026-07-01', before: '2026-07-02',
+  }, deps);
+  assert.equal(result.total, 1);
+  assert.deepEqual(result.messages.map((message) => message.uid), [1]);
+  assert.deepEqual(result.search_scope, { scanned: 2, candidates: 3, complete: false });
+});
+
+test('163 搜索只统计已检查的正文，保留已确认的主题命中', async () => {
+  const { deps } = createWorkerHarness({
+    async search(query) { return query.all ? [1, 2, 3, 4] : []; },
+    async fetchAll() {
+      return [
+        { uid: 1, envelope: { subject: '关键词' } },
+        ...[2, 3, 4].map((uid) => ({ uid, envelope: { subject: '普通邮件' }, size: 8 })),
+      ];
+    },
+    async *fetch(uids) {
+      assert.deepEqual(uids, [4, 3, 2]);
+      yield { uid: 3, source: Buffer.from('partial') };
+      yield { uid: 2, source: Buffer.from('bad MIME') };
+    },
+  }, async () => { throw new Error('invalid MIME'); });
+  const result = await runSearch({ text: '关键词' }, deps);
+  assert.equal(result.total, 1);
+  assert.deepEqual(result.messages.map((message) => message.uid), [1]);
+  assert.deepEqual(result.search_scope, { scanned: 1, candidates: 4, complete: false });
+});
+
 test('Worker 每次只消费宿主注入凭证，并让 IMAP 操作 connect + logout', async () => {
   const calls = [];
   class FakeImap {

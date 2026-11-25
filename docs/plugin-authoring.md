@@ -474,25 +474,43 @@ plugin packages, Host behavior, or CI restrictions.
 
 ### Current declarations and future synchronization
 
-The fields below reference [Host commit 94475474ec](https://github.com/makecindy/cindy/blob/94475474ec60d13f94790d0548e74b7d75ce9de6/packages/plugin-protocol/src/manifest.ts)
-(`v0.1.135`) and its runtime references. They help locate capabilities;
+The fields below reference [Host commit 4584f410b7](https://github.com/makecindy/cindy/blob/4584f410b7fad38514842d90a45b6112c6e67d61/packages/plugin-protocol/src/manifest.ts)
+(`v0.1.141`) and its runtime references. They help locate capabilities;
 availability still depends on the target Host.
 
 | Capability | Declaration |
 | --- | --- |
 | Tool approval policy | `tools[].approval` (`auto / each-call`) |
 | Tasks and companions | `agent.tasks / hiddenTasks / targets / delegation / observe / companions` |
-| Views | `mainView.open / side / multiple`, `taskView`, `mobile` |
+| Host tool groups | `agent.hostTools`. See the [Host tool reference](https://github.com/makecindy/cindy/blob/4584f410b7fad38514842d90a45b6112c6e67d61/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-host-tools.md) for supported groups and approval. |
+| Views | `mainView.open / side / multiple`, `taskView`, `taskView.remote: true` (requires `liveScreen: true`), `mobile` |
 | Configuration and prerequisites | `showTaskPreferences`, `setup.requires[].anyOf` |
 | Introductions and mail | `readme`, `mail`, `mailReader` |
-| Models and Routine events | `models.types`, `routineEvents.events` |
+| Models and Routine events | `models.types`, `cindy.models` (`decisions`, `rerank`), `routineEvents.events` |
+| Event subscriptions | `subscribe.topics` values `turn`, `session`, `message`, `task-state`, `tool-execution`, `native-recovery` |
+| Tool lifecycle hooks | `subscribe.hooks` values `will-tool-call`, `did-tool-result` |
+| Host preferences and UI | `agent.modelPreferences`, `mainView.preferredIcon`, `mcpApps.ui.resources[].hostFullscreenButton`, `composer.header` contribution position |
+| IM integration | `imEntrance` requires `agent.tasks` and `agent.targets` when enabled |
+| Local updates | `githubRelease` selects a GitHub.com `owner/repository` for a local plugin with `settingsHtml` |
 | Static system prompt | `systemPrompt` (v3, `scope: "selected-task"`) |
 | Event hooks | `subscribe.hooks` values `will-start-turn`, `will-model-request`, `will-compose-context`, `will-search-memory` |
 | Credential checks | `network.secrets[].check` |
 | Desktop synchronization and device screens | `deviceSync`, `liveScreen` |
 
+The server reserves `cindy-org-*` for platform-managed common plugins. Official
+repository submissions cannot create plugins with that prefix. Existing plugin
+identities continue to use their current IDs. See the [server publishing contract](https://github.com/xindong/cindy-server/blob/7c26366d7d/docs/plugin-server.md).
+
 Page resources remain under `mcpApps.ui`: `resources` and `tools` must not both be
-empty; a page opened only through a named entry may use empty `tools: {}`.
+empty. A page opened only through a named entry may use empty `tools: {}`.
+Host v0.1.141 allows up to 48 top-level tools and 48 UI tool links, with up to 16
+page resources. The pinned official-repository validator still caps top-level tools at 16.
+
+The Host accepts exact HTTP(S)/WS(S) origins in `network.hosts`, including
+non-default ports. Domain patterns match HTTPS on the default port, and exact
+origins match scheme, host and port. The pinned repository validator still
+requires domain patterns. See the [Host network reference](https://github.com/makecindy/cindy/blob/4584f410b7fad38514842d90a45b6112c6e67d61/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-network.md)
+for runtime request and credential rules.
 
 Host resource languages include `zh-CN / zh-TW / en / ja / ko / es / fr / de / pt-PT / pt-BR`.
 Host capabilities and official repository admission are maintained separately.

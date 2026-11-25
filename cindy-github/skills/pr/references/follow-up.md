@@ -23,7 +23,9 @@ Before any GitHub call the check asks whether a look is due, from what its last 
 | Waiting: only a human approval or the merge is left (`READY`, `BLOCKED_HUMAN`) | about every 30 minutes |
 | Quiet: a draft, or nothing changed for 6 hours | about every hour |
 
-**Cindy fires it early.** When the title-bar PR status (refreshed about every 90 seconds while someone looks at Cindy) shows a change for this PR, Cindy runs the schedule at once and tells the check through the hook's stdin (`trigger: { kind: 'watch', … }`). Such a run skips both the pace and the probe and reads the PR in full. `--triggered` does the same by hand; `--no-pacing` looks every time.
+**Cindy fires it early.** When the title-bar PR status (refreshed about every 90 seconds while someone looks at Cindy) shows a change for this PR, Cindy runs the schedule at once and tells the check through the hook's stdin (`trigger: { kind: 'watch', … }`). Such a run skips both the pace and the probe and reads the PR in full. For ordinary checks, `--triggered` simulates a change and `--no-pacing` disables stage pacing.
+
+After repeated DNS or connection timeouts, scheduled checks wait 30 minutes. A status change from Cindy for this same PR can prompt an earlier full read. If it still cannot read the PR, further changes share one retry per five minutes and the scheduled retry keeps its original time. A complete read clears the warning. Rate limits and sign-in failures keep their own retry times.
 
 ## Batching: collect a push's feedback first
 

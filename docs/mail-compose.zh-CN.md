@@ -41,6 +41,7 @@ const mail = cindyMail.register({
   storageLock: 'my-plugin-settings', // 可选：与插件其他替换 KV 的写入共用锁名
   async selectAccount(accountId) { /* 返回 {ok:true, accountId, accountEmail} 或错误 */ },
   async readDraft({record, sourceCallId}) { /* 返回标准草稿快照 */ },
+  async readReplyQuote({record, readBack}) { /* 可选，读取这份回复的原邮件 */ },
   async writeDraft({record, account, fields, send, sourceCallId}) { /* 保存或发送 */ },
   async deleteDraft({record, account, sourceCallId}) { /* 可选：删除存储中的草稿 */ },
 });
@@ -68,6 +69,10 @@ const mail = cindyMail.register({
 ```
 
 `draftId` 是编写期间稳定的逻辑 ID。底层位置可变化：保存后返回新 `locator`，后续读取和发送会获得新位置。IMAP 可以携带 folder、UID、UIDVALIDITY；API 可以携带原生消息 ID。`fingerprint` 是不透明版本，不要求指定哈希算法。适配器写入前比较版本，保留回复头、附件和未修改的富文本。无法完整保留草稿时设 `editable:false`，不把 HTML 邮件的截断正文重新组装发送。文字字段限每项 16,000 字符，HTML 字段 64,000 字符，Host 邮件卡片总计 1 MiB；普通插件 HTML 仍为 32 KiB。正文保存在适配器草稿存储及 Host 常规卡片历史中，不写入公共 KV 记录。
+
+回复草稿用 `headers['in-reply-to']` 返回已保存的 RFC 回复头，`editor.quote`、`editor.quoteHtml` 返回实际保存的原文。能确认引用来源时，可在 `editor.quoteSender` 返回发件人。如果已认出引用但无法安全地与正文拆分，设 `editor.quoteInBody: true`，卡片会提示在正文中核对。发起写入时要求附原文，可在这次读回结果标记 `replyQuoteExpected: true`。普通读取和主动省略引用时不设该标记。
+
+适配器可实现 `readReplyQuote({record, readBack})`，从同一账号取回准确的父邮件，返回 `{quote, quoteHtml}`。原信没有可引用正文时返回 `null`，无法核实身份时抛错。新建时要求的引用缺失，或用户点击添加原文时，Cindy 才调用此方法；补入后沿用现有的保存和读回流程。重新打开草稿会保留用户主动省略引用的选择。
 
 ## 图文、HTML 与附件
 

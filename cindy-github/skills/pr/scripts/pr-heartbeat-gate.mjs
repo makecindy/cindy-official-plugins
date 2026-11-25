@@ -79,7 +79,7 @@ import { appendTrace, scrub } from './lib/follow-trace.mjs';
 import { createHash } from 'node:crypto';
 import { BACKOFF_STEPS_MIN, baseMovedWait, checkOutcome, handledFailure, inspectWait, makeWait, setsAside, waitDueAt, waitFacts, waitIsDue, waitNotice } from './lib/follow-wait.mjs';
 import { mergeQueueFingerprint } from './lib/merge-queue.mjs';
-import { SETTLE_MAX_MS, breaksSettle, expectedBots, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
+import { SETTLE_MAX_MS, TICK_MS, breaksSettle, expectedBots, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1365,23 +1365,57 @@ function emit(args, payload, out = (text) => process.stdout.write(text)) {
   );
 }
 
+// gh auth status prints recovery suggestions even when it cannot reach GitHub.
+function snapshotDiagnosis(stderr) {
+  const explicitRateLimit = /\[gh-rate-limit\]|HTTP 429\b/i.test(stderr);
+  const dns = /\blookup ([\w.-]+)(?::\d+)?[^\n]*(?:no such host|server misbehaving|i\/o timeout|context deadline exceeded)|\b(?:ENOTFOUND|EAI_AGAIN) ([\w.-]+)/i.exec(stderr);
+  if (dns && !explicitRateLimit) {
+    const host = dns[1] || dns[2];
+    return { kind: 'dns', host, summary: `DNS lookup failed for ${host}` };
+  }
+  if (explicitRateLimit || /rate limit/i.test(stderr)) {
+    return { kind: 'rate-limit', summary: 'GitHub API rate limit reached' };
+  }
+  if (/i\/o timeout|timed? ?out|context deadline exceeded/i.test(stderr)) {
+    return { kind: 'timeout', summary: 'Connection to GitHub timed out' };
+  }
+  if (/HTTP 401\b|bad credentials|token[^\n]* is invalid|not logged into any GitHub hosts|authentication required/i.test(stderr)) {
+    return { kind: 'auth', summary: 'GitHub sign-in required' };
+  }
+  const lines = stderr.trim().split(/\r?\n/).map(line => line.trim())
+    .filter(line => line && !/^-?\s*To (?:re-authenticate|forget about this account)/i.test(line));
+  const summary = lines.findLast(line => /\b(?:error|failed|fatal)\b/i.test(line)) ?? lines.at(-1);
+  return { kind: 'unknown', summary: summary?.slice(0, 200) || 'PR snapshot failed' };
+}
+
 /** Per-PR existing state owns backoff; no global lock or shared service. */
 export function snapshotFailurePlan(run, previous, now, threshold = DEFAULT_MAX_SNAPSHOT_FAILURES) {
-  const rateLimited = /rate limit|\[gh-rate-limit\]/i.test(run.stderr);
+  const diagnosis = snapshotDiagnosis(run.stderr);
+  const rateLimited = diagnosis.kind === 'rate-limit';
+  const networkFailure = diagnosis.kind === 'dns' || diagnosis.kind === 'timeout';
   const normalized = rateLimited ? 'rate-limit' : run.stderr.trim().split('\n').slice(-3).join(' ')
     .replace(/\b\d{4}-\d{2}-\d{2}T\S+/g, '<time>')
     .replace(/\b(?:request|trace)[-_ ]?id[=: ]+\S+/gi, 'request-id=<id>');
-  const fingerprint = createHash('sha256').update(`${run.code}:${normalized}`).digest('hex');
+  // A resolver can alternate between a timeout and a lookup error during one outage.
+  const fingerprint = createHash('sha256').update(networkFailure ? 'github-network' : `${run.code}:${normalized}`).digest('hex');
   const failures = (Number(previous?.consecutiveSnapshotFailures) || 0) + 1;
   const eligible = rateLimited || failures >= threshold;
   const reports = Object.fromEntries(Object.entries(previous?.snapshotFailureReports ?? {})
     .filter(([, at]) => Number.isFinite(at) && at > now - 24 * 60 * 60_000));
   const alreadyReported = Number(reports[fingerprint]) > now - 24 * 60 * 60_000;
   const retryAt = Number(/\[gh-rate-limit\] retryAt=(\d+)/.exec(run.stderr)?.[1]);
-  const until = eligible ? (rateLimited && retryAt > now ? retryAt + 1000 : now + 30 * 60_000) : 0;
+  const scheduledRetry = Number(previous?.snapshotFailureBackoffUntil) || 0;
+  let until = eligible ? (rateLimited && retryAt > now ? retryAt + 1000 : now + 30 * 60_000) : 0;
+  let watchRetryAt;
+  if (eligible && networkFailure) {
+    // Only a fresh PR event may use this opening. Repeated events share one read per tick.
+    const early = scheduledRetry > now;
+    if (early) until = scheduledRetry;
+    watchRetryAt = early ? now + TICK_MS : now;
+  }
   const block = eligible && !alreadyReported;
   if (block) reports[fingerprint] = now;
-  return { failures, fingerprint, rateLimited, block, until, reports: Object.fromEntries(Object.entries(reports).slice(-8)) };
+  return { diagnosis, failures, fingerprint, rateLimited, block, until, watchRetryAt, reports: Object.fromEntries(Object.entries(reports).slice(-8)) };
 }
 
 async function gateMain(argv, ctx) {
@@ -1508,18 +1542,24 @@ async function gateMain(argv, ctx) {
   }
 
   const previous = readState(file);
-  if (Number(previous?.snapshotFailureBackoffUntil) > now) {
-    const detail = `nextProbeAt=${new Date(previous.snapshotFailureBackoffUntil).toISOString()}`;
+  const backoffUntil = Number(previous?.snapshotFailureBackoffUntil) || 0;
+  const backingOff = backoffUntil > now;
+  const watchRetryDue = Number.isFinite(previous?.snapshotWatchRetryAt) && previous.snapshotWatchRetryAt <= now;
+  const hookTrigger = backingOff && !watchRetryDue ? null : await ctx.readTrigger();
+  if (backingOff && hookTrigger?.source !== 'pr-status') {
+    const detail = `nextProbeAt=${new Date(backoffUntil).toISOString()}`;
     const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'snapshot-failure-backoff', detail, checkedAt: now };
     writeState(file, { ...previous, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
     emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
     return EXIT_SKIP;
   }
   // 宿主看到这个 PR 的状态变了而提前触发的一轮:不看节奏,也不做探测(宿主已经知道有变化)。
-  const hookTrigger = await ctx.readTrigger();
   const triggered = args.triggered || (hookTrigger?.kind === 'watch');
+  // Neither an idle tick nor an unchanged summary proves that a failed snapshot recovered.
+  const recovering = previous?.consecutiveSnapshotFailures > 0;
   // 按阶段决定这一轮要不要看:不到时间就直接跳过,不调用 GitHub,也不改状态。
-  if (args.pacing) {
+  const scheduledRetryDue = backoffUntil > 0 && !backingOff;
+  if (args.pacing && !scheduledRetryDue) {
     const pace = pacingDue(previous, now, { triggered });
     if (!pace.due) {
       emit(args, {
@@ -1529,7 +1569,7 @@ async function gateMain(argv, ctx) {
         reason: 'not-due',
         detail: `pace=${pace.pace}; next look at ${isoAt(pace.nextAt)}`,
       }, out);
-      if (!args.json) out('CINDY_PRECHECK_OK\n');
+      if (!args.json && !recovering) out('CINDY_PRECHECK_OK\n');
       return EXIT_SKIP;
     }
   }
@@ -1537,7 +1577,7 @@ async function gateMain(argv, ctx) {
   // Counts alone cannot reveal a named check's rerun or a thread being resolved/replied to.
   // While explicitly waiting on those items, inspect them each tick rather than waiting 30 minutes.
   const targetedWait = previous?.wait && (previous.wait.checks.length > 0 || previous.wait.threads.length > 0);
-  const probe = triggered || targetedWait ? null : parseProbe(await ctx.runProbe(args.snapshot, args.repo, args.number));
+  const probe = triggered || targetedWait || recovering ? null : parseProbe(await ctx.runProbe(args.snapshot, args.repo, args.number));
   if (!triggered && probeAllowsSkip(previous, probe, now, args.maxSilenceMs)) {
     const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'unchanged', detail: 'probe matches the last full read', checkedAt: now };
     writeState(file, { ...previous, lastProbeAt: now, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
@@ -1561,14 +1601,15 @@ async function gateMain(argv, ctx) {
   if (!snap) {
     const plan = snapshotFailurePlan(run, previous, now, args.maxSnapshotFailures);
     const { failures } = plan;
-    const tail = run.stderr.trim().split('\n').slice(-3).join(' / ').slice(0, 500);
-    const detail = `${plan.rateLimited ? 'rate limit; ' : ''}snapshotExit=${run.code} failures=${failures}/${args.maxSnapshotFailures}${tail ? ` stderr=${tail}` : ''}`;
+    const { summary, ...cause } = plan.diagnosis;
+    const detail = `${summary}; snapshotExit=${run.code} failures=${failures}/${args.maxSnapshotFailures}`;
     writeState(file, {
       ...(previous ?? {}),
       consecutiveSnapshotFailures: failures,
       lastSnapshotFailureAt: now,
       snapshotFailureFingerprint: plan.fingerprint,
       snapshotFailureBackoffUntil: plan.until,
+      snapshotWatchRetryAt: plan.watchRetryAt,
       snapshotFailureReports: plan.reports,
       lastDecision: plan.block ? 'block' : 'skip',
       lastDecisionReason: 'snapshot-failed',
@@ -1581,7 +1622,8 @@ async function gateMain(argv, ctx) {
       },
     }, out);
     if (plan.block) {
-      throw new Error(`PR snapshot failed ${failures} consecutive rounds; ${detail}`);
+      out(`CINDY_PR_CHECK_DIAGNOSIS ${JSON.stringify({ ...cause, failures, retryAt: plan.until })}\n`);
+      throw new Error(`${summary}; PR snapshot failed ${failures} consecutive rounds. Scheduled checks may retry from ${new Date(plan.until).toISOString()}\n${run.stderr.trim()}`);
     }
     emit(args, {
       exitCode: EXIT_SKIP,
@@ -1707,6 +1749,7 @@ async function gateMain(argv, ctx) {
       ? Number(previous?.consecutiveSnapshotFailures) || 0 : 0,
     ...(!checkSucceeded && previous?.snapshotFailureReports
       ? { snapshotFailureReports: previous.snapshotFailureReports } : {}),
+    ...(!checkSucceeded && backingOff && { snapshotFailureBackoffUntil: backoffUntil, snapshotWatchRetryAt: now + TICK_MS }),
     lastCheckedAt: now,
     lastDecision: passed ? 'pass' : 'skip',
     lastDecisionReason: decision.reason,
@@ -1853,7 +1896,20 @@ export async function runGate(argv, {
         return value;
       },
       runProbe: async (...a) => { const value = await probeRunner(...a); if (record) { try { record.probe = value.code === 0 ? JSON.parse(value.stdout) : null; } catch { record.probe = null; } } return value; },
-      readTrigger: async (...a) => { const value = await readTrigger(...a); if (record) record.trigger = value ? {kind:value.kind} : null; return value; },
+      readTrigger: async () => {
+        const event = await readTrigger();
+        const url = `https://github.com/${args.repo}/pull/${args.number}`;
+        let trigger = null;
+        if (event?.kind === 'watch') {
+          // Keep replay deterministic without retaining arbitrary event details.
+          trigger = { kind: 'watch' };
+          if (event.source === 'pr-status' && typeof event.detail === 'string' && event.detail.toLowerCase() === url.toLowerCase()) {
+            trigger = { kind: 'watch', source: 'pr-status', detail: url };
+          }
+        }
+        if (record) record.trigger = trigger;
+        return trigger;
+      },
     };
     code = await gateMain(argv, ctx);
   } catch (error) {

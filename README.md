@@ -43,6 +43,8 @@ permission gate.
 
 |  | Plugin | Directory | Description |
 | --- | --- | --- | --- |
+| <img src="./cindy-antigravity-acp/icon.png" width="22" alt=""> | Antigravity | [`cindy-antigravity-acp`](./cindy-antigravity-acp) | Run Cindy tasks with the local agy CLI. Requires your own Google account. |
+| <img src="./dsh-acp/icon.png" width="22" alt=""> | DeepSeek Harness | [`dsh-acp`](./dsh-acp) | Run Cindy tasks with the local dsh CLI. Requires your own DeepSeek API key. |
 | <img src="./cindy-art/assets/icon.png" width="22" alt=""> | Art | [`cindy-art`](./cindy-art) | Image / short-video generation, with edits and restyling based on previously generated images |
 | <img src="./opendesign-trial/assets/icon.png" width="22" alt=""> | OpenDesign | [`opendesign-trial`](./opendesign-trial) | Session-owned HTML design previews, element annotations and manual editing using Cindy’s conversation model |
 | <img src="./cindy-github/assets/icon.png" width="22" alt=""> | GitHub | [`cindy-github`](./cindy-github) | Full GitHub workflow: issues / PRs / code review / Actions / releases |
@@ -68,6 +70,7 @@ permission gate.
 | <img src="./x-manager/assets/icon.png" width="22" alt=""> | X Manager | [`x-manager`](./x-manager) | Search X (Twitter) and post to it — xAI x_search with Grok-subscription / API-key fallback, posting via the official X API v2; currently in a targeted rollout |
 | <img src="./ntfy/assets/icon.png" width="22" alt=""> | ntfy | [`ntfy`](./ntfy) | Push notifications to your phone or desktop through your own ntfy server; the access token is stored by Cindy and sent only to that server; opt-in |
 | <img src="./decision-gate/assets/icon.png" width="22" alt=""> | Decision Gate | [`decision-gate`](./decision-gate) | Decides by your rules: picks a model when a new task starts and judges before an automation or routine runs whether it needs to |
+| <img src="./agentcompass/assets/icon.png" width="22" alt=""> | AgentCompass | [`agentcompass`](./agentcompass) | Hands independent work to the model that fits it: a model profiles the task through Cindy's quick-text channel (a Cindy account is required), the built-in AgentCompass engine picks harness, model and effort from the models this Cindy can run (capability fit only: no quota economy and no fast mode), starts an ordinary Cindy task with `bypassPermissions` (Claude) / `full-access` (Codex, Pi) in the parent project directory, and collects its exact result; opt-in |
 
 Missing a plugin you want? [Propose it](#submit-your-plugin) — or build it
 yourself and submit it here.
@@ -238,6 +241,8 @@ to the same host-driven locale contract, while runtime error copy is still
 primarily Chinese-only.
 
 ## Automated submission and review
+
+The withdrawn personal Antigravity ID (`agy-acp`) is excluded from all Global submissions.
 
 The Chrome extension has a separate [automatic store publishing workflow](./docs/chrome-webstore-publishing.md):
 merge a higher extension version to `main` to submit it for Google review and publish after approval.

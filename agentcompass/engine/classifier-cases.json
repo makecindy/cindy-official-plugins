@@ -1,0 +1,460 @@
+{
+  "version": "2026-11-17",
+  "route_definitions": {
+    "creative_ideation": "Cross-domain association, de-novo concept or mechanism invention, creative writing, narrative dialogue, and open-ended brainstorming.",
+    "architecture_reasoning": "Deductive first-principles system architecture, formal or mathematical proof/derivation, trade-off critique, and multi-system design planning without editing code.",
+    "code_implementation": "Write, fix, refactor, or test backend, CLI, library, algorithm, configuration, or quantitative/experiment code.",
+    "frontend_ui": "Implement, refactor, or style user-facing web or desktop UI views, interactive components, charts, layouts, CSS, and animations.",
+    "code_audit": "Independent read-only review or audit of code, pull requests, diffs, branches, security invariants, or release readiness (even when saving a review report file).",
+    "exploration_forensics": "Read-only codebase exploration, log/database/metric forensics, and runtime root-cause diagnosis on local evidence without modifying code.",
+    "web_research": "Gather, verify, and synthesize information from the public web, literature, documentation, or vendor sources into a sourced report.",
+    "visual_analysis": "Static offline inspection of images, photos, screenshots, or design mockups: OCR, UI layout/mockup diffs, and fine-grained aesthetic, styling, material, or lighting classification.",
+    "text_processing": "Rule-defined structured text cleaning, translation, format conversion, mechanical extraction, and bounded summarization.",
+    "live_loop": "Low-latency observe-decide-act loop attached to a live external text, WebSocket, or API stream where per-turn response time affects the outcome.",
+    "gui_control": "Operate a live desktop, browser, or mobile graphical interface via screenshots, mouse clicks, and keyboard actions, or continuously monitor a live visual screen."
+  },
+  "dimension_rubric": {
+    "anti_inflation_rule": "Score ONLY functional work the worker performs, never brief length or Markdown structure. Coordinator headers (`Parent session agent ID`, `工作目录`), role/AGENTS/SKILL docs, communication contracts, and output/receipt paths are boilerplate—ignore them for `primary_level` and `secondary_level`.",
+    "creativity_vs_architecture": "CONTRAST RULE for `creative_ideation` vs `architecture_reasoning`: `creative_ideation` rewards cross-domain association, inventing novel concepts/gameplay/narrative/product mechanisms from thin air, or expressive creative writing (`creativity` primary). `architecture_reasoning` rewards deductive first-principles engineering, distributed/concurrency invariants, mathematical proof, and system migration specs (`coding` primary, `creativity` supporting). When a single worker must BOTH invent a novel cross-domain mechanism AND implement the code, pair `code_implementation` with `secondary_kind: \"creative_ideation\"`.",
+    "composite_secondary_kind": "CONTRAST RULE for `secondary_kind` & `secondary_level`: Use `secondary_kind: \"none\", secondary_level: 0` whenever the task belongs to one primary domain (reading files before coding, running pytest/git, or writing unit tests alongside `code_implementation` are NOT separate kinds). Set a distinct `secondary_kind` (`1..3`) ONLY when the worker executes two genuinely distinct domains in one assignment (e.g. `code_implementation` L3 + minor `frontend_ui` L1 tweak; `frontend_ui` L2 + live browser `gui_control` L2; `visual_analysis` L3 + `code_implementation` L2).",
+    "visual_vs_live_vs_gui": "CONTRAST RULE for `visual_analysis`, `live_loop`, and `gui_control`: (1) Static offline image/photo/screenshot inspection is `visual_analysis` (`needs_visual: true`; `1` coarse OCR, `2` UI mockup/layout diff, `3` fine-grained outfit/garment/makeup/material/lighting judgment). (2) Operating a live GUI or watching a dynamic screen is `gui_control` (`needs_visual: true`). (3) Non-GUI live API/WebSocket observe-act loops are `live_loop` (`needs_visual: false`). (4) Writing or fixing software about real-time domains is `code_implementation`, NOT `live_loop`.",
+    "access_and_local_only": "CONTRAST RULE for `access` & `local_only`: `code_audit` is ALWAYS `access: \"read-only\"` (even when saving a review report file); local repository `code_implementation` and `frontend_ui` are ALWAYS `access: \"write\"`. `local_only: true` ONLY when depending on un-inlined local files/repos/processes/GUI; `false` when inputs are inlined or from the public web, even if a workspace header or local output path is named.",
+    "wants_fast": "CONTRAST RULE for `wants_fast`: `true` ONLY when affirmatively requesting fast mode, priority tier, urgent/ASAP turnaround, or a pre-reset quota sprint (`pre-reset sprint`, `before quota resets`, `重置前冲刺`) without negation. `false` when negated (`Do NOT use fast mode`, `no rush`), when fast/immediate only describes an in-task step (`click Save immediately`), or when unmentioned.",
+    "task_count": "`\"1\"` for a single task, including multi-step sequential workflows (`diagnose -> fix -> test -> report`) or homogeneous batch inspection of many items into one output. `\"2\"`, `\"3\"`, or `\">3\"` ONLY when bundling independent deliverables that separate workers could produce in parallel.",
+    "expected_hours": "Measured agent pace: quick check, runbook, single-diff audit, or screenshot check = 0.1-0.25h; standard investigation, bug fix, batch visual audit, or 1-5 file feature with tests = 0.3-0.6h; wide 8+ file refactor or broad web survey = 0.8-2.5h; multi-stage build or sustained multi-hour live loop = 2.5-4h+."
+  },
+  "calibration_cases": [
+    {
+      "id": "ideation_cross_domain_mechanism_l3",
+      "task": "Borrowing mechanisms from ecology and Vickrey auctions, invent three completely novel anti-hoarding resource systems for a multiplayer sandbox game, plus character-voiced player rumours introducing each.",
+      "expected_profile": {
+        "work_kind": "creative_ideation",
+        "primary_level": 3,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "read-only",
+        "local_only": false,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 0.6,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "ideation_dialogue_scene_cn_l2",
+      "task": "根据以下已内联的角色小传与案情时间线，撰写一段 1200 字的双人试探对白，要求口语自然、潜台词锋利，直接返回正文。",
+      "expected_profile": {
+        "work_kind": "creative_ideation",
+        "primary_level": 2,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "read-only",
+        "local_only": false,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 0.35,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "arch_first_principles_consensus_l3",
+      "task": "From first principles, critique our proposed lease-handoff state machine (inlined below): prove whether split-brain reservation double-spend is possible under clock skew and specify minimal safety invariants. Save notes to docs/lease-critique.md if helpful, do not modify code.",
+      "expected_profile": {
+        "work_kind": "architecture_reasoning",
+        "primary_level": 3,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "read-only",
+        "local_only": false,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 0.8,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "arch_repo_migration_plan_l2",
+      "task": "Inspect src/storage/ and src/sync/ in this checkout and write a staged schema-migration plan with rollback checkpoints to docs/migration-plan.md without touching production code.",
+      "expected_profile": {
+        "work_kind": "architecture_reasoning",
+        "primary_level": 2,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "write",
+        "local_only": true,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 0.7,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "code_impl_config_tweak_l1",
+      "task": "In tray/deploy.py change DEFAULT_RETRY_COUNT from 3 to 5 and update the matching assertion in tray/test_deploy.py. Do NOT use fast mode.",
+      "expected_profile": {
+        "work_kind": "code_implementation",
+        "primary_level": 1,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "write",
+        "local_only": true,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 0.15,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "code_impl_self_contained_module_l2",
+      "task": "Write a standalone Python 3.12 module implementing weighted reservoir sampling (Efraimidis-Spirakis) with edge-case unit tests; all requirements are in this prompt—return code in your reply.",
+      "expected_profile": {
+        "work_kind": "code_implementation",
+        "primary_level": 2,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "read-only",
+        "local_only": false,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 0.4,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "code_impl_lock_refactor_plus_minor_ui_l3",
+      "task": "Refactor skills/agent-compass/scripts/override_store.py to make cross-process lock recovery crash-safe with unit tests, and bump the padding constant on the Retry button in tray/panel_system.py by 2px. Pre-reset sprint before quota resets.",
+      "expected_profile": {
+        "work_kind": "code_implementation",
+        "primary_level": 3,
+        "secondary_kind": "frontend_ui",
+        "secondary_level": 1,
+        "access": "write",
+        "local_only": true,
+        "needs_visual": false,
+        "wants_fast": true,
+        "expected_hours": 1.2,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "code_impl_plus_novel_ideation_l3",
+      "task": "Conceive a novel cross-domain metaphor and scoring visualiser combining radar geometry with thermodynamic pressure lines, then implement its Python data engine and unit tests in src/thermo_chart.py.",
+      "expected_profile": {
+        "work_kind": "code_implementation",
+        "primary_level": 3,
+        "secondary_kind": "creative_ideation",
+        "secondary_level": 3,
+        "access": "write",
+        "local_only": true,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 1.5,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "frontend_ui_design_system_l3",
+      "task": "Design and implement a new glassmorphic timeline & comparison carousel view in web/src/components/TimelineDeck.tsx with fluid spring motion, responsive typography, and dark/light tokens.",
+      "expected_profile": {
+        "work_kind": "frontend_ui",
+        "primary_level": 3,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "write",
+        "local_only": true,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 1.5,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "frontend_ui_plus_live_browser_gui_l2",
+      "task": "Fix the filter drawer layout in web/src/Drawer.tsx, then launch the local browser window, click through mobile and desktop breakpoints, and capture verification screenshots.",
+      "expected_profile": {
+        "work_kind": "frontend_ui",
+        "primary_level": 2,
+        "secondary_kind": "gui_control",
+        "secondary_level": 2,
+        "access": "write",
+        "local_only": true,
+        "needs_visual": true,
+        "wants_fast": false,
+        "expected_hours": 0.7,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "code_audit_pr_diff_l2",
+      "task": "Perform an independent read-only code review of git diff main...HEAD focusing on error handling and test coverage; write your findings to artifacts/review.md without modifying repository files.",
+      "expected_profile": {
+        "work_kind": "code_audit",
+        "primary_level": 2,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "read-only",
+        "local_only": true,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 0.35,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "code_audit_security_release_l3",
+      "task": "Conduct a pre-release security and credential-isolation audit across setup/, packaging/, and skills/agent-compass/scripts/ to verify no OAuth token or personal path can leak.",
+      "expected_profile": {
+        "work_kind": "code_audit",
+        "primary_level": 3,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "read-only",
+        "local_only": true,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 0.9,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "forensics_race_diagnosis_l3",
+      "task": "Investigate intermittent SQLITE_BUSY timeouts in var/logs/daemon.log and skills/agent-compass/scripts/dispatch_registry.py; trace the exact lock contention path and report the root cause without editing files.",
+      "expected_profile": {
+        "work_kind": "exploration_forensics",
+        "primary_level": 3,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "read-only",
+        "local_only": true,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 0.6,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "forensics_cli_inventory_l1",
+      "task": "Read-only check: list all CLI subcommands defined under agentcompass/cli.py and report their entrypoint script paths.",
+      "expected_profile": {
+        "work_kind": "exploration_forensics",
+        "primary_level": 1,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "read-only",
+        "local_only": true,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 0.15,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "web_research_vendor_pricing_l2",
+      "task": "Search official vendor pricing pages and recent changelogs for OpenRouter, Anthropic, and Google Gemini batch API discounts, verify dates/URLs, and return a sourced comparison table.",
+      "expected_profile": {
+        "work_kind": "web_research",
+        "primary_level": 2,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "read-only",
+        "local_only": false,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 0.45,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "web_research_literature_synthesis_l3",
+      "task": "Survey 2025-2026 psychometrics and LLM router papers on Thurstonian / IRT benchmark linking and conjugate Poisson quota pricing; synthesize competing assumptions and failure modes.",
+      "expected_profile": {
+        "work_kind": "web_research",
+        "primary_level": 3,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "read-only",
+        "local_only": false,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 1.0,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "visual_ocr_receipt_l1",
+      "task": "Read the three error dialog screenshots in var/captures/ and transcribe the exact error code strings into var/captures/codes.json.",
+      "expected_profile": {
+        "work_kind": "visual_analysis",
+        "primary_level": 1,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "write",
+        "local_only": true,
+        "needs_visual": true,
+        "wants_fast": false,
+        "expected_hours": 0.15,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "visual_ui_mockup_diff_l2",
+      "task": "Compare the Figma export frames in designs/v2/ against the static PNG captures in artifacts/screens/ and report spacing, typography, and alignment discrepancies.",
+      "expected_profile": {
+        "work_kind": "visual_analysis",
+        "primary_level": 2,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "read-only",
+        "local_only": true,
+        "needs_visual": true,
+        "wants_fast": false,
+        "expected_hours": 0.35,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "visual_wardrobe_fine_grained_plus_clustering_l3",
+      "task": "逐张审阅 var/runs/wardrobe/photos/ 下的百张穿搭实拍图，精细判别面料光泽、层次剪裁、色温偏差与妆发协调度写入 labels.jsonl，并编写配套的层次聚类统计脚本 cluster_looks.py。",
+      "expected_profile": {
+        "work_kind": "visual_analysis",
+        "primary_level": 3,
+        "secondary_kind": "code_implementation",
+        "secondary_level": 2,
+        "access": "write",
+        "local_only": true,
+        "needs_visual": true,
+        "wants_fast": false,
+        "expected_hours": 0.8,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "text_processing_glossary_l1",
+      "task": "Normalize the inlined 80-row Markdown glossary table to consistent title case, strip duplicate rows, and sort alphabetically by key.",
+      "expected_profile": {
+        "work_kind": "text_processing",
+        "primary_level": 1,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "read-only",
+        "local_only": false,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 0.1,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "text_processing_bilingual_localization_l2",
+      "task": "Translate the inlined release changelog into concise technical Japanese and Simplified Chinese while preserving CLI flags, JSON keys, and code blocks verbatim.",
+      "expected_profile": {
+        "work_kind": "text_processing",
+        "primary_level": 2,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "read-only",
+        "local_only": false,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 0.25,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "live_loop_orderbook_stream_l2",
+      "task": "Attach to the local paper-trading WebSocket stream on ws://127.0.0.1:9400, continuously monitor spread imbalances in real time, and submit hedge quotes via REST within each tick window for the next 2 hours.",
+      "expected_profile": {
+        "work_kind": "live_loop",
+        "primary_level": 2,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "write",
+        "local_only": true,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 2.0,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "gui_control_desktop_settings_l1",
+      "task": "Open the local desktop settings window, switch language to Simplified Chinese, click Save immediately when the button enables, and take a verification screenshot.",
+      "expected_profile": {
+        "work_kind": "gui_control",
+        "primary_level": 1,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "write",
+        "local_only": true,
+        "needs_visual": true,
+        "wants_fast": false,
+        "expected_hours": 0.15,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "gui_control_game_dailies_cn_l3",
+      "task": "禁止编写脚本，直接在本地模拟器窗口中持续观察实时战斗画面并操作角色完成高难词缀深渊与竞技场连战，根据敌方抬手帧即时闪避与切人，直到体力耗尽。",
+      "expected_profile": {
+        "work_kind": "gui_control",
+        "primary_level": 3,
+        "secondary_kind": "none",
+        "secondary_level": 0,
+        "access": "write",
+        "local_only": true,
+        "needs_visual": true,
+        "wants_fast": false,
+        "expected_hours": 2.5,
+        "task_count": "1"
+      }
+    },
+    {
+      "id": "multi_task_two_parallel_deliverables",
+      "task": "1) Survey public WebGPU browser support tables across Safari/Chrome/Firefox; 2) Audit git diff v0.4.3..HEAD in D:/work/app for breaking CLI flag changes.",
+      "expected_profile": {
+        "work_kind": "code_audit",
+        "primary_level": 2,
+        "secondary_kind": "web_research",
+        "secondary_level": 2,
+        "access": "read-only",
+        "local_only": true,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 0.8,
+        "task_count": "2"
+      }
+    },
+    {
+      "id": "multi_task_three_parallel_deliverables",
+      "task": "Please complete all three deliverables in one pass: (A) translate docs/faq.md into Japanese, (B) benchmark SQLite WAL checkpoint latency in scripts/, and (C) design 3 app icon SVG concepts.",
+      "expected_profile": {
+        "work_kind": "frontend_ui",
+        "primary_level": 2,
+        "secondary_kind": "code_implementation",
+        "secondary_level": 2,
+        "access": "write",
+        "local_only": true,
+        "needs_visual": false,
+        "wants_fast": false,
+        "expected_hours": 1.5,
+        "task_count": "3"
+      }
+    },
+    {
+      "id": "multi_task_four_plus_parallel_deliverables",
+      "task": "Bundle assignment: 1) research competitor pricing on the web, 2) write 5 character backstories, 3) audit setup/onboard.py, 4) classify 50 UI screenshots in var/screens/, and 5) fix tray/app.pyw startup icon.",
+      "expected_profile": {
+        "work_kind": "code_implementation",
+        "primary_level": 2,
+        "secondary_kind": "visual_analysis",
+        "secondary_level": 2,
+        "access": "write",
+        "local_only": true,
+        "needs_visual": true,
+        "wants_fast": false,
+        "expected_hours": 2.5,
+        "task_count": ">3"
+      }
+    }
+  ]
+}

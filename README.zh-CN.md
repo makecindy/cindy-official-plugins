@@ -36,6 +36,8 @@
 
 |  | 插件 | 目录 | 说明 |
 | --- | --- | --- | --- |
+| <img src="./cindy-antigravity-acp/icon.png" width="22" alt=""> | Antigravity | [`cindy-antigravity-acp`](./cindy-antigravity-acp) | 通过本机 agy 执行 Cindy 任务，需自备 Google 账号。 |
+| <img src="./dsh-acp/icon.png" width="22" alt=""> | DeepSeek Harness | [`dsh-acp`](./dsh-acp) | 通过本机 dsh 执行 Cindy 任务，需自备 DeepSeek API Key。 |
 | <img src="./cindy-art/assets/icon.png" width="22" alt=""> | Art | [`cindy-art`](./cindy-art) | 图片 / 短视频生成，支持基于已生成图片的改图与风格化 |
 | <img src="./opendesign-trial/assets/icon.png" width="22" alt=""> | OpenDesign | [`opendesign-trial`](./opendesign-trial) | 复用 Cindy 会话模型的 HTML 设计稿、固定会话预览、元素批注和手动编辑 |
 | <img src="./cindy-github/assets/icon.png" width="22" alt=""> | GitHub | [`cindy-github`](./cindy-github) | GitHub issue / PR / code review / Actions / release 全流程操作 |
@@ -61,6 +63,7 @@
 | <img src="./x-manager/assets/icon.png" width="22" alt=""> | X Manager | [`x-manager`](./x-manager) | 在 X（Twitter）上搜舆情、发帖——xAI x_search，Grok 订阅 / API key 双通道降级，发帖走 X 官方 API v2；目前定向灰度中 |
 | <img src="./ntfy/assets/icon.png" width="22" alt=""> | ntfy | [`ntfy`](./ntfy) | 通过你自己的 ntfy 服务器向手机或电脑发送推送通知；访问令牌由 Cindy 保管，只发送给对应服务器；自选安装 |
 | <img src="./decision-gate/assets/icon.png" width="22" alt=""> | 决策闸门 | [`decision-gate`](./decision-gate) | 按你写的规则开新任务时选模型，并在自动化和例行任务运行前判断要不要跑 |
+| <img src="./agentcompass/assets/icon.png" width="22" alt=""> | AgentCompass | [`agentcompass`](./agentcompass) | 把独立工作交给最合适的模型：通过 Cindy 的 quick-text 通道由模型为任务做画像（需要 Cindy 账号），内置 AgentCompass 引擎在这台 Cindy 能运行的模型中选出 harness、模型与档位（仅按能力匹配，不做额度经济，也没有 fast 模式），在父项目目录以 `bypassPermissions`（Claude）/ `full-access`（Codex、Pi）启动普通 Cindy 任务并取回确切结果；自选安装 |
 
 想要的插件不在这里？[提议一个](#提交你的插件)——或者自己写一个提交上来。
 
@@ -192,6 +195,8 @@ cindy-art/
 自绘设置页正独立迁移到同一套宿主语言契约，运行时报错文案目前仍以中文单语为主。
 
 ## 自动提交与审核
+
+已撤回的 Antigravity 个人投稿 ID（`agy-acp`）不参与 Global 提交。
 
 Chrome 扩展使用独立的[商店自动发布流程](./docs/chrome-webstore-publishing.zh-CN.md)：
 将更高的扩展版本合入 `main` 后自动提交 Google 审核，通过后自动发布。

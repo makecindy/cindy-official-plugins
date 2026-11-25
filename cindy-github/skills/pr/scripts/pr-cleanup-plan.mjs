@@ -8,7 +8,7 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { buildCleanupCommands, githubRepoNamesOfRemotes, isLongLivedBranch, isPrWorktree, planLocalCleanup, remoteNameForRepo } from './lib/cleanup-plan.mjs';
+import { buildCleanupCommands, buildPrimarySyncCommands, githubRepoNamesOfRemotes, isLongLivedBranch, isPrWorktree, planLocalCleanup, remoteNameForRepo } from './lib/cleanup-plan.mjs';
 import { ensureAuth, ensureBinary, ghJson } from './lib/gh.mjs';
 import { resolvePullRequestTarget } from './lib/repo-target.mjs';
 
@@ -227,6 +227,7 @@ async function main() {
     hasLocalArtifacts,
     cindyManagedWorktree,
     localWorkNotInPr,
+    primaryOnBase: worktrees[0]?.branch === baseRef,
   });
 
   const out = {
@@ -263,6 +264,7 @@ async function main() {
       recommendation: plan.recommendation,
       canCleanupLocal: plan.canCleanupLocal,
       canSyncPrimary: plan.canSyncPrimary,
+      canFastForwardPrimary: plan.canFastForwardPrimary,
       blockers: plan.blockers,
       notes: plan.notes,
       commands: plan.canCleanupLocal
@@ -275,7 +277,9 @@ async function main() {
             syncPrimary: plan.canSyncPrimary,
             baseRemote,
           })
-        : [],
+        : plan.canFastForwardPrimary
+          ? buildPrimarySyncCommands({ primaryWorktree, baseRef, baseRemote })
+          : [],
     },
   };
 
