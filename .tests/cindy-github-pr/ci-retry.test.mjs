@@ -1162,3 +1162,93 @@ test('inherited signed-push requirements are rejected before quota and amend', t
   assert.equal(fs.existsSync(fx.retryDir), false);
   assert.equal(git(work, ['config', '--get', 'push.gpgSign']), 'if-asked', 'no bypass or configuration rewrite by recovery');
 });
+
+
+test('empty root and single-parent heads are excluded before quota or amend', async t => {
+  for (const kind of ['root', 'single-parent']) await t.test(kind, t => {
+    const fx = fixture(t), work = path.join(fx.root, 'empty-head'); fs.mkdirSync(work);
+    const global = path.join(fx.root, 'global'); fs.writeFileSync(global, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
+    const git = args => execFileSync('git', args, { cwd: work, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    git(['init', '-b', 'main']);
+    for (const [name, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false']]) git(['config', name, value]);
+    if (kind === 'single-parent') {
+      fs.writeFileSync(path.join(work, 'code.txt'), 'original code\n'); git(['add', 'code.txt']); git(['commit', '-s', '-m', 'parent']);
+    }
+    git(['commit', '--allow-empty', '-s', '-m', 'existing empty head']);
+    const original = git(['rev-parse', 'HEAD']), raw = git(['--no-replace-objects', 'cat-file', 'commit', original]);
+    const tree = raw.match(/^tree ([a-f0-9]+)/m)[1], parents = [...raw.matchAll(/^parent ([a-f0-9]+)/gm)].map(m => m[1]);
+    if (kind === 'root') assert.equal(git(['--no-replace-objects', 'cat-file', '-s', tree]), '0');
+    else assert.equal(git(['--no-replace-objects', 'cat-file', 'commit', parents[0]]).match(/^tree ([a-f0-9]+)/m)[1], tree);
+    const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    const amend = spawnSync('git', plan.amendArgs, { cwd: work, env, encoding: 'utf8' });
+    assert.notEqual(amend.status, 0, 'native counterexample: default amend refuses the empty head');
+    assert.equal(git(['rev-parse', 'HEAD']), original);
+    assert.equal(git(['cat-file', 'commit', original]), raw);
+    assert.equal(fs.existsSync(fx.retryDir), false);
+    const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    assert.match(guide, /Before quota or amend, reject an empty root or single-parent head/);
+    assert.match(guide, /sole parent's raw tree/);
+    assert.match(guide, /root.*cat-file.*-s.*zero/i);
+  });
+});
+
+test('unsigned heads cannot inherit automatic signing before quota or amend', t => {
+  const fx = fixture(t), work = path.join(fx.root, 'unsigned'); fs.mkdirSync(work);
+  const key = path.join(fx.root, 'key');
+  execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', 'ada@example.test', '-f', key], { stdio: 'pipe' });
+  const global = path.join(fx.root, 'global'); fs.writeFileSync(global, '');
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1', GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' };
+  const git = args => execFileSync('git', args, { cwd: work, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git(['init', '-b', 'main']);
+  for (const [name, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'true'], ['gpg.format', 'ssh'], ['user.signingkey', key]]) git(['config', name, value]);
+  fs.writeFileSync(path.join(work, 'code.txt'), 'original code\n'); git(['add', 'code.txt']); git(['commit', '--no-gpg-sign', '-s', '-m', 'unsigned original']);
+  const original = git(['rev-parse', 'HEAD']);
+  assert.doesNotMatch(git(['cat-file', 'commit', original]), /^gpgsig(?:-sha256)? /m);
+  const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+    gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+  // Native counterexample only, no real recovery: inherited signing changes provenance.
+  git(plan.amendArgs); assert.match(git(['cat-file', 'commit', 'HEAD']), /^gpgsig /m);
+  assert.equal(git(['config', '--type=bool', '--get', 'commit.gpgSign']), 'true');
+  assert.equal(fs.existsSync(fx.retryDir), false);
+  const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  assert.match(guide, /For an unsigned original, require commit.gpgSign unset or false before quota or amend/);
+  assert.match(guide, /unsigned original.*replacement.*gpgsig.*stop.*unpushed/i);
+});
+
+test('equivalent default XDG settings share quota and old alternate roots fail closed', async t => {
+  for (const initialExplicit of [false, true]) await t.test(initialExplicit ? 'explicit to implicit' : 'implicit to explicit', t => {
+  const fx = fixture(t), loader = path.join(fx.root, 'supported-roots.mjs');
+  fs.writeFileSync(loader, `import fs from 'node:fs';
+import os from 'node:os';
+// Supported-filesystem model, not Linux or power-loss runtime evidence.
+Object.defineProperty(process, 'platform', { value: 'linux' });
+os.homedir = () => process.env.RECEIPT_TEST_HOME;
+fs.fsyncSync = () => {};
+const { runGate } = await import(process.argv[2]);
+process.exitCode = await runGate(process.argv.slice(3));
+`);
+  const base = path.join(fx.root, '.local', 'state'), canonical = path.join(base, 'Cindy', 'pr-recovery'), alternate = path.join(base, 'cindy-pr', 'ci-retry');
+  const run = (xdg, flags) => {
+    const env = { ...fx.env, RECEIPT_TEST_HOME: fx.root }; if (xdg) env.XDG_STATE_HOME = base; else delete env.XDG_STATE_HOME;
+    return spawnSync(process.execPath, [loader, pathToFileURL(gate).href, ...fx.args(flags)], { env, encoding: 'utf8' });
+  };
+  const reserved = run(initialExplicit, ['--reserve-ci-retry', oldHead]); assert.equal(reserved.status, 0, reserved.stderr);
+  const before = fs.readdirSync(canonical).map(n => [n, fs.readFileSync(path.join(canonical, n), 'utf8')]);
+  const status = run(!initialExplicit, ['--ci-retry-status']); assert.equal(status.status, 0, status.stderr);
+  assert.equal(JSON.parse(status.stdout).pr_consumed, 1); assert.equal(JSON.parse(status.stdout).available, false);
+  assert.equal(run(!initialExplicit, ['--reserve-ci-retry', oldHead]).status, 1);
+  for (const [name, raw] of before) assert.equal(fs.readFileSync(path.join(canonical, name), 'utf8'), raw);
+  // Earlier explicit-default versions used another namespace. Never treat even
+  // an empty or malformed alternate directory as proof of fresh quota.
+  fs.mkdirSync(alternate, { recursive: true });
+  assert.equal(run(initialExplicit, ['--ci-retry-status']).status, 1, 'even an empty old namespace is uncertain');
+  fs.writeFileSync(path.join(alternate, 'unknown.slot'), 'unknown earlier outcome');
+  for (const xdg of [false, true]) {
+    const blocked = run(xdg, ['--ci-retry-status']); assert.equal(blocked.status, 1); assert.match(blocked.stderr, /alternate CI retry root.*reconcile/i);
+    assert.doesNotMatch(blocked.stdout, /"available":true/);
+  }
+  assert.equal(fs.readFileSync(path.join(alternate, 'unknown.slot'), 'utf8'), 'unknown earlier outcome');
+  });
+});

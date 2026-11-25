@@ -616,12 +616,22 @@ export function ciRetryFilePath(stateDir, prNodeId, failure) {
 }
 
 export function ciRetryDataDir(env = process.env) {
-  if (env.XDG_STATE_HOME && path.isAbsolute(env.XDG_STATE_HOME)) return path.join(env.XDG_STATE_HOME, 'cindy-pr', 'ci-retry');
-  const base = process.platform === 'win32'
+  const base = env.XDG_STATE_HOME && path.isAbsolute(env.XDG_STATE_HOME) ? env.XDG_STATE_HOME
+    : process.platform === 'win32'
     ? (env.LOCALAPPDATA && path.isAbsolute(env.LOCALAPPDATA) ? env.LOCALAPPDATA : path.join(os.homedir(), 'AppData', 'Local'))
     : process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support')
       : path.join(os.homedir(), '.local', 'state');
   return path.join(base, 'Cindy', 'pr-recovery');
+}
+
+function refuseAlternateCiRetryRoot(retryDir) {
+  // One namespace for every selected base, including an explicit default XDG
+  // value. Earlier XDG writers used a different suffix; never grant fresh
+  // quota over that possible history or move/delete it automatically.
+  const alternate = path.join(path.dirname(path.dirname(retryDir)), 'cindy-pr', 'ci-retry');
+  try { fs.lstatSync(alternate); }
+  catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  throw new Error('Existing alternate CI retry root; reconcile its previous outcome before any budget operation. Keep both roots and receipts; do not delete, reset, switch roots or retry.');
 }
 
 function normalizeCiRetryFailure(value) {
@@ -2096,9 +2106,12 @@ export async function runGate(argv, {
     args = parseArgs(argv, env);
     if (!args.help) {
       // The effective directory comes from the completed parse, even if a CI
-      // value is missing before --state-dir. Preserve raw bytes before any
-      // semantic rejection; validation/adoption cannot create fresh budget yet.
-      if (args.ciRetryRequested) preserveCiRetryEvidence(args.stateDir, args.ciRetryDir);
+      // value is missing before --state-dir. Reject ambiguous historical roots
+      // first, then preserve raw bytes before semantic validation/adoption.
+      if (args.ciRetryRequested) {
+        refuseAlternateCiRetryRoot(args.ciRetryDir);
+        preserveCiRetryEvidence(args.stateDir, args.ciRetryDir);
+      }
       validateArgs(args);
     }
     try {

@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.47, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.48, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1148,3 +1148,59 @@ non-manifest archive byte equals source and manifest semantics match. All 13
 staged files match the validated working bytes. The newly generated package
 was removed and its absence verified; old blocked cleanup artifacts and durable
 quota remain untouched. Source 1.5.47 exceeds freshly fetched main 1.5.35.
+
+
+## Tool contracts and supported heads — 2026-11-25 (source 1.5.48, not installed)
+
+Round 39 groups the default-tool wording findings with their duplicate, and the
+remaining findings into pre-reservation eligibility and equivalent-root quota
+identity. The two root manifest tool descriptions now use exactly the existing
+strict zh-CN policy suffix: full file/ancestor synchronization, unsupported means
+stop, and any active hook (including LFS/DCO) stops before consumption/amend.
+A default-versus-localized contract regression failed first, then passed. The
+other locales, runtime UI, storage I/O owner and Git write arguments are unchanged.
+
+Raw zero/one-parent heads now have an explicit eligibility check before quota:
+empty roots or a single-parent head with its parent's tree are refused, without
+`--allow-empty` or an amend probe. Genuine multi-parent merges retain the existing
+complete-parent rules. Unsigned originals require effective commit.gpgSign unset
+or false before reserve/amend and before push; a new signature after amend stops
+unpushed. Signed originals retain same-signer verification. Native Git fixtures
+reproduced empty-head amend refusal and automatic SSH signing of an unsigned
+original; the new guide-contract regressions failed first then passed. These
+counterexamples use disposable local repositories, no real recovery or quota.
+
+Every selected durable base now uses the same `Cindy/pr-recovery` suffix, removing
+the unset-versus-explicit-default XDG namespace split. Earlier non-XDG roots and
+fixed slots remain in place. Before any CI request preservation/validation, the
+existing `<selected-base>/cindy-pr/ci-retry` namespace is checked read-only; any
+entry or inspection error except absence stops reconciliation without moving,
+copying, deleting or allocating. No root registry, automatic root migration,
+lock, refund or new storage is added. Arbitrary past custom roots cannot be
+discovered; changing the base still requires establishing prior outcomes and
+never grants fresh quota. A supported-filesystem model first reproduced fresh
+quota after changing equivalent XDG settings; regressions cover both directions
+with the same consumed receipt, duplicate denial, and refusal of empty/unknown
+old alternate roots. This is not native Linux or hardware power-loss evidence.
+
+Local remains actually tested **1.5.45**; 1.5.48 was not installed. No new live
+amend/push, quota, preference/credential/permission change or retired fixture use.
+The earlier #12846 trial run 45621511972 ultimately failed overall: the original
+Windows 8/8 shard succeeded; Windows 3/8 and its aggregate failed on a different
+outboundFile test. The other 24 jobs, including Host on three platforms, passed.
+This result was read back from GitHub and added to the PR; it is not all-green CI
+or proof of runner/infrastructure causation. Subsequent ordinary commit 692979c7
+and run 45631121917 are separate work, not another CI-only attempt. Historical
+consumption remains 1/2 according to the original task receipt. Current UI,
+disabling mid-recovery and signed-head live acceptance gaps remain unchanged.
+
+Final required four suites plus plugin: **474 passed, 36 skipped, 0 failed
+(267.65 s)**. The 17 native successful quota cases remain skipped on this Windows
+backend; 19 existing skips remain. Initial focused regressions: **6 passed
+(5.49 s)**; the final suite includes the expanded two-direction XDG model.
+Forge package/content verification passed: **29 files, 239851 bytes**, exact
+non-manifest bytes and semantic manifest equality. The temporary 1.5.48 package
+was removed and absence verified. Seven staged files match validated source;
+1.5.48 exceeds freshly fetched main 1.5.35. No dependency/license/permission or
+installed-runtime update occurred. Maintainer-requested current-head review and
+fork workflow approval remain external prerequisites, not retry eligibility.

@@ -88,7 +88,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.47');
+  assert.equal(manifest.version, '1.5.48');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -101,6 +101,19 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
       hosts: ['api.github.com'],
     },
   });
+});
+
+test('root PR tool contracts retain the strict localized recovery boundary', () => {
+  const localized = JSON.parse(readFileSync(new URL('../cindy-github/locales/zh-CN.json', import.meta.url), 'utf8'));
+  for (const name of ['pr_card', 'pr_follow_settings']) {
+    const description = manifest.tools.find(tool => tool.name === name).description;
+    const text = localized.tools[name].description;
+    const policy = text.slice(text.indexOf('回执须同步'));
+    assert.ok(policy.startsWith('回执须同步文件及完整父目录链'));
+    assert.ok(description.endsWith(policy), name + ': default discovery must not restore a withdrawn recovery policy');
+    assert.match(description, /任何有效 hook（含标准 LFS\/DCO）都在消耗次数、改写前停止/);
+    assert.doesNotMatch(description, /Windows write-through/);
+  }
 });
 
 test('connection tests never cache an identity that the plugin cannot attribute atomically', async () => {

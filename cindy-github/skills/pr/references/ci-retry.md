@@ -191,6 +191,28 @@ author and message/trailers from that payload. After amend compare the raw new
 payload against this same original baseline, not two replacement-aware views
 or `%P`/symbolic lookups. Signature identity checks remain mandatory.
 
+Before quota or amend, reject an empty root or single-parent head. Use the
+original raw parent count, never a replacement-aware or shallow view. For one
+parent, read that pinned parent's raw commit with the same argument boundary
+as `originalObjectArgs`; reject when the sole parent's raw tree equals the
+original head tree. For a root, read the verified original tree with separate
+argv `['--no-replace-objects', 'cat-file', '-t', verifiedOriginalTreeSha]` and
+`['--no-replace-objects', 'cat-file', '-s', verifiedOriginalTreeSha]`; require
+type `tree` and a positive size. A zero size is an empty root. Failed/unknown
+reads stop before reservation; do not amend as a probe or add `--allow-empty`
+to qualify. A genuine multi-parent merge is not excluded merely because its
+tree matches the first parent; the existing complete-parent checks still apply.
+
+For an unsigned original, require commit.gpgSign unset or false before quota or amend.
+Read `['--no-replace-objects', 'config', '--includes', '--type=bool', '--get',
+'commit.gpgSign']` in the actual checkout/environment with the same missing-key
+and error handling as `pushSigningConfigArgs`. True, invalid or unknown values
+stop without a signing probe, configuration change or `--no-gpg-sign` bypass.
+Recheck before amend/push. An unsigned original requires the replacement to
+remain unsigned: a new `gpgsig` or `gpgsig-sha256` header means stop and leave it
+unpushed. For a signed original, keep the existing pre-reservation signer and
+post-amend identity/verification requirements; no silent provenance change.
+
 Before consuming quota or amending, reject any encoding header in the original
 raw header block. Require a strictly valid UTF-8 raw message and complete reads
 of `encodingConfigArgs`: i18n.commitEncoding and i18n.logOutputEncoding must both
@@ -304,10 +326,19 @@ after successful file flush before any Git operation; any failure still stops
 recovery without a refund, alternate store or automatic retry.
 
 Retry receipts are stored separately in durable user data, never
-in that cache: `$XDG_STATE_HOME/cindy-pr/ci-retry` when set to an absolute path;
+in that cache: `$XDG_STATE_HOME/Cindy/pr-recovery` when set to an absolute path;
 otherwise Windows uses `%LOCALAPPDATA%/Cindy/pr-recovery`, macOS uses
 `~/Library/Application Support/Cindy/pr-recovery`, and other systems use
-`~/.local/state/Cindy/pr-recovery`. The gate preserves earlier cache receipt
+`~/.local/state/Cindy/pr-recovery`. The relative suffix is always `Cindy/pr-recovery`, so an explicit XDG value
+that equals the platform's default base does not select another budget. Before
+preservation or validation of any CI budget request, check the earlier
+`<selected-base>/cindy-pr/ci-retry` root read-only. Any existing entry there,
+even an empty directory, symlink or malformed file, stops for reconciliation
+without moving, deleting or allocating anything. Unreadable/unknown roots also
+stop. This does not scan arbitrary past custom roots: changing the selected
+base still requires establishing prior outcomes and never grants fresh quota.
+
+The gate preserves earlier cache receipt
 files with exclusive copying, retaining the originals and never overwriting
 durable evidence. An unreadable or damaged receipt fails closed. Clearing or
 changing observation cache does not reset migrated budgets. Never change the
