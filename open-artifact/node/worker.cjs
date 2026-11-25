@@ -133,8 +133,9 @@ async function workspaceArtifact(harness, url, caller) {
 }
 
 function requireAdoptionOwner(artifact) {
+  const owner = artifact.owner;
   if (typeof artifact.url !== 'string' || !artifact.url ||
-      typeof artifact.owner !== 'string' || !artifact.owner.trim()) {
+      (owner !== null && (typeof owner !== 'string' || !owner.trim()))) {
     throw new Error('Artifact ownership is unavailable');
   }
   return artifact;
