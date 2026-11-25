@@ -1362,6 +1362,26 @@ test('plugin-engine follow models survive card validation and reach the schedule
   });
 });
 
+test('plugin-engine models survive publication-time auto-follow scheduling', async () => {
+  const { hostApi, rows } = followScheduler();
+  const runtime = createPrRuntime({
+    github: prGraphql({ number: 7 }),
+    hostApi,
+    kv: { prCard: {
+      autoFollow: true,
+      followModel: { route: { agentKind: 'acp', providerId: 'plugin-provider', model: 'plugin-model', effort: 'high', fastMode: false }, label: 'Plugin engine · ACP' },
+    } },
+  });
+  const { callId } = await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
+  const result = (await runtime.tool({ card_id: callId, pr: 7, published: true })).reply.result;
+  assert.equal(result.follow_state, 'active');
+  assert.equal(runtime.agentRuns.length, 0);
+  assert.deepEqual(rows.get('sch-1'), {
+    ...rows.get('sch-1'),
+    modelAgentKind: 'acp', providerId: 'plugin-provider', model: 'plugin-model', effort: 'high', fastMode: false,
+  });
+});
+
 // Remote providers: the card dropdown can pick a model on another computer or from a shared provider.
 // The card names where it runs, and the agent gets the location to set on the follow-up schedule.
 test('a follow model on another computer or a shared provider keeps its location', async () => {
