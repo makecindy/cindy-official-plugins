@@ -454,9 +454,62 @@ for (const language of ['en', 'zh-CN']) test(`remote boot/shutdown outcome advic
       assert.ok(text().includes(conservative), `${action}/${errorCode}`);
     }
   }
+  // Feed the actual provider/channel failure into the actual page, not a
+  // hand-authored execution value. A completed mutation can precede a failed read.
+  for (const action of ['task_boot', 'shutdown']) {
+    let failRead = false;
+    const world = computers({providerWorker: async r => r.method === 'remote_task_state'
+      ? failRead ? {ok:false,errorCode:'TASK_BINDINGS_UNREADABLE',execution:'not_executed'} : state
+      : {ok:true,execution:'executed'}});
+    await world.viewer.ask({call:'task_state',sessionId:'task-1'});
+    failRead = true;
+    reply = await world.viewer.ask({call:action,sessionId:'task-1',udid:'SIM-1'});
+    reading = state;
+    await vm.runInContext(`act('${action}', {udid:'SIM-1'}, 'SIM-1')`, context);
+    await settle();
+    assert.ok(text().includes(conservative), `${action}/actual-post-read-failure`);
+    assert.equal(world.provider.calls.filter(r => ['boot','settings_shutdown'].includes(r.method)).length, 1);
+    assert.equal(shown().find(n => n.tag === 'button' && n.props.text === (language === 'en' ? 'Open' : '打开'))?.props.disabled, false);
+  }
   // Read-only connection loss is not classified as a failed mutation.
   vm.runInContext('note = null', context);
   reading = () => {throw {errorCode: 'DEVICE_OFFLINE'};};
   await vm.runInContext('refresh()', context);
   assert.equal(text().includes(conservative), false);
+});
+
+test('post-operation observation failures never borrow read execution evidence or replay a mutation', async () => {
+  for (const call of ['task_boot', 'shutdown', 'restart_device', 'task_bind']) {
+    for (const outcome of ['success', 'not_executed', 'executed', 'unknown', 'pending', 'reject']) {
+      let failRead = false, finish;
+      const world = computers({providerWorker: async r => {
+        if (r.method === 'remote_task_state') return failRead
+          ? {ok: false, errorCode: 'TASK_BINDINGS_UNREADABLE', execution: 'not_executed'}
+          : {ok: true, device: SIM, devices: [SIM], settings: {enabled: true}};
+        if (outcome === 'pending') return new Promise(resolve => finish = resolve);
+        if (outcome === 'reject') throw Error('reply lost');
+        return outcome === 'success' ? {ok: true, execution: 'executed'}
+          : {ok: false, errorCode: 'ACTION_FAILED', execution: outcome};
+      }});
+      await world.viewer.ask({call: 'task_state', sessionId: 'task-1'});
+      failRead = true;
+      // Binding returns a direct mutation error before reading state; retain that evidence.
+      if (call === 'task_bind' && outcome !== 'success') continue;
+      const response = await world.viewer.ask({call, sessionId: 'task-1', udid: 'SIM-1'});
+      assert.deepEqual(plain(response), {ok: false, errorCode: 'TASK_BINDINGS_UNREADABLE', execution: 'unknown'}, `${call}/${outcome}`);
+      const read = await world.viewer.ask({call: 'task_state', sessionId: 'task-1'});
+      assert.deepEqual(plain(read), {ok: false, errorCode: 'TASK_BINDINGS_UNREADABLE', execution: 'not_executed'}, 'pure reads retain their own execution');
+      if (finish) {finish({ok: false, errorCode: 'LATE_FAILURE', execution: 'unknown'}); await settle();}
+      failRead = false;
+      const recovered = await world.viewer.ask({call: 'task_state', sessionId: 'task-1'});
+      assert.equal(recovered.ok, true);
+      if (call !== 'task_bind' && outcome !== 'success') {
+        assert.equal(recovered.operation.state, 'failed');
+        assert.equal(recovered.operation.execution, ['not_executed', 'executed'].includes(outcome) ? outcome : 'unknown');
+      }
+      assert.equal((await world.viewer.ask({call: 'task_state', sessionId: 'task-1'})).operation, undefined);
+      assert.equal(world.provider.calls.filter(r => ['boot', 'settings_shutdown', 'settings_restart', 'task_bind'].includes(r.method)).length, 1);
+      assert.equal(world.viewer.calls.some(r => ['boot', 'settings_shutdown', 'settings_restart', 'task_bind'].includes(r.method)), false);
+    }
+  }
 });

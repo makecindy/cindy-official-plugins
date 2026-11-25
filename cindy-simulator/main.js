@@ -239,7 +239,9 @@ async function remoteServe(d) {
       : worker('settings_shutdown', {udid:d.udid}));
   } else if (d.call !== 'task_state') return {ok:false, errorCode:'UNSUPPORTED', execution:'not_executed'};
   const s = await worker('remote_task_state', {_task:d.sessionId, _locale:locale});
-  if (!s.ok) return failed(s);
+  // A failed observation cannot prove that the preceding mutation did not run.
+  // Keep its operation entry for a later read; pure reads retain their own error.
+  if (!s.ok) return failed(d.call === 'task_state' ? s : {...s, execution:'unknown'});
   const op = remoteOps.get(d.sessionId);
   // A failure is told once; the page then shows the device as it is.
   if (op && op.state !== 'running') remoteOps.delete(d.sessionId);

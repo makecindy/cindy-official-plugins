@@ -445,3 +445,41 @@ Required repository suites and simulator aggregate: 934 passed, 0 failed
 (77.00 seconds). JavaScript syntax, whitespace and preflight checks passed.
 The updated package was not installed; real dual-computer memory-mode restart
 acceptance remains outstanding under the existing user authorization.
+
+## Round 17 post-operation read checkpoint (2026-11-25)
+
+Invariant: execution evidence describes the requested operation, never the
+follow-up task-state read. The worker owns its operation outcome; the task-state
+worker owns only observation. remoteServe must project a failed observation as
+unknown for an operation request. Standalone task_state keeps its read error.
+The existing remoteOps entry remains available for a later successful read;
+failed observation does not consume terminal outcomes or repeat the operation.
+
+| Request / event | Follow-up read fails | Later read recovers |
+| --- | --- | --- |
+| Boot / shutdown / restart dispatched, running or completed | unknown; inspect remote device | Deliver existing terminal result; never dispatch again |
+| Worker operation failed with any execution evidence | unknown observation response, preserve operation entry | Deliver original operation execution evidence once |
+| Task binding succeeded | unknown observation response | Read binding without binding again |
+| Standalone task_state | Its own read failure remains not_executed | Read only |
+| Invalid/refused operation before dispatch | Existing operation rejection | No operation to replay |
+
+This recurrence comes from composing mutation and observation failures through
+one implicit result. Shrink that ambiguity at the existing remoteServe boundary:
+read failure has one explicit projection based on request kind, with no new
+state, queue, lock, cache, retry or persistence. Operation-owned terminal delivery
+and the approved UI formatter remain the sole owners of their existing roles.
+Audit covers all three long operations plus binding, completion before and after
+read failure, explicit failure, rejection, and pure reads. Tests must fail on
+1b72b4cc and verify actual provider-to-viewer results through the bilingual page.
+
+The transport regression covers 19 dispatched-operation/read-failure cases:
+three long operations × six completion outcomes, plus successful binding.
+The bilingual page fixtures additionally consume actual provider/channel replies
+for successful boot and shutdown followed by failed reads, showing conservative
+copy and enabled actions. All three regressions fail against 1b72b4cc's main.js.
+Forge validated and packaged 0.3.61 successfully, without installation or restart.
+Required repository suites and simulator aggregate: 935 passed, 0 failed
+(80.08 seconds), including the updated bilingual integrated regressions.
+Focused transport/page suite: 17 passed before the final integrated page addition;
+the full aggregate above validates that addition. Syntax and whitespace passed.
+No new dual-computer runtime result is claimed; existing authorization persists.
