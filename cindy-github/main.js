@@ -2682,7 +2682,8 @@ async function readKv(requireObject) {
   return {};
 }
 
-var PR_AGENT_KINDS = { cc: 1, codex: 1, pi: 1 };
+// Keep this in sync with the Host scheduler routes accepted by the model picker.
+var PR_AGENT_KINDS = { acp: 1, cc: 1, codex: 1, pi: 1 };
 
 /**
  * 宿主选择器返回的完整组合(引擎、来源、模型、档位、速度),只认合法形状。卡内下拉框还可能带运行位置

@@ -86,7 +86,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.35');
+  assert.equal(manifest.version, '1.5.36');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -1340,6 +1340,26 @@ test('card settings pick the auto-follow model with the host picker and hand its
   await runtime.click(cardId, 'prset:modelPick', { modelSelection: codex });
   assert.equal(picks.length, 2);
   assert.deepEqual(runtime.kv.prCard.followModel, { route: codex, label: 'gpt-5.6' });
+});
+
+test('plugin-engine follow models survive card validation and reach the scheduler route', async () => {
+  const route = { agentKind: 'acp', providerId: 'plugin-provider', model: 'plugin-model', effort: 'high', fastMode: false };
+  const runtime = createPrRuntime({
+    github: prGraphql({ number: 7 }),
+    pickModel: async () => ({ ok: true, route }),
+    agentModels: [{ id: 'plugin-model', name: 'Plugin engine', providerId: 'plugin-provider', providerName: 'ACP' }],
+  });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' })).reply.result.card_id;
+  await runtime.click(cardId, 'prui:settings');
+  await runtime.click(cardId, 'prset:model');
+  assert.deepEqual(runtime.kv.prCard.followModel, { route, label: 'Plugin engine · ACP' });
+
+  await runtime.tool({ card_id: cardId, pr: '7' });
+  await runtime.click(cardId, 'pr:follow');
+  assert.deepEqual(runtime.agentRuns.at(-1).event.follow_model, {
+    model_agent_kind: 'acp', provider_id: 'plugin-provider', model: 'plugin-model', effort: 'high', fast_mode: false,
+    label: 'Plugin engine · ACP',
+  });
 });
 
 // Remote providers: the card dropdown can pick a model on another computer or from a shared provider.
