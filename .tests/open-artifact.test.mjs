@@ -6,7 +6,7 @@ import test from 'node:test';
 
 const source = await readFile(new URL('../open-artifact/main.js', import.meta.url), 'utf8');
 
-function harness({ accepted = true, openDuringCall = true, confirmation = { ok: true, confirmed: true } } = {}) {
+function harness({ accepted = true, openDuringCall = true, confirmation = { ok: true, confirmed: true }, nodeResponse } = {}) {
   let onMessage;
   const calls = [];
   const cindy = {
@@ -21,6 +21,7 @@ function harness({ accepted = true, openDuringCall = true, confirmation = { ok: 
     node: {
       async request(frame) {
         calls.push(['node', frame]);
+        if (frame.method === 'artifact/call' && nodeResponse) return nodeResponse();
         if (frame.method === 'artifact/call' && openDuringCall) {
           await onMessage({
             type: 'event', name: 'node-notification', method: 'artifact/open',
@@ -37,6 +38,33 @@ function harness({ accepted = true, openDuringCall = true, confirmation = { ok: 
   });
   return { calls, onMessage };
 }
+
+test('cloud publishing reports only a confirmed remote receipt as published', async () => {
+  for (const [nodeResponse, status] of [
+    [() => { throw new Error('Runtime disconnected'); }, 'unknown'],
+    [() => ({ ok: false, errorCode: 'TIMEOUT' }), 'unknown'],
+    [() => ({ ok: false, message: 'Workspace unavailable', data: { publicationStatus: 'not_executed' } }), 'not_executed'],
+    [() => ({ ok: true, result: { error: { message: 'Remote unavailable' } } }), 'unknown'],
+    [() => ({ ok: true, result: { cloud: { remote: 'other', view_url: 'https://example.test/work' } } }), 'unknown'],
+    [() => ({ ok: true, result: { cloud: { remote: 'my-cloud', view_url: 'https://example.test/work' } } }), 'published'],
+  ]) {
+    const { calls, onMessage } = harness({ nodeResponse });
+    await onMessage({
+      type: 'tool-call', tool: 'artifact', callId: 'share', args: {
+        action: 'share', cloud: 'my-cloud', url: 'open-artifact://artifact/art_test',
+        session_context: { session_id: 'task-one', workdir: '/project', workdir_is_local: true },
+      },
+    });
+    const reply = calls.at(-1)[1];
+    assert.equal(reply.result?.publicationStatus, status);
+    assert.equal(reply.ok, status === 'published');
+    if (status === 'unknown') {
+      assert.equal(reply.errorCode, 'ARTIFACT_SHARE_UNKNOWN');
+      assert.match(reply.message, /check the remote/i);
+    }
+    assert.equal(calls.filter(([type]) => type === 'node').length, 1);
+  }
+});
 
 test('an adoption requires a positive host confirmation for the destination task', async () => {
   for (const [confirmation, expected] of [

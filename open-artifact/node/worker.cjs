@@ -188,6 +188,11 @@ async function checkArtifactArguments(harness, tool, args, caller) {
 }
 
 async function run({ method, params, id }) {
+  let publicationStatus = params?.tool === 'Artifact' && params.args?.action === 'share' &&
+    params.args.cloud !== undefined ? 'not_executed' : null;
+  const fail = (code, message) => send({ id, error: {
+    code, message, ...(publicationStatus ? { data: { publicationStatus } } : {}),
+  } });
   try {
     if (method === 'host/complete') {
       hostRequests.get(params.id)?.(params.answer);
@@ -197,7 +202,7 @@ async function run({ method, params, id }) {
     if (method !== 'artifact/call' || !allowedTools.has(params?.tool) ||
         typeof params.session !== 'string' || typeof params.workspace !== 'string' ||
         !path.isAbsolute(params.workspace)) {
-      send({ id, error: { code: -32602, message: 'Invalid Open Artifact request' } });
+      fail(-32602, 'Invalid Open Artifact request');
       return;
     }
     const caller = { session: params.session, workspace: params.workspace };
@@ -205,7 +210,11 @@ async function run({ method, params, id }) {
     try {
       args = await workspaceArguments(params.tool, params.args, caller.workspace);
     } catch {
-      send({ id, error: { code: -32602, message: 'Use files and directories inside the task workspace.' } });
+      fail(-32602, 'Use files and directories inside the task workspace.');
+      return;
+    }
+    if (publicationStatus && !args.url) {
+      fail(-32602, 'Choose an artifact to publish.');
       return;
     }
     const harness = await connect(params.scope);
@@ -213,7 +222,7 @@ async function run({ method, params, id }) {
     try {
       if (!adopting) args = await checkArtifactArguments(harness, params.tool, args, caller);
     } catch {
-      send({ id, error: { code: -32602, message: 'The artifact or file is unavailable in the task workspace.' } });
+      fail(-32602, 'The artifact or file is unavailable in the task workspace.');
       return;
     }
     if (sessions.get(caller.session) !== caller.workspace) {
@@ -229,6 +238,7 @@ async function run({ method, params, id }) {
       ? setInterval(() => send({ method: 'artifact/progress', params: {} }), 45000)
       : undefined;
     try {
+      if (publicationStatus) publicationStatus = 'unknown';
       const result = adopting
         ? await adopt(harness, args, caller)
         : await harness.call(params.tool, args, caller);
@@ -239,7 +249,7 @@ async function run({ method, params, id }) {
   } catch (error) {
     const message = error.message === 'Open Artifact runtime integrity check failed'
       ? error.message : 'Open Artifact runtime or tool unavailable';
-    send({ id, error: { code: -32000, message } });
+    fail(-32000, message);
   }
 }
 

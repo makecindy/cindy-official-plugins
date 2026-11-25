@@ -79,8 +79,12 @@ cindy.onHostMessage(async msg => {
   if (msg.type !== 'tool-call' || !Object.hasOwn(tools, msg.tool)) return;
   const { session_context: ctx, ...args } = msg.args ?? {};
   const reply = data => cindy.send({ type: 'tool-result', callId: msg.callId, ...data });
+  const cloudPublication = msg.tool === 'artifact' && args.action === 'share' && args.cloud !== undefined;
   if (!ctx?.session_id || !ctx.workdir_is_local || !ctx.workdir || ctx.workdir_is_read_only) {
-    await reply({ ok: false, errorCode: 'LOCAL_WORKSPACE_REQUIRED', message: 'Open Artifact needs a writable local task workspace.' });
+    await reply({
+      ok: false, errorCode: 'LOCAL_WORKSPACE_REQUIRED', message: 'Open Artifact needs a writable local task workspace.',
+      ...(cloudPublication ? { result: { publicationStatus: 'not_executed' } } : {}),
+    });
     return;
   }
   const session = ctx.session_id;
@@ -89,14 +93,37 @@ cindy.onHostMessage(async msg => {
     void cindy.send({ type: 'tool-progress', callId: msg.callId }).catch(() => {});
   }, 45000) : undefined;
   let result;
+  let forwarded = false;
   try {
+    const scope = await getScope();
+    forwarded = true;
     result = await request('artifact/call', {
-      scope: await getScope(), session, workspace: ctx.workdir, tool: tools[msg.tool], args,
+      scope, session, workspace: ctx.workdir, tool: tools[msg.tool], args,
     }, longWait ? { timeoutMs: 120000, maxTotalMs: 630000 } : { timeoutMs: 120000 });
   } catch {
     result = null;
   } finally {
     if (progress !== undefined) clearInterval(progress);
+  }
+  if (cloudPublication) {
+    const output = result?.ok ? result.result : undefined;
+    if (!output?.error && output?.cloud?.remote === args.cloud &&
+        typeof output.cloud.view_url === 'string' && output.cloud.view_url) {
+      await reply({ ok: true, result: { ...output, publicationStatus: 'published' } });
+    } else if (!forwarded || (!result?.ok && result?.data?.publicationStatus === 'not_executed')) {
+      await reply({
+        ok: false, errorCode: 'ARTIFACT_SHARE_NOT_EXECUTED',
+        message: result?.message ?? 'Open Artifact could not start the cloud publication.',
+        result: { publicationStatus: 'not_executed' },
+      });
+    } else {
+      await reply({
+        ok: false, errorCode: 'ARTIFACT_SHARE_UNKNOWN',
+        message: 'The artifact may have been published. Check the remote or the Share panel before trying again.',
+        result: { publicationStatus: 'unknown' },
+      });
+    }
+    return;
   }
   if (!result?.ok) {
     await reply({ ok: false, errorCode: 'ARTIFACT_CALL_FAILED', message: result?.message ?? 'Open Artifact could not complete the request.' });
