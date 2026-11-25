@@ -144,7 +144,7 @@ function guideArguments(values) {
   const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
   const source = guide.match(/```js\n(\/\/ Argument lists for the existing task execution tool\.[\s\S]*?)\n```/)?.[1];
   assert.ok(source, 'the recovery guide must define argument lists, not shell command templates');
-  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, shallowStateArgs: typeof shallowStateArgs === "undefined" ? undefined : shallowStateArgs, shallowPathArgs: typeof shallowPathArgs === "undefined" ? undefined : shallowPathArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs })', values);
+  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, encodingConfigArgs: typeof encodingConfigArgs === "undefined" ? undefined : encodingConfigArgs, hookConfigArgs: typeof hookConfigArgs === "undefined" ? undefined : hookConfigArgs, hookListArgs: typeof hookListArgs === "undefined" ? undefined : hookListArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, shallowStateArgs: typeof shallowStateArgs === "undefined" ? undefined : shallowStateArgs, shallowPathArgs: typeof shallowPathArgs === "undefined" ? undefined : shallowPathArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs })', values);
 }
 
 test('recovery guide passes dynamic refs, remotes and paths as literal argument data', () => {
@@ -251,7 +251,9 @@ function fixture(t) {
 
 quotaTest('same failure budget survives changed SHAs, observation resets, casing and follow-up restarts', async t => {
   const fx = fixture(t);
-  assert.equal((await fx.run(['--ci-retry-status'])).result.available, true);
+  const unused = (await fx.run(['--ci-retry-status'])).result;
+  assert.equal(unused.available, true);
+  assert.equal(unused.receipt_flush_confirmed, false);
   assert.equal(fs.existsSync(fx.stateDir), false, 'status is read-only');
   assert.equal(fs.existsSync(fx.retryDir), false, 'unused status creates no receipt or directory');
   const first = await fx.run(['--reserve-ci-retry', oldHead]);
@@ -259,6 +261,7 @@ quotaTest('same failure budget survives changed SHAs, observation resets, casing
   assert.equal(first.result.reason, 'ci-retry-reserved');
   assert.equal(first.result.reservation.sourceHead, oldHead);
   assert.equal(first.result.reservation_only, true, 'budget does not assert safety or grant permission');
+  assert.equal(first.result.receipt_flush_confirmed, true);
   const file = stateFilePath(fx.stateDir, 'example/repo', 42);
   fs.mkdirSync(fx.stateDir, { recursive: true });
   fs.writeFileSync(file, '{}');
@@ -268,10 +271,42 @@ quotaTest('same failure budget survives changed SHAs, observation resets, casing
   assert.equal(repeated.code, 1);
   assert.match(repeated.stderr, /already consumed/);
   assert.equal((await fx.run(['--reserve-ci-retry', newHead], 'https://github.com/EXAMPLE/REPO/pull/42')).code, 1);
-  assert.equal((await fx.run(['--ci-retry-status'])).result.reservation.sourceHead, oldHead);
+  const consumed = (await fx.run(['--ci-retry-status'])).result;
+  assert.equal(consumed.reservation.sourceHead, oldHead);
+  assert.equal(consumed.receipt_flush_confirmed, true);
   assert.equal((await fx.run(['--ci-retry-status'], 'https://github.com/example/renamed/pull/42')).result.available, false, 'repository rename preserves PR identity');
   assert.equal((await fx.run(['--reserve-ci-retry', newHead], 'https://github.com/new-owner/transferred/pull/42')).code, 1, 'repository transfer cannot restore the budget');
   assert.notEqual(ciRetryFilePath(fx.stateDir, prNodeId, failure), ciRetryFilePath(fx.stateDir, 'PR_anotherImmutableId', failure));
+});
+
+test('empty quota status does not claim receipt flush support when file flush is unavailable', t => {
+  const fx = fixture(t), loader = path.join(fx.root, 'no-file-flush.mjs');
+  fs.writeFileSync(loader, `import fs from 'node:fs';
+const original = fs.fsyncSync;
+fs.fsyncSync = fd => {
+  if (fs.fstatSync(fd).isFile()) throw Object.assign(new Error('file flush unavailable'), { code: 'ENOTSUP' });
+  return original(fd);
+};
+const { runGate } = await import(process.argv[2]);
+process.exitCode = await runGate(process.argv.slice(3));
+`);
+  const run = flags => spawnSync(process.execPath, [loader, pathToFileURL(gate).href, ...fx.args(flags)], { env: fx.env, encoding: 'utf8' });
+  const initial = run(['--ci-retry-status']);
+  assert.equal(initial.status, 0, initial.stderr);
+  const status = JSON.parse(initial.stdout);
+  assert.equal(status.pr_consumed, 0);
+  assert.equal(status.available, true, 'availability describes quota only');
+  assert.equal(status.receipt_flush_confirmed, false, 'no file was flushed; directory existence is not proof');
+  assert.match(status.detail, /not.*confirmed|not.*exercised/i);
+  assert.equal(fs.existsSync(fx.retryDir), false, 'status creates no probe or receipt');
+  const reserved = run(['--reserve-ci-retry', oldHead]);
+  assert.equal(reserved.status, 1);
+  assert.match(reserved.stderr, /durability could not be confirmed/);
+  assert.doesNotMatch(reserved.stdout, /ci-retry-reserved/);
+  const rechecked = run(['--ci-retry-status']);
+  assert.equal(rechecked.status, 1, 'stored but unflushable evidence cannot become confirmed');
+  assert.doesNotMatch(rechecked.stdout, /"receipt_flush_confirmed":true/);
+  assert.equal(fs.existsSync(fx.stateDir), false, 'no ordinary gate state or success trace');
 });
 
 quotaTest('two distinct failures consume the PR total and a third stops regardless of diagnosis', async t => {
@@ -940,6 +975,74 @@ test('CI recovery excludes hooks with extra remote writes before quota and amend
       assert.ok(/post-commit.*post-rewrite.*reference-transaction/.test(guide), 'scope must include all amend/ref hooks');
     });
   }
+});
+
+test('configuration-registered hooks are discovered even with an empty traditional hook directory', {
+  skip: (() => { const result = spawnSync('git', ['hook', '-h'], { encoding: 'utf8' }); return (result.stdout + result.stderr).includes('git hook list') ? false : 'Git hook list unavailable'; })(),
+}, t => {
+  const fx = fixture(t), work = path.join(fx.root, 'work'), remote = path.join(fx.root, 'extra.git');
+  const global = path.join(fx.root, 'global'), included = path.join(fx.root, 'included');
+  fs.writeFileSync(global, ''); fs.writeFileSync(included, '');
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
+  const git = (cwd, args, vars = {}) => execFileSync('git', args, { cwd, env: { ...env, ...vars }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git(fx.root, ['init', '--bare', '-b', 'main', remote]);
+  fs.mkdirSync(work); git(work, ['init', '-b', 'main']);
+  for (const [key, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false']]) git(work, ['config', key, value]);
+  git(work, ['remote', 'add', 'hook-sink', remote]);
+  fs.writeFileSync(path.join(work, 'code.txt'), 'unchanged tree\n');
+  git(work, ['add', 'code.txt']); git(work, ['commit', '-s', '-m', 'original'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' });
+  const original = git(work, ['rev-parse', 'HEAD']);
+  git(work, ['config', '--file', included, 'hook.configured-push.event', 'post-commit']);
+  git(work, ['config', '--file', included, 'hook.configured-push.command', 'git push --no-follow-tags --recurse-submodules=no hook-sink HEAD:refs/heads/hook-effect']);
+  git(work, ['config', '--file', global, 'include.path', included]);
+  const directory = git(work, ['rev-parse', '--path-format=absolute', '--git-path', 'hooks']);
+  assert.equal(fs.readdirSync(directory).some(n => !n.endsWith('.sample')), false);
+  assert.match(git(work, ['hook', 'list', '--show-scope', 'post-commit']), /global\s+configured-push/);
+  // Native counterexample only: the old directory-only audit misses an extra
+  // write during amend. All destinations here are this test's disposable files.
+  git(work, ['commit', '--amend', '--no-edit'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:01Z' });
+  assert.notEqual(git(work, ['rev-parse', 'HEAD']), original);
+  assert.equal(git(remote, ['rev-parse', 'refs/heads/hook-effect']), git(work, ['rev-parse', 'HEAD']));
+  const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+    gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+  assert.ok(Array.isArray(plan.hookListArgs), 'enumerate effective hooks instead of only scanning a directory');
+  for (const event of ['pre-commit', 'prepare-commit-msg', 'commit-msg', 'post-commit', 'post-rewrite', 'reference-transaction', 'post-index-change', 'pre-auto-gc', 'pre-push']) {
+    assert.ok(plan.hookListArgs.some(argv => argv.at(-1) === event), event);
+  }
+  const listed = git(work, plan.hookListArgs.find(argv => argv.at(-1) === 'post-commit'));
+  assert.match(listed, /configured-push/);
+  assert.match(git(work, plan.hookConfigArgs), /configured-push/);
+  assert.equal(fs.existsSync(fx.retryDir), false, 'counterexample never consumes quota');
+});
+
+test('recovery rejects declared or mismatched message encodings before quota or amend', async t => {
+  for (const originalEncoding of ['ISO-8859-1', 'UTF-8']) await t.test(originalEncoding, t => {
+    const fx = fixture(t), work = path.join(fx.root, 'work'); fs.mkdirSync(work);
+    const global = path.join(fx.root, 'global'); fs.writeFileSync(global, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
+    const git = (args, vars = {}, encoding = 'utf8') => execFileSync('git', args, { cwd: work, env: { ...env, ...vars }, encoding, stdio: ['ignore', 'pipe', 'pipe'] });
+    git(['init', '-b', 'main']);
+    for (const [key, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false'], ['i18n.commitEncoding', originalEncoding]]) git(['config', key, value]);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'unchanged\n'); git(['add', 'code.txt']);
+    const message = path.join(fx.root, 'message');
+    fs.writeFileSync(message, Buffer.from('intent caf\u00e9\n', originalEncoding === 'UTF-8' ? 'utf8' : 'latin1'));
+    git(['commit', '-s', '-F', message], { GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' });
+    const original = git(['rev-parse', 'HEAD']).trim(), before = git(['cat-file', 'commit', original], {}, 'buffer');
+    git(['config', 'i18n.commitEncoding', originalEncoding === 'UTF-8' ? 'ISO-8859-1' : 'UTF-8']);
+    const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    // Counterexample of the old flow only. Never consumes quota or pushes.
+    assert.match(git(plan.encodingConfigArgs), /i18n[.]commitencoding/i);
+    git(plan.amendArgs, { GIT_COMMITTER_DATE: '2026-01-01T00:00:01Z' });
+    const after = git(['cat-file', 'commit', 'HEAD'], {}, 'buffer');
+    const rawMessage = bytes => bytes.subarray(bytes.indexOf(Buffer.from('\n\n')) + 2);
+    assert.notDeepEqual(rawMessage(after), rawMessage(before), 'no-edit/verbatim alone does not prevent recoding');
+    assert.equal(fs.existsSync(fx.retryDir), false);
+    const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    assert.ok(/Before consuming quota or amending, reject any encoding header/.test(guide), 'declared encodings stop before quota');
+    assert.ok(/strictly valid UTF-8/.test(guide), 'raw message must be valid UTF-8');
+    assert.ok(/i18n\.commitEncoding.*i18n\.logOutputEncoding/.test(guide), 'inspect both commit and display encodings');
+  });
 });
 
 test('CI recovery uses raw objects and excludes replace refs and legacy grafts', async t => {

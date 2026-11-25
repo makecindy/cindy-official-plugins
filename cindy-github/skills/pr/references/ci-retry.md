@@ -51,6 +51,11 @@ const reserveArgs = [gatePath, prUrl, '--state-dir', observationStateDir,
 const statusArgs = [gatePath, prUrl, '--state-dir', observationStateDir, '--ci-retry-status',
   '--ci-retry-id', prNodeId, '--ci-retry-failure', diagnosisPath, '--json'];
 const hooksPathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'hooks'];
+const hookConfigArgs = ['--no-replace-objects', 'config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^hook[.]'];
+const encodingConfigArgs = ['--no-replace-objects', 'config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^i18n[.](commitencoding|logoutputencoding)$'];
+const hookListArgs = ['pre-commit', 'prepare-commit-msg', 'commit-msg', 'post-commit',
+  'post-rewrite', 'reference-transaction', 'post-index-change', 'pre-auto-gc', 'pre-push']
+  .map(event => ['--no-replace-objects', 'hook', 'list', '--show-scope', '-z', event]);
 const graftPathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'info/grafts'];
 const replaceRefsArgs = ['--no-replace-objects', 'for-each-ref', '--format=%(refname)', 'refs/replace/'];
 const shallowStateArgs = ['--no-replace-objects', 'rev-parse', '--is-shallow-repository'];
@@ -123,6 +128,27 @@ Do not disable, rename, chmod, rewrite or bypass hooks to become eligible.
 Ordinary authorized fixes remain governed by their repository rules; this
 restriction is for the optional CI-only recovery, not normal contribution.
 
+The effective hook set includes configuration-registered hooks, not only files.
+Before quota/reservation, amend and push, read `hookConfigArgs` using the same
+checkout/environment as the intended Git operation. Preserve origin, scope and
+all multi-values, including conditional includes, worktree/global/system config
+and command-scope settings. Inspect command, event and enabled values without
+executing command strings. With Git 2.54+, use every `hookListArgs` event to have
+Git resolve effective registration order, last-command-wins, event resets and
+disabled entries; include any additional event delegated commands can invoke.
+Git list returns 1 for a known event with no hooks and its explicit no-hooks
+diagnostic; that is different from an unsupported command, config parse failure
+or unreadable include. Inspect every listed configured command and delegated
+binary under the same policy as directory hooks. Do not eval a command or run
+`git hook run` to discover whether it is safe. If enumeration is unsupported,
+continue with legacy directory inspection only when the full successful config
+read establishes no registered hooks; otherwise stop before quota/amend/push.
+Never unset configuration or disable a registered hook to gain eligibility.
+Record and compare the effective lists and complete configuration fingerprints
+at every execution boundary; a new/changed/unverifiable entry stops recovery.
+Reports use hashes and redacted origin/scope; never retain embedded credentials.
+[Git hook 2.54](https://git-scm.com/docs/git-hook/2.54.0) defines these semantics.
+
 Inspected standard Git LFS and DCO hooks may run normally. For a repository DCO
 hook, compare its entire content with the trusted source at the pinned original
 commit, review that source, and require the original message already to contain
@@ -171,6 +197,19 @@ respect continuations, and record tree, the **ordered complete parent list**,
 author and message/trailers from that payload. After amend compare the raw new
 payload against this same original baseline, not two replacement-aware views
 or `%P`/symbolic lookups. Signature identity checks remain mandatory.
+
+Before consuming quota or amending, reject any encoding header in the original
+raw header block. Require a strictly valid UTF-8 raw message and complete reads
+of `encodingConfigArgs`: i18n.commitEncoding and i18n.logOutputEncoding must both
+be unset or the known UTF-8/UTF8 aliases (case-insensitive). Non-UTF-8, conflicting,
+unreadable or ambiguous encoding settings stop before reservation. Read through
+conditional includes and all effective scopes; do not infer the source encoding
+from a displayed/replacement-decoded string. The existing executor must preserve
+raw bytes for validation. Do not change configuration, pass a one-off encoding
+override or amend as a probe to make an incompatible head qualify. Recheck the
+same raw header and encoding configuration immediately before amend and push.
+`--no-edit` and `--cleanup=verbatim` do not stop Git recoding an existing message;
+the later raw-message comparison remains required for supported UTF-8 inputs.
 
 | Event | Action |
 | --- | --- |
@@ -270,6 +309,16 @@ Successful OS acknowledgements and process-restart tests are not hardware
 power-loss evidence. Microsoft documents write-through metadata behavior in
 [CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew#caching-behavior).
 
+Status separates unused quota from confirmed receipt I/O. `available: true`
+means a quota slot is unused; it does not establish storage capability.
+`receipt_flush_confirmed: false` with empty slots means no receipt-file flush
+has been exercised, even if an ancestor directory exists. Status creates no
+probe file or directory. A true value means stored receipt evidence was read
+and flushed successfully, not that a future write is guaranteed. A reservation
+must itself return `receipt_flush_confirmed: true` and its matching receipt
+after successful file flush before any Git operation; any failure still stops
+recovery without a refund, alternate store or automatic retry.
+
 Retry receipts are stored separately in durable user data, never
 in that cache: `$XDG_STATE_HOME/cindy-pr/ci-retry` when set to an absolute path;
 otherwise Windows uses `%LOCALAPPDATA%/Cindy/pr-recovery`, macOS uses
@@ -360,7 +409,7 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    Use the selected Node executable with `reserveArgs` above, preserving each
    argument boundary. This remains a budget operation, not a Git executor.
 
-   Require exit 0, `reason: "ci-retry-reserved"` and the matching
+   Require exit 0, `reason: "ci-retry-reserved"`, `receipt_flush_confirmed: true` and the matching
    `reservation.sourceHead` and normalized `reservation.failure`. The return
    includes `pr_limit: 2`, `pr_consumed` and `pr_remaining`. A status result with
    `available: false` forbids a new reservation, including exhaustion by different

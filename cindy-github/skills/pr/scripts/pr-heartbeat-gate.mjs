@@ -1614,8 +1614,9 @@ async function gateMain(args, ctx) {
   // This is a budget receipt only; the agent must read live plugin preferences and
   // establish every safety condition in references/ci-retry.md before any Git write.
   if (args.ciRetryRequested) {
-    // A status result must not advertise usable quota on an unsupported store.
-    // Probe the existing ancestor without creating an unused receipt directory.
+    // Directory existence is not a file-flush capability probe on Windows.
+    // Keep status read-only and report whether returned receipt evidence was
+    // actually flushed; the reservation itself must flush before any Git write.
     ciRetryReceiptIO.confirmParent(args.ciRetryDir);
     // A PR node_id survives repository renames/transfers and URL aliases.
     // The agent obtains it from the live PR, not from the mutable repository name.
@@ -1633,10 +1634,15 @@ async function gateMain(args, ctx) {
     emit(args, {
       exitCode: EXIT_PASS, repo: args.repo, number: args.number,
       reason: args.reserveCiRetry ? 'ci-retry-reserved' : 'ci-retry-status',
-      detail: !args.reserveCiRetry && consumed === CI_RETRY_PR_LIMIT
+      detail: !args.reserveCiRetry && consumed === 0
+        ? 'Budget only: quota is unused, but receipt-file flush has not been confirmed. A successful reservation must confirm its file flush before any Git write. Read live pr_follow_settings and follow references/ci-retry.md.'
+        : !args.reserveCiRetry && consumed === CI_RETRY_PR_LIMIT
         ? 'PR total limit of 2 consumed. Stop and report; no new amend or push regardless of diagnosis. Verify any previous outcome.'
         : 'Budget only, not authorization. Read live pr_follow_settings and follow references/ci-retry.md before Git writes.',
       available: reservation === null && consumed < CI_RETRY_PR_LIMIT,
+      // A validated stored slot was read through the flushing I/O boundary.
+      // This does not promise that a future new-slot write will succeed.
+      receipt_flush_confirmed: consumed > 0,
       pr_limit: CI_RETRY_PR_LIMIT, pr_consumed: consumed, pr_remaining: CI_RETRY_PR_LIMIT - consumed,
       reservation, reservation_only: true,
     }, out);
