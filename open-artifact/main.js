@@ -129,12 +129,11 @@ cindy.onHostMessage(async msg => {
         message: result?.message ?? (cloudPublication ? 'Open Artifact could not start the cloud publication.' : 'Open Artifact could not start the write.'),
         result: { ...feedback, [statusField]: 'not_executed' },
       });
-    } else if (msg.tool === 'artifact' && action === 'publish' && args.url &&
-        output?.error?.code === 'conflict' && output.url === args.url && output.current) {
-      // The bundled file writer checks every precondition before writing any file.
+    } else if (statusField === 'executionStatus' && output?.executionStatus === 'not_executed' &&
+        output.error?.code === 'conflict' && output.current) {
       await reply({
         ok: false, errorCode: 'OPEN_ARTIFACT_ERROR', message: output.error.message,
-        result: { ...output, executionStatus: 'not_executed' },
+        result: output,
       });
     } else {
       await reply({

@@ -4,7 +4,7 @@
   "id": "open-artifact",
   "name": "Open Artifact",
   "author": "GaoWeiLiuXD",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "icon": "assets/icon.png",
   "description": "Create, edit, and comment on Open Artifact work in the task sidebar.",
   "whenToUse": "Create or edit a deck, design, whiteboard, spreadsheet, dashboard, document, or animation as a live artifact.",

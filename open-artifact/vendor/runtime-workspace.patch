@@ -134,7 +134,7 @@ index c791992..936a7de 100644
 +  }
 +
 diff --git a/packages/daemon/src/tools.ts b/packages/daemon/src/tools.ts
-index 2236f23..0169e35 100644
+index 2236f23..81bbb7e 100644
 --- a/packages/daemon/src/tools.ts
 +++ b/packages/daemon/src/tools.ts
 @@ -46,0 +47 @@ import {
@@ -193,57 +193,69 @@ index 2236f23..0169e35 100644
 -        const current = this.hashOf(inside(record.root, clean));
 +        const requested = inside(record.root, clean);
 +        const current = this.hashOf(directory?.resolve(requested) ?? requested);
-@@ -939 +966 @@ export class Tools {
+@@ -937,0 +965 @@ export class Tools {
++          executionStatus: 'not_executed',
+@@ -939 +967 @@ export class Tools {
 -          current: Object.fromEntries(conflicts.map((path) => [path, this.fileState(record, path)])),
 +          current: Object.fromEntries(conflicts.map((path) => [path, this.fileState(record, path, directory)])),
-@@ -982 +1009 @@ export class Tools {
+@@ -982 +1010 @@ export class Tools {
 -  private fileState(record: ArtifactRecord, path: string): Record<string, unknown> {
 +  private fileState(record: ArtifactRecord, path: string, directory: WorkspaceDirectory | null): Record<string, unknown> {
-@@ -984 +1011 @@ export class Tools {
+@@ -984 +1012 @@ export class Tools {
 -      return this.readOne(record, path, MAX_READ);
 +      return this.readOne(record, path, MAX_READ, directory);
-@@ -990 +1017 @@ export class Tools {
+@@ -990 +1018 @@ export class Tools {
 -  private listFiles(root: string, hashes = false): FileEntry[] {
 +  private listFiles(root: string, hashes = false, directory: WorkspaceDirectory | null = null): FileEntry[] {
-@@ -996 +1023 @@ export class Tools {
+@@ -996 +1024 @@ export class Tools {
 -        entries = readdirSync(dir, { withFileTypes: true });
 +        entries = readdirSync(directory?.resolve(dir) ?? dir, { withFileTypes: true });
-@@ -1006 +1033,2 @@ export class Tools {
+@@ -1006 +1034,2 @@ export class Tools {
 -            const file = join(dir, e.name);
 +            const requested = join(dir, e.name);
 +            const file = directory?.resolve(requested) ?? requested;
-@@ -1020,2 +1048,3 @@ export class Tools {
+@@ -1020,2 +1049,3 @@ export class Tools {
 -  private readOne(record: ArtifactRecord, path: string, budget: number): Record<string, unknown> {
 -    const file = inside(record.root, path);
 +  private readOne(record: ArtifactRecord, path: string, budget: number, directory: WorkspaceDirectory | null): Record<string, unknown> {
 +    const requested = inside(record.root, path);
 +    const file = directory?.resolve(requested) ?? requested;
-@@ -1024 +1053 @@ export class Tools {
+@@ -1024 +1054 @@ export class Tools {
 -    if (stat.isDirectory()) return { path, files: this.listFiles(file, true) };
 +    if (stat.isDirectory()) return { path, files: this.listFiles(file, true, directory) };
-@@ -1044,0 +1074 @@ export class Tools {
+@@ -1044,0 +1075 @@ export class Tools {
 +    const directory = this.artifactFiles(record, caller);
-@@ -1056 +1086 @@ export class Tools {
+@@ -1056 +1087 @@ export class Tools {
 -          const one = this.readOne(record, path, budget);
 +          const one = this.readOne(record, path, budget, directory);
-@@ -1065,2 +1095,2 @@ export class Tools {
+@@ -1065,2 +1096,2 @@ export class Tools {
 -    if (args.path) return { ...this.readOne(record, args.path, MAX_READ), ...seen };
 -    const { owner, userEdits: _edits, remote, ...shown } = record;
 +    if (args.path) return { ...this.readOne(record, args.path, MAX_READ, directory), ...seen };
 +    const { owner, userEdits: _edits, remote, workspaceDirectory: _workspace, ...shown } = record;
-@@ -1077 +1107 @@ export class Tools {
+@@ -1077 +1108 @@ export class Tools {
 -      files: this.listFiles(record.root, true),
 +      files: this.listFiles(record.root, true, directory),
-@@ -1270,0 +1301,2 @@ export class Tools {
+@@ -1240,0 +1272,2 @@ export class Tools {
++      // The dispatcher assigns this proof. An action response cannot vouch for its own execution.
++      if (result.error && result.executionStatus === 'not_executed') delete result.executionStatus;
+@@ -1247,0 +1281,6 @@ export class Tools {
++      // A local data conflict reports the precondition state before any batch write.
++      if (name === 'open-artifact.db.write' && !forward && !location.remote &&
++          error instanceof OpenArtifactError && error.status === 409 && error.code === 'conflict' && error.current !== undefined) {
++        const { current, ...body } = errorBody(error);
++        return { error: body, current, executionStatus: 'not_executed' };
++      }
+@@ -1270,0 +1310,2 @@ export class Tools {
 +      const workspace = this.workspaceDirectory(caller);
 +      if (workspace) workspace.resolve(record.workspaceDirectory ? this.o.store.authorizedRoot(record) : record.root);
-@@ -1275 +1307,4 @@ export class Tools {
+@@ -1275 +1316,4 @@ export class Tools {
 -      const next = this.o.store.update(record.id, { owner: caller, agentSeenAt: now() });
 +      const next = this.o.store.update(record.id, {
 +        owner: caller, agentSeenAt: now(),
 +        ...(workspace && !record.workspaceDirectory ? { workspaceDirectory: workspace.identity } : {}),
 +      });
-@@ -1307 +1342,5 @@ export class Tools {
+@@ -1307 +1351,5 @@ export class Tools {
 -    const record = this.o.store.create({ root, type: typeId, typeSource: type?.scope ?? null, typeRelease: type?.version ?? null, owner: caller, title });
 +    const workspace = this.workspaceDirectory(caller);
 +    const record = this.o.store.create({
@@ -251,7 +263,7 @@ index 2236f23..0169e35 100644
 +      ...(workspace ? { workspaceDirectory: workspace.identity } : {}),
 +    });
 diff --git a/packages/daemon/test/tools.test.ts b/packages/daemon/test/tools.test.ts
-index 99daeba..8326143 100644
+index 99daeba..5decda4 100644
 --- a/packages/daemon/test/tools.test.ts
 +++ b/packages/daemon/test/tools.test.ts
 @@ -6 +6 @@ import { createServer, type Server } from 'node:http';
@@ -274,6 +286,10 @@ index 99daeba..8326143 100644
 +  assert.throws(() => tools.resolveFolder(join('..', basename(sibling)), who), { code: 'not_granted' });
 +});
 +
+@@ -237,0 +251 @@ test('publish with if_match writes only what is unchanged; read gives sha256', a
++  assert.equal(stale.executionStatus, 'not_executed');
+@@ -402,0 +417 @@ test('ArtifactData passes paging, queries, if_match and str_replace through, and
++  assert.equal(conflict.executionStatus, 'not_executed');
 diff --git a/packages/protocol/package.json b/packages/protocol/package.json
 index f3933d2..0587a48 100644
 --- a/packages/protocol/package.json
@@ -896,102 +912,159 @@ index 94e01da..711ca92 100644
 -          fs.copyFileSync(path.join(blobs, entry.name), path.join(root, BLOBS_DIR, entry.name));
 +          const source = path.join(blobs, entry.name);
 +          fs.copyFileSync(files?.resolve(source) ?? source, path.join(root, BLOBS_DIR, entry.name));
+diff --git a/packages/type-server/src/docs/host.ts b/packages/type-server/src/docs/host.ts
+index 31480b7..8a16100 100644
+--- a/packages/type-server/src/docs/host.ts
++++ b/packages/type-server/src/docs/host.ts
+@@ -22,0 +23 @@ import {
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -177,2 +178,2 @@ export class DocHost {
+-    this.store = DocStore.open(docDirOf(options.root));
+-    this.people = DocPeople.open(docDirOf(options.root));
++    this.store = DocStore.open(docDirOf(options.root), new WorkspaceDirectory(options.root));
++    this.people = DocPeople.open(this.store);
+diff --git a/packages/type-server/src/docs/people.ts b/packages/type-server/src/docs/people.ts
+index e035936..18784e0 100644
+--- a/packages/type-server/src/docs/people.ts
++++ b/packages/type-server/src/docs/people.ts
+@@ -6,2 +6 @@
+-import fs from 'node:fs';
+-import path from 'node:path';
++import type { DocStore } from './store.ts';
+@@ -9 +7,0 @@ import path from 'node:path';
+-export const PEOPLE_FILE = '.people.json';
+@@ -15 +13 @@ export class DocPeople {
+-  private readonly file: string;
++  private readonly store: DocStore;
+@@ -17,2 +15,2 @@ export class DocPeople {
+-  private constructor(file: string, names: Map<string, string>) {
+-    this.file = file;
++  private constructor(store: DocStore, names: Map<string, string>) {
++    this.store = store;
+@@ -23,2 +21 @@ export class DocPeople {
+-  static open(docDir: string): DocPeople {
+-    const file = path.join(docDir, PEOPLE_FILE);
++  static open(store: DocStore): DocPeople {
+@@ -27 +24 @@ export class DocPeople {
+-      const raw: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
++      const raw = store.readPeople();
+@@ -33 +30 @@ export class DocPeople {
+-    return new DocPeople(file, names);
++    return new DocPeople(store, names);
+@@ -47,4 +44 @@ export class DocPeople {
+-      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+-      const temp = `${this.file}.${process.pid}.tmp`;
+-      fs.writeFileSync(temp, `${JSON.stringify(Object.fromEntries(this.names), null, 2)}\n`);
+-      fs.renameSync(temp, this.file);
++      this.store.savePeople(Object.fromEntries(this.names));
 diff --git a/packages/type-server/src/docs/store.ts b/packages/type-server/src/docs/store.ts
-index 93434fe..3dcf4e3 100644
+index 93434fe..184c9be 100644
 --- a/packages/type-server/src/docs/store.ts
 +++ b/packages/type-server/src/docs/store.ts
-@@ -16,0 +17 @@ import path from 'node:path';
+@@ -8,0 +9 @@
++ *   doc/.people.json     display names of people who worked on the doc
+@@ -16,0 +18 @@ import path from 'node:path';
 +import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
-@@ -268,2 +269,2 @@ function writeAtomic(file: string, text: string): void {
+@@ -38,0 +41 @@ export const SESSIONS_FILE = '.sessions.json';
++const PEOPLE_FILE = '.people.json';
+@@ -268,2 +271,2 @@ function writeAtomic(file: string, text: string): void {
 -  const temp = `${file}.${process.pid}.tmp`;
 -  fs.writeFileSync(temp, text);
 +  const temp = `${file}.${randomBytes(8).toString('hex')}.tmp`;
 +  fs.writeFileSync(temp, text, { flag: 'wx' });
-@@ -277,0 +279 @@ export class DocStore {
+@@ -277,0 +281 @@ export class DocStore {
 +  private readonly files: WorkspaceDirectory;
-@@ -288 +290 @@ export class DocStore {
+@@ -288 +292 @@ export class DocStore {
 -  private constructor(root: string, manifest: Manifest, sessions: SessionsFile) {
 +  private constructor(root: string, manifest: Manifest, sessions: SessionsFile, files: WorkspaceDirectory) {
-@@ -289,0 +292 @@ export class DocStore {
+@@ -289,0 +294 @@ export class DocStore {
 +    this.files = files;
-@@ -295 +298,2 @@ export class DocStore {
+@@ -295 +300,2 @@ export class DocStore {
 -  static open(root: string): DocStore {
 +  static open(root: string, files?: WorkspaceDirectory): DocStore {
 +    root = path.resolve(root);
-@@ -299 +303,2 @@ export class DocStore {
+@@ -299 +305,2 @@ export class DocStore {
 -      manifest = JSON.parse(fs.readFileSync(file, 'utf8')) as Manifest;
 +      files ??= new WorkspaceDirectory(root);
 +      manifest = JSON.parse(fs.readFileSync(files.resolve(file), 'utf8')) as Manifest;
-@@ -309 +314 @@ export class DocStore {
+@@ -309 +316 @@ export class DocStore {
 -      sessions = JSON.parse(fs.readFileSync(path.join(root, SESSIONS_FILE), 'utf8')) as SessionsFile;
 +      sessions = JSON.parse(fs.readFileSync(files.resolve(path.join(root, SESSIONS_FILE)), 'utf8')) as SessionsFile;
-@@ -312 +317 @@ export class DocStore {
+@@ -312 +319,9 @@ export class DocStore {
 -    return new DocStore(root, manifest, sessions);
 +    return new DocStore(root, manifest, sessions, files);
-@@ -319,2 +324,3 @@ export class DocStore {
++  }
++
++  readPeople(): unknown {
++    return JSON.parse(fs.readFileSync(this.files.resolve(path.join(this.root, PEOPLE_FILE)), 'utf8'));
++  }
++
++  savePeople(names: Record<string, string>): void {
++    writeJson(this.files.resolve(path.join(this.root, PEOPLE_FILE), false), names);
+@@ -319,2 +334,3 @@ export class DocStore {
 -  static create(root: string, name: string, fill: (store: DocStore, session: Session) => { id?: string | undefined; name: string; blocks: Block[] }[]): DocStore {
 -    if (isDocFolder(root)) throw new StoreError('DOC_EXISTS', `${root} already holds a doc.`);
 +  static create(root: string, name: string, fill: (store: DocStore, session: Session) => { id?: string | undefined; name: string; blocks: Block[] }[], files?: WorkspaceDirectory): DocStore {
 +    root = files?.resolve(path.resolve(root)) ?? path.resolve(root);
 +    if (fs.existsSync(files?.resolve(path.join(root, MANIFEST_FILE)) ?? path.join(root, MANIFEST_FILE))) throw new StoreError('DOC_EXISTS', `${root} already holds a doc.`);
-@@ -324 +330 @@ export class DocStore {
+@@ -324 +340 @@ export class DocStore {
 -    const store = new DocStore(root, manifest, { sessions: {} });
 +    const store = new DocStore(root, manifest, { sessions: {} }, files ?? new WorkspaceDirectory(root));
-@@ -382 +388 @@ export class DocStore {
+@@ -382 +398 @@ export class DocStore {
 -      disk = JSON.parse(fs.readFileSync(file, 'utf8')) as DiskDoc;
 +      disk = JSON.parse(fs.readFileSync(this.files.resolve(file), 'utf8')) as DiskDoc;
-@@ -428,2 +434,3 @@ export class DocStore {
+@@ -428,2 +444,3 @@ export class DocStore {
 -      if (text === null) fs.rmSync(file, { force: true });
 -      else writeAtomic(file, text);
 +      const entry = this.files.resolve(file, false);
 +      if (text === null) fs.rmSync(entry, { force: true });
 +      else writeAtomic(entry, text);
-@@ -441 +448 @@ export class DocStore {
+@@ -441 +458 @@ export class DocStore {
 -    writeJson(path.join(this.root, SESSIONS_FILE), this.sessionsFile);
 +    writeJson(this.files.resolve(path.join(this.root, SESSIONS_FILE), false), this.sessionsFile);
-@@ -447 +454 @@ export class DocStore {
+@@ -447 +464 @@ export class DocStore {
 -    writeJson(file, value);
 +    writeJson(this.files.resolve(file, false), value);
-@@ -454 +461 @@ export class DocStore {
+@@ -454 +471 @@ export class DocStore {
 -      prior = fs.readFileSync(file, 'utf8');
 +      prior = fs.readFileSync(this.files.resolve(file), 'utf8');
-@@ -468 +475 @@ export class DocStore {
+@@ -468 +485 @@ export class DocStore {
 -      beforeAt = fs.statSync(file).mtime.toISOString();
 +      beforeAt = fs.statSync(this.files.resolve(file)).mtime.toISOString();
-@@ -476 +483 @@ export class DocStore {
+@@ -476 +493 @@ export class DocStore {
 -      fs.rmSync(old, { force: true });
 +      fs.rmSync(this.files.resolve(old, false), { force: true });
-@@ -497 +504 @@ export class DocStore {
+@@ -497 +514 @@ export class DocStore {
 -      const read = JSON.parse(fs.readFileSync(path.join(this.historyDir(tabId), HISTORY_INDEX), 'utf8')) as HistoryIndex;
 +      const read = JSON.parse(fs.readFileSync(this.files.resolve(path.join(this.historyDir(tabId), HISTORY_INDEX)), 'utf8')) as HistoryIndex;
-@@ -509 +516 @@ export class DocStore {
+@@ -509 +526 @@ export class DocStore {
 -      return docFromDisk(JSON.parse(fs.readFileSync(path.join(this.historyDir(tabId), `${rev}.json`), 'utf8')) as DiskDoc);
 +      return docFromDisk(JSON.parse(fs.readFileSync(this.files.resolve(path.join(this.historyDir(tabId), `${rev}.json`)), 'utf8')) as DiskDoc);
-@@ -608,2 +615,3 @@ export class DocStore {
+@@ -608,2 +625,3 @@ export class DocStore {
 -      fs.mkdirSync(path.dirname(this.binFile(id)), { recursive: true });
 -      fs.renameSync(file, this.binFile(id));
 +      const bin = this.files.resolve(this.binFile(id), false);
 +      fs.mkdirSync(path.dirname(bin), { recursive: true });
 +      fs.renameSync(this.files.resolve(file, false), bin);
-@@ -618 +626 @@ export class DocStore {
+@@ -618 +636 @@ export class DocStore {
 -      names = fs.readdirSync(path.join(this.root, TABS_DIR, DELETED_DIR));
 +      names = fs.readdirSync(this.files.resolve(path.join(this.root, TABS_DIR, DELETED_DIR)));
-@@ -631 +639 @@ export class DocStore {
+@@ -631 +649 @@ export class DocStore {
 -      return docFromDisk(JSON.parse(fs.readFileSync(bin, 'utf8')) as DiskDoc);
 +      return docFromDisk(JSON.parse(fs.readFileSync(this.files.resolve(bin), 'utf8')) as DiskDoc);
-@@ -693 +701 @@ export class DocStore {
+@@ -693 +711 @@ export class DocStore {
 -      disk = JSON.parse(fs.readFileSync(bin, 'utf8')) as DiskDoc;
 +      disk = JSON.parse(fs.readFileSync(this.files.resolve(bin), 'utf8')) as DiskDoc;
-@@ -721 +729 @@ export class DocStore {
+@@ -721 +739 @@ export class DocStore {
 -    fs.renameSync(bin, file);
 +    fs.renameSync(this.files.resolve(bin, false), this.files.resolve(file, false));
-@@ -737 +745 @@ export class DocStore {
+@@ -737 +755 @@ export class DocStore {
 -        if (other.subtabOf === id && other.group === record.group && fs.existsSync(this.binFile(child))) this.putBack(child, restored);
 +        if (other.subtabOf === id && other.group === record.group && fs.existsSync(this.files.resolve(this.binFile(child)))) this.putBack(child, restored);
-@@ -822 +830 @@ export class DocStore {
+@@ -822 +840 @@ export class DocStore {
 -    writeJson(path.join(this.root, MANIFEST_FILE), this.manifest);
 +    writeJson(this.files.resolve(path.join(this.root, MANIFEST_FILE), false), this.manifest);
-@@ -877 +885 @@ export class DocStore {
+@@ -877 +895 @@ export class DocStore {
 -    writeJson(path.join(this.root, SESSIONS_FILE), this.sessionsFile);
 +    writeJson(this.files.resolve(path.join(this.root, SESSIONS_FILE), false), this.sessionsFile);
 diff --git a/packages/type-server/src/history.ts b/packages/type-server/src/history.ts
@@ -1433,6 +1506,53 @@ index ebd66c7..6f12894 100644
 @@ -320 +323 @@ export async function writeAtomic(file: string, bytes: Buffer | string): Promise
 -  await writeFile(temp, bytes);
 +  await writeFile(temp, bytes, { flag: 'wx' });
+diff --git a/packages/type-server/test/docs-server.test.ts b/packages/type-server/test/docs-server.test.ts
+index bbf1996..257fc8b 100644
+--- a/packages/type-server/test/docs-server.test.ts
++++ b/packages/type-server/test/docs-server.test.ts
+@@ -2 +2 @@ import assert from 'node:assert/strict';
+-import { mkdtemp, readFile, rm } from 'node:fs/promises';
++import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+@@ -4 +4 @@ import { tmpdir } from 'node:os';
+-import { join } from 'node:path';
++import { basename, join } from 'node:path';
+@@ -6,0 +7 @@ import { type DiskDoc, docFromDisk } from '@open-artifact/docs-core';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -92,0 +94,34 @@ describe('docs on the type server', () => {
++  it('uses the document storage policy for reading and remembering people', async (t) => {
++    const other = join(dir, 'People');
++    const folder = join(other, 'doc');
++    await mkdir(folder, { recursive: true });
++    const file = join(folder, '.people.json');
++    const saved = { earlier: 'Previous collaborator' };
++    await writeFile(file, JSON.stringify(saved));
++    const resolve = WorkspaceDirectory.prototype.resolve;
++    const opens: boolean[] = [];
++    t.mock.method(WorkspaceDirectory.prototype, 'resolve', function (
++      this: WorkspaceDirectory, input: string, followLeaf = true,
++    ) {
++      if (basename(input) === '.people.json') {
++        opens.push(followLeaf);
++        throw new Error('Fixture policy refused the people index');
++      }
++      return resolve.call(this, input, followLeaf);
++    });
++    const opened = await server.open({ root: other, type: 'docs' });
++    try {
++      const response = await fetch(new URL('_api/doc/session', opened.url), {
++        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ client: 'people' }),
++      });
++      assert.equal(response.status, 200);
++      const session = await response.json() as DocSessionResponse;
++      assert.ok(session.people);
++      assert.equal(session.people.earlier, undefined);
++      assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), saved);
++      assert.deepEqual(opens, [true, false]);
++    } finally {
++      await server.close(opened.id);
++    }
++  });
++
 diff --git a/packages/type-server/test/server.test.ts b/packages/type-server/test/server.test.ts
 index bfa41e4..a23ce54 100644
 --- a/packages/type-server/test/server.test.ts

@@ -134,7 +134,7 @@ test('a local file conflict retains the current content for resolving the edit',
   const url = 'open-artifact://artifact/art_test';
   const current = { 'Draft.md': { sha256: 'current', content: 'Edited draft' } };
   const { calls, onMessage } = harness({ nodeResponse: () => ({
-    ok: true, result: { url, current, error: { code: 'conflict', message: 'The draft changed.' } },
+    ok: true, result: { url, current, executionStatus: 'not_executed', error: { code: 'conflict', message: 'The draft changed.' } },
   }) });
   await onMessage({
     type: 'tool-call', tool: 'artifact', callId: 'patch-files', args: {
@@ -146,6 +146,29 @@ test('a local file conflict retains the current content for resolving the edit',
   assert.equal(reply.ok, false);
   assert.equal(reply.result?.executionStatus, 'not_executed');
   assert.deepEqual(reply.result.current, current);
+});
+
+test('a confirmed data conflict preserves the current version and pending feedback', async () => {
+  const url = 'open-artifact://artifact/art_test';
+  const current = { 'datasets/sample': { exists: true, sha256: 'new', data: { title: 'Page edit' } } };
+  const error = { code: 'conflict', message: 'The data changed.', fix: 'Read the current version.' };
+  const messages = ['The task has a waiting comment.'];
+  for (const action of ['set', 'update', 'delete', 'str_replace', 'batch']) {
+    for (const executionStatus of ['not_executed', undefined]) {
+      const { calls, onMessage } = harness({ nodeResponse: () => ({
+        ok: true, result: { url, error, current, messages, executionStatus },
+      }) });
+      await onMessage({ type: 'tool-call', tool: 'artifact_data', callId: 'patch-data', args: {
+        action, url, session_context: { session_id: 'task-one', workdir: '/project', workdir_is_local: true },
+      } });
+      const reply = calls.at(-1)[1];
+      assert.equal(reply.ok, false);
+      assert.equal(reply.result.executionStatus, executionStatus ?? 'unknown');
+      assert.deepEqual(reply.result.current, executionStatus ? current : undefined);
+      assert.deepEqual(reply.result.error, executionStatus ? error : undefined);
+      assert.deepEqual(reply.result.messages, messages);
+    }
+  }
 });
 
 test('an adoption requires a positive host confirmation for the destination task', async () => {
@@ -238,7 +261,7 @@ test('the worker returns pending comments immediately and waits only when none a
   const { dependencies: [{ version }] } = JSON.parse(await readFile(new URL('binary-dependencies.json', plugin), 'utf8'));
   const fixture = await mkdtemp(join(tmpdir(), 'oa-wait-test-'));
   const scope = '00000000-0000-4000-8000-000000000000';
-  await mkdir(join(fixture, '.cindy-open-artifact', scope, `runtime-${version}-cindy.1`), { recursive: true });
+  await mkdir(join(fixture, '.cindy-open-artifact', scope, `runtime-${version}-cindy.2`), { recursive: true });
   await mkdir(join(fixture, 'node'));
   await mkdir(join(fixture, 'vendor'));
   for (const file of ['node/worker.cjs', 'node/safety.cjs']) {
