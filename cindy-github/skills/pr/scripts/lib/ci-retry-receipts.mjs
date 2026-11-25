@@ -1,11 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+// Node omits fs.constants.O_SYNC on Windows. Numeric open flags are forwarded
+// to libuv, whose Windows UV_FS_O_SYNC requests FILE_FLAG_WRITE_THROUGH.
+// Verified against the executing Node 22.22.3 / libuv 1.51.0:
+// https://github.com/libuv/libuv/blob/v1.51.0/include/uv/win.h
+const WINDOWS_WRITE_THROUGH = 0x08000000;
+
 // One I/O boundary for the existing immutable receipts. No alternate store,
-// fallback, deletion or retry: unsupported/uncertain sync must stop recovery.
+// deletion or retry: a failed file flush must stop recovery. POSIX also syncs
+// every parent directory. Windows uses write-through file handles plus fsync;
+// it does not claim POSIX-style confirmation of the complete parent chain.
 // The injected filesystem is for tests; the CLI always uses Node's real fs.
-export function createCiRetryReceiptIO(io = fs) {
+export function createCiRetryReceiptIO(io = fs, { platform = process.platform } = {}) {
+  const windows = platform === 'win32';
   function syncDirectories(dir) {
+    if (windows) return;
     for (let current = path.resolve(dir);;) {
       const fd = io.openSync(current, 'r');
       try { io.fsyncSync(fd); } finally { io.closeSync(fd); }
@@ -41,7 +51,7 @@ export function createCiRetryReceiptIO(io = fs) {
 
   function read(file) {
     let fd;
-    try { fd = io.openSync(file, 'r+'); }
+    try { fd = io.openSync(file, windows ? io.constants.O_RDWR | WINDOWS_WRITE_THROUGH : 'r+'); }
     catch (error) { if (error.code === 'ENOENT') return null; throw error; }
     let raw;
     try { raw = io.readFileSync(fd, 'utf8'); io.fsyncSync(fd); }
@@ -54,7 +64,10 @@ export function createCiRetryReceiptIO(io = fs) {
   function writeExclusive(file, raw) {
     prepare(file);
     let fd;
-    try { fd = io.openSync(file, 'wx', 0o600); }
+    const flags = windows
+      ? io.constants.O_WRONLY | io.constants.O_CREAT | io.constants.O_EXCL | WINDOWS_WRITE_THROUGH
+      : 'wx';
+    try { fd = io.openSync(file, flags, 0o600); }
     catch (error) {
       if (error.code !== 'EEXIST') throw error;
       if (read(file) === null) throw new Error('CI retry receipt disappeared after exclusive collision');
@@ -67,6 +80,12 @@ export function createCiRetryReceiptIO(io = fs) {
   }
 
   function copyExclusive(source, target) {
+    if (windows) {
+      // copyFile cannot request a write-through destination handle. Keep the
+      // same exclusive winner and raw bytes through the existing write owner.
+      writeExclusive(target, io.readFileSync(source));
+      return;
+    }
     prepare(target);
     try { io.copyFileSync(source, target, io.constants.COPYFILE_EXCL); }
     catch (error) { if (error.code !== 'EEXIST') throw error; }

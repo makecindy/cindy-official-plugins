@@ -7,6 +7,7 @@ import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { parseArgs, runGate, stateFilePath, ciRetryFilePath, ciRetryDataDir } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
+import { createCiRetryReceiptIO } from '../../cindy-github/skills/pr/scripts/lib/ci-retry-receipts.mjs';
 
 const gate = fileURLToPath(new URL('../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs', import.meta.url));
 const url = 'https://github.com/example/repo/pull/42';
@@ -14,17 +15,16 @@ const prNodeId = 'PR_exampleImmutableId';
 const oldHead = 'a'.repeat(40), newHead = 'b'.repeat(40);
 const failure = { workflow: '.github/workflows/verify.yml', job: 'verify', step: 'install dependencies', cause: 'package store unavailable' };
 
-// Native integration tests must not pretend directory sync works on this host.
-// Supported CI hosts run the existing real-filesystem quota/process cases.
-const nativeDirectorySync = (() => {
+// Probe the actual receipt backend, including Windows write-through. This is
+// native I/O evidence, never a claim of power-loss or ancestor durability.
+const nativeReceiptSync = (() => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-receipt-capability-'));
-  let fd;
-  try { fd = fs.openSync(dir, 'r'); fs.fsyncSync(fd); return { supported: true }; }
+  try { createCiRetryReceiptIO().writeExclusive(path.join(dir, 'probe'), 'probe'); return { supported: true }; }
   catch (error) { return { supported: false, code: error.code }; }
-  finally { if (fd !== undefined) fs.closeSync(fd); fs.rmdirSync(dir); }
+  finally { fs.rmSync(dir, { recursive: true, force: true }); }
 })();
-const quotaTest = nativeDirectorySync.supported ? test
-  : (name, fn) => test(name, { skip: `native directory sync unavailable: ${nativeDirectorySync.code}` }, fn);
+const quotaTest = nativeReceiptSync.supported ? test
+  : (name, fn) => test(name, { skip: `native receipt sync unavailable: ${nativeReceiptSync.code}` }, fn);
 
 test('every parsed CI-only parameter requests evidence preservation, including missing mode and values', () => {
   for (const flags of [
@@ -103,7 +103,7 @@ test('orphan CI parameters preserve before validation and never dispatch an impl
     const rejected = await fx.run(flags);
     assert.equal(rejected.code, 1);
     assert.equal(rejected.stdout, '');
-    if (nativeDirectorySync.supported) {
+    if (nativeReceiptSync.supported) {
       assert.equal(fs.readFileSync(path.join(fx.retryDir, path.basename(cached)), 'utf8'), bytes);
       assert.match(rejected.stderr, /requires --ci-retry-|requires exactly one mode|expects|separate command/);
     } else {
@@ -121,8 +121,8 @@ test('orphan CI parameters preserve before validation and never dispatch an impl
   assert.equal(fs.existsSync(fx.retryDir), false);
 });
 
-test('unsupported native directory sync refuses status, reservation and raw migration without quota success', {
-  skip: nativeDirectorySync.supported ? 'this host supports native directory sync' : false,
+test('unsupported native receipt sync refuses status, reservation and raw migration without quota success', {
+  skip: nativeReceiptSync.supported ? 'this host supports its native receipt backend' : false,
 }, t => {
   for (const mode of ['--ci-retry-status', '--reserve-ci-retry', 'legacy']) {
     const fx = fixture(t);
@@ -857,7 +857,53 @@ test('recovery binds signature identity even when two different SSH keys both ve
 
 // These are native demonstrations of excluded configurations, not recovery
 // execution or a mechanical implementation of the Agent's eligibility judgment.
-test('CI recovery excludes active default/custom commit hooks before quota and amend', async t => {
+test('inspected standard LFS and DCO hooks preserve an unchanged signed-off amend and exact push', {
+  skip: spawnSync('git', ['lfs', 'version'], { encoding: 'utf8' }).status !== 0 ? 'Git LFS unavailable' : false,
+}, t => {
+  const fx = fixture(t), work = path.join(fx.root, 'work'), remote = path.join(fx.root, 'parent.git');
+  const global = path.join(fx.root, 'isolated-global'); fs.writeFileSync(global, '');
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
+  const git = (cwd, args, vars = {}) => execFileSync('git', args, { cwd, env: { ...env, ...vars }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git(fx.root, ['init', '--bare', '-b', 'main', remote]);
+  git(fx.root, ['clone', remote, work]);
+  for (const [key, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false']]) git(work, ['config', key, value]);
+  git(work, ['lfs', 'install', '--local']);
+  const hooks = git(work, ['rev-parse', '--path-format=absolute', '--git-path', 'hooks']);
+  const dco = path.join(hooks, 'prepare-commit-msg');
+  fs.writeFileSync(dco, '#!/bin/sh\ngit interpret-trailers --if-exists addIfDifferent --if-missing add --trailer "Signed-off-by: Ada Example <ada@example.test>" --in-place "$1"\n');
+  fs.chmodSync(dco, 0o755);
+  fs.writeFileSync(path.join(work, '.gitattributes'), '*.bin filter=lfs diff=lfs merge=lfs -text\n');
+  fs.writeFileSync(path.join(work, 'fixture.bin'), 'placeholder fixture bytes\n');
+  git(work, ['add', '.gitattributes', 'fixture.bin']);
+  git(work, ['commit', '-s', '-m', 'original'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' });
+  const original = git(work, ['rev-parse', 'HEAD']);
+  git(work, ['push', '--no-follow-tags', '--recurse-submodules=no', '--', 'origin', original + ':refs/heads/main']);
+  const hooksBefore = Object.fromEntries(fs.readdirSync(hooks).filter(n => !n.endsWith('.sample')).map(n => [n, fs.readFileSync(path.join(hooks, n))]));
+  const inventory = dir => fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true }).filter(n => fs.statSync(path.join(dir, n)).isFile()).sort() : [];
+  const objectsDir = path.join(remote, 'lfs', 'objects'), objectsBefore = inventory(objectsDir);
+  assert.ok(objectsBefore.length > 0, 'original push already provided the LFS object');
+  const rawBefore = git(work, ['cat-file', 'commit', original]);
+  const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+    gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+  git(work, plan.amendArgs, { GIT_COMMITTER_DATE: '2026-01-01T00:00:01Z' });
+  const replacement = git(work, ['rev-parse', 'HEAD']), rawAfter = git(work, ['cat-file', 'commit', replacement]);
+  assert.notEqual(replacement, original);
+  const invariants = raw => ({ headers: raw.split('\n\n')[0].split('\n').filter(l => /^(tree|parent|author) /.test(l)), message: raw.slice(raw.indexOf('\n\n') + 2) });
+  assert.deepEqual(invariants(rawAfter), invariants(rawBefore));
+  git(work, guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: replacement,
+    gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir }).pushArgs);
+  assert.equal(git(remote, ['rev-parse', 'refs/heads/main']), replacement);
+  assert.equal(git(remote, ['for-each-ref', '--format=%(refname)']), 'refs/heads/main');
+  assert.deepEqual(inventory(objectsDir), objectsBefore, 'recovery adds no new LFS objects');
+  for (const [name, bytes] of Object.entries(hooksBefore)) assert.deepEqual(fs.readFileSync(path.join(hooks, name)), bytes);
+  assert.equal(fs.existsSync(fx.retryDir), false, 'native transport fixture does not consume recovery quota');
+  const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  assert.match(guide, /Inspected standard Git LFS and DCO hooks may run normally/);
+  assert.match(guide, /compare all installed hook bodies/);
+  assert.match(guide, /before amend and push/);
+});
+
+test('CI recovery excludes hooks with extra remote writes before quota and amend', async t => {
   for (const custom of [false, true]) for (const hook of ['post-commit', 'post-rewrite']) {
     await t.test((custom ? 'custom' : 'default') + '/' + hook, t => {
       const fx = fixture(t), work = path.join(fx.root, 'work'), parent = path.join(fx.root, 'parent.git'), extra = path.join(fx.root, 'extra.git');
@@ -890,7 +936,7 @@ test('CI recovery excludes active default/custom commit hooks before quota and a
       assert.deepEqual(fs.readFileSync(hookPath), hookBytes, 'never disable or rewrite a user hook');
       assert.equal(fs.existsSync(fx.retryDir), false, 'demonstration must not consume real or simulated recovery quota');
       const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
-      assert.ok(/Any active hook makes this checkout ineligible before quota or amend/.test(guide), 'all active hooks must be excluded before quota/amend');
+      assert.ok(/Unknown hooks or hooks capable of extra remote writes stop recovery before quota or amend/.test(guide));
       assert.ok(/post-commit.*post-rewrite.*reference-transaction/.test(guide), 'scope must include all amend/ref hooks');
     });
   }

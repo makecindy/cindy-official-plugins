@@ -744,3 +744,29 @@ Windows 10.0.26100 / Node 22.22.3 / Git 2.54.0.windows.1 的原生 file-URL 克�
 规定四套加插件 **456 通过、36 跳过、0 失败（143.31 秒）**。17 项不支持原生同步的正向及 19 项原有 Windows 跳过不变。清单及官方方式内存归档/内容检查通过：暂存树 `4c003c99097fa7d970bf8b854954a3c0e21c02b9`，33 文件、245757 压缩 bytes、684736 展开 bytes，精确匹配 Git blob，未留包。源码 1.5.44 高于刚获取的 main 1.5.35；UI/settings/locales、回执 I/O 与推送参数不变。
 
 源码/包 1.5.44 未安装，最后实测 local 仍是 97d540e / 1.5.19；本轮 local 身份仍不可用，实时偏好未知，不提供改写授权。真实拒绝 rerun 恢复、恢复中关闭、当前 UI/读取顺序/集成及当时 head 维护者复审仍是前提。未安装、改真实偏好/凭证/权限/额度、执行 CI-only 改写或 merge/队列、重建退役资源或重试被阻断清理。
+
+
+## 已核验标准 hooks 与 Windows 回执 — 2026-11-25（源码 1.5.45）
+
+主人要求兼容现有 #12846 任务的标准 Git LFS 和 DCO hooks，并在安装/真实恢复前明确接受 Windows 收窄后的回执保证。hooks 的存在本身不再阻断；Agent 必须核验完整脚本、委托程序身份和有效配置。DCO 脚本须与固定原始提交中的可信仓库源文件一致，且不改变已有正确签署的消息。标准 LFS hooks 仅允许作用于已核实的同一 head 仓库，所需对象须已由原推送提供。未知/自定义 dispatcher、内容变化、额外 ref/仓库/对象上传和未知副作用仍在额度/amend 前停止；不禁用或替换 hooks。原始对象、签名、精确 lease、审批/队列、历史覆盖和额度保护保留。
+
+回执仍由原单一 I/O 边界写入，路径、排他名额、旧回执原始字节保留和失败处理不变。POSIX 继续同步文件及完整父目录链；Windows 改为使用数字 libuv UV_FS_O_SYNC（0x08000000，对应 FILE_FLAG_WRITE_THROUGH）打开回执并 fsync 文件；旧回执排他原始复制也经同一写入者。Node 22.22.3 的 Windows fs.constants.O_SYNC 实际缺失，因此显式使用原生标志，并用回归覆盖。已对照与执行环境一致的 [libuv 1.51.0 win.h](https://github.com/libuv/libuv/blob/v1.51.0/include/uv/win.h)、[fs.c](https://github.com/libuv/libuv/blob/v1.51.0/src/win/fs.c) 核实标志及映射；[Microsoft CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew#caching-behavior) 说明 write-through 文件/相关元数据行为。
+
+Windows 不逐项确认所有新建父目录：突然断电可能丢失新目录/名称及次数证据，不等价于原完整父目录链保证。主人已接受此限制并授权本次实测；此前维护者确认的持久性/hooks 方案发生变化，合并前仍须维护者审查，没有合并授权。已知断电或此前恢复结果不明仍须核对，不获得新名额。未新增存储体系、原生 helper、依赖、凭证或权限。
+
+新增真实本地 Git/LFS 临时夹具，覆盖标准 LFS hooks 加 DCO trailer hook 的 amend 与精确 lease 推送，核对 tree/parents/author/原始消息不变、hook 字节不变、无新 LFS 对象且仅目标 ref 变化；原额外远端写入 hook 反例仍拒绝。Windows 原生额度测试现使用真实后端执行，覆盖跨进程排他、每 PR 两次/同故障一次、迁移和重启。它们是本地机制证据，不代替真实 Cindy/GitHub 恢复或硬件断电测试。夹具仅清理自己的临时资源。
+
+
+### 现有 #12846 任务的真实 Cindy/GitHub 恢复
+
+Cindy Forge 在 Cindy 0.1.146、Windows 10.0.26100 / Node 22.22.3 返回 local cindy-github 1.5.45 updated/enabled，保留市场实例。主人开启的 local 偏好在恢复及 amend/push 前均读回 true。使用原 PR 任务和实际安装的 local Skill 入口，没有模拟、新建测试仓库或绕过权限。
+
+沿用该任务已发生的真实重跑拒绝 `Must have admin rights to Repository`：[原失败 run 45611685427](https://github.com/makecindy/cindy/actions/runs/45611685427)，attempt 1，原 head `a20c0d6c7a8952215edd5de885538f3eb4b5bf1b`。稳定诊断为 `.github/workflows/ci.yml` / `Windows unit tests (8/8)` / `Run client and package unit tests` / `connection pool reconnect restore test timing race with late close delivery`。原任务此前的上一 head Windows、当前 Linux 和本地对照，支持把它作为与 mock 接线改动无关的一次时序波动处理；这是 Agent 分诊，不是基础设施原因的机械证明。维护者仍须按准入条件判断此诊断，不能从推送成功倒推资格。
+
+原任务核对标准 LFS/DCO 完整脚本及配置、未签名原提交与正确 sign-off、干净工作树、无历史覆盖、完整 reviews 零条、queue/auto-merge=null，以及准确远端 head。真实持久预留返回 ci-retry-reserved，已消费 1/2、剩余 1，sourceHead 为原 SHA。一次 amend 保留 raw tree、完整有序 parents、author 及原始消息；一次固定 lease、固定已验证 SHA 的推送成功。原 [PR #12846](https://github.com/makecindy/cindy/pull/12846) 和对应 fork ref 均读回新 SHA `f910ce818d134816308369ffc241ad994db91547`。hook 字节和配置不变，无须上传新 LFS 对象；完整审批/队列回读仍为零/null。
+
+GitHub 为准确新 SHA 创建 pull_request [client-ci run 45621511972](https://github.com/makecindy/cindy/actions/runs/45621511972)（观察时 in_progress）；[design run 45621511728](https://github.com/makecindy/cindy/actions/runs/45621511728) 已成功，原任务报告 DCO 成功。这验证真实重跑拒绝 → 受限改写 → 原 PR 新 SHA/新 CI 启动；不宣称新 CI 已全部成功。没有第二次 rerun/改写、撤销审批、merge/队列、凭证/权限变更、重用退役实验资源或新增跟进。原任务经既有 gate 记录结果，保留原跟进。
+
+已执行完整仓库命令：533 通过、7 失败、20 跳过（317.56 秒）。修正英文工具描述长度后复跑四公共套：61 通过、4 失败，四项均报告发布夹具缺少 jq；相关 guidance 工作流与新获取的 main 相同。最初定向原生 hook/额度检查 187 通过，新增断言抓到 Windows O_SYNC 缺失；已改为核实的数字标志，随后 66 项回执检查全部通过。Forge 校验/打包及上述真实恢复通过，不宣称本地测试全绿；远端检查与审查仍须完成。安装后仅删除本工作会话新生成的 1.5.44/1.5.45 两个包，既有被阻断清理目标和持久额度未动。
+
+仍未覆盖恢复中关闭、故障注入未知态/卡片高度 UI、当前复制/读取顺序集成及签名 head 的真实恢复。Windows 持久性方案变化与已核验 hooks 例外仍须维护者对最终源码 head 审查，没有合并授权。

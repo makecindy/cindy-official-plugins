@@ -19,7 +19,7 @@ function fixture(t, failAt = Infinity, failureCode = 'EIO') {
       if (++syncs === failAt) throw Object.assign(new Error('injected sync failure'), { code: failureCode });
       // Supported-filesystem model only, not Windows or power-loss evidence.
     },
-  });
+  }, { platform: 'linux' });
   return { root, io, events, handles };
 }
 
@@ -67,7 +67,41 @@ test('an absent receipt differs from lost directory confirmation and copies neve
   fs.writeFileSync(file, 'winner'); fs.writeFileSync(source, 'stale');
   f.io.copyExclusive(source, file);
   assert.equal(f.io.read(file), 'winner');
-  const broken = createCiRetryReceiptIO({ ...fs, fsyncSync() { throw Object.assign(new Error('lost'), { code: 'ENOENT' }); } });
+  const broken = createCiRetryReceiptIO({ ...fs, fsyncSync() { throw Object.assign(new Error('lost'), { code: 'ENOENT' }); } }, { platform: 'linux' });
   assert.throws(() => broken.read(file), /durability could not be confirmed/);
   assert.equal(fs.readFileSync(source, 'utf8'), 'stale');
+});
+
+test('Windows receipts use exclusive write-through handles and flush files without opening directories', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-receipt-win-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const events = [], handles = new Set();
+  const io = createCiRetryReceiptIO({ ...fs,
+    openSync(file, flags, ...rest) {
+      if (file === path.join(root, 'legacy')) return fs.openSync(file, flags, ...rest);
+      assert.equal(typeof flags, 'number');
+      assert.ok(flags & 0x08000000, 'every receipt handle requests libuv Windows write-through even when fs.constants.O_SYNC is absent');
+      const fd = fs.openSync(file, process.platform === 'win32' ? flags : flags & ~0x08000000, ...rest);
+      assert.equal(fs.fstatSync(fd).isDirectory(), false);
+      handles.add(fd); events.push(['open', flags]); return fd;
+    },
+    closeSync(fd) { fs.closeSync(fd); handles.delete(fd); },
+    fsyncSync(fd) { events.push(['flush']); fs.fsyncSync(fd); },
+  }, { platform: 'win32' });
+  const target = path.join(root, 'new', 'nested', 'slot'), source = path.join(root, 'legacy');
+  const raw = Buffer.from([0, 255, 123, 10]);
+  fs.writeFileSync(source, raw);
+  try { io.copyExclusive(source, target); } catch (error) { throw error.cause ?? error; }
+  assert.deepEqual(fs.readFileSync(target), raw);
+  assert.deepEqual(fs.readFileSync(source), raw);
+  assert.equal(io.writeExclusive(target, 'replacement'), false);
+  assert.deepEqual(fs.readFileSync(target), raw, 'never overwrite a consumed/unknown receipt');
+  assert.ok(events.some(e => e[0] === 'open' && (e[1] & fs.constants.O_EXCL)));
+  assert.ok(events.some(e => e[0] === 'flush'));
+  assert.equal(handles.size, 0);
+  const broken = createCiRetryReceiptIO({ ...fs,
+    fsyncSync() { throw Object.assign(new Error('lost flush'), { code: 'EIO' }); },
+  }, { platform: 'win32' });
+  assert.throws(() => broken.read(target), /durability could not be confirmed/);
+  assert.deepEqual(fs.readFileSync(target), raw);
 });

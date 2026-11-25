@@ -102,18 +102,18 @@ extra writes or unknown behavior stops recovery. Do not change configuration
 or replace a helper to make it eligible. The existing task tool remains the
 only executor; no resolver, hook runner or storage is added.
 
-### Supported checkout: no hooks or history overlays
+### Supported checkout: inspected hooks, no history overlays
 
 The same eligibility boundary applies before **any Git status/object work or
 budget operation**, immediately before amend, and immediately before push.
 First use read-only configuration/path inspection, not a trial commit or hook.
-An executable extension or object-view override outside this supported checkout,
-or unknown execution effects, stops CI-only recovery; do not run it as a probe.
-Any active hook makes this checkout ineligible before quota or amend.
-Require the effective hooks directory to be absent or contain only inactive
-Git `*.sample` files. Any non-sample entry, dispatcher, symlink, unreadable
-path or uncertain activation stops this CI-only route; do not attempt to prove
-arbitrary scripts harmless by running them. This covers pre-commit,
+An executable extension or object-view override with unknown execution effects
+stops CI-only recovery; do not run it as a probe.
+Unknown hooks or hooks capable of extra remote writes stop recovery before quota or amend.
+Inspect every non-sample entry in the effective hooks directory and the executable
+and configuration it delegates to. A familiar filename, marker or `git lfs`
+substring does not prove standard content. Symlinks, unreadable paths, arbitrary
+dispatchers and uncertain activation stop this route. This covers pre-commit,
 prepare-commit-msg, commit-msg, post-commit, post-rewrite, reference-transaction,
 pre-push and other hooks, not just the final push hook. Use `hooksPathArgs` to
 resolve Git's effective directory, including `core.hooksPath` and linked
@@ -122,6 +122,24 @@ or false too: a status/monitor command with unknown effects is not supported.
 Do not disable, rename, chmod, rewrite or bypass hooks to become eligible.
 Ordinary authorized fixes remain governed by their repository rules; this
 restriction is for the optional CI-only recovery, not normal contribution.
+
+Inspected standard Git LFS and DCO hooks may run normally. For a repository DCO
+hook, compare its entire content with the trusted source at the pinned original
+commit, review that source, and require the original message already to contain
+the configured committer's exact sign-off. It must leave that message unchanged;
+the post-amend raw-message check still applies. For Git LFS, compare all installed
+hook bodies with the standard templates from the installed, verified Git LFS
+release and inspect effective LFS/filter configuration. Require no custom transfer
+agent, extension, push URL or LFS endpoint outside the same verified head repository.
+Require all LFS objects needed by the unchanged original tree already present at
+that destination, established from the original successful push/task evidence;
+otherwise wait for a normal authorized contribution rather than uploading objects
+as part of this recovery. Standard hook checks/local bookkeeping may run, but
+no new LFS object, tag, release, child repository or extra ref write is authorized.
+Record inspected hook bytes and delegated binary identity, and compare them again
+before amend and push. Changed content/configuration or unknown effects stop the
+route without consuming another attempt. Do not install or replace a hook or
+dependency just to make this checkout eligible.
 
 Any replace ref or legacy graft makes this checkout ineligible before quota.
 Require `replaceRefsArgs` to return no entries and the file at `graftPathArgs`
@@ -156,9 +174,9 @@ or `%P`/symbolic lookups. Signature identity checks remain mandatory.
 
 | Event | Action |
 | --- | --- |
-| Any effective hook, overlay, shallow state or unknown inspection before budget | Stop without budget, amend or push |
+| Uninspected/changed hook, extra remote effect, overlay, shallow state or unknown inspection before budget | Stop without budget, amend or push |
 | Hook/configuration/history facts change before amend | Stop; keep any consumed receipt, no refund |
-| Raw tree/parents/author differ, or a history boundary/hook appears after amend | Leave the new local commit unpushed and report; never reset user work |
+| Raw tree/parents/author differ, or a history boundary/unverified hook appears after amend | Leave the new local commit unpushed and report; never reset user work |
 | Earlier hook may already have written externally | Reconcile all suspected destinations read-only; unknown is not unexecuted |
 
 These are Agent checks in an exclusive checkout, not an atomic filesystem lock
@@ -224,21 +242,33 @@ auto-merge, queue operations, direct main pushes, permission changes or bypasses
 ## Verify, consume the budget, amend and push
 
 Use the current `<skill-dir>` and this PR's existing observation-cache directory
-for the gate. Both budget status and reservation require confirmed filesystem
-durability. The single receipt I/O owner syncs file contents and every parent
+for the gate. Both budget status and reservation use the platform's receipt I/O
+boundary. On POSIX, the single receipt I/O owner syncs file contents and every parent
 directory through the filesystem root, including newly created ancestors,
 before returning success. New slots, raw exclusive legacy copies, migration
 and re-read receipts share this boundary. Only an absent file at open means
 unused: a later ENOENT, failed/unsupported sync or unknown outcome stops recovery.
-There is no fallback to file-only sync, refund, removal, alternate directory or
+There is no error-swallowing fallback, refund, removal, alternate directory or
 automatic retry. Keep observation cache and all receipts on any error; an
 unsupported store cannot confirm migration or grant available quota.
 
-The Windows/Node 22.22.3 environment tested here returns EPERM for directory
-fsync, so this CI-only recovery is refused there, including budget status;
-ordinary PR follow-up remains available. Other platforms/filesystems must
-actually support these operations; an OS name alone is not support evidence.
-Successful sync calls are OS acknowledgements, not a hardware power-loss test.
+On Windows, Node cannot perform the POSIX directory fsync used above. The Windows
+backend instead opens each receipt with O_SYNC (libuv FILE_FLAG_WRITE_THROUGH),
+retains exclusive creation, and fsyncs the file before reporting success. Legacy
+copies use that same write-through owner rather than an unflushed copyFile target.
+Read-back flushes the winning receipt too; any failed/unknown file operation
+stops recovery. Receipt paths, immutable slots, migration and limits are unchanged.
+This confirms Windows file writes and their associated metadata flush, not a
+separate flush of every newly created ancestor directory. Abrupt power loss may
+therefore lose a newly created directory/name and its consumption record; do not
+claim the earlier POSIX parent-chain guarantee on Windows. Known power loss or an
+uncertain prior recovery outcome still requires reconciliation, never fresh quota.
+This Windows policy is an explicit change to the earlier durability contract and
+requires maintainer review before merge. A runtime test using it requires the
+owner to accept that narrower guarantee; installation alone is not acceptance.
+Successful OS acknowledgements and process-restart tests are not hardware
+power-loss evidence. Microsoft documents write-through metadata behavior in
+[CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew#caching-behavior).
 
 Retry receipts are stored separately in durable user data, never
 in that cache: `$XDG_STATE_HOME/cindy-pr/ci-retry` when set to an absolute path;
@@ -379,7 +409,8 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    recovery; migration never grants two fresh attempts on top of old history.
 4. Recheck eligibility 6 (no approval, queue or auto-merge; all states known),
    the PR is open, the preference is enabled, and local/index/remote
-   facts still match, including absence of every effective hook/history overlay.
+   facts still match, including the inspected hook bytes/configuration and absence
+   of every history overlay.
    Use `git` with `amendArgs` only after those checks. The shared
    `--cleanup=verbatim` argument preserves the raw message regardless
    of local/global cleanup or comment-character settings. Keep it for unsigned
