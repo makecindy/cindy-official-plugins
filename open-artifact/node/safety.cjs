@@ -49,10 +49,6 @@ async function workspaceArguments(tool, args, workspace) {
         ? { ...write, file_path: await resolveWorkspacePath(workspace, write.file_path) }
         : write));
   }
-  if (tool === 'Artifact' && !checked.url && !checked.folder &&
-      (checked.action === 'publish' || checked.action === undefined)) {
-    await resolveWorkspacePath(workspace, 'artifacts');
-  }
   return checked;
 }
 
@@ -129,8 +125,6 @@ async function artifactActionArguments(name, args, workspace, artifact) {
       ['docx', 'pdf', 'html'].includes(checked.format)) {
     const file = exportFilename(artifact.title, checked.tab, checked.format);
     checked.out = await resolveWorkspacePath(workspace, path.join(artifact.root, 'exports', file));
-  } else if (name === 'duplicate' && artifact.type === 'docs') {
-    await resolveWorkspacePath(workspace, path.dirname(artifact.root));
   }
   return checked;
 }

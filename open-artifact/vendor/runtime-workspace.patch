@@ -1,0 +1,1464 @@
+diff --git a/packages/daemon/src/bin/open-artifact.ts b/packages/daemon/src/bin/open-artifact.ts
+index 5876d45..4504fc9 100755
+--- a/packages/daemon/src/bin/open-artifact.ts
++++ b/packages/daemon/src/bin/open-artifact.ts
+@@ -459 +459,4 @@ async function daemon(sub: string | undefined): Promise<void> {
+-      const started = await startDaemon(port !== undefined ? { port: Number(port) } : {});
++      const started = await startDaemon({
++        ...(port !== undefined ? { port: Number(port) } : {}),
++        ...(process.env.OPEN_ARTIFACT_WORKSPACE_FOLDERS_ONLY === '1' ? { workspaceFoldersOnly: true } : {}),
++      });
+diff --git a/packages/daemon/src/daemon.ts b/packages/daemon/src/daemon.ts
+index be8d8e7..b68a408 100644
+--- a/packages/daemon/src/daemon.ts
++++ b/packages/daemon/src/daemon.ts
+@@ -13 +13 @@ import { EventEmitter } from 'node:events';
+-import { appendFileSync, cpSync, createReadStream, existsSync, openSync, readFileSync, readdirSync, rmSync, statSync, watch, writeFileSync, writeSync, closeSync, type Dirent, type FSWatcher } from 'node:fs';
++import { appendFileSync, cpSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, watch, writeFileSync, writeSync, closeSync, type Dirent, type FSWatcher } from 'node:fs';
+@@ -16 +16,2 @@ import { userInfo } from 'node:os';
+-import { dirname, extname, isAbsolute, join, resolve, sep } from 'node:path';
++import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'node:path';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -379,0 +381,2 @@ export interface DaemonOptions {
++  /** Require workspaces for local artifact creation and adoption. */
++  workspaceFoldersOnly?: boolean;
+@@ -484 +487 @@ export class Daemon extends EventEmitter<{ exit: [] }> {
+-    this.store = new ArtifactStore();
++    this.store = new ArtifactStore(options.workspaceFoldersOnly === true);
+@@ -534,0 +538 @@ export class Daemon extends EventEmitter<{ exit: [] }> {
++      workspaceFoldersOnly: options.workspaceFoldersOnly === true,
+@@ -1376,0 +1381,6 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
++    const source = this.store.authorizedRoot(record);
++    const workspace = record.workspaceDirectory;
++    const inherited = {
++      type: record.type, typeSource: record.typeSource, typeRelease: record.typeRelease, owner: record.owner,
++      ...(workspace ? { workspaceDirectory: workspace } : {}),
++    };
+@@ -1379,0 +1390 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
++      if (workspace) await this.openPage(record);
+@@ -1381,2 +1392,2 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
+-        { root: record.root, id: record.id, args: { name: name ?? (record.title.slice(0, 249) + ' (copy)') } }, undefined, ACTION_CALL_MS);
+-      return this.store.create({ root: copy.root, title: copy.name, type: record.type, typeSource: record.typeSource, typeRelease: record.typeRelease, owner: record.owner });
++        { root: source, id: record.id, args: { name: name ?? (record.title.slice(0, 249) + ' (copy)') } }, undefined, ACTION_CALL_MS);
++      return this.store.create({ ...inherited, root: copy.root, title: copy.name });
+@@ -1384,4 +1395,5 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
+-    const parent = dirname(record.root);
+-    const base = record.root.slice(parent.length + 1);
+-    let root = join(parent, `${base}-copy`);
+-    for (let n = 2; existsSync(root); n++) root = join(parent, `${base}-copy-${n}`);
++    const directory = workspace ? new WorkspaceDirectory(workspace.root, workspace) : undefined;
++    const parent = directory?.root === source ? source : dirname(source);
++    const base = basename(source) || 'work';
++    const target = (name: string) => directory?.resolve(join(parent, name), false) ?? join(parent, name);
++    let root = target(`${base}-copy`);
+@@ -1389,4 +1401,17 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
+-    ensureDir(root);
+-    for (const name of readdirSync(record.root)) {
+-      if (skip(name)) continue;
+-      cpSync(join(record.root, name), join(root, name), { recursive: true, errorOnExist: false });
++    const children = readdirSync(source).filter((name) => !skip(name));
++    for (let n = 2; ; n++) {
++      try {
++        mkdirSync(root);
++        break;
++      } catch (error) {
++        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
++        root = target(`${base}-copy-${n}`);
++      }
++    }
++    const files = directory ? new WorkspaceDirectory(source) : undefined;
++    for (const name of children) {
++      const entry = join(source, name);
++      cpSync(entry, join(root, name), {
++        recursive: true, errorOnExist: false,
++        ...(files ? { dereference: true, filter: (path: string) => { files.resolve(path); return true; } } : {}),
++      });
+@@ -1394 +1419 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
+-    return this.store.create({ root, type: record.type, typeSource: record.typeSource, typeRelease: record.typeRelease, owner: record.owner, title: `Copy of ${record.title}`.slice(0, 200) });
++    return this.store.create({ ...inherited, root, title: `Copy of ${record.title}`.slice(0, 200) });
+@@ -1458,0 +1484 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
++    record = { ...record, root: this.store.authorizedRoot(record) };
+diff --git a/packages/daemon/src/servers.ts b/packages/daemon/src/servers.ts
+index 1eb023b..90c627f 100644
+--- a/packages/daemon/src/servers.ts
++++ b/packages/daemon/src/servers.ts
+@@ -136 +136 @@ export function forRemote<T>(type: TypeInfo, body: T): T {
+-  const { root: _root, ...rest } = body as Record<string, unknown>;
++  const { root: _root, workspaceDirectory: _workspace, ...rest } = body as Record<string, unknown>;
+@@ -278 +278 @@ export class TypeServers {
+-  async open(type: TypeInfo, record: { id: string; root: string; title: string }, context: { lang?: string; shell: string }): Promise<{ url: string; page_url: string }> {
++  async open(type: TypeInfo, record: Pick<OpenRequest, 'id' | 'workspaceDirectory'> & { root: string; title: string }, context: { lang?: string; shell: string }): Promise<{ url: string; page_url: string }> {
+@@ -292 +292,5 @@ export class TypeServers {
+-    const request: OpenRequest = { id: record.id, root: record.root, title: record.title, lang: context.lang || 'en', shell: context.shell, viewer: context.shell + shellPath(record.id) };
++    const request: OpenRequest = {
++      id: record.id, root: record.root, title: record.title, lang: context.lang || 'en',
++      shell: context.shell, viewer: context.shell + shellPath(record.id),
++      ...(record.workspaceDirectory ? { workspaceDirectory: record.workspaceDirectory } : {}),
++    };
+diff --git a/packages/daemon/src/store.ts b/packages/daemon/src/store.ts
+index c791992..936a7de 100644
+--- a/packages/daemon/src/store.ts
++++ b/packages/daemon/src/store.ts
+@@ -20,0 +21 @@ import { ensureDir, files, readJson, writeJson } from './paths.ts';
++import { WorkspaceDirectory, type WorkspaceDirectoryIdentity } from '@open-artifact/protocol/workspace-files';
+@@ -80,0 +82 @@ export interface CreateRecord {
++  workspaceDirectory?: WorkspaceDirectoryIdentity;
+@@ -90 +92,3 @@ export class ArtifactStore extends EventEmitter<{ changed: [StoreChange] }> {
+-  constructor() {
++  private readonly enforceWorkspaceDirectories: boolean;
++
++  constructor(enforceWorkspaceDirectories = false) {
+@@ -91,0 +96 @@ export class ArtifactStore extends EventEmitter<{ changed: [StoreChange] }> {
++    this.enforceWorkspaceDirectories = enforceWorkspaceDirectories;
+@@ -153,0 +159,3 @@ export class ArtifactStore extends EventEmitter<{ changed: [StoreChange] }> {
++    const identity = fields.workspaceDirectory;
++    if (this.enforceWorkspaceDirectories && !identity) throw new OpenArtifactError('not_granted', 'An authorized workspace is required.');
++    const workspace = identity ? new WorkspaceDirectory(identity.root, identity) : undefined;
+@@ -156 +164,2 @@ export class ArtifactStore extends EventEmitter<{ changed: [StoreChange] }> {
+-      root: resolve(fields.root),
++      root: workspace?.resolve(fields.root) ?? resolve(fields.root),
++      ...(identity ? { workspaceDirectory: identity } : {}),
+@@ -172 +181,2 @@ export class ArtifactStore extends EventEmitter<{ changed: [StoreChange] }> {
+-    writeJson(join(record.root, '.artifact.json'), marker);
++    const markerPath = join(record.root, '.artifact.json');
++    writeJson(workspace?.resolve(markerPath, false) ?? markerPath, marker);
+@@ -175,0 +186,10 @@ export class ArtifactStore extends EventEmitter<{ changed: [StoreChange] }> {
++  /** Resolve an artifact against the workspace originally authorized by the host. */
++  authorizedRoot(record: ArtifactRecord): string {
++    const identity = record.workspaceDirectory;
++    if (!identity) {
++      if (this.enforceWorkspaceDirectories) throw new OpenArtifactError('not_granted', 'This artifact needs an authorized workspace.');
++      return record.root;
++    }
++    return new WorkspaceDirectory(identity.root, identity).resolve(record.root);
++  }
++
+diff --git a/packages/daemon/src/tools.ts b/packages/daemon/src/tools.ts
+index 2236f23..0169e35 100644
+--- a/packages/daemon/src/tools.ts
++++ b/packages/daemon/src/tools.ts
+@@ -46,0 +47 @@ import {
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -326,0 +328,2 @@ export interface ToolsOptions {
++  /** Use the attached workspace as the boundary of a new or adopted folder. */
++  workspaceFoldersOnly?: boolean;
+@@ -498 +501 @@ export class Tools {
+-          return this.write(args);
++          return this.write(args, caller);
+@@ -744,0 +748,3 @@ export class Tools {
++    if (this.o.workspaceFoldersOnly && !caller.workspace) {
++      throw new OpenArtifactError('not_granted', 'A local workspace is required to create or adopt a work.');
++    }
+@@ -746,2 +752,4 @@ export class Tools {
+-    if (folder) return resolve(base, folder);
+-    const dir = join(base, this.o.settings().artifactsDir || 'artifacts');
++    const directory = this.o.workspaceFoldersOnly ? new WorkspaceDirectory(base) : null;
++    const folderPath = (candidate: string) => directory?.resolve(candidate) ?? candidate;
++    if (folder) return folderPath(resolve(base, folder));
++    const dir = folderPath(join(base, this.o.settings().artifactsDir || 'artifacts'));
+@@ -749,2 +757,2 @@ export class Tools {
+-    let root = join(dir, slug);
+-    for (let i = 2; existsSync(root) && readdirSync(root).length; i++) root = join(dir, `${slug}-${i}`);
++    let root = folderPath(join(dir, slug));
++    for (let i = 2; existsSync(root) && readdirSync(root).length; i++) root = folderPath(join(dir, `${slug}-${i}`));
+@@ -842 +850,5 @@ export class Tools {
+-    const record = this.o.store.create({ root, type: typeId, typeSource: type.scope, typeRelease: type.version, owner, title });
++    const workspace = this.workspaceDirectory(caller);
++    const record = this.o.store.create({
++      root, type: typeId, typeSource: type.scope, typeRelease: type.version, owner, title,
++      ...(workspace ? { workspaceDirectory: workspace.identity } : {}),
++    });
+@@ -897 +909,13 @@ export class Tools {
+-  private async write(args: ArtifactArgs): Promise<ToolCallResult> {
++  private workspaceDirectory(caller: SessionRef): WorkspaceDirectory | null {
++    if (!this.o.workspaceFoldersOnly) return null;
++    if (!caller.workspace) throw new OpenArtifactError('not_granted', 'A local workspace is required to access a work.');
++    return new WorkspaceDirectory(caller.workspace);
++  }
++
++  private artifactFiles(record: ArtifactRecord, caller: SessionRef): WorkspaceDirectory | null {
++    const workspace = this.workspaceDirectory(caller);
++    if (!workspace) return null;
++    return new WorkspaceDirectory(workspace.resolve(this.o.store.authorizedRoot(record)));
++  }
++
++  private async write(args: ArtifactArgs, caller: SessionRef): Promise<ToolCallResult> {
+@@ -898,0 +923 @@ export class Tools {
++    const directory = this.artifactFiles(record, caller);
+@@ -910 +935,2 @@ export class Tools {
+-      const file = inside(record.root, clean);
++      const requested = inside(record.root, clean);
++      const file = directory?.resolve(requested, value !== null) ?? requested;
+@@ -928 +954,2 @@ export class Tools {
+-        const current = this.hashOf(inside(record.root, clean));
++        const requested = inside(record.root, clean);
++        const current = this.hashOf(directory?.resolve(requested) ?? requested);
+@@ -939 +966 @@ export class Tools {
+-          current: Object.fromEntries(conflicts.map((path) => [path, this.fileState(record, path)])),
++          current: Object.fromEntries(conflicts.map((path) => [path, this.fileState(record, path, directory)])),
+@@ -982 +1009 @@ export class Tools {
+-  private fileState(record: ArtifactRecord, path: string): Record<string, unknown> {
++  private fileState(record: ArtifactRecord, path: string, directory: WorkspaceDirectory | null): Record<string, unknown> {
+@@ -984 +1011 @@ export class Tools {
+-      return this.readOne(record, path, MAX_READ);
++      return this.readOne(record, path, MAX_READ, directory);
+@@ -990 +1017 @@ export class Tools {
+-  private listFiles(root: string, hashes = false): FileEntry[] {
++  private listFiles(root: string, hashes = false, directory: WorkspaceDirectory | null = null): FileEntry[] {
+@@ -996 +1023 @@ export class Tools {
+-        entries = readdirSync(dir, { withFileTypes: true });
++        entries = readdirSync(directory?.resolve(dir) ?? dir, { withFileTypes: true });
+@@ -1006 +1033,2 @@ export class Tools {
+-            const file = join(dir, e.name);
++            const requested = join(dir, e.name);
++            const file = directory?.resolve(requested) ?? requested;
+@@ -1020,2 +1048,3 @@ export class Tools {
+-  private readOne(record: ArtifactRecord, path: string, budget: number): Record<string, unknown> {
+-    const file = inside(record.root, path);
++  private readOne(record: ArtifactRecord, path: string, budget: number, directory: WorkspaceDirectory | null): Record<string, unknown> {
++    const requested = inside(record.root, path);
++    const file = directory?.resolve(requested) ?? requested;
+@@ -1024 +1053 @@ export class Tools {
+-    if (stat.isDirectory()) return { path, files: this.listFiles(file, true) };
++    if (stat.isDirectory()) return { path, files: this.listFiles(file, true, directory) };
+@@ -1044,0 +1074 @@ export class Tools {
++    const directory = this.artifactFiles(record, caller);
+@@ -1056 +1086 @@ export class Tools {
+-          const one = this.readOne(record, path, budget);
++          const one = this.readOne(record, path, budget, directory);
+@@ -1065,2 +1095,2 @@ export class Tools {
+-    if (args.path) return { ...this.readOne(record, args.path, MAX_READ), ...seen };
+-    const { owner, userEdits: _edits, remote, ...shown } = record;
++    if (args.path) return { ...this.readOne(record, args.path, MAX_READ, directory), ...seen };
++    const { owner, userEdits: _edits, remote, workspaceDirectory: _workspace, ...shown } = record;
+@@ -1077 +1107 @@ export class Tools {
+-      files: this.listFiles(record.root, true),
++      files: this.listFiles(record.root, true, directory),
+@@ -1270,0 +1301,2 @@ export class Tools {
++      const workspace = this.workspaceDirectory(caller);
++      if (workspace) workspace.resolve(record.workspaceDirectory ? this.o.store.authorizedRoot(record) : record.root);
+@@ -1275 +1307,4 @@ export class Tools {
+-      const next = this.o.store.update(record.id, { owner: caller, agentSeenAt: now() });
++      const next = this.o.store.update(record.id, {
++        owner: caller, agentSeenAt: now(),
++        ...(workspace && !record.workspaceDirectory ? { workspaceDirectory: workspace.identity } : {}),
++      });
+@@ -1307 +1342,5 @@ export class Tools {
+-    const record = this.o.store.create({ root, type: typeId, typeSource: type?.scope ?? null, typeRelease: type?.version ?? null, owner: caller, title });
++    const workspace = this.workspaceDirectory(caller);
++    const record = this.o.store.create({
++      root, type: typeId, typeSource: type?.scope ?? null, typeRelease: type?.version ?? null, owner: caller, title,
++      ...(workspace ? { workspaceDirectory: workspace.identity } : {}),
++    });
+diff --git a/packages/daemon/test/tools.test.ts b/packages/daemon/test/tools.test.ts
+index 99daeba..8326143 100644
+--- a/packages/daemon/test/tools.test.ts
++++ b/packages/daemon/test/tools.test.ts
+@@ -6 +6 @@ import { createServer, type Server } from 'node:http';
+-import { join } from 'node:path';
++import { basename, dirname, join } from 'node:path';
+@@ -124 +124 @@ before(async () => {
+-  daemon = await startDaemon({ port: 0, quiet: true, shellDir: tempDir('open-artifact-shell-'), homeDir: tempDir('open-artifact-no-home-') });
++  daemon = await startDaemon({ port: 0, quiet: true, shellDir: tempDir('open-artifact-shell-'), homeDir: tempDir('open-artifact-no-home-'), workspaceFoldersOnly: true });
+@@ -152,0 +153,13 @@ async function createGreeter(title: string): Promise<string> {
++test('constrained creation and adoption keep the same default, explicit, and workspace-root placement', () => {
++  const root = tempDir('open-artifact-placement-');
++  const who = { ...caller, workspace: root };
++  const tools = daemon.tools;
++  assert.equal(tools.resolveFolder(undefined, who, 'New card'), join(root, 'artifacts', 'new-card'));
++  assert.equal(tools.resolveFolder('chosen', who), join(root, 'chosen'));
++  assert.equal(tools.resolveFolder('.', who), root);
++  assert.throws(() => tools.resolveFolder(undefined, { ...who, workspace: null }), { code: 'not_granted' });
++  const sibling = tempDir('open-artifact-other-');
++  assert.equal(dirname(root), dirname(sibling));
++  assert.throws(() => tools.resolveFolder(join('..', basename(sibling)), who), { code: 'not_granted' });
++});
++
+diff --git a/packages/protocol/package.json b/packages/protocol/package.json
+index f3933d2..0587a48 100644
+--- a/packages/protocol/package.json
++++ b/packages/protocol/package.json
+@@ -8 +8,2 @@
+-    ".": "./src/index.ts"
++    ".": "./src/index.ts",
++    "./workspace-files": "./src/workspace-files.ts"
+diff --git a/packages/protocol/src/library.ts b/packages/protocol/src/library.ts
+index bbb5386..c0a0ad1 100644
+--- a/packages/protocol/src/library.ts
++++ b/packages/protocol/src/library.ts
+@@ -12,0 +13 @@ import type { ArtifactRole, ShareCloudView } from './type-server.ts';
++import type { WorkspaceDirectoryIdentity } from './workspace-files.ts';
+@@ -18,0 +20,2 @@ export interface ArtifactRecord {
++  /** A local embedding host may pin the workspace that contains this artifact. */
++  workspaceDirectory?: WorkspaceDirectoryIdentity;
+diff --git a/packages/protocol/src/type-server.ts b/packages/protocol/src/type-server.ts
+index fe95577..7181072 100644
+--- a/packages/protocol/src/type-server.ts
++++ b/packages/protocol/src/type-server.ts
+@@ -84,0 +85,2 @@ export interface OpenRequest {
++  /** The local workspace owning this folder, when the embedding host requires it. */
++  workspaceDirectory?: import('./workspace-files.ts').WorkspaceDirectoryIdentity;
+diff --git a/packages/protocol/src/workspace-files.ts b/packages/protocol/src/workspace-files.ts
+new file mode 100644
+index 0000000..7275a38
+--- /dev/null
++++ b/packages/protocol/src/workspace-files.ts
+@@ -0,0 +1,72 @@
++/** Path resolution for local, already-authorized workspace files. */
++import { lstatSync, realpathSync, statSync } from 'node:fs';
++import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
++import { OpenArtifactError } from './errors.ts';
++
++function includesPath(root: string, target: string): boolean {
++  const path = relative(root, target);
++  return path !== '..' && !path.startsWith('..' + sep) && !isAbsolute(path);
++}
++
++const forbidden = () => new OpenArtifactError('not_granted', 'File is outside the authorized workspace.', { status: 403 });
++
++export interface WorkspaceDirectoryIdentity {
++  root: string;
++  device: string;
++  inode: string;
++}
++
++export class WorkspaceDirectory {
++  readonly root: string;
++  private readonly givenRoot: string;
++  private readonly device: bigint;
++  private readonly inode: bigint;
++
++  constructor(root: string, identity?: WorkspaceDirectoryIdentity) {
++    this.givenRoot = resolve(root);
++    this.root = realpathSync(this.givenRoot);
++    const stat = statSync(this.root, { bigint: true });
++    if (!stat.isDirectory()) throw forbidden();
++    this.device = stat.dev;
++    this.inode = stat.ino;
++    if (identity && (
++      identity.root !== this.root ||
++      identity.device !== this.device.toString() ||
++      identity.inode !== this.inode.toString()
++    )) throw forbidden();
++  }
++
++  get identity(): WorkspaceDirectoryIdentity {
++    return { root: this.root, device: this.device.toString(), inode: this.inode.toString() };
++  }
++
++  /** Check both the directory identity and the path. New files inherit the nearest existing parent's boundary. */
++  resolve(input: string, followLeaf = true): string {
++    const directory = lstatSync(this.root, { bigint: true });
++    if (!directory.isDirectory() || directory.dev !== this.device || directory.ino !== this.inode) throw forbidden();
++    const path = resolve(this.givenRoot, input);
++    const target = includesPath(this.givenRoot, path) ? resolve(this.root, relative(this.givenRoot, path)) : path;
++    if (!includesPath(this.root, target)) throw forbidden();
++
++    const tail: string[] = [];
++    let ancestor = target;
++    if (!followLeaf && target !== this.root) {
++      tail.push(basename(target));
++      ancestor = dirname(target);
++    }
++    for (;;) {
++      try {
++        lstatSync(ancestor);
++        break;
++      } catch (error) {
++        if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || ancestor === this.root) throw error;
++        tail.unshift(basename(ancestor));
++        ancestor = dirname(ancestor);
++      }
++    }
++
++    const actual = join(realpathSync(ancestor), ...tail);
++    if (!includesPath(this.root, actual)) throw forbidden();
++    return actual;
++  }
++}
+diff --git a/packages/protocol/test/workspace-files.test.ts b/packages/protocol/test/workspace-files.test.ts
+new file mode 100644
+index 0000000..6476a69
+--- /dev/null
++++ b/packages/protocol/test/workspace-files.test.ts
+@@ -0,0 +1,40 @@
++import assert from 'node:assert/strict';
++import { mkdtempSync, mkdirSync, realpathSync, renameSync, symlinkSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { test } from 'node:test';
++import { WorkspaceDirectory } from '../src/workspace-files.ts';
++
++test('a checked target resolves inside the authorized workspace and supports new files', () => {
++  const base = mkdtempSync(join(tmpdir(), 'oa-workspace-policy-'));
++  const work = join(base, 'task');
++  mkdirSync(join(work, 'documents'), { recursive: true });
++  symlinkSync(join(work, 'documents'), join(work, 'current'), 'junction');
++
++  const canonical = realpathSync(work);
++  const files = new WorkspaceDirectory(work);
++  assert.equal(files.resolve('drafts/new.md'), join(canonical, 'drafts', 'new.md'));
++  assert.equal(files.resolve('current/new.md'), join(canonical, 'documents', 'new.md'));
++  assert.throws(() => files.resolve(join(base, 'another-task', 'draft.md')), { code: 'not_granted' });
++});
++
++test('a file operation stays bound to its authorized directory', () => {
++  const base = realpathSync(mkdtempSync(join(tmpdir(), 'oa-workspace-identity-')));
++  const work = join(base, 'task');
++  mkdirSync(work);
++  const files = new WorkspaceDirectory(work);
++  renameSync(work, join(base, 'existing'));
++  mkdirSync(work);
++  assert.throws(() => files.resolve('draft.md'), { code: 'not_granted' });
++});
++
++test('replacing an entry preserves the meaning of an authorized in-workspace link', () => {
++  const work = realpathSync(mkdtempSync(join(tmpdir(), 'oa-workspace-entry-')));
++  const target = join(work, 'original');
++  const alias = join(work, 'alias');
++  mkdirSync(target);
++  symlinkSync(target, alias, 'junction');
++  const files = new WorkspaceDirectory(work);
++  assert.equal(files.resolve('alias'), target);
++  assert.equal(files.resolve('alias', false), alias);
++});
+diff --git a/packages/server-sdk/src/frame/comments.ts b/packages/server-sdk/src/frame/comments.ts
+index 9332c61..b1b9dae 100644
+--- a/packages/server-sdk/src/frame/comments.ts
++++ b/packages/server-sdk/src/frame/comments.ts
+@@ -17,3 +17,4 @@ import { randomBytes } from 'node:crypto';
+-import { closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+-import { join } from 'node:path';
+-import { FrameError } from './files.ts';
++import { closeSync, existsSync, lstatSync, openSync, readFileSync, rmSync } from 'node:fs';
++import { resolve } from 'node:path';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
++import { FrameError, writeAtomic } from './files.ts';
+@@ -104,0 +106 @@ export class CommentStore {
++  private readonly files: WorkspaceDirectory;
+@@ -110 +112,2 @@ export class CommentStore {
+-    this.file = join(root, COMMENTS_FILE);
++    this.file = resolve(root, COMMENTS_FILE);
++    this.files = new WorkspaceDirectory(root);
+@@ -113 +116,5 @@ export class CommentStore {
+-    if (this.lock === 'process') rmSync(`${this.file}.lock`, { force: true });
++    if (this.lock === 'process') rmSync(this.files.resolve(`${this.file}.lock`, false), { force: true });
++  }
++
++  readText(): string {
++    return readFileSync(this.files.resolve(this.file), 'utf8');
+@@ -118 +125 @@ export class CommentStore {
+-      const doc = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<CommentsDoc> | null;
++      const doc = JSON.parse(this.readText()) as Partial<CommentsDoc> | null;
+@@ -159 +166 @@ export class CommentStore {
+-    const lock = `${this.file}.lock`;
++    const lock = this.files.resolve(`${this.file}.lock`, false);
+@@ -169 +176 @@ export class CommentStore {
+-          if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) {
++          if (Date.now() - lstatSync(lock).mtimeMs > LOCK_STALE_MS) {
+@@ -192,4 +199,3 @@ export class CommentStore {
+-    if (doc.threads.length || existsSync(this.file)) {
+-      const tmp = join(this.root, `.${COMMENTS_FILE}.${randomBytes(4).toString('hex')}.tmp`);
+-      writeFileSync(tmp, `${JSON.stringify({ version: 1, threads: doc.threads }, null, 2)}\n`);
+-      renameSync(tmp, this.file);
++    const file = this.files.resolve(this.file, false);
++    if (doc.threads.length || existsSync(this.files.resolve(this.file))) {
++      writeAtomic(file, `${JSON.stringify({ version: 1, threads: doc.threads }, null, 2)}\n`);
+diff --git a/packages/server-sdk/src/frame/db.ts b/packages/server-sdk/src/frame/db.ts
+index a1bf5b5..c7f8ca1 100644
+--- a/packages/server-sdk/src/frame/db.ts
++++ b/packages/server-sdk/src/frame/db.ts
+@@ -15 +15,2 @@ import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs
+-import { isAbsolute, join } from 'node:path';
++import { isAbsolute, join, resolve } from 'node:path';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -278,0 +280,2 @@ export class DbStore extends EventEmitter {
++  private readonly files: WorkspaceDirectory;
++  private readonly imports: WorkspaceDirectory | undefined;
+@@ -280 +283 @@ export class DbStore extends EventEmitter {
+-  constructor(root: string) {
++  constructor(root: string, imports?: WorkspaceDirectory) {
+@@ -282,2 +285,4 @@ export class DbStore extends EventEmitter {
+-    this.root = root;
+-    this.dir = join(root, DB_DIR);
++    this.root = resolve(root);
++    this.dir = join(this.root, DB_DIR);
++    this.files = new WorkspaceDirectory(root);
++    this.imports = imports;
+@@ -286,2 +291,7 @@ export class DbStore extends EventEmitter {
+-  private fileOf(segs: string[]): string {
+-    return join(this.dir, ...segs.slice(0, -1), `${segs.at(-1)}.json`);
++  private fileOf(segs: string[], followLeaf = true): string {
++    return this.files.resolve(join(this.dir, ...segs.slice(0, -1), `${segs.at(-1)}.json`), followLeaf);
++  }
++
++  /** Reads the exact bytes seen by the document store, for history and validation. */
++  readDocumentFile(p: string): string {
++    return readFileSync(this.fileOf(splitPath(p, 'doc')), 'utf8');
+@@ -291,0 +302 @@ export class DbStore extends EventEmitter {
++    const file = this.fileOf(segs);
+@@ -293 +304 @@ export class DbStore extends EventEmitter {
+-      const data = JSON.parse(readFileSync(this.fileOf(segs), 'utf8')) as unknown;
++      const data = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+@@ -303 +314 @@ export class DbStore extends EventEmitter {
+-    const dir = join(this.dir, ...segs);
++    const dir = this.files.resolve(join(this.dir, ...segs));
+@@ -314,0 +326 @@ export class DbStore extends EventEmitter {
++      const file = this.files.resolve(join(dir, e.name));
+@@ -316 +328 @@ export class DbStore extends EventEmitter {
+-        const data = JSON.parse(readFileSync(join(dir, e.name), 'utf8')) as unknown;
++        const data = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+@@ -354 +366 @@ export class DbStore extends EventEmitter {
+-    writeAtomic(file, `${text}\n`);
++    writeAtomic(this.fileOf(segs, false), `${text}\n`);
+@@ -365 +377 @@ export class DbStore extends EventEmitter {
+-    writeAtomic(this.fileOf(segs), `${text}\n`);
++    writeAtomic(this.fileOf(segs, false), `${text}\n`);
+@@ -371,0 +384 @@ export class DbStore extends EventEmitter {
++    const file = this.fileOf(segs, false);
+@@ -374 +387 @@ export class DbStore extends EventEmitter {
+-      rmSync(this.fileOf(segs));
++      rmSync(file);
+@@ -435 +448 @@ export class DbStore extends EventEmitter {
+-        if (e.isDirectory() && SEGMENT.test(e.name)) walk(join(dir, e.name), [...segs, e.name]);
++        if (e.isDirectory() && SEGMENT.test(e.name)) walk(this.files.resolve(join(dir, e.name)), [...segs, e.name]);
+@@ -440 +453 @@ export class DbStore extends EventEmitter {
+-          out.push({ path: docSegs.join('/'), bytes: statSync(join(dir, e.name)).size });
++          out.push({ path: docSegs.join('/'), bytes: statSync(this.files.resolve(join(dir, e.name))).size });
+@@ -444 +457 @@ export class DbStore extends EventEmitter {
+-    walk(this.dir, []);
++    walk(this.files.resolve(this.dir), []);
+@@ -527,0 +541 @@ export class DbStore extends EventEmitter {
++        const file = this.imports?.resolve(w.file_path!) ?? w.file_path!;
+@@ -529 +543 @@ export class DbStore extends EventEmitter {
+-          data = JSON.parse(readFileSync(w.file_path!, 'utf8')) as unknown;
++          data = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+diff --git a/packages/server-sdk/src/frame/files.ts b/packages/server-sdk/src/frame/files.ts
+index 0d5c182..0c20ada 100644
+--- a/packages/server-sdk/src/frame/files.ts
++++ b/packages/server-sdk/src/frame/files.ts
+@@ -12,2 +12,3 @@ import { createHash, randomBytes } from 'node:crypto';
+-import { mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, existsSync, type Stats } from 'node:fs';
+-import { basename, dirname, extname, join, sep } from 'node:path';
++import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, existsSync, type Stats } from 'node:fs';
++import { basename, dirname, extname, join, resolve } from 'node:path';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -142 +143 @@ function writeAtomic(file: string, data: Buffer | string): void {
+-  writeFileSync(tmp, data);
++  writeFileSync(tmp, data, { flag: 'wx' });
+@@ -147,0 +149 @@ export class FileStore {
++  private readonly directory: WorkspaceDirectory;
+@@ -153,0 +156 @@ export class FileStore {
++    this.directory = new WorkspaceDirectory(root);
+@@ -159 +162 @@ export class FileStore {
+-    const sha256 = createHash('sha256').update(readFileSync(join(this.root, rel))).digest('hex');
++    const sha256 = createHash('sha256').update(readFileSync(this.directory.resolve(rel))).digest('hex');
+@@ -178 +181 @@ export class FileStore {
+-        if (e.isDirectory()) walk(join(dir, e.name), rel);
++        if (e.isDirectory()) walk(this.directory.resolve(rel), rel);
+@@ -179,0 +183 @@ export class FileStore {
++          const file = this.directory.resolve(rel);
+@@ -181 +185 @@ export class FileStore {
+-            const st = statSync(join(dir, e.name));
++            const st = statSync(file);
+@@ -189 +193 @@ export class FileStore {
+-    walk(this.root, '');
++    walk(this.directory.resolve('.'), '');
+@@ -211,2 +214,0 @@ export class FileStore {
+-    const file = join(this.root, clean);
+-    if (!file.startsWith(this.root + sep)) return null;
+@@ -214,3 +216 @@ export class FileStore {
+-      const real = realpathSync(file);
+-      const realRoot = realpathSync(this.root);
+-      if (!real.startsWith(realRoot + sep)) return null;
++      const real = this.directory.resolve(clean);
+@@ -231 +231 @@ export class FileStore {
+-    const plan: (FileWrite & { rel: string })[] = [];
++    const plan: (FileWrite & { rel: string; file: string })[] = [];
+@@ -242 +242,2 @@ export class FileStore {
+-      plan.push({ rel, ...spec });
++      this.directory.resolve(rel);
++      plan.push({ ...spec, rel, file: this.directory.resolve(rel, false) });
+@@ -261 +262 @@ export class FileStore {
+-      const file = join(this.root, w.rel);
++      const { file } = w;
+@@ -306,0 +308 @@ export class BlobStore {
++  private readonly directory: WorkspaceDirectory;
+@@ -310 +312,2 @@ export class BlobStore {
+-    this.dir = join(root, '_blobs');
++    this.dir = resolve(root, '_blobs');
++    this.directory = new WorkspaceDirectory(root);
+@@ -316,2 +319,2 @@ export class BlobStore {
+-      const m = JSON.parse(readFileSync(join(this.dir, `${id}.json`), 'utf8')) as Omit<BlobMeta, 'id'>;
+-      return existsSync(join(this.dir, id)) ? { id, ...m } : null;
++      const m = JSON.parse(readFileSync(this.directory.resolve(join(this.dir, `${id}.json`)), 'utf8')) as Omit<BlobMeta, 'id'>;
++      return existsSync(this.directory.resolve(join(this.dir, id))) ? { id, ...m } : null;
+@@ -324 +327 @@ export class BlobStore {
+-    return this.meta(id) ? join(this.dir, id) : null;
++    return this.meta(id) ? this.directory.resolve(join(this.dir, id)) : null;
+@@ -330 +333 @@ export class BlobStore {
+-      names = readdirSync(this.dir);
++      names = readdirSync(this.directory.resolve(this.dir));
+@@ -358,3 +361,4 @@ export class BlobStore {
+-      mkdirSync(this.dir, { recursive: true });
+-      writeFileSync(join(this.dir, id), data);
+-      writeFileSync(join(this.dir, `${id}.json`), `${JSON.stringify({ contentType: raw, sizeBytes: data.length, createdAt: new Date().toISOString() })}\n`);
++      const file = this.directory.resolve(join(this.dir, id), false);
++      const meta = this.directory.resolve(join(this.dir, `${id}.json`), false);
++      writeAtomic(file, data);
++      writeAtomic(meta, `${JSON.stringify({ contentType: raw, sizeBytes: data.length, createdAt: new Date().toISOString() })}\n`);
+@@ -372,2 +376,2 @@ export class BlobStore {
+-    rmSync(join(this.dir, id), { force: true });
+-    rmSync(join(this.dir, `${id}.json`), { force: true });
++    rmSync(this.directory.resolve(join(this.dir, id), false), { force: true });
++    rmSync(this.directory.resolve(join(this.dir, `${id}.json`), false), { force: true });
+diff --git a/packages/server-sdk/src/frame/index.ts b/packages/server-sdk/src/frame/index.ts
+index 9fe1497..349a48c 100644
+--- a/packages/server-sdk/src/frame/index.ts
++++ b/packages/server-sdk/src/frame/index.ts
+@@ -206 +206 @@ export class FrameSite implements Site {
+-    this.db = new DbStore(root);
++    this.db = new DbStore(root, ctx.workspace);
+diff --git a/packages/server-sdk/src/serve.ts b/packages/server-sdk/src/serve.ts
+index 9b82c53..7ca86f1 100644
+--- a/packages/server-sdk/src/serve.ts
++++ b/packages/server-sdk/src/serve.ts
+@@ -20,0 +21 @@ import { threadId } from 'node:worker_threads';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -128,0 +130 @@ export interface SiteContext {
++  workspace?: WorkspaceDirectory | undefined;
+@@ -499,0 +502 @@ interface Mounted extends ArtifactRef {
++  workspace: WorkspaceDirectory | undefined;
+@@ -655 +658,4 @@ export class TypeServer {
+-    if (have && have.root === resolve(root)) {
++    const identity = request.workspaceDirectory;
++    const workspace = identity ? new WorkspaceDirectory(identity.root, identity) : have?.workspace;
++    const target = workspace?.resolve(root) ?? resolve(root);
++    if (have && have.root === target && have.workspace?.root === workspace?.root) {
+@@ -663 +669 @@ export class TypeServer {
+-    const work = this.mount(id, resolve(root), title).finally(() => this.mounting.delete(id));
++    const work = this.mount(id, target, title, workspace).finally(() => this.mounting.delete(id));
+@@ -668 +674 @@ export class TypeServer {
+-  private async mount(id: string, root: string, title: string | undefined): Promise<Mounted> {
++  private async mount(id: string, root: string, title: string | undefined, workspace?: WorkspaceDirectory): Promise<Mounted> {
+@@ -670 +676 @@ export class TypeServer {
+-    const logFile = join(root, LOG_FILE);
++    const logPath = join(root, LOG_FILE);
+@@ -673 +679 @@ export class TypeServer {
+-        appendFileSync(logFile, `[${new Date().toISOString()}] ${line}\n`);
++        appendFileSync(workspace ? new WorkspaceDirectory(workspace.resolve(root)).resolve(logPath) : logPath, `[${new Date().toISOString()}] ${line}\n`);
+@@ -697,0 +704 @@ export class TypeServer {
++      workspace,
+@@ -715 +722 @@ export class TypeServer {
+-    const entry: Mounted = { id, root, title: title ?? '', site, page: site.page, streams: 0, lastUsed: Date.now() };
++    const entry: Mounted = { id, root, title: title ?? '', site, page: site.page, workspace, streams: 0, lastUsed: Date.now() };
+@@ -785,0 +793,6 @@ export class TypeServer {
++  private requireAuthorized(entry: Mounted): void {
++    if (entry.workspace && entry.workspace.resolve(entry.root) !== entry.root) {
++      throw new OpenArtifactError('not_granted', 'The authorized artifact directory changed.', { status: 403 });
++    }
++  }
++
+@@ -816,0 +830 @@ export class TypeServer {
++      this.requireAuthorized(content.entry);
+@@ -828,0 +843 @@ export class TypeServer {
++      this.requireAuthorized(at.entry);
+@@ -840,0 +856 @@ export class TypeServer {
++      this.requireAuthorized(entry);
+@@ -864,0 +881 @@ export class TypeServer {
++      this.requireAuthorized(entry);
+diff --git a/packages/type-server/src/agent.ts b/packages/type-server/src/agent.ts
+index ca8c201..844f858 100644
+--- a/packages/type-server/src/agent.ts
++++ b/packages/type-server/src/agent.ts
+@@ -23 +23 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node
+-import { join } from 'node:path';
++import { basename, join } from 'node:path';
+@@ -26,0 +27 @@ import type { WakeSender } from '@open-artifact/protocol';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -60 +61,2 @@ export function agentPaths(root: string): { dir: string; inbox: string; done: st
+-  const dir = join(root, '_agent');
++  const files = new WorkspaceDirectory(root);
++  const entry = (name: string) => files.resolve(join('_agent', name));
+@@ -62,6 +64,6 @@ export function agentPaths(root: string): { dir: string; inbox: string; done: st
+-    dir,
+-    inbox: join(dir, 'inbox'),
+-    done: join(dir, 'done'),
+-    waiting: join(dir, 'waiting'),
+-    asking: join(dir, 'asking'),
+-    viewContext: join(dir, 'view-context.json'),
++    get dir() { return files.resolve('_agent'); },
++    get inbox() { return entry('inbox'); },
++    get done() { return entry('done'); },
++    get waiting() { return entry('waiting'); },
++    get asking() { return entry('asking'); },
++    get viewContext() { return entry('view-context.json'); },
+@@ -95 +97 @@ export async function clearWaiter(root: string): Promise<void> {
+-  await rm(agentPaths(root).waiting, { force: true });
++  await rm(new WorkspaceDirectory(root).resolve('_agent/waiting', false), { force: true });
+@@ -113 +115 @@ export function clearAsking(root: string): void {
+-  rmSync(agentPaths(root).asking, { force: true });
++  rmSync(new WorkspaceDirectory(root).resolve('_agent/asking', false), { force: true });
+@@ -155 +157 @@ export async function enqueue(root: string, request: QueuedRequest): Promise<voi
+-  const { inbox } = agentPaths(root);
++  const files = new WorkspaceDirectory(root);
+@@ -157 +159 @@ export async function enqueue(root: string, request: QueuedRequest): Promise<voi
+-  await writeAtomic(join(inbox, `${stamp}-${request.id}.json`), `${JSON.stringify(request, null, 2)}\n`);
++  await writeAtomic(files.resolve(join('_agent', 'inbox', `${stamp}-${request.id}.json`), false), `${JSON.stringify(request, null, 2)}\n`);
+@@ -162 +164 @@ export async function pending(root: string): Promise<{ file: string; request: Qu
+-  const { inbox } = agentPaths(root);
++  const files = new WorkspaceDirectory(root);
+@@ -165 +167 @@ export async function pending(root: string): Promise<{ file: string; request: Qu
+-    names = (await readdir(inbox)).filter((name) => name.endsWith('.json')).sort();
++    names = (await readdir(files.resolve('_agent/inbox'))).filter((name) => name.endsWith('.json')).sort();
+@@ -171 +172,0 @@ export async function pending(root: string): Promise<{ file: string; request: Qu
+-    const file = join(inbox, name);
+@@ -173 +174,3 @@ export async function pending(root: string): Promise<{ file: string; request: Qu
+-      out.push({ file, request: JSON.parse(await readFile(file, 'utf8')) as QueuedRequest });
++      const requested = join('_agent', 'inbox', name);
++      const request = JSON.parse(await readFile(files.resolve(requested), 'utf8')) as QueuedRequest;
++      out.push({ file: files.resolve(requested, false), request });
+@@ -183 +186,2 @@ export async function markTaken(root: string, files: string[]): Promise<void> {
+-  const { done } = agentPaths(root);
++  const directory = new WorkspaceDirectory(root);
++  const done = directory.resolve('_agent/done');
+@@ -186,2 +190,3 @@ export async function markTaken(root: string, files: string[]): Promise<void> {
+-    const name = file.slice(file.lastIndexOf('/') + 1);
+-    await rename(file, join(done, name)).catch(() => rm(file, { force: true }));
++    const input = directory.resolve(file, false);
++    const output = directory.resolve(join(done, basename(file)), false);
++    await rename(input, output).catch(() => rm(input, { force: true }));
+@@ -190 +195 @@ export async function markTaken(root: string, files: string[]): Promise<void> {
+-  for (const name of names.slice(0, Math.max(0, names.length - DONE_KEEP))) await rm(join(done, name), { force: true });
++  for (const name of names.slice(0, Math.max(0, names.length - DONE_KEEP))) await rm(directory.resolve(join(done, name), false), { force: true });
+@@ -297 +302 @@ export function editsFile(root: string): string {
+-  return join(agentPaths(root).dir, 'edits.json');
++  return new WorkspaceDirectory(root).resolve('_agent/edits.json');
+@@ -313 +317,0 @@ export function countEdits(root: string, n: number): void {
+-  const file = editsFile(root);
+@@ -314,0 +319 @@ export function countEdits(root: string, n: number): void {
++    const file = new WorkspaceDirectory(root).resolve('_agent/edits.json', false);
+@@ -317 +322 @@ export function countEdits(root: string, n: number): void {
+-    writeFileSync(temp, `${JSON.stringify({ edits: readEdits(root) + n, at: new Date().toISOString() })}\n`);
++    writeFileSync(temp, `${JSON.stringify({ edits: readEdits(root) + n, at: new Date().toISOString() })}\n`, { flag: 'wx' });
+@@ -326 +331 @@ export function resetEdits(root: string): void {
+-  rmSync(editsFile(root), { force: true });
++  rmSync(new WorkspaceDirectory(root).resolve('_agent/edits.json', false), { force: true });
+diff --git a/packages/type-server/src/artifact-files.ts b/packages/type-server/src/artifact-files.ts
+index 2c82920..5c8a01b 100644
+--- a/packages/type-server/src/artifact-files.ts
++++ b/packages/type-server/src/artifact-files.ts
+@@ -12 +12,2 @@ import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+-import { basename, join, relative, sep } from 'node:path';
++import { basename, join, relative, resolve, sep } from 'node:path';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -30,0 +32,2 @@ export async function referencesTo(root: string, id: string): Promise<string[]>
++  root = resolve(root);
++  const directory = new WorkspaceDirectory(root);
+@@ -34 +37 @@ export async function referencesTo(root: string, id: string): Promise<string[]>
+-    const info = await stat(file).catch(() => null);
++    const info = await stat(directory.resolve(file)).catch(() => null);
+@@ -36 +39 @@ export async function referencesTo(root: string, id: string): Promise<string[]>
+-    const bytes = await readFile(file).catch(() => null);
++    const bytes = await readFile(directory.resolve(file)).catch(() => null);
+@@ -42 +45 @@ export async function referencesTo(root: string, id: string): Promise<string[]>
+-      entries = await readdir(dir, { withFileTypes: true });
++      entries = await readdir(directory.resolve(dir), { withFileTypes: true });
+@@ -101,2 +104 @@ export async function ensureGitignore(root: string): Promise<boolean> {
+-  const file = join(root, '.gitignore');
+-  if (existsSync(file) || !existsSync(root)) return false;
++  if (!existsSync(root)) return false;
+@@ -103,0 +106 @@ export async function ensureGitignore(root: string): Promise<boolean> {
++    const file = new WorkspaceDirectory(root).resolve('.gitignore', false);
+diff --git a/packages/type-server/src/db-host.ts b/packages/type-server/src/db-host.ts
+index 0af547c..0980126 100644
+--- a/packages/type-server/src/db-host.ts
++++ b/packages/type-server/src/db-host.ts
+@@ -26 +26 @@ import { randomUUID } from 'node:crypto';
+-import { existsSync, mkdirSync, readFileSync, watch, type FSWatcher } from 'node:fs';
++import { existsSync, mkdirSync, watch, type FSWatcher } from 'node:fs';
+@@ -28,0 +29 @@ import { join } from 'node:path';
++import type { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -84,0 +86 @@ export interface DbHostOptions {
++  workspace?: WorkspaceDirectory | undefined;
+@@ -300 +302 @@ export class DbHost {
+-    this.db = new DbStore(options.root);
++    this.db = new DbStore(options.root, options.workspace);
+@@ -387 +389 @@ export class DbHost {
+-      return canonical(readFileSync(join(this.db.dir, ...path.split('/')) + '.json', 'utf8'));
++      return canonical(this.db.readDocumentFile(path));
+@@ -395 +397 @@ export class DbHost {
+-      return readFileSync(this.comments.file, 'utf8');
++      return this.comments.readText();
+@@ -786 +788 @@ export function readDbFiles(root: string): Map<string, string> {
+-      files.set(path, readFileSync(join(store.dir, ...path.split('/')) + '.json', 'utf8'));
++      files.set(path, store.readDocumentFile(path));
+diff --git a/packages/type-server/src/docs/actions.ts b/packages/type-server/src/docs/actions.ts
+index aeea948..05fb9e6 100644
+--- a/packages/type-server/src/docs/actions.ts
++++ b/packages/type-server/src/docs/actions.ts
+@@ -7,0 +8 @@ import path from 'node:path';
++import type { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -93,0 +95 @@ export interface DocActionContext {
++  workspace?: WorkspaceDirectory | undefined;
+@@ -123 +125 @@ export async function runDocAction(name: DocActionName, args: Json, context: Doc
+-      return store instanceof DocStore ? { status: 201, body: duplicateDoc(store, args.name.trim()) } : store;
++      return store instanceof DocStore ? { status: 201, body: duplicateDoc(store, args.name.trim(), context.workspace) } : store;
+@@ -150 +152 @@ export async function runDocAction(name: DocActionName, args: Json, context: Doc
+-async function exportAction(args: Json, { root, owner, host }: DocActionContext): Promise<DocActionAnswer> {
++async function exportAction(args: Json, { root, owner, host, workspace }: DocActionContext): Promise<DocActionAnswer> {
+@@ -156 +158,2 @@ async function exportAction(args: Json, { root, owner, host }: DocActionContext)
+-  const out = typeof args.out === 'string' && args.out ? path.resolve(args.out) : undefined;
++  const requested = typeof args.out === 'string' && args.out ? path.resolve(args.out) : undefined;
++  const out = requested === undefined ? undefined : workspace?.resolve(requested) ?? requested;
+@@ -173 +176,2 @@ async function exportAction(args: Json, { root, owner, host }: DocActionContext)
+-    const into = out ?? path.join(root, EXPORTS_DIR, file.name);
++    const requested = out ?? path.join(root, EXPORTS_DIR, file.name);
++    const into = workspace?.resolve(requested) ?? requested;
+@@ -185 +189 @@ async function exportAction(args: Json, { root, owner, host }: DocActionContext)
+-async function importAction(args: Json, { root, owner, host }: DocActionContext): Promise<DocActionAnswer> {
++async function importAction(args: Json, { root, owner, host, workspace }: DocActionContext): Promise<DocActionAnswer> {
+@@ -186,0 +191 @@ async function importAction(args: Json, { root, owner, host }: DocActionContext)
++  const file = workspace?.resolve(args.file) ?? args.file;
+@@ -189 +194 @@ async function importAction(args: Json, { root, owner, host }: DocActionContext)
+-    bytes = fs.readFileSync(args.file);
++    bytes = fs.readFileSync(file);
+@@ -196 +201 @@ async function importAction(args: Json, { root, owner, host }: DocActionContext)
+-    const body = await importIntoFolder({ root, owner, ...(host ? { host } : {}) }, { file: args.file, bytes, ...(name ? { name } : {}) });
++    const body = await importIntoFolder({ root, owner, ...(host ? { host } : {}) }, { file, bytes, ...(name ? { name } : {}) });
+diff --git a/packages/type-server/src/docs/blobs.ts b/packages/type-server/src/docs/blobs.ts
+index 0cb4cd3..7ce7bac 100644
+--- a/packages/type-server/src/docs/blobs.ts
++++ b/packages/type-server/src/docs/blobs.ts
+@@ -5,0 +6 @@
++import { randomBytes } from 'node:crypto';
+@@ -8,0 +10 @@ import { BLOB_ID, blobRef, imageInfo } from '@open-artifact/docs-core';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -17 +19 @@ export const blobIdOf = (bytes: Uint8Array): string => sha256(Buffer.from(bytes.
+-function blobFile(artifactRoot: string, id: string): string | null {
++function blobFile(files: WorkspaceDirectory, id: string): string | null {
+@@ -21 +23 @@ function blobFile(artifactRoot: string, id: string): string | null {
+-    names = fs.readdirSync(path.join(artifactRoot, BLOBS_DIR));
++    names = fs.readdirSync(files.resolve(BLOBS_DIR));
+@@ -26 +28 @@ function blobFile(artifactRoot: string, id: string): string | null {
+-  return name ? path.join(artifactRoot, BLOBS_DIR, name) : null;
++  return name ? files.resolve(path.join(BLOBS_DIR, name)) : null;
+@@ -32,2 +34,2 @@ export function putDocBlob(artifactRoot: string, bytes: Uint8Array): string {
+-  if (blobFile(artifactRoot, id)) return blobRef(id);
+-  const dir = path.join(artifactRoot, BLOBS_DIR);
++  const files = new WorkspaceDirectory(artifactRoot);
++  if (blobFile(files, id)) return blobRef(id);
+@@ -35,4 +37,4 @@ export function putDocBlob(artifactRoot: string, bytes: Uint8Array): string {
+-  const file = path.join(dir, `${id}.${extensionOf(mime)}`);
+-  fs.mkdirSync(dir, { recursive: true });
+-  const temporary = `${file}.${process.pid}.tmp`;
+-  fs.writeFileSync(temporary, bytes);
++  const file = files.resolve(path.join(BLOBS_DIR, `${id}.${extensionOf(mime)}`), false);
++  fs.mkdirSync(path.dirname(file), { recursive: true });
++  const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
++  fs.writeFileSync(temporary, bytes, { flag: 'wx' });
+@@ -45,2 +46,0 @@ export function readDocBlob(artifactRoot: string, ref: string): Buffer | null {
+-  const file = blobFile(artifactRoot, ref.replace(/^blob\//, ''));
+-  if (!file) return null;
+@@ -48 +48,2 @@ export function readDocBlob(artifactRoot: string, ref: string): Buffer | null {
+-    return fs.readFileSync(file);
++    const file = blobFile(new WorkspaceDirectory(artifactRoot), ref.replace(/^blob\//, ''));
++    return file ? fs.readFileSync(file) : null;
+diff --git a/packages/type-server/src/docs/duplicate.ts b/packages/type-server/src/docs/duplicate.ts
+index 94e01da..711ca92 100644
+--- a/packages/type-server/src/docs/duplicate.ts
++++ b/packages/type-server/src/docs/duplicate.ts
+@@ -4,0 +5 @@ import { docToDisk } from '@open-artifact/docs-core';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -9,2 +10,4 @@ import { DOC_DIR, MANIFEST_FILE, SESSIONS_FILE, TABS_DIR, type DocStore } from '
+-export function duplicateDoc(store: DocStore, name: string): { root: string; name: string } {
+-  const parent = path.dirname(path.dirname(store.root));
++export function duplicateDoc(store: DocStore, name: string, workspace?: WorkspaceDirectory): { root: string; name: string } {
++  const artifact = path.dirname(store.root);
++  const parent = workspace?.root === artifact ? artifact : path.dirname(artifact);
++  const files = workspace ? new WorkspaceDirectory(workspace.resolve(artifact)) : undefined;
+@@ -12 +15,2 @@ export function duplicateDoc(store: DocStore, name: string): { root: string; nam
+-  let root = path.join(parent, base);
++  const folder = (name: string) => workspace?.resolve(path.join(parent, name), false) ?? path.join(parent, name);
++  let root = folder(base);
+@@ -19 +23 @@ export function duplicateDoc(store: DocStore, name: string): { root: string; nam
+-      root = path.join(parent, base + ' ' + suffix);
++      root = folder(base + ' ' + suffix);
+@@ -29 +33,2 @@ export function duplicateDoc(store: DocStore, name: string): { root: string; nam
+-    const sessions = path.join(store.root, SESSIONS_FILE);
++    const requestedSessions = path.join(store.root, SESSIONS_FILE);
++    const sessions = files?.resolve(requestedSessions) ?? requestedSessions;
+@@ -31 +36,2 @@ export function duplicateDoc(store: DocStore, name: string): { root: string; nam
+-    const blobs = path.join(path.dirname(store.root), BLOBS_DIR);
++    const requestedBlobs = path.join(artifact, BLOBS_DIR);
++    const blobs = files?.resolve(requestedBlobs) ?? requestedBlobs;
+@@ -36 +42,2 @@ export function duplicateDoc(store: DocStore, name: string): { root: string; nam
+-          fs.copyFileSync(path.join(blobs, entry.name), path.join(root, BLOBS_DIR, entry.name));
++          const source = path.join(blobs, entry.name);
++          fs.copyFileSync(files?.resolve(source) ?? source, path.join(root, BLOBS_DIR, entry.name));
+diff --git a/packages/type-server/src/docs/store.ts b/packages/type-server/src/docs/store.ts
+index 93434fe..3dcf4e3 100644
+--- a/packages/type-server/src/docs/store.ts
++++ b/packages/type-server/src/docs/store.ts
+@@ -16,0 +17 @@ import path from 'node:path';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -268,2 +269,2 @@ function writeAtomic(file: string, text: string): void {
+-  const temp = `${file}.${process.pid}.tmp`;
+-  fs.writeFileSync(temp, text);
++  const temp = `${file}.${randomBytes(8).toString('hex')}.tmp`;
++  fs.writeFileSync(temp, text, { flag: 'wx' });
+@@ -277,0 +279 @@ export class DocStore {
++  private readonly files: WorkspaceDirectory;
+@@ -288 +290 @@ export class DocStore {
+-  private constructor(root: string, manifest: Manifest, sessions: SessionsFile) {
++  private constructor(root: string, manifest: Manifest, sessions: SessionsFile, files: WorkspaceDirectory) {
+@@ -289,0 +292 @@ export class DocStore {
++    this.files = files;
+@@ -295 +298,2 @@ export class DocStore {
+-  static open(root: string): DocStore {
++  static open(root: string, files?: WorkspaceDirectory): DocStore {
++    root = path.resolve(root);
+@@ -299 +303,2 @@ export class DocStore {
+-      manifest = JSON.parse(fs.readFileSync(file, 'utf8')) as Manifest;
++      files ??= new WorkspaceDirectory(root);
++      manifest = JSON.parse(fs.readFileSync(files.resolve(file), 'utf8')) as Manifest;
+@@ -309 +314 @@ export class DocStore {
+-      sessions = JSON.parse(fs.readFileSync(path.join(root, SESSIONS_FILE), 'utf8')) as SessionsFile;
++      sessions = JSON.parse(fs.readFileSync(files.resolve(path.join(root, SESSIONS_FILE)), 'utf8')) as SessionsFile;
+@@ -312 +317 @@ export class DocStore {
+-    return new DocStore(root, manifest, sessions);
++    return new DocStore(root, manifest, sessions, files);
+@@ -319,2 +324,3 @@ export class DocStore {
+-  static create(root: string, name: string, fill: (store: DocStore, session: Session) => { id?: string | undefined; name: string; blocks: Block[] }[]): DocStore {
+-    if (isDocFolder(root)) throw new StoreError('DOC_EXISTS', `${root} already holds a doc.`);
++  static create(root: string, name: string, fill: (store: DocStore, session: Session) => { id?: string | undefined; name: string; blocks: Block[] }[], files?: WorkspaceDirectory): DocStore {
++    root = files?.resolve(path.resolve(root)) ?? path.resolve(root);
++    if (fs.existsSync(files?.resolve(path.join(root, MANIFEST_FILE)) ?? path.join(root, MANIFEST_FILE))) throw new StoreError('DOC_EXISTS', `${root} already holds a doc.`);
+@@ -324 +330 @@ export class DocStore {
+-    const store = new DocStore(root, manifest, { sessions: {} });
++    const store = new DocStore(root, manifest, { sessions: {} }, files ?? new WorkspaceDirectory(root));
+@@ -382 +388 @@ export class DocStore {
+-      disk = JSON.parse(fs.readFileSync(file, 'utf8')) as DiskDoc;
++      disk = JSON.parse(fs.readFileSync(this.files.resolve(file), 'utf8')) as DiskDoc;
+@@ -428,2 +434,3 @@ export class DocStore {
+-      if (text === null) fs.rmSync(file, { force: true });
+-      else writeAtomic(file, text);
++      const entry = this.files.resolve(file, false);
++      if (text === null) fs.rmSync(entry, { force: true });
++      else writeAtomic(entry, text);
+@@ -441 +448 @@ export class DocStore {
+-    writeJson(path.join(this.root, SESSIONS_FILE), this.sessionsFile);
++    writeJson(this.files.resolve(path.join(this.root, SESSIONS_FILE), false), this.sessionsFile);
+@@ -447 +454 @@ export class DocStore {
+-    writeJson(file, value);
++    writeJson(this.files.resolve(file, false), value);
+@@ -454 +461 @@ export class DocStore {
+-      prior = fs.readFileSync(file, 'utf8');
++      prior = fs.readFileSync(this.files.resolve(file), 'utf8');
+@@ -468 +475 @@ export class DocStore {
+-      beforeAt = fs.statSync(file).mtime.toISOString();
++      beforeAt = fs.statSync(this.files.resolve(file)).mtime.toISOString();
+@@ -476 +483 @@ export class DocStore {
+-      fs.rmSync(old, { force: true });
++      fs.rmSync(this.files.resolve(old, false), { force: true });
+@@ -497 +504 @@ export class DocStore {
+-      const read = JSON.parse(fs.readFileSync(path.join(this.historyDir(tabId), HISTORY_INDEX), 'utf8')) as HistoryIndex;
++      const read = JSON.parse(fs.readFileSync(this.files.resolve(path.join(this.historyDir(tabId), HISTORY_INDEX)), 'utf8')) as HistoryIndex;
+@@ -509 +516 @@ export class DocStore {
+-      return docFromDisk(JSON.parse(fs.readFileSync(path.join(this.historyDir(tabId), `${rev}.json`), 'utf8')) as DiskDoc);
++      return docFromDisk(JSON.parse(fs.readFileSync(this.files.resolve(path.join(this.historyDir(tabId), `${rev}.json`)), 'utf8')) as DiskDoc);
+@@ -608,2 +615,3 @@ export class DocStore {
+-      fs.mkdirSync(path.dirname(this.binFile(id)), { recursive: true });
+-      fs.renameSync(file, this.binFile(id));
++      const bin = this.files.resolve(this.binFile(id), false);
++      fs.mkdirSync(path.dirname(bin), { recursive: true });
++      fs.renameSync(this.files.resolve(file, false), bin);
+@@ -618 +626 @@ export class DocStore {
+-      names = fs.readdirSync(path.join(this.root, TABS_DIR, DELETED_DIR));
++      names = fs.readdirSync(this.files.resolve(path.join(this.root, TABS_DIR, DELETED_DIR)));
+@@ -631 +639 @@ export class DocStore {
+-      return docFromDisk(JSON.parse(fs.readFileSync(bin, 'utf8')) as DiskDoc);
++      return docFromDisk(JSON.parse(fs.readFileSync(this.files.resolve(bin), 'utf8')) as DiskDoc);
+@@ -693 +701 @@ export class DocStore {
+-      disk = JSON.parse(fs.readFileSync(bin, 'utf8')) as DiskDoc;
++      disk = JSON.parse(fs.readFileSync(this.files.resolve(bin), 'utf8')) as DiskDoc;
+@@ -721 +729 @@ export class DocStore {
+-    fs.renameSync(bin, file);
++    fs.renameSync(this.files.resolve(bin, false), this.files.resolve(file, false));
+@@ -737 +745 @@ export class DocStore {
+-        if (other.subtabOf === id && other.group === record.group && fs.existsSync(this.binFile(child))) this.putBack(child, restored);
++        if (other.subtabOf === id && other.group === record.group && fs.existsSync(this.files.resolve(this.binFile(child)))) this.putBack(child, restored);
+@@ -822 +830 @@ export class DocStore {
+-    writeJson(path.join(this.root, MANIFEST_FILE), this.manifest);
++    writeJson(this.files.resolve(path.join(this.root, MANIFEST_FILE), false), this.manifest);
+@@ -877 +885 @@ export class DocStore {
+-    writeJson(path.join(this.root, SESSIONS_FILE), this.sessionsFile);
++    writeJson(this.files.resolve(path.join(this.root, SESSIONS_FILE), false), this.sessionsFile);
+diff --git a/packages/type-server/src/history.ts b/packages/type-server/src/history.ts
+index e6a3dcc..9cdb6af 100644
+--- a/packages/type-server/src/history.ts
++++ b/packages/type-server/src/history.ts
+@@ -40 +40,2 @@ import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, wri
+-import { dirname, join } from 'node:path';
++import { dirname, join, resolve } from 'node:path';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -189 +190 @@ function writeAtomicSync(file: string, data: Buffer | string): void {
+-    writeFileSync(temp, data);
++    writeFileSync(temp, data, { flag: 'wx' });
+@@ -205,0 +207,2 @@ export class History {
++  private readonly root: string;
++  private directory: WorkspaceDirectory | undefined;
+@@ -217 +220,2 @@ export class History {
+-    this.dir = join(root, HISTORY_DIR);
++    this.root = resolve(root);
++    this.dir = join(this.root, HISTORY_DIR);
+@@ -226,0 +231,9 @@ export class History {
++  private get files(): WorkspaceDirectory {
++    return this.directory ??= new WorkspaceDirectory(this.root);
++  }
++
++  private writableFiles(): WorkspaceDirectory {
++    if (!this.directory) mkdirSync(this.root, { recursive: true });
++    return this.files;
++  }
++
+@@ -229 +242 @@ export class History {
+-      const info = statSync(join(this.dir, INDEX));
++      const info = statSync(this.files.resolve(join(this.dir, INDEX)));
+@@ -242 +255 @@ export class History {
+-      raw = JSON.parse(readFileSync(join(this.dir, INDEX), 'utf8'));
++      raw = JSON.parse(readFileSync(this.files.resolve(join(this.dir, INDEX)), 'utf8'));
+@@ -252 +265 @@ export class History {
+-    writeAtomicSync(join(this.dir, INDEX), `${JSON.stringify(this.index)}\n`);
++    writeAtomicSync(this.writableFiles().resolve(join(this.dir, INDEX), false), `${JSON.stringify(this.index)}\n`);
+@@ -309 +322 @@ export class History {
+-      return readFileSync(join(this.dir, OBJECTS, sha));
++      return readFileSync(this.files.resolve(join(this.dir, OBJECTS, sha)));
+@@ -319 +332 @@ export class History {
+-      return statSync(join(this.dir, OBJECTS, sha)).size;
++      return statSync(this.files.resolve(join(this.dir, OBJECTS, sha))).size;
+@@ -476 +489 @@ export class History {
+-    const file = join(this.dir, OBJECTS, sha);
++    const file = this.writableFiles().resolve(join(this.dir, OBJECTS, sha));
+@@ -514 +527 @@ export class History {
+-      names = readdirSync(join(this.dir, OBJECTS));
++      names = readdirSync(this.files.resolve(join(this.dir, OBJECTS)));
+@@ -518 +531,3 @@ export class History {
+-    for (const name of names) if (SHA.test(name) && !keep.has(name)) rmSync(join(this.dir, OBJECTS, name), { force: true });
++    for (const name of names) {
++      if (SHA.test(name) && !keep.has(name)) rmSync(this.files.resolve(join(this.dir, OBJECTS, name), false), { force: true });
++    }
+diff --git a/packages/type-server/src/server.ts b/packages/type-server/src/server.ts
+index b1f2018..ecde27a 100644
+--- a/packages/type-server/src/server.ts
++++ b/packages/type-server/src/server.ts
+@@ -47,0 +48 @@ import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from 'no
++import { WorkspaceDirectory, type WorkspaceDirectoryIdentity } from '@open-artifact/protocol/workspace-files';
+@@ -336,0 +338 @@ export interface OpenRequest {
++  workspaceDirectory?: WorkspaceDirectoryIdentity;
+@@ -480,0 +483 @@ class OpenArtifact {
++  readonly workspace: WorkspaceDirectory | undefined;
+@@ -483 +486 @@ class OpenArtifact {
+-  constructor(id: string, token: string, type: TypeName, root: string, title: string) {
++  constructor(id: string, token: string, type: TypeName, root: string, title: string, workspace?: WorkspaceDirectory) {
+@@ -488,0 +492 @@ class OpenArtifact {
++    this.workspace = workspace;
+@@ -546 +550 @@ export function folderId(root: string): string {
+-async function readArtifactMeta(root: string): Promise<{ id?: string; title?: string; type?: string }> {
++async function readArtifactMeta(root: string, files?: WorkspaceDirectory): Promise<{ id?: string; title?: string; type?: string }> {
+@@ -548 +552,2 @@ async function readArtifactMeta(root: string): Promise<{ id?: string; title?: st
+-    const meta = JSON.parse(await readFile(join(root, '.artifact.json'), 'utf8')) as Record<string, unknown>;
++    const path = join(root, '.artifact.json');
++    const meta = JSON.parse(await readFile(files?.resolve(path) ?? path, 'utf8')) as Record<string, unknown>;
+@@ -560 +565 @@ async function readArtifactMeta(root: string): Promise<{ id?: string; title?: st
+-async function indexTitle(root: string, type: TypeName): Promise<string | undefined> {
++async function indexTitle(root: string, type: TypeName, files?: WorkspaceDirectory): Promise<string | undefined> {
+@@ -562 +567,2 @@ async function indexTitle(root: string, type: TypeName): Promise<string | undefi
+-    const index = JSON.parse(await readFile(join(root, contentDirOf(type), TYPES[type].marker), 'utf8')) as { title?: unknown };
++    const path = join(root, contentDirOf(type), TYPES[type].marker);
++    const index = JSON.parse(await readFile(files?.resolve(path) ?? path, 'utf8')) as { title?: unknown };
+@@ -570,2 +576,2 @@ async function indexTitle(root: string, type: TypeName): Promise<string | undefi
+-export async function detectType(root: string): Promise<TypeName | null> {
+-  const meta = await readArtifactMeta(root);
++export async function detectType(root: string, files?: WorkspaceDirectory): Promise<TypeName | null> {
++  const meta = await readArtifactMeta(root, files);
+@@ -575 +581,2 @@ export async function detectType(root: string): Promise<TypeName | null> {
+-      await stat(join(root, contentDirOf(type.name), type.marker));
++      const path = join(root, contentDirOf(type.name), type.marker);
++      await stat(files?.resolve(path) ?? path);
+@@ -585 +592,2 @@ export async function detectType(root: string): Promise<TypeName | null> {
+-      if ((await stat(join(root, contentDirOf(type.name), dirname(type.marker)))).isDirectory()) return type.name;
++      const path = join(root, contentDirOf(type.name), dirname(type.marker));
++      if ((await stat(files?.resolve(path) ?? path)).isDirectory()) return type.name;
+@@ -680,0 +689 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
++      workspace: artifact.workspace,
+@@ -989,3 +998,6 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-    const root = resolve(request.root);
+-    const meta = await readArtifactMeta(root);
+-    const type = request.type ?? (await detectType(root)) ?? (hosted.size === 1 ? [...hosted][0]! : null);
++    const identity = request.workspaceDirectory;
++    const workspace = identity ? new WorkspaceDirectory(identity.root, identity) : request.id ? byId.get(request.id)?.workspace : undefined;
++    const root = workspace?.resolve(request.root) ?? resolve(request.root);
++    const files = workspace ? new WorkspaceDirectory(root) : undefined;
++    const meta = await readArtifactMeta(root, files);
++    const type = request.type ?? (await detectType(root, files)) ?? (hosted.size === 1 ? [...hosted][0]! : null);
+@@ -1006 +1018 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-      await stat(marker);
++      await stat(files?.resolve(marker) ?? marker);
+@@ -1010 +1022,4 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-      for (const [path, content] of Object.entries(TYPES[type].scaffold(title, dir))) await writeAtomic(join(dir, path), content);
++      for (const [path, content] of Object.entries(TYPES[type].scaffold(title, dir))) {
++        const target = join(dir, path);
++        await writeAtomic(files?.resolve(target, false) ?? target, content);
++      }
+@@ -1013 +1028 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-    const title = request.title?.trim() || meta.title || (await indexTitle(root, type)) || basename(root);
++    const title = request.title?.trim() || meta.title || (await indexTitle(root, type, files)) || basename(root);
+@@ -1020 +1035 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-      artifact = new OpenArtifact(id, randomBytes(16).toString('hex'), type, root, title);
++      artifact = new OpenArtifact(id, randomBytes(16).toString('hex'), type, root, title, workspace);
+@@ -1110,0 +1126,10 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
++  const requireAuthorized = (artifact: OpenArtifact): void => {
++    if (artifact.workspace) {
++      try {
++        if (artifact.workspace.resolve(artifact.root) !== artifact.root) throw new Error('Directory changed');
++      } catch {
++        throw new HttpError(403, 'not_granted', 'The authorized artifact directory changed.');
++      }
++    }
++  };
++
+@@ -1112,0 +1138 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
++    requireAuthorized(artifact);
+@@ -1557,0 +1584 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
++    if (open) requireAuthorized(open);
+@@ -1650 +1677,2 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-    const dir = join(agentPaths(root).dir, 'snapshots');
++    const files = new WorkspaceDirectory(root);
++    const dir = files.resolve('_agent/snapshots');
+@@ -1652,2 +1680,2 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-    const image = join(dir, `snapshot-${new Date().toISOString().replace(/[:.]/g, '-')}.png`);
+-    await writeFile(image, png);
++    const image = files.resolve(join(dir, `snapshot-${new Date().toISOString().replace(/[:.]/g, '-')}.png`), false);
++    await writeFile(image, png, { flag: 'wx' });
+@@ -1655 +1683 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-    for (const name of old.slice(0, Math.max(0, old.length - SNAPSHOTS_KEPT))) await rm(join(dir, name), { force: true });
++    for (const name of old.slice(0, Math.max(0, old.length - SNAPSHOTS_KEPT))) await rm(files.resolve(join(dir, name), false), { force: true });
+@@ -1664,0 +1693 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
++    if (open) requireAuthorized(open);
+@@ -1702 +1731 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-    const host: SheetCallHost = open ? { artifactUrl: pageUrl(open), showWalkthrough: (walkthrough) => showWalkthrough(open, walkthrough) } : {};
++    const host: SheetCallHost = open ? { artifactUrl: pageUrl(open), workspace: open.workspace, showWalkthrough: (walkthrough) => showWalkthrough(open, walkthrough) } : {};
+@@ -1746,2 +1775,2 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-      ? await open.run(async () => runDocAction(name, args, { root, owner, host: open.doc! }))
+-      : await runDocAction(name, args, { root, owner });
++      ? await open.run(async () => runDocAction(name, args, { root, owner, host: open.doc!, workspace: open.workspace }))
++      : await runDocAction(name, args, { root, owner, workspace: open?.workspace });
+@@ -2217 +2246 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-      const answer = await artifact.run(() => runDocAction('duplicate', args, { root: artifact.root, owner: viewer, host: artifact.doc! }));
++      const answer = await artifact.run(() => runDocAction('duplicate', args, { root: artifact.root, owner: viewer, host: artifact.doc!, workspace: artifact.workspace }));
+@@ -2219 +2248,4 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-      const copy = await open({ root: String(answer.body.root), type: 'docs', title: String(answer.body.name) });
++      const copy = await open({
++        root: String(answer.body.root), type: 'docs', title: String(answer.body.name),
++        ...(artifact.workspace ? { workspaceDirectory: artifact.workspace.identity } : {}),
++      });
+diff --git a/packages/type-server/src/sheets/cli.ts b/packages/type-server/src/sheets/cli.ts
+index e1a35f3..bfa183d 100644
+--- a/packages/type-server/src/sheets/cli.ts
++++ b/packages/type-server/src/sheets/cli.ts
+@@ -23,0 +24 @@ import path from 'node:path';
++import type { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -170 +171 @@ function needSheet(root: string): void {
+-function withCode(calls: unknown, from: string): unknown {
++function withCode(calls: unknown, from: string, workspace?: WorkspaceDirectory): unknown {
+@@ -175,9 +176 @@ function withCode(calls: unknown, from: string): unknown {
+-    if (typeof codeFile !== 'string') throw new SheetsCommandError('NOT_FOUND', 'codeFile is the path of a file of chart code.');
+-    const file = path.resolve(from, codeFile);
+-    let code: string;
+-    try {
+-      code = fs.readFileSync(file, 'utf8');
+-    } catch {
+-      throw new SheetsCommandError('NOT_FOUND', `${file} (codeFile) is not a file of chart code.`);
+-    }
+-    return { ...call, payload: { ...rest, code } };
++    return { ...call, payload: { ...rest, code: widgetCodeFromFile(codeFile, from, workspace) } };
+@@ -200 +193 @@ function needsSheet(call: SheetCall): boolean {
+-function withCodeFile(args: JsonObject, from: string): JsonObject {
++function withCodeFile(args: JsonObject, from: string, workspace?: WorkspaceDirectory): JsonObject {
+@@ -202,0 +196,4 @@ function withCodeFile(args: JsonObject, from: string): JsonObject {
++  return { ...rest, code: widgetCodeFromFile(codeFile, from, workspace) };
++}
++
++function widgetCodeFromFile(codeFile: unknown, from: string, workspace?: WorkspaceDirectory): string {
+@@ -204,2 +201,2 @@ function withCodeFile(args: JsonObject, from: string): JsonObject {
+-  const file = path.resolve(from, codeFile);
+-  let code: string;
++  const requested = path.resolve(from, codeFile);
++  const file = workspace?.resolve(requested) ?? requested;
+@@ -207 +204 @@ function withCodeFile(args: JsonObject, from: string): JsonObject {
+-    code = fs.readFileSync(file, 'utf8');
++    return fs.readFileSync(file, 'utf8');
+@@ -211 +207,0 @@ function withCodeFile(args: JsonObject, from: string): JsonObject {
+-  return { ...rest, code };
+@@ -286,2 +282,2 @@ function widgetArgs(root: string, words: readonly string[]): JsonObject {
+-function widgetPayload(args: JsonObject): JsonObject {
+-  const { verb, id, ...rest } = withCodeFile(args, process.cwd());
++function widgetPayload(args: JsonObject, workspace?: WorkspaceDirectory): JsonObject {
++  const { verb, id, ...rest } = withCodeFile(args, process.cwd(), workspace);
+@@ -292,2 +288,3 @@ function widgetPayload(args: JsonObject): JsonObject {
+-function exportTo(store: SheetStore, root: string, args: JsonObject): Json {
+-  const given = typeof args.file === 'string' ? path.resolve(args.file) : undefined;
++function exportTo(store: SheetStore, root: string, args: JsonObject, workspace?: WorkspaceDirectory): Json {
++  const requested = typeof args.file === 'string' ? path.resolve(args.file) : undefined;
++  const given = requested === undefined ? undefined : workspace?.resolve(requested) ?? requested;
+@@ -302 +299,2 @@ function exportTo(store: SheetStore, root: string, args: JsonObject): Json {
+-  const file = into === null ? given! : path.join(into, made.filename);
++  const output = into === null ? given! : path.join(into, made.filename);
++  const file = workspace?.resolve(output) ?? output;
+@@ -314,0 +313 @@ export interface SheetCallHost {
++  workspace?: WorkspaceDirectory | undefined;
+@@ -355 +354 @@ export function runSheetCall(store: SheetStore, call: SheetCall, host: SheetCall
+-      return store.agentBatch(withCode(args.calls, process.cwd()));
++      return store.agentBatch(withCode(args.calls, process.cwd(), host.workspace));
+@@ -357 +356 @@ export function runSheetCall(store: SheetStore, call: SheetCall, host: SheetCall
+-      return store.agentWidget(widgetPayload(args));
++      return store.agentWidget(widgetPayload(args, host.workspace));
+@@ -359 +358 @@ export function runSheetCall(store: SheetStore, call: SheetCall, host: SheetCall
+-      return exportTo(store, store.root, args);
++      return exportTo(store, store.root, args, host.workspace);
+diff --git a/packages/type-server/src/sheets/files.ts b/packages/type-server/src/sheets/files.ts
+index c3fdf02..8ba4982 100644
+--- a/packages/type-server/src/sheets/files.ts
++++ b/packages/type-server/src/sheets/files.ts
+@@ -8,0 +9 @@ import { deflateRawSync } from 'node:zlib';
++import type { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -38,2 +39,3 @@ export const looksLikeXlsx = (bytes: Uint8Array): boolean => bytes.length >= 4 &
+-export function saveImport(sheetDir: string, name: string, bytes: Uint8Array): string {
+-  const dir = path.join(sheetDir, IMPORTS_DIR);
++export function saveImport(sheetDir: string, name: string, bytes: Uint8Array, files?: WorkspaceDirectory): string {
++  const requested = path.resolve(sheetDir, IMPORTS_DIR);
++  const dir = files?.resolve(requested) ?? requested;
+@@ -46 +48,2 @@ export function saveImport(sheetDir: string, name: string, bytes: Uint8Array): s
+-      fs.writeFileSync(path.join(dir, file), bytes, { flag: 'wx' });
++      const target = path.join(dir, file);
++      fs.writeFileSync(files?.resolve(target, false) ?? target, bytes, { flag: 'wx' });
+diff --git a/packages/type-server/src/sheets/store.ts b/packages/type-server/src/sheets/store.ts
+index c4f5de9..8b08900 100644
+--- a/packages/type-server/src/sheets/store.ts
++++ b/packages/type-server/src/sheets/store.ts
+@@ -21 +21 @@
+-import { randomUUID } from 'node:crypto';
++import { randomBytes, randomUUID } from 'node:crypto';
+@@ -23,0 +24 @@ import path from 'node:path';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -176 +177,2 @@ const refused = (refusal: string): SheetReadRefusal => ({ kind: 'refused', refus
+-export function readMeta(sheetDir: string): SheetMeta | null {
++export function readMeta(sheetDir: string, files?: WorkspaceDirectory): SheetMeta | null {
++  const file = path.resolve(sheetDir, META_FILE);
+@@ -179 +181 @@ export function readMeta(sheetDir: string): SheetMeta | null {
+-    meta = JSON.parse(fs.readFileSync(path.join(sheetDir, META_FILE), 'utf8'));
++    meta = JSON.parse(fs.readFileSync(files?.resolve(file) ?? file, 'utf8'));
+@@ -191,5 +193,6 @@ export function readMeta(sheetDir: string): SheetMeta | null {
+-function writeMeta(sheetDir: string, meta: SheetMeta): void {
+-  fs.mkdirSync(sheetDir, { recursive: true });
+-  const file = path.join(sheetDir, META_FILE);
+-  const temporary = `${file}.${process.pid}.tmp`;
+-  fs.writeFileSync(temporary, `${JSON.stringify(meta, null, 2)}\n`);
++function writeMeta(sheetDir: string, meta: SheetMeta, files?: WorkspaceDirectory): void {
++  const requested = path.resolve(sheetDir, META_FILE);
++  const file = files?.resolve(requested, false) ?? requested;
++  fs.mkdirSync(path.dirname(file), { recursive: true });
++  const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
++  fs.writeFileSync(temporary, `${JSON.stringify(meta, null, 2)}\n`, { flag: 'wx' });
+@@ -200,2 +203,2 @@ function writeMeta(sheetDir: string, meta: SheetMeta): void {
+-export function ensureMeta(sheetDir: string, title = DEFAULT_TITLE): SheetMeta {
+-  const meta = readMeta(sheetDir);
++export function ensureMeta(sheetDir: string, title = DEFAULT_TITLE, files?: WorkspaceDirectory): SheetMeta {
++  const meta = readMeta(sheetDir, files);
+@@ -204 +207 @@ export function ensureMeta(sheetDir: string, title = DEFAULT_TITLE): SheetMeta {
+-  writeMeta(sheetDir, made);
++  writeMeta(sheetDir, made, files);
+@@ -212 +215,2 @@ export function ensureMeta(sheetDir: string, title = DEFAULT_TITLE): SheetMeta {
+-export function readEdits(sheetDir: string): { edits: StoredEdit[]; bytes: number; damaged: number | null } {
++export function readEdits(sheetDir: string, files?: WorkspaceDirectory): { edits: StoredEdit[]; bytes: number; damaged: number | null } {
++  const file = path.resolve(sheetDir, EDITS_FILE);
+@@ -215 +219 @@ export function readEdits(sheetDir: string): { edits: StoredEdit[]; bytes: numbe
+-    text = fs.readFileSync(path.join(sheetDir, EDITS_FILE), 'utf8');
++    text = fs.readFileSync(files?.resolve(file) ?? file, 'utf8');
+@@ -265,0 +270 @@ export class SheetStore {
++  private readonly files: WorkspaceDirectory;
+@@ -302,2 +307,4 @@ export class SheetStore {
+-    this.root = options.root;
+-    this.dir = path.join(options.root, SHEET_DIR);
++    this.root = path.resolve(options.root);
++    fs.mkdirSync(this.root, { recursive: true });
++    this.files = new WorkspaceDirectory(this.root);
++    this.dir = path.join(this.root, SHEET_DIR);
+@@ -311,2 +318,2 @@ export class SheetStore {
+-    this.meta = ensureMeta(this.dir, options.title);
+-    this.widgets = new WidgetStore(this.dir);
++    this.meta = ensureMeta(this.dir, options.title, this.files);
++    this.widgets = new WidgetStore(this.dir, this.files);
+@@ -334 +341 @@ export class SheetStore {
+-    writeMeta(this.dir, this.meta);
++    writeMeta(this.dir, this.meta, this.files);
+@@ -355 +362 @@ export class SheetStore {
+-    const { edits, bytes, damaged } = readEdits(this.dir);
++    const { edits, bytes, damaged } = readEdits(this.dir, this.files);
+@@ -438 +445 @@ export class SheetStore {
+-      size = fs.statSync(path.join(this.dir, EDITS_FILE)).size;
++      size = fs.statSync(this.files.resolve(path.join(this.dir, EDITS_FILE))).size;
+@@ -444 +451 @@ export class SheetStore {
+-    const { edits, bytes } = readEdits(this.dir);
++    const { edits, bytes } = readEdits(this.dir, this.files);
+@@ -479,2 +486,3 @@ export class SheetStore {
+-    fs.mkdirSync(this.dir, { recursive: true });
+-    fs.appendFileSync(path.join(this.dir, EDITS_FILE), line);
++    const file = this.files.resolve(path.join(this.dir, EDITS_FILE));
++    fs.mkdirSync(path.dirname(file), { recursive: true });
++    fs.appendFileSync(file, line);
+@@ -542,2 +550,3 @@ export class SheetStore {
+-        fs.mkdirSync(this.dir, { recursive: true });
+-        const watcher = fs.watch(this.dir, () => {
++        const dir = this.files.resolve(this.dir);
++        fs.mkdirSync(dir, { recursive: true });
++        const watcher = fs.watch(dir, () => {
+@@ -792 +801 @@ export class SheetStore {
+-    const file = saveImport(this.dir, kept, bytes);
++    const file = saveImport(this.dir, kept, bytes, this.files);
+@@ -799 +808 @@ export class SheetStore {
+-    if (!sentToAgent) fs.rmSync(path.join(this.dir, file), { force: true });
++    if (!sentToAgent) fs.rmSync(this.files.resolve(path.join(this.dir, file), false), { force: true });
+diff --git a/packages/type-server/src/sheets/widgets.ts b/packages/type-server/src/sheets/widgets.ts
+index 980beb4..a7e047b 100644
+--- a/packages/type-server/src/sheets/widgets.ts
++++ b/packages/type-server/src/sheets/widgets.ts
+@@ -13 +13 @@
+-import { randomUUID } from 'node:crypto';
++import { randomBytes, randomUUID } from 'node:crypto';
+@@ -15,0 +16 @@ import path from 'node:path';
++import type { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -38,0 +40 @@ export class WidgetStore {
++  private readonly files: WorkspaceDirectory | undefined;
+@@ -42,2 +44,8 @@ export class WidgetStore {
+-  constructor(sheetDir: string) {
+-    this.dir = path.join(sheetDir, WIDGETS_DIR);
++  constructor(sheetDir: string, files?: WorkspaceDirectory) {
++    this.dir = path.resolve(sheetDir, WIDGETS_DIR);
++    this.files = files;
++  }
++
++  private file(id: string, followLeaf = true): string {
++    const requested = path.join(this.dir, `${id}.json`);
++    return this.files?.resolve(requested, followLeaf) ?? requested;
+@@ -54 +62 @@ export class WidgetStore {
+-      value = JSON.parse(fs.readFileSync(path.join(this.dir, `${id}.json`), 'utf8'));
++      value = JSON.parse(fs.readFileSync(this.file(id), 'utf8'));
+@@ -75 +83 @@ export class WidgetStore {
+-      names = fs.readdirSync(this.dir);
++      names = fs.readdirSync(this.files?.resolve(this.dir) ?? this.dir);
+@@ -106 +114 @@ export class WidgetStore {
+-      fs.rmSync(path.join(this.dir, `${id}.json`));
++      fs.rmSync(this.file(id, false));
+@@ -131,4 +139,4 @@ export class WidgetStore {
+-    fs.mkdirSync(this.dir, { recursive: true });
+-    const file = path.join(this.dir, `${widget.id}.json`);
+-    const temporary = `${file}.${process.pid}.tmp`;
+-    fs.writeFileSync(temporary, `${JSON.stringify(widget, null, 2)}\n`);
++    const file = this.file(widget.id, false);
++    fs.mkdirSync(path.dirname(file), { recursive: true });
++    const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
++    fs.writeFileSync(temporary, `${JSON.stringify(widget, null, 2)}\n`, { flag: 'wx' });
+diff --git a/packages/type-server/src/store.ts b/packages/type-server/src/store.ts
+index ebd66c7..6f12894 100644
+--- a/packages/type-server/src/store.ts
++++ b/packages/type-server/src/store.ts
+@@ -16 +16,2 @@ import { lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'no
+-import { dirname, join, relative, sep } from 'node:path';
++import { dirname, join } from 'node:path';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -106,0 +108 @@ export class ArtifactStore {
++  private directory: WorkspaceDirectory | undefined;
+@@ -113,2 +115,3 @@ export class ArtifactStore {
+-  resolve(path: string): string {
+-    return join(this.root, ...path.split('/'));
++  resolve(path: string, followLeaf = true): string {
++    this.directory ??= new WorkspaceDirectory(this.root);
++    return this.directory.resolve(path, followLeaf);
+@@ -121 +124 @@ export class ArtifactStore {
+-    const walk = async (dir: string): Promise<void> => {
++    const walk = async (path: string): Promise<void> => {
+@@ -124 +127 @@ export class ArtifactStore {
+-        entries = await readdir(dir, { withFileTypes: true });
++        entries = await readdir(this.resolve(path), { withFileTypes: true });
+@@ -130 +133 @@ export class ArtifactStore {
+-        const absolute = join(dir, entry.name);
++        const relative = `${path}/${entry.name}`;
+@@ -132 +135 @@ export class ArtifactStore {
+-          await walk(absolute);
++          await walk(relative);
+@@ -134,2 +137 @@ export class ArtifactStore {
+-          const path = relative(this.root, absolute).split(sep).join('/');
+-          const hash = await this.hashOf(path);
++          const hash = await this.hashOf(relative);
+@@ -137,2 +139,2 @@ export class ArtifactStore {
+-            out[path] = { sha256: hash.sha256, size: hash.size };
+-            seen.add(path);
++            out[relative] = { sha256: hash.sha256, size: hash.size };
++            seen.add(relative);
+@@ -143 +145 @@ export class ArtifactStore {
+-    await walk(this.resolve(PROJECT_DIR));
++    await walk(PROJECT_DIR);
+@@ -212,0 +215 @@ export class ArtifactStore {
++      this.resolve(path);
+@@ -239 +242 @@ export class ArtifactStore {
+-      const absolute = this.resolve(path);
++      const absolute = this.resolve(path, false);
+@@ -261 +264 @@ export class ArtifactStore {
+-    return join(this.root, '_blobs');
++    return this.resolve('_blobs');
+@@ -273 +276 @@ export class ArtifactStore {
+-    const file = join(this.blobDir, `${id}.${extensionOf(type)}`);
++    const file = this.resolve(`_blobs/${id}.${extensionOf(type)}`, false);
+@@ -281 +284 @@ export class ArtifactStore {
+-    const assets = join(project, 'assets');
++    const assets = this.resolve(`${PROJECT_DIR}/assets`);
+@@ -304 +307 @@ export class ArtifactStore {
+-      const file = join(this.blobDir, name);
++      const file = this.resolve(`_blobs/${name}`);
+@@ -307 +310 @@ export class ArtifactStore {
+-      const contentType = name === id ? await boardMediaType(file + '.json') : mimeOf(name);
++      const contentType = name === id ? await boardMediaType(this.resolve(`_blobs/${name}.json`)) : mimeOf(name);
+@@ -320 +323 @@ export async function writeAtomic(file: string, bytes: Buffer | string): Promise
+-  await writeFile(temp, bytes);
++  await writeFile(temp, bytes, { flag: 'wx' });
+diff --git a/packages/type-server/test/server.test.ts b/packages/type-server/test/server.test.ts
+index bfa41e4..a23ce54 100644
+--- a/packages/type-server/test/server.test.ts
++++ b/packages/type-server/test/server.test.ts
+@@ -3 +3 @@ import type { IncomingHttpHeaders } from 'node:http';
+-import { mkdtemp, mkdir, readFile, stat, writeFile, rm } from 'node:fs/promises';
++import { mkdtemp, mkdir, readFile, rename, stat, writeFile, rm } from 'node:fs/promises';
+@@ -8,0 +9 @@ import { findChrome } from '../src/snapshot.ts';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -85,0 +87,19 @@ describe('type server', () => {
++  it('keeps a mounted editor bound to the original workspace', async () => {
++    const workspace = join(dir, 'Authorized workspace');
++    const work = join(workspace, 'Canvas');
++    await mkdir(work, { recursive: true });
++    const files = new WorkspaceDirectory(workspace);
++    const { id, pageUrl } = await server.open({ root: files.resolve(work), type: 'design', workspaceDirectory: files.identity });
++    try {
++      const session = new URL('_api/session', pageUrl);
++      assert.equal((await fetch(session)).status, 200);
++      await rename(workspace, join(dir, 'Moved workspace'));
++      await mkdir(work, { recursive: true });
++      const response = await fetch(session);
++      assert.equal(response.status, 403);
++      assert.equal((await response.json()).code, 'not_granted');
++    } finally {
++      server.close(id);
++    }
++  });
++

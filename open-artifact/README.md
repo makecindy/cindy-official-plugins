@@ -8,6 +8,6 @@ To adopt a folder or move an existing work to another task, run `adopt` in the d
 
 The plugin starts its bundled Open Artifact runtime on first use. No Node installation, runtime download, external account, or automatic cloud publishing is needed. The plugin needs approval for its local Node worker, localhost previews and task delivery. Disabling it stops the worker and its daemon.
 
-Artifact folders and tool-supplied import and export paths must resolve inside the task workspace. The plugin checks extracted runtime files against the bundled integrity inventory before reuse.
+Artifact folders and tool-supplied import and export paths must resolve inside the task workspace. The editor remains bound to the workspace registered for the work as long as the page is open. The plugin checks the extracted runtime against the bundled integrity inventory before reuse.
 
-Based on [Open Artifact](https://github.com/JimLiu/open-artifact) and the [original Cindy integration](https://github.com/makecindy/cindy/pull/12226). The bundled runtime is pinned to 0.14.6. See `THIRD-PARTY-LICENSES.txt`.
+Based on [Open Artifact](https://github.com/JimLiu/open-artifact) and the [original Cindy integration](https://github.com/makecindy/cindy/pull/12226). The bundled runtime uses Open Artifact 0.14.6 with the workspace changes documented in [vendor/BUILD.md](vendor/BUILD.md). See `THIRD-PARTY-LICENSES.txt`.

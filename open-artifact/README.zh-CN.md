@@ -8,6 +8,6 @@
 
 首次使用时启动随包运行时。无需另装 Node、联网下载运行时或登录外部账号。插件不会自动发布到云端。安装时需要批准本机 Node 工作进程、本机预览和任务投递。停用后工作进程及其启动的后台服务随之停止。
 
-作品目录和工具指定的导入、导出路径必须解析到当前任务工作目录内。复用已解包的运行时前，插件会按随包校验清单核对文件。
+作品目录和工具指定的导入、导出路径必须解析到当前任务工作目录内。页面保持打开时，编辑器沿用作品登记的工作目录。复用已解包的运行时前，插件会按随包清单校验文件。
 
-基于 [Open Artifact](https://github.com/JimLiu/open-artifact) 和 [原 Cindy 接入](https://github.com/makecindy/cindy/pull/12226)。随包运行时锁定为 0.14.6。许可证见 `THIRD-PARTY-LICENSES.txt`。
+基于 [Open Artifact](https://github.com/JimLiu/open-artifact) 和 [原 Cindy 接入](https://github.com/makecindy/cindy/pull/12226)。随包运行时使用 Open Artifact 0.14.6，工作目录相关改动见 [vendor/BUILD.md](vendor/BUILD.md)。许可证见 `THIRD-PARTY-LICENSES.txt`。
