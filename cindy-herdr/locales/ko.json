@@ -1,0 +1,46 @@
+{
+  "name": "Herdr 콘솔",
+  "description": "로컬 Herdr와 tmux를 다루는 콘솔: 작업 공간/탭/창과 에이전트 상태 확인, 화면 읽기, 입력과 키 전송, 상태 변화 대기, blocked/done 이벤트를 Cindy 알림과 자동화로 연결합니다. 로컬 터미널용이며 Herdr가 없어도 tmux를 직접 조작할 수 있습니다. 원격 SSH 머신과 작업 공간 관리는 herdr-bridge를 사용하세요.",
+  "whenToUse": "로컬 Herdr 에이전트 상태를 확인하거나 입력을 보내고 상태 변화를 기다릴 때, Herdr 또는 tmux 창을 조작하거나 Herdr 이벤트를 Cindy에 연결할 때 사용합니다.",
+  "tools": {
+    "herdr_state": {
+      "description": "Herdr의 작업 공간, 탭, 창, 에이전트를 상태, 작업 디렉터리, 제목과 함께 나열합니다."
+    },
+    "herdr_read": {
+      "description": "창 또는 에이전트의 터미널 출력을 읽습니다. 현재 화면은 visible, 최근 줄은 recent, 줄바꿈이 제거된 최근 줄은 recent_unwrapped를 사용합니다."
+    },
+    "herdr_prompt": {
+      "description": "Herdr 에이전트에게 프롬프트를 보냅니다. wait_until 을 주면 그 상태(idle/working/blocked/done/unknown)가 될 때까지 timeout_ms 안에서 기다립니다(기본 120000). 대상이 이미 blocked 면 아무것도 보내지 않고 그대로 돌려줍니다. 결과가 HERDR_OUTCOME_UNKNOWN 이면 도착 여부를 먼저 확인하세요."
+    },
+    "herdr_send": {
+      "description": "Herdr pane 에 텍스트나 키를 보냅니다(keys 는 enter, ctrl+h, alt+x, f1, shift+tab 같은 Herdr 형식). 결과가 HERDR_OUTCOME_UNKNOWN 이면 전송은 갔지만 답이 없어 이미 반영됐을 수 있으니, 다시 보내기 전에 화면을 확인하세요."
+    },
+    "herdr_wait": {
+      "description": "에이전트가 지정한 상태에 도달하거나 창 출력이 지정한 텍스트와 일치할 때까지 기다립니다(match 는 {type:\"substring\"|\"regex\", value:\"텍스트\"} 형태). 긴 대기는 timeout_ms 안에서 여러 구간으로 나뉘어 실행되며(기본 300000), 한도를 넘으면 오류가 됩니다."
+    },
+    "herdr_control": {
+      "description": "Herdr 작업 공간, 탭, 창, Git worktree를 관리합니다. 닫기 작업과 worktree의 remove는 사용자가 명시적으로 요청한 경우에만 실행합니다."
+    },
+    "herdr_notify": {
+      "description": "Herdr 터미널 화면에 알림을 표시합니다."
+    },
+    "herdr_events": {
+      "description": "Herdr 이벤트 구독을 관리합니다: mode=status 는 현재 구독 상태, subscribe 는 구독을 시작하고(에이전트 상태 변화, 창 생성·종료, 탭 전환 등), unsubscribe 는 멈추며, wait 는 현재 구독에서 이벤트 하나가 올 때까지 기다립니다(match_event 는 {event:\"pane_agent_status_changed\", pane_id:\"w1:p1\"} 형태이며 pane_id 는 생략 가능)."
+    },
+    "herdr_automation_setup": {
+      "description": "Herdr 이벤트에만 깨어나는 Cindy 자동화를 만듭니다: 에이전트가 blocked 또는 done 이 되면 플러그인이 호스트 스케줄러에 한 번 실행을 요청하며, 이 자동화는 타이머로 스스로 실행되지 않습니다. targetSessionId 를 주면 기존 세션에 연결됩니다. 자동화 id 를 반환합니다."
+    },
+    "herdr_call": {
+      "description": "위 도구들이 다루지 않는 드문 메서드를 Herdr 소켓 API 로 직접 호출합니다. pane·workspace 생성이나 닫기를 포함해 Herdr 상태를 바꾸므로 의도를 확인한 뒤 실행하세요. 메서드 이름은 Herdr Socket API 문서를 참고하세요. timeout_ms / wait.timeout_ms 는 최대 90000ms 로 제한됩니다(초과 값은 잘립니다). 더 긴 대기는 herdr_wait 를 사용하세요."
+    },
+    "tmux_state": {
+      "description": "로컬 tmux 세션과 창을 명령, 작업 디렉터리, 크기, 활성 상태와 함께 나열합니다. tmux를 사용할 수 없으면 available=false와 안내를 반환합니다."
+    },
+    "tmux_read": {
+      "description": "tmux session/window/pane의 화면을 읽습니다. 기본값은 현재 보이는 화면이며, lines를 지정하면 최근 N줄(스크롤백 포함)을 반환합니다. 한 번에 최대 5000줄, 약 120000자까지이며, 초과된 이전 내용은 잘리고 truncated=true와 requested_lines / max_lines / char_limit를 반환합니다. 히스토리가 부족하면 전부 반환합니다."
+    },
+    "tmux_send": {
+      "description": "tmux 세션·창에 텍스트나 키를 보냅니다. 텍스트는 리터럴(-l)로 보내므로 C-b나 Enter가 키 이름으로 해석되지 않습니다. keys 는 tmux가 인식하는 키 이름(Enter, Escape, F1, C-c, M-x, S-Tab 등)만 받고, 알 수 없는 이름은 텍스트로 보내지 않고 거부합니다."
+    }
+  }
+}

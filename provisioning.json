@@ -13,6 +13,9 @@
     "herdr": {
       "audience": { "emails": [] }
     },
+    "cindy-herdr": {
+      "audience": { "emails": [] }
+    },
     "cindy-academic-skills": {
       "audience": { "emails": [] }
     },

@@ -1,0 +1,594 @@
+{
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.140",
+  "id": "cindy-herdr",
+  "name": "Herdr 控制台",
+  "author": "joei4cm",
+  "icon": "assets/icon.png",
+  "description": "本机 Herdr 与 tmux 的终端控制台：查看工作区/标签/分屏与 agent 状态、读取画面、发送输入与按键、等待状态变化，并把 blocked/done 事件接成 Cindy 通知与自动化。面向本机终端——本机没装 Herdr 也能直接操作 tmux；要管理远程 SSH 机器和工作区，用 herdr-bridge。",
+  "whenToUse": "需要看 Herdr 里正在跑什么 agent、读某个分屏的输出、给 agent 派活、等待它完成或需要授权；或者要看/操作本机 tmux 的 session、pane 与画面；或者想把终端事件接到 Cindy 通知与自动化时找我",
+  "version": "0.1.115",
+  "kind": "chip",
+  "entry": "main.js",
+  "command": "herdr",
+  "launch": "resident",
+  "node": {
+    "entry": "node/worker.cjs",
+    "protocol": "json-rpc-stdio",
+    "lifecycle": "resident"
+  },
+  "panel": {
+    "title": "Herdr 控制台",
+    "html": "panel.html",
+    "position": "right",
+    "minWidth": 260,
+    "defaultFraction": 0.26
+  },
+  "notify": true,
+  "badge": true,
+  "agent": {
+    "hostTools": [
+      "scheduler"
+    ]
+  },
+  "tools": [
+    {
+      "name": "herdr_state",
+      "description": "读取 Herdr 当前状态：工作区、标签、分屏与 agent 列表（含 agent 状态、工作目录、标题）。想知道「现在 Herdr 里有什么、谁在做什么」时先调用它。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "description": "只看某个工作区；省略则返回全部"
+          }
+        }
+      }
+    },
+    {
+      "name": "herdr_read",
+      "description": "读取一个分屏或 agent 的终端输出。source=visible 是当前画面，recent 是最近若干行，recent_unwrapped 适合看日志（忽略软换行）。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pane_id": {
+            "type": "string",
+            "description": "分屏 ID，形如 w1:p1；与 target 二选一（必须且只能给一个）"
+          },
+          "target": {
+            "type": "string",
+            "description": "agent 名或它所在的分屏 ID；与 pane_id 二选一（必须且只能给一个）"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "visible",
+              "recent",
+              "recent_unwrapped",
+              "detection"
+            ],
+            "description": "读取范围，默认 visible"
+          },
+          "lines": {
+            "type": "number",
+            "description": "读取行数"
+          },
+          "strip_ansi": {
+            "type": "boolean",
+            "description": "是否去掉 ANSI 控制字符，默认 true"
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "pane_id"
+            ],
+            "not": {
+              "required": [
+                "target"
+              ]
+            }
+          },
+          {
+            "required": [
+              "target"
+            ],
+            "not": {
+              "required": [
+                "pane_id"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "herdr_prompt",
+      "description": "给 Herdr 里的 agent 发一段提示词。可选 wait_until 等待它进入某个状态（idle/working/blocked/done/unknown），等待时长受 timeout_ms 限制（默认 120000）。目标已经 blocked 时不会发送，直接返回。若返回 HERDR_OUTCOME_UNKNOWN，请先读取画面确认提示是否已送达。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "agent 名或分屏 ID"
+          },
+          "text": {
+            "type": "string",
+            "description": "要发送的提示词"
+          },
+          "wait_until": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "idle",
+                "working",
+                "blocked",
+                "done",
+                "unknown"
+              ]
+            },
+            "description": "发送后等待这些状态之一"
+          },
+          "timeout_ms": {
+            "type": "number",
+            "description": "等待上限毫秒，默认 120000"
+          }
+        },
+        "required": [
+          "target",
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "herdr_send",
+      "description": "向某个分屏发送文本或按键（keys 用 Herdr 键位写法，如 enter、ctrl+h、alt+x、f1、shift+tab）。若返回 HERDR_OUTCOME_UNKNOWN，说明请求已发出但没收到回包，可能已经生效，请先读取画面确认再决定是否重发。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pane_id": {
+            "type": "string",
+            "description": "分屏 ID"
+          },
+          "text": {
+            "type": "string",
+            "description": "要输入的文本"
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "要发送的按键组合"
+          }
+        },
+        "required": [
+          "pane_id"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "text"
+            ],
+            "not": {
+              "required": [
+                "keys"
+              ]
+            }
+          },
+          {
+            "required": [
+              "keys"
+            ],
+            "not": {
+              "required": [
+                "text"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "herdr_wait",
+      "description": "等待某个 agent 进入指定状态，或等待某个分屏输出命中指定文本（match 形如 {type:\"substring\"|\"regex\", value:\"文本\"}）。长等待拆成多段执行，总时长受 timeout_ms 限制（默认 300000），到时仍未命中就报错。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "等待状态时填写 agent 名或分屏 ID（与 pane_id+match 二选一）"
+          },
+          "until": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "idle",
+                "working",
+                "blocked",
+                "done",
+                "unknown"
+              ]
+            },
+            "description": "等待这些状态之一"
+          },
+          "pane_id": {
+            "type": "string",
+            "description": "等待输出时填写分屏 ID，必须同时给 match（与 target 二选一）"
+          },
+          "match": {
+            "type": "object",
+            "description": "输出匹配条件，形如 {type:'substring'|'regex', value:'文本'}",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "substring",
+                  "regex"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "visible",
+              "recent",
+              "recent_unwrapped",
+              "detection"
+            ],
+            "description": "输出匹配的范围，默认 visible"
+          },
+          "timeout_ms": {
+            "type": "number",
+            "description": "等待上限毫秒，默认 300000"
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "target"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "pane_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "match"
+                  ]
+                },
+                {
+                  "required": [
+                    "source"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "pane_id",
+              "match"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "target"
+                  ]
+                },
+                {
+                  "required": [
+                    "until"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "herdr_control",
+      "description": "管理 Herdr 的工作区、标签与分屏：创建/聚焦/重命名/关闭工作区与标签，拆分、移动、交换、缩放、调整分屏大小，创建 git worktree。破坏性操作（close、worktree 的 remove）只在用户明确要求时执行。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "area": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "tab",
+              "pane",
+              "worktree",
+              "layout"
+            ],
+            "description": "操作对象类型，默认 workspace"
+          },
+          "action": {
+            "type": "string",
+            "description": "动作名，如 workspace: create/list/focus/rename/close；tab: create/list/focus/rename/close；pane: split/swap/move/zoom/resize/focus/list/close；worktree: list/create/open/remove（remove 会删除本地 checkout，只在用户明确要求时使用）"
+          },
+          "workspace_id": {
+            "type": "string"
+          },
+          "tab_id": {
+            "type": "string"
+          },
+          "pane_id": {
+            "type": "string"
+          },
+          "target_pane_id": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "left",
+              "right",
+              "up",
+              "down"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "ratio": {
+            "type": "number"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "focus": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object",
+            "description": "该动作的其它参数，原样透传给 Herdr"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "herdr_notify",
+      "description": "在 Herdr 自己的界面里弹一条通知（走 Herdr 的 toast），用于把信息同步到终端那一侧。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "标题，必填"
+          },
+          "body": {
+            "type": "string",
+            "description": "正文"
+          },
+          "sound": {
+            "type": "string",
+            "enum": [
+              "none",
+              "done",
+              "request"
+            ]
+          },
+          "position": {
+            "type": "string",
+            "enum": [
+              "top-left",
+              "top-right",
+              "bottom-left",
+              "bottom-right"
+            ]
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "herdr_events",
+      "description": "管理 Herdr 事件订阅：mode=status 查看当前订阅状态，subscribe 开始订阅（agent 状态变化、分屏开关、标签切换等），unsubscribe 停止订阅，wait 在当前订阅上等一个事件（match_event 形如 {event:\"pane.agent_status_changed\", pane_id:\"w1:p1\"}，pane_id 可省略）。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "status",
+              "subscribe",
+              "unsubscribe",
+              "wait"
+            ],
+            "description": "操作，默认 status"
+          },
+          "match_event": {
+            "type": "object",
+            "description": "mode=wait 时等待的事件，形如 {event:'pane.agent_status_changed', pane_id:'w1:p1'}"
+          },
+          "timeout_ms": {
+            "type": "number",
+            "description": "mode=wait 的等待上限毫秒"
+          }
+        }
+      }
+    },
+    {
+      "name": "herdr_automation_setup",
+      "description": "创建一条只由 Herdr 事件唤醒的 Cindy 自动化：agent 进入 blocked 或 done 时由插件请宿主调度器跑一次，这条自动化不会自己按时间运行。targetSessionId 可把自动化绑到某个已有会话，让它在原对话里继续。返回自动化 id。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "自动化名称"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "触发时让 Cindy 做什么"
+          },
+          "agentKind": {
+            "type": "string",
+            "enum": [
+              "claude-code",
+              "codex",
+              "pi"
+            ]
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "targetSessionId": {
+            "type": "string",
+            "description": "把自动化绑定到这个会话 id（可选）；省略则每次触发新开会话"
+          },
+          "silentWhenIdle": {
+            "type": "boolean",
+            "description": "默认静默，只有需要时才提醒"
+          }
+        }
+      }
+    },
+    {
+      "name": "herdr_call",
+      "description": "直接调用任意 Herdr socket API 方法（完整方法名 + params），用于上面工具没覆盖的少见方法。调用会改变 Herdr 状态（包括创建、关闭分屏或工作区），执行前先确认用户意图。方法名见 Herdr Socket API 文档。 单次 timeout_ms / wait.timeout_ms 上限 90000 毫秒（超过会被截断）；更长的等待请改用 herdr_wait。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "description": "如 pane.list、agent.get、session.snapshot"
+          },
+          "params": {
+            "type": "object",
+            "description": "方法参数"
+          }
+        },
+        "required": [
+          "method"
+        ]
+      }
+    },
+    {
+      "name": "tmux_state",
+      "description": "读取本机 tmux 现状：有哪些 session、每个 session 里有哪些 pane（含当前命令、工作目录、尺寸、是否活动）。想知道「tmux 里现在开着什么」时先调它。这台电脑没装 tmux 时返回 available=false 与提示，不报错。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "session": {
+            "type": "string",
+            "description": "只看某个 session 的 pane；省略则列出所有 session 的全部 pane"
+          }
+        }
+      }
+    },
+    {
+      "name": "tmux_read",
+      "description": "读取某个 tmux session / window / pane 的画面。默认是当前可见屏；给 lines 则取最近 N 行（含历史滚动区），一次最多 5000 行、约 120000 个字符，超出时更早的内容被切掉并返回 truncated=true，同时带上 requested_lines / max_lines / char_limit，历史不够时返回全部。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "session 名、session:window 或 session:window.pane，例如 work 或 work:2.1"
+          },
+          "lines": {
+            "type": "number",
+            "description": "取最近 N 行；省略则只取当前可见屏"
+          }
+        },
+        "required": [
+          "target"
+        ]
+      }
+    },
+    {
+      "name": "tmux_send",
+      "description": "往 tmux 的 session / window / pane 发文本或按键。发文本走字面量模式（-l），内容里的 C-b、Enter 这类不会被当成键名；发具名按键用 keys，只接受 tmux 认识的键名（Enter、Escape、F1、C-c、M-x、S-Tab 这类），不认识的名字会被拒绝而不是当字面文本发出去。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "session 名、session:window 或 session:window.pane，例如 work 或 work:2.1"
+          },
+          "text": {
+            "type": "string",
+            "description": "要原样输入的文本；与 keys 二选一"
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "要按下的具名按键，如 [\"Enter\"]、[\"C-c\"]；与 text 二选一"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "text"
+            ],
+            "not": {
+              "required": [
+                "keys"
+              ]
+            }
+          },
+          {
+            "required": [
+              "keys"
+            ],
+            "not": {
+              "required": [
+                "text"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "readme": {
+    "en": "README.md",
+    "zh-CN": "README.zh-CN.md"
+  },
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "releaseNotes": "首发版本，使用独立官方 id `cindy-herdr`。此前以本地开发副本（id `herdr`）安装的人请注意：这是另一个插件实例，不继承原实例的数据——`herdr_events` 的「已退订」偏好需要重新 subscribe；此前用 `herdr_automation_setup` 创建的自动化绑定在旧会话上，需要重新创建并绑定到目标会话。`$herdr` 命令与全部工具名（herdr_state / herdr_read / herdr_prompt / …）不变。"
+}

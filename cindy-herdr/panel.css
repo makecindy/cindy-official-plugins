@@ -1,0 +1,479 @@
+/* Herdr 控制台面板
+   面板活在 Cindy 右侧栏里：宽度窄、信息密度高、用户来回看「现在谁在做什么」。
+   视觉语言：安静的控制台——结构靠留白和一条分隔线说话，状态靠一个小圆点加
+   文字表达，颜色只给状态用，不给装饰用。所有颜色都取宿主变量，明暗两套自动跟随。 */
+
+:root {
+  color-scheme: light dark;
+
+  --pc-bg: var(--panel-bg, transparent);
+  --pc-surface: var(--surface, #ffffff);
+  --pc-sunken: var(--surface-sunken, rgba(0, 0, 0, .04));
+  --pc-text: var(--text-primary, #1a1a1a);
+  --pc-muted: var(--text-secondary, #6a6a63);
+  --pc-faint: var(--text-tertiary, #8d8d85);
+  --pc-line: var(--border-default, #e4e4e0);
+  --pc-line-strong: var(--border-strong, #c9c9c2);
+
+  /* 状态点颜色：运行中绿、出错红、空闲灰；普通 pane 用中性色（空心环）。 */
+  --pc-working: #12a150;
+  --pc-blocked: #d93a3a;
+  --pc-idle: #8d8d85;
+  --pc-neutral: #a9a9a1;
+  --pc-accent: #2fa85a;
+  /* 终端输出等宽栈：有 CJK 等宽字体的机器上中文也能对齐。 */
+  --pc-mono: "FiraCode Nerd Font Mono", "JetBrains Mono", "Cascadia Code",
+    "Noto Sans Mono CJK SC", "Sarasa Mono SC", "Source Han Sans Mono",
+    "DejaVu Sans Mono", "Liberation Mono", ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 10px 12px 14px;
+  font: 13px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--pc-text);
+  background: var(--pc-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* --- 顶部：来源切换 + 状态 + 刷新 ------------------------------------- */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--pc-line);
+}
+
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border-radius: 8px;
+  background: var(--pc-sunken);
+}
+
+.seg button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--pc-muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+
+.seg button:hover {
+  color: var(--pc-text);
+}
+
+.seg button.on {
+  background: var(--pc-surface);
+  color: var(--pc-text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .08);
+}
+
+.status {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--pc-faint);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--pc-muted);
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+
+.icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.icon:hover {
+  background: var(--pc-sunken);
+  color: var(--pc-text);
+}
+
+/* --- 列表 -------------------------------------------------------------- */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 6px;
+}
+
+.group {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 10px 2px 4px;
+  font-size: 11px;
+  color: var(--pc-muted);
+}
+
+.group + .group {
+  border-top: 1px solid var(--pc-line);
+  padding-top: 9px;
+}
+
+.group:first-child {
+  padding-top: 2px;
+}
+
+.group .group-name {
+  font-weight: 600;
+  color: var(--pc-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group .group-meta {
+  flex: none;
+  color: var(--pc-faint);
+}
+
+.group .group-link {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--pc-faint);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.group .group-link:hover {
+  color: var(--pc-text);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--pc-faint);
+}
+
+.dot.working {
+  background: var(--pc-working);
+}
+
+.dot.blocked {
+  background: var(--pc-blocked);
+}
+
+/* 空闲 / 已完成：灰点 */
+.dot.idle {
+  background: var(--pc-idle);
+}
+
+/* 普通 pane（没有 agent）和不在用的 tmux pane：中性色空心环 */
+.dot.plain,
+.dot.hollow {
+  background: transparent;
+  border: 1px solid var(--pc-neutral);
+}
+
+.dot.plain {
+  background: var(--pc-neutral);
+}
+
+.empty {
+  padding: 18px 6px;
+  font-size: 12px;
+  color: var(--pc-faint);
+  text-align: center;
+}
+
+/* --- chip：agent pane --------------------------------------------------- */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 2px 0 4px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 4px 9px;
+  border: 1px solid var(--pc-line);
+  border-radius: 999px;
+  background: var(--pc-surface);
+  color: var(--pc-text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.3;
+  cursor: pointer;
+  transition: background .12s ease, border-color .12s ease;
+}
+
+.chip:hover {
+  border-color: var(--pc-line-strong);
+  background: var(--pc-sunken);
+}
+
+.chip.on {
+  border-color: var(--pc-accent);
+  box-shadow: inset 0 0 0 1px var(--pc-accent);
+}
+
+/* 换行开关：两种状态各一个图标，跟着 aria-pressed 走。 */
+#detail-wrap .wrap-off {
+  display: none;
+}
+
+#detail-wrap[aria-pressed='false'] .wrap-on {
+  display: none;
+}
+
+#detail-wrap[aria-pressed='false'] .wrap-off {
+  display: block;
+}
+
+.chip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 4px;
+  color: var(--pc-muted);
+}
+
+.chip-icon svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+/* 官方标识按原样显示：只缩放，不改色、不重绘。 */
+.chip-logo {
+  width: 13px;
+  height: 13px;
+  display: block;
+  object-fit: contain;
+  border-radius: 2px;
+}
+
+.chip.on .chip-icon {
+  color: var(--pc-accent);
+}
+
+.chip-name {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-meta {
+  color: var(--pc-faint);
+  font-size: 11px;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-state {
+  flex: none;
+  cursor: default;
+  background: transparent;
+  border-color: transparent;
+  padding: 2px 0 2px 8px;
+}
+
+.chip-state:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
+/* --- 详情 -------------------------------------------------------------- */
+
+.detail {
+  margin-top: 12px;
+  border: 1px solid var(--pc-line);
+  border-radius: 10px;
+  background: var(--pc-surface);
+  overflow: hidden;
+}
+
+.detail-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--pc-line);
+}
+
+.detail-head .chip-state {
+  margin-top: -1px;
+}
+
+.detail-id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.detail-title {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-sub {
+  font-size: 11px;
+  color: var(--pc-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 终端输出：紧凑行距、真等宽。默认自动换行（侧栏很窄），
+   也可以切成不换行，保持终端原本的列对齐。 */
+.output {
+  margin: 0;
+  padding: 10px;
+  max-height: 38vh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--pc-sunken);
+  color: var(--pc-text);
+  font-family: var(--pc-mono);
+  font-size: 12px;
+  line-height: 1.4;
+  font-variant-ligatures: none;
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.output.nowrap {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+/* 中日韩字形在多数系统上不是等宽字体，会把终端里的列顶歪。
+   宽字符单独占 2 个等宽单元格（终端的通行口径），其余仍是普通文本。 */
+.output .wide {
+  display: inline-block;
+  width: 2ch;
+  text-align: center;
+  overflow: visible;
+}
+
+/* 输入就在终端里：最后一行带提示符，光标用终端强调色。
+   回车提交；方向键、PageUp/Down、Home/End、Tab、Esc 和 Ctrl 组合直接发给终端。 */
+.term {
+  border-top: 1px solid var(--pc-line);
+  background: var(--pc-sunken);
+}
+
+.term .output {
+  background: transparent;
+}
+
+.term-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px 10px;
+}
+
+.term-prompt {
+  font-family: var(--pc-mono);
+  font-size: 12px;
+  color: var(--pc-accent);
+}
+
+.term-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--pc-text);
+  caret-color: var(--pc-accent);
+  font-family: var(--pc-mono);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.term-input::placeholder {
+  color: var(--pc-faint);
+}
+
+.composer-target {
+  padding: 7px 10px 9px;
+  border-top: 1px solid var(--pc-line);
+  font-size: 11px;
+  color: var(--pc-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button:focus-visible,
+.chip:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--pc-line-strong);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}

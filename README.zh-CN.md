@@ -38,6 +38,7 @@
 | --- | --- | --- | --- |
 | <img src="./cindy-antigravity-acp/icon.png" width="22" alt=""> | Antigravity | [`cindy-antigravity-acp`](./cindy-antigravity-acp) | 通过本机 agy 执行 Cindy 任务，需自备 Google 账号。 |
 | <img src="./dsh-acp/icon.png" width="22" alt=""> | DeepSeek Harness | [`dsh-acp`](./dsh-acp) | 通过本机 dsh 执行 Cindy 任务，需自备 DeepSeek API Key。 |
+| <img src="./cindy-herdr/assets/icon.png" width="22" alt=""> | Herdr 控制台 | [`cindy-herdr`](./cindy-herdr) | 本机 Herdr 与 tmux 的终端控制台：查看 agent 状态、读取画面、发送输入，并把 blocked/done 事件接成 Cindy 通知与自动化；本机没装 Herdr 也能直接操作 tmux。面向本机终端——管理远程 SSH 机器和工作区用 herdr-bridge；自选安装 |
 | <img src="./cindy-art/assets/icon.png" width="22" alt=""> | Art | [`cindy-art`](./cindy-art) | 图片 / 短视频生成，支持基于已生成图片的改图与风格化 |
 | <img src="./opendesign-trial/assets/icon.png" width="22" alt=""> | OpenDesign | [`opendesign-trial`](./opendesign-trial) | 复用 Cindy 会话模型的 HTML 设计稿、固定会话预览、元素批注和手动编辑 |
 | <img src="./cindy-github/assets/icon.png" width="22" alt=""> | GitHub | [`cindy-github`](./cindy-github) | GitHub issue / PR / code review / Actions / release 全流程操作 |

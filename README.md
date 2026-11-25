@@ -45,6 +45,7 @@ permission gate.
 | --- | --- | --- | --- |
 | <img src="./cindy-antigravity-acp/icon.png" width="22" alt=""> | Antigravity | [`cindy-antigravity-acp`](./cindy-antigravity-acp) | Run Cindy tasks with the local agy CLI. Requires your own Google account. |
 | <img src="./dsh-acp/icon.png" width="22" alt=""> | DeepSeek Harness | [`dsh-acp`](./dsh-acp) | Run Cindy tasks with the local dsh CLI. Requires your own DeepSeek API key. |
+| <img src="./cindy-herdr/assets/icon.png" width="22" alt=""> | Herdr Console | [`cindy-herdr`](./cindy-herdr) | Console for local Herdr and tmux: inspect agent state, read panes, send input, and turn blocked/done events into Cindy notifications and automations; tmux works even without Herdr installed. For local terminals — use herdr-bridge to manage remote SSH machines and workspaces; opt-in |
 | <img src="./cindy-art/assets/icon.png" width="22" alt=""> | Art | [`cindy-art`](./cindy-art) | Image / short-video generation, with edits and restyling based on previously generated images |
 | <img src="./opendesign-trial/assets/icon.png" width="22" alt=""> | OpenDesign | [`opendesign-trial`](./opendesign-trial) | Session-owned HTML design previews, element annotations and manual editing using Cindy’s conversation model |
 | <img src="./cindy-github/assets/icon.png" width="22" alt=""> | GitHub | [`cindy-github`](./cindy-github) | Full GitHub workflow: issues / PRs / code review / Actions / releases |

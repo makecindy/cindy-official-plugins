@@ -1,0 +1,110 @@
+/* Herdr 控制台面板的纯函数：按键映射、宽字符与 grapheme 处理、目录名。
+   既给面板页面用（普通 script，挂 window.HerdrPanelLib），
+   也给仓库测试用（CommonJS 导出），两边是同一份代码。 */
+(function (root, factory) {
+  const api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.HerdrPanelLib = api;
+})(typeof self !== 'undefined' ? self : globalThis, function () {
+  // 宽字符（中日韩、全角、emoji 区）：在终端里占 2 个单元格。
+  const WIDE_CHAR = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE6F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F300}-\u{1FAFF}\u{20000}-\u{2FA1F}]/u;
+
+  const HERDR_KEYS = {
+    ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    // Herdr 文档只确认了 enter/esc/ctrl+h/f1 这类名字，没列翻页键；
+    // 没确认的键不转发，否则可能被当成字面文本打进终端。
+    Home: 'home', End: 'end', Tab: 'tab', Escape: 'esc',
+    Backspace: 'backspace', Delete: 'delete'
+  };
+  const TMUX_KEYS = {
+    ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+    PageUp: 'PPage', PageDown: 'NPage', Home: 'Home', End: 'End',
+    Tab: 'Tab', Escape: 'Escape', Backspace: 'BSpace', Delete: 'DC'
+  };
+  // 只有「终端行为」键才转发；退格/删除/左右/Home/End 只编辑还没提交的草稿。
+  const FORWARDABLE_KEYS = {
+    ArrowUp: 1, ArrowDown: 1, PageUp: 1, PageDown: 1, Tab: 1, Escape: 1
+  };
+
+  const segmenter = typeof Intl !== 'undefined' && Intl.Segmenter
+    ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    : null;
+
+  function graphemes(text) {
+    const source = String(text == null ? '' : text);
+    if (segmenter) {
+      return Array.from(segmenter.segment(source), function (part) { return part.segment; });
+    }
+    // 没有 Intl.Segmenter 时，至少别把代理对拆开。
+    const out = [];
+    for (let i = 0; i < source.length;) {
+      const code = source.codePointAt(i);
+      const size = code > 0xffff ? 2 : 1;
+      out.push(source.slice(i, i + size));
+      i += size;
+    }
+    return out;
+  }
+
+  function isWideGrapheme(text) {
+    const unit = String(text == null ? '' : text);
+    return WIDE_CHAR.test(unit[0] || '') || WIDE_CHAR.test(unit);
+  }
+
+  // view: 'herdr' | 'tmux'；返回要发给后端的按键名，或 null（这次不转发）。
+  function specialKey(view, event) {
+    // Command（metaKey）留给浏览器：⌘C/⌘V/⌘X/⌘A 是复制粘贴全选，
+    // 不能当终端组合键转发，否则输入框的编辑快捷键全部失效。
+    // 终端控制键只认真正的 Control。
+    if (event.metaKey) return null;
+    // AltGraph 在 Windows/Linux 上表现为 ctrl+alt：那是输入字符
+    // （AltGr+Q = @、AltGr+E = €），不能当终端组合键。
+    if (event.ctrlKey && event.altKey) return null;
+    if (typeof event.getModifierState === 'function' && event.getModifierState('AltGraph')) return null;
+    if (event.ctrlKey) {
+      // 文本框里的剪贴板快捷键留在本地：粘贴/复制不能被发到远端终端，
+      // 否则本地草稿编辑不了，还会把 C-v / C-c 当成终端控制键发出去。
+      // 纯 Ctrl+C 仍是「取消终端里那行」的语义，不能拦。
+      const target = event.target;
+      const inTextField = Boolean(target) && (
+        target.tagName === 'TEXTAREA' || target.tagName === 'INPUT'
+        || target.isContentEditable === true);
+      if (inTextField) {
+        const pressed = String(event.key || '').toLowerCase();
+        const isPaste = pressed === 'v';
+        const isCopy = pressed === 'c' && event.shiftKey;
+        const isCut = pressed === 'x' && event.shiftKey;
+        if (isPaste || isCopy || isCut) return null;
+      }
+      if (String(event.key).length !== 1) return null;
+      return (view === 'tmux' ? 'C-' : 'ctrl+') + String(event.key).toLowerCase();
+    }
+    // 浏览器给 Shift+Tab 的 key 仍是 'Tab'：修饰要单独认，
+    // 否则反向补全既不发生也没被转发。
+    if (event.key === 'Tab' && event.shiftKey) {
+      return view === 'tmux' ? 'BTab' : 'shift+tab';
+    }
+    if (!FORWARDABLE_KEYS[event.key]) return null;
+    const table = view === 'tmux' ? TMUX_KEYS : HERDR_KEYS;
+    return table[event.key] || null;
+  }
+
+  // 目录名：只保留路径最后一段；没有路径时返回空串。
+  function dirName(value) {
+    const text = String(value == null ? '' : value).replace(/\/+$/, '');
+    if (!text) return '';
+    const parts = text.split('/');
+    return parts[parts.length - 1] || text;
+  }
+
+  return {
+    WIDE_CHAR: WIDE_CHAR,
+    HERDR_KEYS: HERDR_KEYS,
+    TMUX_KEYS: TMUX_KEYS,
+    FORWARDABLE_KEYS: FORWARDABLE_KEYS,
+    graphemes: graphemes,
+    isWideGrapheme: isWideGrapheme,
+    specialKey: specialKey,
+    dirName: dirName
+  };
+});
