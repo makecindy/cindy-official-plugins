@@ -2,6 +2,8 @@ Open Artifact CLI, Harness Kit and Protocol 0.14.6
 https://github.com/JimLiu/open-artifact/tree/132c038529e4527d1bc30561a855ffd958aa7302
 Apache-2.0; see vendor/OPEN-ARTIFACT-LICENSE and vendor/OPEN-ARTIFACT-NOTICE.
 The CLI archive also carries its original vendor notices and licenses.
+The plugin icon is the unmodified PNG shipped by Open Artifact:
+https://github.com/JimLiu/open-artifact/blob/132c038529e4527d1bc30561a855ffd958aa7302/plugins/claude-code/assets/icon.png
 
 The archive reader in vendor/adapter.mjs bundles tar 7.5.22 and its
 resolved chownr, minipass, minizlib, yallist and @isaacs/fs-minipass dependencies.
