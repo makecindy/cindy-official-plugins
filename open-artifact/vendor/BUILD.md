@@ -2,9 +2,12 @@
 
 Use the npm registry packages `@open-artifact/cli@0.14.6`,
 `@open-artifact/harness-kit@0.14.6` and `@open-artifact/protocol@0.14.6`.
-Keep the CLI tarball unchanged as `runtime.tgz`. Its pinned SHA-512 is in
-`node/worker.cjs`. The runtime is extracted locally from this signed plugin's
-contents to stay within the marketplace's archive entry limit.
+The repository packager uses `binary-dependencies.json` to download the CLI
+tarball, verify its SHA-256 and bundle it unchanged as
+`vendor/open-artifact-runtime/runtime.tgz`. For a local Forge build, download
+and verify the same tarball before placing it at that path. The installed
+plugin extracts the bundled tarball locally to fit the marketplace's archive
+entry limit. Its SHA-512 is pinned in `node/worker.cjs`.
 
 To regenerate `adapter.mjs`, copy `adapter.entry.mjs` to a dependency build
 directory containing these two Open Artifact libraries and tar 7.5.22. Run

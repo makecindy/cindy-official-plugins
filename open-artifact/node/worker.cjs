@@ -7,7 +7,7 @@ const { resolveWorkspacePath, verifyRuntime, workspaceArguments } = require('./s
 const runtimeInventory = require('../vendor/runtime-integrity.json');
 
 const version = '0.14.6';
-const runtimeArchive = path.join(__dirname, '../vendor/runtime.tgz');
+const runtimeArchive = path.join(__dirname, '../vendor/open-artifact-runtime/runtime.tgz');
 const pinnedIntegrity = 'ZxJs17HHSkH8+AOXx+CIgWfoIrTqaqJGTKVVRlyhtTZXWc7sdINlrV0sPrx5I/3ERXT880CEX+KUH74sv+Yz2g==';
 const allowedTools = new Set(['Artifact', 'ArtifactData', 'ArtifactComments']);
 const sessions = new Map();

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "dependencies": [
+    {
+      "name": "open-artifact-runtime",
+      "version": "0.14.6",
+      "license": "vendor/OPEN-ARTIFACT-LICENSE",
+      "assets": [
+        {
+          "url": "https://registry.npmjs.org/@open-artifact/cli/-/cli-0.14.6.tgz",
+          "sha256": "f03ac8cb1d97f69e417281b5af42f53bdc72fb21565b061fc872341172de0d5f",
+          "format": "file",
+          "files": [
+            {
+              "target": "vendor/open-artifact-runtime/runtime.tgz"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
