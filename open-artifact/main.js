@@ -4,7 +4,6 @@ const tools = {
   artifact_comments: 'ArtifactComments',
 };
 let ownerScope;
-const pendingToolSession = new Map();
 
 function getScope() {
   ownerScope ??= (async () => {
@@ -36,7 +35,8 @@ async function answerHost({ method, params }) {
   let answer = method === 'artifact/open' ? false : 'failed';
   try {
     if (method === 'artifact/open') {
-      if (pendingToolSession.has(session)) {
+      // The Node worker checks the attached task before sending this event.
+      if (typeof session === 'string' && session) {
         const opened = await cindy.preview({ url, sessionId: session, reuseExisting: true });
         answer = opened?.ok === true;
       }
@@ -68,7 +68,6 @@ cindy.onHostMessage(async msg => {
     return;
   }
   const session = ctx.session_id;
-  pendingToolSession.set(session, (pendingToolSession.get(session) ?? 0) + 1);
   const longWait = msg.tool === 'artifact_comments' && args.action === 'wait';
   const progress = longWait ? setInterval(() => {
     void cindy.send({ type: 'tool-progress', callId: msg.callId }).catch(() => {});
@@ -82,9 +81,6 @@ cindy.onHostMessage(async msg => {
     result = null;
   } finally {
     if (progress !== undefined) clearInterval(progress);
-    const count = pendingToolSession.get(session) - 1;
-    if (count === 0) pendingToolSession.delete(session);
-    else pendingToolSession.set(session, count);
   }
   if (!result?.ok) {
     await reply({ ok: false, errorCode: 'ARTIFACT_CALL_FAILED', message: result?.message ?? 'Open Artifact could not complete the request.' });

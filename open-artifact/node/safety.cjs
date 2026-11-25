@@ -2,6 +2,13 @@ const { createHash } = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
+const actionPathFields = new Map([
+  ['upload', ['file']],
+  ['import', ['file']],
+  ['export', ['file', 'out']],
+  ['widget', ['codeFile']],
+]);
+
 function isWithin(root, candidate) {
   const relative = path.relative(root, candidate);
   return relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative);
@@ -49,6 +56,54 @@ async function workspaceArguments(tool, args, workspace) {
   return checked;
 }
 
+function exportFilename(title, part, extension) {
+  const stem = [title, part].filter(Boolean).join(' - ')
+    .replace(/[\u0000-\u001f\u007f<>:"/\\|?*]/g, ' ')
+    .replace(/\s+/g, ' ').replace(/^[.\s]+|[.\s]+$/g, '').slice(0, 120);
+  return `${stem || 'Artifact'}.${extension}`;
+}
+
+async function sheetExportPath(args, workspace, artifact) {
+  if (args.file !== undefined) {
+    const stat = await fs.stat(args.file).catch(error => {
+      if (error.code !== 'ENOENT') throw error;
+      return null;
+    });
+    if (!stat?.isDirectory()) return args.file;
+  }
+  const directory = args.file ?? path.join(artifact.root, 'exports');
+  const csv = args.csv === true || /\.csv$/i.test(directory);
+  const filename = exportFilename(artifact.title, csv && args.sheet, csv ? 'csv' : 'xlsx');
+  return resolveWorkspacePath(workspace, path.join(directory, filename));
+}
+
+async function artifactActionArguments(name, args, workspace, artifact) {
+  if (args != null && (typeof args !== 'object' || Array.isArray(args))) return args;
+  const checked = { ...args };
+  for (const field of actionPathFields.get(name) ?? []) {
+    if (Object.hasOwn(checked, field)) checked[field] = await resolveWorkspacePath(workspace, checked[field]);
+  }
+  if (name === 'batch' && Array.isArray(checked.calls)) {
+    checked.calls = await Promise.all(checked.calls.map(async call => {
+      const payload = call?.payload;
+      if (!payload || !Object.hasOwn(payload, 'codeFile')) return call;
+      const codeFile = await resolveWorkspacePath(workspace, payload.codeFile);
+      return { ...call, payload: { ...payload, codeFile } };
+    }));
+  }
+  // Pass an explicit, checked output file when the runtime would choose its own filename.
+  if (name === 'export' && artifact.type === 'sheets') {
+    checked.file = await sheetExportPath(checked, workspace, artifact);
+  } else if (name === 'export' && artifact.type === 'docs' && checked.out === undefined &&
+      ['docx', 'pdf', 'html'].includes(checked.format)) {
+    const file = exportFilename(artifact.title, checked.tab, checked.format);
+    checked.out = await resolveWorkspacePath(workspace, path.join(artifact.root, 'exports', file));
+  } else if (name === 'duplicate' && artifact.type === 'docs') {
+    await resolveWorkspacePath(workspace, path.dirname(artifact.root));
+  }
+  return checked;
+}
+
 async function verifyRuntime(root, inventory) {
   const remaining = new Set(Object.keys(inventory));
   const directories = new Set([...remaining].flatMap(file => {
@@ -77,4 +132,4 @@ async function verifyRuntime(root, inventory) {
   if (remaining.size) fail();
 }
 
-module.exports = { resolveWorkspacePath, verifyRuntime, workspaceArguments };
+module.exports = { artifactActionArguments, resolveWorkspacePath, verifyRuntime, workspaceArguments };

@@ -6,7 +6,7 @@ import test from 'node:test';
 
 const source = await readFile(new URL('../open-artifact/main.js', import.meta.url), 'utf8');
 
-function harness({ accepted = true } = {}) {
+function harness({ accepted = true, openDuringCall = true } = {}) {
   let onMessage;
   const calls = [];
   const cindy = {
@@ -20,7 +20,7 @@ function harness({ accepted = true } = {}) {
     node: {
       async request(frame) {
         calls.push(['node', frame]);
-        if (frame.method === 'artifact/call') {
+        if (frame.method === 'artifact/call' && openDuringCall) {
           await onMessage({
             type: 'event', name: 'node-notification', method: 'artifact/open',
             params: { id: 'open-one', session: frame.params.session, url: 'http://127.0.0.1:41000/a/one' },
@@ -49,6 +49,26 @@ test('the tool uses the verified task and opens the work in that task with reuse
   assert.equal(calls[1][1].sessionId, 'task-one');
   assert.equal(calls[1][1].reuseExisting, true);
   assert.equal(calls.at(-1)[1].result.marker, 'done');
+});
+
+test('the first write opens the work in the original task after creation returns', async () => {
+  const { calls, onMessage } = harness({ openDuringCall: false });
+  await onMessage({
+    type: 'tool-call', tool: 'artifact', callId: 'create-one',
+    args: {
+      action: 'publish', open: 'after_first_write',
+      session_context: { session_id: 'task-one', workdir: '/project', workdir_is_local: true },
+    },
+  });
+  assert.equal(calls.at(-1)[1].result.marker, 'done');
+  await onMessage({
+    type: 'event', name: 'node-notification', method: 'artifact/open',
+    params: { id: 'first-write', session: 'task-one', url: 'http://127.0.0.1:41000/a/one' },
+  });
+  const preview = calls.find(([type]) => type === 'preview')?.[1];
+  assert.equal(preview?.sessionId, 'task-one');
+  assert.equal(preview?.reuseExisting, true);
+  assert.equal(calls.at(-1)[1].params.answer, true);
 });
 
 test('a remote or read-only task never starts the runtime', async () => {
@@ -91,6 +111,52 @@ test('workspace paths resolve to authorized local files, including through symli
   await symlink(parent, join(workspace, 'linked'), 'junction');
   await assert.rejects(workspaceArguments('ArtifactData', { writes: [{ file_path: 'linked/file.json' }] }, workspace));
   await assert.rejects(workspaceArguments('ArtifactData', { out_file: '../outside.json' }, workspace));
+});
+
+test('artifact actions resolve import, upload and export paths within the task workspace', async () => {
+  const { mkdtemp, mkdir, symlink, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { artifactActionArguments, resolveWorkspacePath } = await import('../open-artifact/node/safety.cjs');
+  const parent = await mkdtemp(join(tmpdir(), 'oa-action-path-test-'));
+  const workspace = join(parent, 'task');
+  const root = join(workspace, 'artifact');
+  await mkdir(root, { recursive: true });
+  await symlink(parent, join(workspace, 'linked'), 'junction');
+  const artifact = { root, type: 'docs', title: 'Notes' };
+  const checkedRoot = await resolveWorkspacePath(workspace, '.');
+
+  for (const name of ['import', 'upload']) {
+    const input = await artifactActionArguments(name, { file: 'notes.md' }, workspace, artifact);
+    assert.equal(input.file, join(checkedRoot, 'notes.md'));
+    await assert.rejects(artifactActionArguments(name, { file: join(parent, 'fixture.md') }, workspace, artifact));
+  }
+  await assert.rejects(artifactActionArguments('export', { out: 'linked/notes.md' }, workspace, artifact));
+  const explicit = await artifactActionArguments('export', { format: 'markdown', out: 'new/notes.md' }, workspace, artifact);
+  assert.equal(explicit.out, join(checkedRoot, 'new', 'notes.md'));
+  assert.equal((await artifactActionArguments('export', { format: 'markdown' }, workspace, artifact)).out, undefined);
+  const doc = await artifactActionArguments('export', { format: 'docx' }, workspace, artifact);
+  assert.equal(doc.out, join(checkedRoot, 'artifact', 'exports', 'Notes.docx'));
+  await symlink(parent, join(root, 'exports'), 'junction');
+  await assert.rejects(artifactActionArguments('export', { format: 'docx' }, workspace, artifact));
+
+  const sheet = { ...artifact, type: 'sheets', title: 'Budget' };
+  const batch = { calls: [{ payload: { codeFile: 'linked/chart.jsx' } }] };
+  await assert.rejects(artifactActionArguments('widget', { codeFile: 'linked/chart.jsx' }, workspace, sheet));
+  await assert.rejects(artifactActionArguments('batch', batch, workspace, sheet));
+  const validBatch = { calls: [{ payload: { codeFile: 'chart.jsx' } }] };
+  const chart = await artifactActionArguments('batch', validBatch, workspace, sheet);
+  assert.equal(chart.calls[0].payload.codeFile, join(checkedRoot, 'chart.jsx'));
+  const exports = join(workspace, 'downloads');
+  await mkdir(exports);
+  const csvArgs = { csv: true, file: exports, sheet: 'Sales/West' };
+  const csv = await artifactActionArguments('export', csvArgs, workspace, sheet);
+  assert.equal(csv.file, join(checkedRoot, 'downloads', 'Budget - Sales West.csv'));
+  const outside = join(parent, 'fixture.csv');
+  await writeFile(outside, 'fixture\n');
+  await symlink(outside, csv.file);
+  await assert.rejects(artifactActionArguments('export', csvArgs, workspace, sheet));
+  await assert.rejects(artifactActionArguments('export', { file: 'linked/book.xlsx' }, workspace, sheet));
 });
 
 test('runtime cache rejects changed files, extra entries and links', async () => {

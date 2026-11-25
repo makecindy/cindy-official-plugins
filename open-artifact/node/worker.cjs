@@ -3,7 +3,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
-const { resolveWorkspacePath, verifyRuntime, workspaceArguments } = require('./safety.cjs');
+const { artifactActionArguments, resolveWorkspacePath, verifyRuntime, workspaceArguments } = require('./safety.cjs');
 const runtimeInventory = require('../vendor/runtime-integrity.json');
 
 const version = '0.14.6';
@@ -113,24 +113,27 @@ async function connect(scope) {
   return runtime;
 }
 
-async function artifactRoot(harness, url, caller) {
+async function workspaceArtifact(harness, url, caller) {
   let cursor;
   do {
     const page = await harness.call('Artifact', { action: 'list', scope: 'mine', limit: 200, cursor }, caller);
     const artifact = page.artifacts?.find(item => item.url === url);
-    if (artifact) return resolveWorkspacePath(caller.workspace, artifact.root);
+    if (artifact) return { ...artifact, root: await resolveWorkspacePath(caller.workspace, artifact.root) };
     cursor = page.next_cursor;
   } while (cursor);
   throw new Error('Artifact is unavailable in the task workspace');
 }
 
-async function checkArtifactPaths(harness, tool, args, caller) {
-  if (!args.url) return;
-  const root = await artifactRoot(harness, args.url, caller);
-  if (tool !== 'Artifact') return;
+async function checkArtifactArguments(harness, tool, args, caller) {
+  if (!args.url) return args;
+  const artifact = await workspaceArtifact(harness, args.url, caller);
+  if (tool !== 'Artifact') return args;
   const paths = [args.path, ...(Array.isArray(args.paths) ? args.paths : []),
     ...Object.keys(args.files ?? {})].filter(value => value !== undefined);
-  await Promise.all(paths.map(file => resolveWorkspacePath(root, file)));
+  await Promise.all(paths.map(file => resolveWorkspacePath(artifact.root, file)));
+  if (args.action !== 'call') return args;
+  const checked = await artifactActionArguments(args.name, args.args, caller.workspace, artifact);
+  return { ...args, args: checked };
 }
 
 async function run({ method, params, id }) {
@@ -156,7 +159,7 @@ async function run({ method, params, id }) {
     }
     const harness = await connect(params.scope);
     try {
-      await checkArtifactPaths(harness, params.tool, args, caller);
+      args = await checkArtifactArguments(harness, params.tool, args, caller);
     } catch {
       send({ id, error: { code: -32602, message: 'The artifact or file is unavailable in the task workspace.' } });
       return;
