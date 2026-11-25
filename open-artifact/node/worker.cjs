@@ -8,7 +8,7 @@ const { artifactActionArguments, artifactFileArguments, resolveWorkspacePath, ve
 const runtimeInventory = require('../vendor/runtime-integrity.json');
 
 const version = '0.14.6';
-const runtimeDirectory = `runtime-${version}-cindy.2`;
+const runtimeDirectory = `runtime-${version}-cindy.3`;
 const runtimeArchive = path.join(__dirname, '../vendor/open-artifact-runtime/runtime.tgz');
 const pinnedIntegrity = 'ZxJs17HHSkH8+AOXx+CIgWfoIrTqaqJGTKVVRlyhtTZXWc7sdINlrV0sPrx5I/3ERXT880CEX+KUH74sv+Yz2g==';
 const runtimeOverlays = ['vendor/open-artifact.mjs', 'vendor/frame-host/frame-host.mjs', 'vendor/type-server/cli.mjs'];

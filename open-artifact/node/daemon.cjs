@@ -3,7 +3,7 @@ const { pathToFileURL } = require('node:url');
 
 const home = process.argv[2];
 if (typeof home !== 'string' || !path.isAbsolute(home)) throw new Error('Missing Open Artifact home');
-const entry = path.join(home, 'runtime-0.14.6-cindy.2', 'scripts', 'open-artifact.mjs');
+const entry = path.join(home, 'runtime-0.14.6-cindy.3', 'scripts', 'open-artifact.mjs');
 process.env.OPEN_ARTIFACT_HOME = home;
 process.env.OPEN_ARTIFACT_RUNTIME_UPDATE = 'off';
 process.env.OPEN_ARTIFACT_NODE_CHILDREN = 'threads';

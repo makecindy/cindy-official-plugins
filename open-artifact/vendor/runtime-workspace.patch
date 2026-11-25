@@ -9,7 +9,7 @@ index 5876d45..4504fc9 100755
 +        ...(process.env.OPEN_ARTIFACT_WORKSPACE_FOLDERS_ONLY === '1' ? { workspaceFoldersOnly: true } : {}),
 +      });
 diff --git a/packages/daemon/src/daemon.ts b/packages/daemon/src/daemon.ts
-index be8d8e7..b68a408 100644
+index be8d8e7..45022db 100644
 --- a/packages/daemon/src/daemon.ts
 +++ b/packages/daemon/src/daemon.ts
 @@ -13 +13 @@ import { EventEmitter } from 'node:events';
@@ -18,30 +18,49 @@ index be8d8e7..b68a408 100644
 @@ -16 +16,2 @@ import { userInfo } from 'node:os';
 -import { dirname, extname, isAbsolute, join, resolve, sep } from 'node:path';
 +import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'node:path';
-+import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
-@@ -379,0 +381,2 @@ export interface DaemonOptions {
++import { WorkspaceDirectory, readSharingState } from '@open-artifact/protocol/workspace-files';
+@@ -252,5 +252,0 @@ const scriptJson = (value: unknown): string => JSON.stringify(value).replace(/</
+-/** Whether `.sharing.json` in an artifact folder says it is shared on the network (the type server writes it). */
+-function sharedOnLan(root: string): boolean {
+-  return readJson<{ lan?: boolean } | null>(join(root, '.sharing.json'), null)?.lan === true;
+-}
+-
+@@ -379,0 +376,2 @@ export interface DaemonOptions {
 +  /** Require workspaces for local artifact creation and adoption. */
 +  workspaceFoldersOnly?: boolean;
-@@ -484 +487 @@ export class Daemon extends EventEmitter<{ exit: [] }> {
+@@ -484 +482 @@ export class Daemon extends EventEmitter<{ exit: [] }> {
 -    this.store = new ArtifactStore();
 +    this.store = new ArtifactStore(options.workspaceFoldersOnly === true);
-@@ -534,0 +538 @@ export class Daemon extends EventEmitter<{ exit: [] }> {
+@@ -534,0 +533 @@ export class Daemon extends EventEmitter<{ exit: [] }> {
 +      workspaceFoldersOnly: options.workspaceFoldersOnly === true,
-@@ -1376,0 +1381,6 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
+@@ -765,0 +765,9 @@ export class Daemon extends EventEmitter<{ exit: [] }> {
++  /** The library and startup use the same checked sharing record as the editor. */
++  private sharedOnLan(record: ArtifactRecord): boolean {
++    try {
++      return readSharingState(new WorkspaceDirectory(this.store.authorizedRoot(record)))?.lan === true;
++    } catch {
++      return false;
++    }
++  }
++
+@@ -768 +776 @@ export class Daemon extends EventEmitter<{ exit: [] }> {
+-      if (!sharedOnLan(record.root)) continue;
++      if (!this.sharedOnLan(record)) continue;
+@@ -1376,0 +1385,6 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
 +    const source = this.store.authorizedRoot(record);
 +    const workspace = record.workspaceDirectory;
 +    const inherited = {
 +      type: record.type, typeSource: record.typeSource, typeRelease: record.typeRelease, owner: record.owner,
 +      ...(workspace ? { workspaceDirectory: workspace } : {}),
 +    };
-@@ -1379,0 +1390 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
+@@ -1379,0 +1394 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
 +      if (workspace) await this.openPage(record);
-@@ -1381,2 +1392,2 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
+@@ -1381,2 +1396,2 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
 -        { root: record.root, id: record.id, args: { name: name ?? (record.title.slice(0, 249) + ' (copy)') } }, undefined, ACTION_CALL_MS);
 -      return this.store.create({ root: copy.root, title: copy.name, type: record.type, typeSource: record.typeSource, typeRelease: record.typeRelease, owner: record.owner });
 +        { root: source, id: record.id, args: { name: name ?? (record.title.slice(0, 249) + ' (copy)') } }, undefined, ACTION_CALL_MS);
 +      return this.store.create({ ...inherited, root: copy.root, title: copy.name });
-@@ -1384,4 +1395,5 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
+@@ -1384,4 +1399,5 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
 -    const parent = dirname(record.root);
 -    const base = record.root.slice(parent.length + 1);
 -    let root = join(parent, `${base}-copy`);
@@ -51,7 +70,7 @@ index be8d8e7..b68a408 100644
 +    const base = basename(source) || 'work';
 +    const target = (name: string) => directory?.resolve(join(parent, name), false) ?? join(parent, name);
 +    let root = target(`${base}-copy`);
-@@ -1389,4 +1401,17 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
+@@ -1389,4 +1405,17 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
 -    ensureDir(root);
 -    for (const name of readdirSync(record.root)) {
 -      if (skip(name)) continue;
@@ -73,11 +92,47 @@ index be8d8e7..b68a408 100644
 +        recursive: true, errorOnExist: false,
 +        ...(files ? { dereference: true, filter: (path: string) => { files.resolve(path); return true; } } : {}),
 +      });
-@@ -1394 +1419 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
+@@ -1394 +1423 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
 -    return this.store.create({ root, type: record.type, typeSource: record.typeSource, typeRelease: record.typeRelease, owner: record.owner, title: `Copy of ${record.title}`.slice(0, 200) });
 +    return this.store.create({ ...inherited, root, title: `Copy of ${record.title}`.slice(0, 200) });
-@@ -1458,0 +1484 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
+@@ -1427 +1456 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
+-      shared: sharedOnLan(record.root),
++      shared: this.sharedOnLan(record),
+@@ -1458,0 +1488 @@ ${rows ? `<ul>\n${rows}\n</ul>` : '<p>No artifacts yet. Ask an agent to make one
 +    record = { ...record, root: this.store.authorizedRoot(record) };
+diff --git a/packages/daemon/src/release-guard.ts b/packages/daemon/src/release-guard.ts
+index 1d37ee2..010d869 100644
+--- a/packages/daemon/src/release-guard.ts
++++ b/packages/daemon/src/release-guard.ts
+@@ -24 +23,0 @@
+-import { join } from 'node:path';
+@@ -25,0 +25 @@ import { actionKindOf, type ArtifactRecord, type SessionRef, type ToolCallResult
++import { artifactDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -27 +27,12 @@ import { compareVersions, parseVersion } from '@open-artifact/harness-kit';
+-import { readJson, writeJson } from './paths.ts';
++
++const MARKER = '.artifact.json';
++
++function releaseMarker(record: ArtifactRecord) {
++  try {
++    const files = artifactDirectory(record);
++    const value = files.readJson<Record<string, unknown> | null>(MARKER, null);
++    return value ? { files, value } : null;
++  } catch {
++    return null;
++  }
++}
+@@ -41,2 +52,2 @@ export function writtenRelease(record: ArtifactRecord): string | null {
+-  const marker = readJson<{ release?: unknown } | null>(join(record.root, '.artifact.json'), null);
+-  const candidates = [record.typeRelease, typeof marker?.release === 'string' ? marker.release : null].filter((v): v is string => !!v && !!parseVersion(v));
++  const release = releaseMarker(record)?.value.release;
++  const candidates = [record.typeRelease, typeof release === 'string' ? release : null].filter((v): v is string => !!v && !!parseVersion(v));
+@@ -73,3 +84,2 @@ export function writeMarkerRelease(record: ArtifactRecord, release: string): voi
+-  const file = join(record.root, '.artifact.json');
+-  const marker = readJson<Record<string, unknown> | null>(file, null);
+-  if (marker && marker.release !== release) writeJson(file, { ...marker, release });
++  const marker = releaseMarker(record);
++  if (marker && marker.value.release !== release) marker.files.writeJson(MARKER, { ...marker.value, release });
 diff --git a/packages/daemon/src/servers.ts b/packages/daemon/src/servers.ts
 index 1eb023b..90c627f 100644
 --- a/packages/daemon/src/servers.ts
@@ -96,7 +151,7 @@ index 1eb023b..90c627f 100644
 +      ...(record.workspaceDirectory ? { workspaceDirectory: record.workspaceDirectory } : {}),
 +    };
 diff --git a/packages/daemon/src/store.ts b/packages/daemon/src/store.ts
-index c791992..936a7de 100644
+index c791992..e85aa7b 100644
 --- a/packages/daemon/src/store.ts
 +++ b/packages/daemon/src/store.ts
 @@ -20,0 +21 @@ import { ensureDir, files, readJson, writeJson } from './paths.ts';
@@ -120,8 +175,8 @@ index c791992..936a7de 100644
 +      ...(identity ? { workspaceDirectory: identity } : {}),
 @@ -172 +181,2 @@ export class ArtifactStore extends EventEmitter<{ changed: [StoreChange] }> {
 -    writeJson(join(record.root, '.artifact.json'), marker);
-+    const markerPath = join(record.root, '.artifact.json');
-+    writeJson(workspace?.resolve(markerPath, false) ?? markerPath, marker);
++    if (workspace) new WorkspaceDirectory(workspace.resolve(record.root)).writeJson('.artifact.json', marker);
++    else writeJson(join(record.root, '.artifact.json'), marker);
 @@ -175,0 +186,10 @@ export class ArtifactStore extends EventEmitter<{ changed: [StoreChange] }> {
 +  /** Resolve an artifact against the workspace originally authorized by the host. */
 +  authorizedRoot(record: ArtifactRecord): string {
@@ -134,7 +189,7 @@ index c791992..936a7de 100644
 +  }
 +
 diff --git a/packages/daemon/src/tools.ts b/packages/daemon/src/tools.ts
-index 2236f23..81bbb7e 100644
+index 2236f23..a244401 100644
 --- a/packages/daemon/src/tools.ts
 +++ b/packages/daemon/src/tools.ts
 @@ -46,0 +47 @@ import {
@@ -142,6 +197,12 @@ index 2236f23..81bbb7e 100644
 @@ -326,0 +328,2 @@ export interface ToolsOptions {
 +  /** Use the attached workspace as the boundary of a new or adopted folder. */
 +  workspaceFoldersOnly?: boolean;
+@@ -386 +389 @@ type Opening = 'after_first_write' | 'now';
+-export function contentTitle(root: string, titleFrom: string | null): string | undefined {
++function contentTitle(files: WorkspaceDirectory, titleFrom: string | null): string | undefined {
+@@ -390 +393 @@ export function contentTitle(root: string, titleFrom: string | null): string | u
+-    return titleInJson(readFileSync(join(root, parsed.file), 'utf8'), parsed.pointer)?.slice(0, 200);
++    return titleInJson(readFileSync(files.resolve(parsed.file), 'utf8'), parsed.pointer)?.slice(0, 200);
 @@ -498 +501 @@ export class Tools {
 -          return this.write(args);
 +          return this.write(args, caller);
@@ -255,13 +316,71 @@ index 2236f23..81bbb7e 100644
 +        owner: caller, agentSeenAt: now(),
 +        ...(workspace && !record.workspaceDirectory ? { workspaceDirectory: workspace.identity } : {}),
 +      });
-@@ -1307 +1351,5 @@ export class Tools {
--    const record = this.o.store.create({ root, type: typeId, typeSource: type?.scope ?? null, typeRelease: type?.version ?? null, owner: caller, title });
+@@ -1293,0 +1338,2 @@ export class Tools {
 +    const workspace = this.workspaceDirectory(caller);
++    const files = new WorkspaceDirectory(workspace?.resolve(root) ?? root);
+@@ -1296,5 +1342,7 @@ export class Tools {
+-      try {
+-        typeId = (JSON.parse(readFileSync(join(root, '.artifact.json'), 'utf8')) as { type?: string }).type ?? null;
+-      } catch {
+-        // Detect by the types' marker files.
+-        typeId = this.o.types.list(caller.workspace).find((t) => t.detect.some((rel) => existsSync(join(root, rel))))?.id ?? null;
++      const marker = files.readJson<{ type?: unknown } | null>('.artifact.json', null);
++      if (marker === null) {
++        typeId = this.o.types.list(caller.workspace).find((t) => t.detect.some((rel) => {
++          try { return existsSync(files.resolve(rel)); } catch { return false; }
++        }))?.id ?? null;
++      } else if (typeof marker.type === 'string') {
++        typeId = marker.type;
+@@ -1306,2 +1354,5 @@ export class Tools {
+-    const title = args.title || contentTitle(root, type?.titleFrom ?? null) || basename(root);
+-    const record = this.o.store.create({ root, type: typeId, typeSource: type?.scope ?? null, typeRelease: type?.version ?? null, owner: caller, title });
++    const title = args.title || contentTitle(files, type?.titleFrom ?? null) || basename(root);
 +    const record = this.o.store.create({
 +      root, type: typeId, typeSource: type?.scope ?? null, typeRelease: type?.version ?? null, owner: caller, title,
 +      ...(workspace ? { workspaceDirectory: workspace.identity } : {}),
 +    });
+diff --git a/packages/daemon/test/release-guard.test.ts b/packages/daemon/test/release-guard.test.ts
+index 13fad4e..d306bc2 100644
+--- a/packages/daemon/test/release-guard.test.ts
++++ b/packages/daemon/test/release-guard.test.ts
+@@ -9 +9 @@ import { readFileSync, writeFileSync } from 'node:fs';
+-import { join } from 'node:path';
++import { basename, join } from 'node:path';
+@@ -11,0 +12 @@ import type { ArtifactRecord, ToolCallResult } from '@open-artifact/protocol';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -13 +14 @@ import { startDaemon, type Daemon } from '../src/daemon.ts';
+-import { ReleaseGuard, isNewerRelease, writtenRelease } from '../src/release-guard.ts';
++import { ReleaseGuard, isNewerRelease, writeMarkerRelease, writtenRelease } from '../src/release-guard.ts';
+@@ -75,0 +77,14 @@ test('the guard: writes refused, reads marked read-only, a newer writer recorded
++test('release metadata reads and updates respect the artifact directory policy', (t) => {
++  const current = record();
++  current.workspaceDirectory = new WorkspaceDirectory(current.root).identity;
++  const marker = join(current.root, '.artifact.json');
++  writeFileSync(marker, JSON.stringify({ release: '3.0.0' }));
++  const resolve = WorkspaceDirectory.prototype.resolve;
++  t.mock.method(WorkspaceDirectory.prototype, 'resolve', function (this: WorkspaceDirectory, input: string, followLeaf = true) {
++    if (basename(input) === '.artifact.json') throw new Error('Fixture policy denied the artifact marker.');
++    return resolve.call(this, input, followLeaf);
++  });
++  assert.equal(writtenRelease(current), '2.0.0');
++  writeMarkerRelease(current, '4.0.0');
++  assert.deepEqual(JSON.parse(readFileSync(marker, 'utf8')), { release: '3.0.0' });
++});
+@@ -81,0 +97,13 @@ after(() => daemon.close());
++test('the library reports sharing only from the checked artifact state', (t) => {
++  const current = record();
++  current.workspaceDirectory = new WorkspaceDirectory(current.root).identity;
++  writeFileSync(join(current.root, '.sharing.json'), JSON.stringify({ lan: true }));
++  assert.equal(daemon.artifactView(current).shared, true);
++  const resolve = WorkspaceDirectory.prototype.resolve;
++  t.mock.method(WorkspaceDirectory.prototype, 'resolve', function (this: WorkspaceDirectory, input: string, followLeaf = true) {
++    if (basename(input) === '.sharing.json') throw new Error('Fixture policy denied sharing state.');
++    return resolve.call(this, input, followLeaf);
++  });
++  assert.equal(daemon.artifactView(current).shared, false);
++});
++
 diff --git a/packages/daemon/test/tools.test.ts b/packages/daemon/test/tools.test.ts
 index 99daeba..5decda4 100644
 --- a/packages/daemon/test/tools.test.ts
@@ -316,12 +435,13 @@ index fe95577..7181072 100644
 +  workspaceDirectory?: import('./workspace-files.ts').WorkspaceDirectoryIdentity;
 diff --git a/packages/protocol/src/workspace-files.ts b/packages/protocol/src/workspace-files.ts
 new file mode 100644
-index 0000000..7275a38
+index 0000000..b1429d1
 --- /dev/null
 +++ b/packages/protocol/src/workspace-files.ts
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,108 @@
 +/** Path resolution for local, already-authorized workspace files. */
-+import { lstatSync, realpathSync, statSync } from 'node:fs';
++import { randomBytes } from 'node:crypto';
++import { lstatSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 +import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 +import { OpenArtifactError } from './errors.ts';
 +
@@ -362,6 +482,28 @@ index 0000000..7275a38
 +    return { root: this.root, device: this.device.toString(), inode: this.inode.toString() };
 +  }
 +
++  /** Read optional metadata from a checked file. */
++  readJson<T>(input: string, fallback: T): T {
++    try {
++      return JSON.parse(readFileSync(this.resolve(input), 'utf8')) as T;
++    } catch {
++      return fallback;
++    }
++  }
++
++  /** Atomically replace a metadata entry inside this directory. */
++  writeJson(input: string, value: unknown, mode?: number): void {
++    const file = this.resolve(input, false);
++    const tmp = `${file}.${randomBytes(8).toString('hex')}.tmp`;
++    writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx', ...(mode === undefined ? {} : { mode }) });
++    try {
++      renameSync(tmp, file);
++    } catch (error) {
++      try { unlinkSync(tmp); } catch { /* Preserve the original error. */ }
++      throw error;
++    }
++  }
++
 +  /** Check both the directory identity and the path. New files inherit the nearest existing parent's boundary. */
 +  resolve(input: string, followLeaf = true): string {
 +    const directory = lstatSync(this.root, { bigint: true });
@@ -391,6 +533,19 @@ index 0000000..7275a38
 +    if (!includesPath(this.root, actual)) throw forbidden();
 +    return actual;
 +  }
++}
++
++/** Bind a recorded artifact to the real folder in its originally authorized workspace. */
++export function artifactDirectory({ root, workspaceDirectory }: { root: string; workspaceDirectory?: WorkspaceDirectoryIdentity }): WorkspaceDirectory {
++  const workspace = workspaceDirectory ? new WorkspaceDirectory(workspaceDirectory.root, workspaceDirectory) : undefined;
++  return new WorkspaceDirectory(workspace?.resolve(root) ?? root);
++}
++
++export const SHARING_FILE = '.sharing.json';
++
++/** The existing sharing record, used by the editor, the CLI and the daemon. */
++export function readSharingState(files: WorkspaceDirectory): Record<string, unknown> | null {
++  return files.readJson<Record<string, unknown> | null>(SHARING_FILE, null);
 +}
 diff --git a/packages/protocol/test/workspace-files.test.ts b/packages/protocol/test/workspace-files.test.ts
 new file mode 100644
@@ -635,6 +790,21 @@ index 9fe1497..349a48c 100644
 @@ -206 +206 @@ export class FrameSite implements Site {
 -    this.db = new DbStore(root);
 +    this.db = new DbStore(root, ctx.workspace);
+diff --git a/packages/server-sdk/src/lan.ts b/packages/server-sdk/src/lan.ts
+index 3f628b0..1b16e13 100644
+--- a/packages/server-sdk/src/lan.ts
++++ b/packages/server-sdk/src/lan.ts
+@@ -9 +8,0 @@ import { lookup } from 'node:dns/promises';
+-import { readFileSync } from 'node:fs';
+@@ -13 +12 @@ import { hostname, networkInterfaces, type NetworkInterfaceInfo } from 'node:os'
+-import { join } from 'node:path';
++import { SHARING_FILE, WorkspaceDirectory, readSharingState } from '@open-artifact/protocol/workspace-files';
+@@ -16 +15 @@ import { join } from 'node:path';
+-export const SHARING_FILE = '.sharing.json';
++export { SHARING_FILE };
+@@ -114 +113 @@ export function sharedOnLan(root: string): boolean {
+-    return (JSON.parse(readFileSync(join(root, SHARING_FILE), 'utf8')) as { lan?: unknown } | null)?.lan === true;
++    return readSharingState(new WorkspaceDirectory(root))?.lan === true;
 diff --git a/packages/server-sdk/src/serve.ts b/packages/server-sdk/src/serve.ts
 index 9b82c53..7ca86f1 100644
 --- a/packages/server-sdk/src/serve.ts
@@ -958,7 +1128,7 @@ index e035936..18784e0 100644
 -      fs.renameSync(temp, this.file);
 +      this.store.savePeople(Object.fromEntries(this.names));
 diff --git a/packages/type-server/src/docs/store.ts b/packages/type-server/src/docs/store.ts
-index 93434fe..184c9be 100644
+index 93434fe..f717224 100644
 --- a/packages/type-server/src/docs/store.ts
 +++ b/packages/type-server/src/docs/store.ts
 @@ -8,0 +9 @@
@@ -996,11 +1166,11 @@ index 93434fe..184c9be 100644
 +  }
 +
 +  readPeople(): unknown {
-+    return JSON.parse(fs.readFileSync(this.files.resolve(path.join(this.root, PEOPLE_FILE)), 'utf8'));
++    return this.files.readJson(path.join(this.root, PEOPLE_FILE), undefined);
 +  }
 +
 +  savePeople(names: Record<string, string>): void {
-+    writeJson(this.files.resolve(path.join(this.root, PEOPLE_FILE), false), names);
++    this.files.writeJson(path.join(this.root, PEOPLE_FILE), names);
 @@ -319,2 +334,3 @@ export class DocStore {
 -  static create(root: string, name: string, fill: (store: DocStore, session: Session) => { id?: string | undefined; name: string; blocks: Block[] }[]): DocStore {
 -    if (isDocFolder(root)) throw new StoreError('DOC_EXISTS', `${root} already holds a doc.`);
@@ -1122,7 +1292,7 @@ index e6a3dcc..9cdb6af 100644
 +      if (SHA.test(name) && !keep.has(name)) rmSync(this.files.resolve(join(this.dir, OBJECTS, name), false), { force: true });
 +    }
 diff --git a/packages/type-server/src/server.ts b/packages/type-server/src/server.ts
-index b1f2018..ecde27a 100644
+index b1f2018..96200dd 100644
 --- a/packages/type-server/src/server.ts
 +++ b/packages/type-server/src/server.ts
 @@ -47,0 +48 @@ import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from 'no
@@ -1145,7 +1315,7 @@ index b1f2018..ecde27a 100644
 +    const meta = JSON.parse(await readFile(files?.resolve(path) ?? path, 'utf8')) as Record<string, unknown>;
 @@ -560 +565 @@ async function readArtifactMeta(root: string): Promise<{ id?: string; title?: st
 -async function indexTitle(root: string, type: TypeName): Promise<string | undefined> {
-+async function indexTitle(root: string, type: TypeName, files?: WorkspaceDirectory): Promise<string | undefined> {
++async function indexTitle(root: string, type: TypeName, files?: Pick<WorkspaceDirectory, 'resolve'>): Promise<string | undefined> {
 @@ -562 +567,2 @@ async function indexTitle(root: string, type: TypeName): Promise<string | undefi
 -    const index = JSON.parse(await readFile(join(root, contentDirOf(type), TYPES[type].marker), 'utf8')) as { title?: unknown };
 +    const path = join(root, contentDirOf(type), TYPES[type].marker);
@@ -1165,6 +1335,15 @@ index b1f2018..ecde27a 100644
 +      if ((await stat(files?.resolve(path) ?? path)).isDirectory()) return type.name;
 @@ -680,0 +689 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
 +      workspace: artifact.workspace,
+@@ -693 +702 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-        void indexTitle(artifact.root, artifact.type).then((title) => {
++        void indexTitle(artifact.root, artifact.type, artifact.store).then((title) => {
+@@ -700 +709 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-        void indexTitle(artifact.root, artifact.type).then((title) => {
++        void indexTitle(artifact.root, artifact.type, artifact.store).then((title) => {
+@@ -784 +793 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-        const title = await indexTitle(artifact.root, artifact.type);
++        const title = await indexTitle(artifact.root, artifact.type, artifact.store);
 @@ -989,3 +998,6 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
 -    const root = resolve(request.root);
 -    const meta = await readArtifactMeta(root);
@@ -1203,6 +1382,9 @@ index b1f2018..ecde27a 100644
 +
 @@ -1112,0 +1138 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
 +    requireAuthorized(artifact);
+@@ -1368 +1394 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
+-          const title = await indexTitle(artifact.root, artifact.type);
++          const title = await indexTitle(artifact.root, artifact.type, artifact.store);
 @@ -1557,0 +1584 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
 +    if (open) requireAuthorized(open);
 @@ -1650 +1677,2 @@ export function createTypeServer(options: TypeServerOptions): TypeServer {
@@ -1236,6 +1418,114 @@ index b1f2018..ecde27a 100644
 +        root: String(answer.body.root), type: 'docs', title: String(answer.body.name),
 +        ...(artifact.workspace ? { workspaceDirectory: artifact.workspace.identity } : {}),
 +      });
+diff --git a/packages/type-server/src/share-cli.ts b/packages/type-server/src/share-cli.ts
+index 00c722d..c3c48e2 100644
+--- a/packages/type-server/src/share-cli.ts
++++ b/packages/type-server/src/share-cli.ts
+@@ -18 +18,2 @@ import { isTailnet } from '@open-artifact/server-sdk/lan';
+-import { GUEST_ROLES, SHARING_FILE, SharingFile, isGuestRole, type ShareChange, type ShareViewFull } from './sharing.ts';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
++import { GUEST_ROLES, SharingFile, isGuestRole, type ShareChange, type ShareViewFull } from './sharing.ts';
+@@ -20 +20,0 @@ import type { ShareRole } from '@open-artifact/protocol';
+-import { join } from 'node:path';
+@@ -73 +73,7 @@ export function shareChangeOf(flags: Flags, fail: ShareCliDeps['fail']): ShareCh
+-export const sharedPort = (root: string): number | undefined => SharingFile.read(join(root, SHARING_FILE)).port;
++export function sharedPort(root: string): number | undefined {
++  try {
++    return SharingFile.read(new WorkspaceDirectory(root)).port;
++  } catch {
++    return undefined;
++  }
++}
+diff --git a/packages/type-server/src/sharing.ts b/packages/type-server/src/sharing.ts
+index f7d2e30..80c3b0e 100644
+--- a/packages/type-server/src/sharing.ts
++++ b/packages/type-server/src/sharing.ts
+@@ -30 +29,0 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+@@ -32,2 +31,3 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+-import { join, resolve } from 'node:path';
+-import type { ShareRequest, ShareRole, ShareView } from '@open-artifact/protocol';
++import { resolve } from 'node:path';
++import { OpenArtifactError, type ShareRequest, type ShareRole, type ShareView } from '@open-artifact/protocol';
++import { SHARING_FILE, WorkspaceDirectory, readSharingState } from '@open-artifact/protocol/workspace-files';
+@@ -36 +36 @@ import { ASK_AGENT_ROUTES, isOwnerOnlyRoute, roleMay, type RoleOptions } from '@
+-import { LanNetwork, SHARING_FILE, isTailnet, lanAddresses } from '@open-artifact/server-sdk/lan';
++import { LanNetwork, isTailnet, lanAddresses } from '@open-artifact/server-sdk/lan';
+@@ -131 +131 @@ export class SharingFile {
+-  readonly file: string;
++  private readonly files: WorkspaceDirectory;
+@@ -134,3 +134,3 @@ export class SharingFile {
+-  constructor(root: string) {
+-    this.file = join(root, SHARING_FILE);
+-    this.state = SharingFile.read(this.file);
++  constructor(files: WorkspaceDirectory) {
++    this.files = files;
++    this.state = SharingFile.read(files);
+@@ -139 +139 @@ export class SharingFile {
+-  static read(file: string): SharingState {
++  static read(files: WorkspaceDirectory): SharingState {
+@@ -141,6 +141 @@ export class SharingFile {
+-    let raw: unknown;
+-    try {
+-      raw = JSON.parse(readFileSync(file, 'utf8'));
+-    } catch {
+-      return state;
+-    }
++    const raw = readSharingState(files);
+@@ -172,0 +168,9 @@ export class SharingFile {
++  assertAvailable(): void {
++    try {
++      this.files.resolve(SHARING_FILE);
++    } catch (error) {
++      if (error instanceof OpenArtifactError && error.code === 'not_granted') throw new HttpError(403, error.code, error.message);
++      throw error;
++    }
++  }
++
+@@ -174,3 +178,2 @@ export class SharingFile {
+-    const tmp = `${this.file}.${process.pid}.tmp`;
+-    writeFileSync(tmp, `${JSON.stringify(this.state, null, 2)}\n`, { mode: 0o600 });
+-    renameSync(tmp, this.file);
++    this.assertAvailable();
++    this.files.writeJson(SHARING_FILE, this.state, 0o600);
+@@ -218,3 +221,8 @@ export class SharingFile {
+-    this.state.lan = on;
+-    if (on && port) this.state.port = port;
+-    this.save();
++    const prior = this.state;
++    this.state = { ...prior, lan: on, ...(on && port ? { port } : {}) };
++    try {
++      this.save();
++    } catch (error) {
++      this.state = prior;
++      throw error;
++    }
+@@ -282,0 +291 @@ export interface ShareTarget {
++  readonly workspace?: WorkspaceDirectory | undefined;
+@@ -345 +354,2 @@ export class LanSharing {
+-    const entry: Entry = { target, file: new SharingFile(target.root), on: false };
++    const root = target.workspace?.resolve(target.root) ?? target.root;
++    const entry: Entry = { target, file: new SharingFile(new WorkspaceDirectory(root)), on: false };
+@@ -413 +422,0 @@ export class LanSharing {
+-      if (entry.file.state.lan) entry.file.setLan(false);
+@@ -415,0 +425 @@ export class LanSharing {
++      if (entry.file.state.lan) entry.file.setLan(false);
+@@ -420,0 +431 @@ export class LanSharing {
++    entry.file.assertAvailable();
+@@ -422,2 +433,8 @@ export class LanSharing {
+-    entry.on = true;
+-    if (!entry.file.state.lan || entry.file.state.port !== port) entry.file.setLan(true, port);
++    try {
++      if (!entry.file.state.lan || entry.file.state.port !== port) entry.file.setLan(true, port);
++      else entry.file.assertAvailable();
++      entry.on = true;
++    } catch (error) {
++      this.lan.release();
++      throw error;
++    }
+@@ -460,0 +478 @@ export class LanSharing {
++    if (change.links !== undefined || change.reset !== undefined || change.guests !== undefined) file.assertAvailable();
 diff --git a/packages/type-server/src/sheets/cli.ts b/packages/type-server/src/sheets/cli.ts
 index e1a35f3..bfa183d 100644
 --- a/packages/type-server/src/sheets/cli.ts
@@ -1579,6 +1869,45 @@ index bfa41e4..a23ce54 100644
 +      assert.equal((await response.json()).code, 'not_granted');
 +    } finally {
 +      server.close(id);
++    }
++  });
++
+diff --git a/packages/type-server/test/sharing.test.ts b/packages/type-server/test/sharing.test.ts
+index 9bf5a9f..b9bcb0f 100644
+--- a/packages/type-server/test/sharing.test.ts
++++ b/packages/type-server/test/sharing.test.ts
+@@ -12 +12 @@ import { tmpdir } from 'node:os';
+-import { join } from 'node:path';
++import { basename, join } from 'node:path';
+@@ -13,0 +14,2 @@ import { after, before, describe, it } from 'node:test';
++import { OpenArtifactError } from '@open-artifact/protocol';
++import { WorkspaceDirectory } from '@open-artifact/protocol/workspace-files';
+@@ -111,0 +114,28 @@ describe('LAN sharing', () => {
++  it('keeps an artifact private when the directory policy denies its sharing state', async (t) => {
++    const other = join(dir, 'Private');
++    await mkdir(other, { recursive: true });
++    const sidecar = join(other, '.sharing.json');
++    const saved = { lan: true };
++    await writeFile(sidecar, JSON.stringify(saved));
++    const resolve = WorkspaceDirectory.prototype.resolve;
++    t.mock.method(WorkspaceDirectory.prototype, 'resolve', function (this: WorkspaceDirectory, input: string, followLeaf = true) {
++      if (basename(input) === '.sharing.json') {
++        throw new OpenArtifactError('not_granted', 'Fixture policy denied the sharing state.', { status: 403 });
++      }
++      return resolve.call(this, input, followLeaf);
++    });
++    const opened = await server.open({ root: other, type: 'whiteboard', workspaceDirectory: new WorkspaceDirectory(dir).identity });
++    try {
++      const route = new URL('/__open-artifact/share', opened.url);
++      const headers = { authorization: `Bearer ${secret}`, 'content-type': 'application/json' };
++      const response = await fetch(new URL(`?id=${opened.id}`, route), { headers });
++      assert.equal(response.status, 200);
++      assert.equal((await response.json() as View).lan, false);
++      const change = await fetch(route, { method: 'POST', headers, body: JSON.stringify({ id: opened.id, lan: true }) });
++      assert.equal(change.status, 403);
++      assert.deepEqual(JSON.parse(await readFile(sidecar, 'utf8')), saved);
++    } finally {
++      await server.close(opened.id);
 +    }
 +  });
 +

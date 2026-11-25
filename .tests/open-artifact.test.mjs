@@ -261,7 +261,7 @@ test('the worker returns pending comments immediately and waits only when none a
   const { dependencies: [{ version }] } = JSON.parse(await readFile(new URL('binary-dependencies.json', plugin), 'utf8'));
   const fixture = await mkdtemp(join(tmpdir(), 'oa-wait-test-'));
   const scope = '00000000-0000-4000-8000-000000000000';
-  await mkdir(join(fixture, '.cindy-open-artifact', scope, `runtime-${version}-cindy.2`), { recursive: true });
+  await mkdir(join(fixture, '.cindy-open-artifact', scope, `runtime-${version}-cindy.3`), { recursive: true });
   await mkdir(join(fixture, 'node'));
   await mkdir(join(fixture, 'vendor'));
   for (const file of ['node/worker.cjs', 'node/safety.cjs']) {
