@@ -19,6 +19,7 @@ const TEXT = {
     remotePluginUpdate: 'Update the Device Simulator plugin on the other computer to choose, start or create its devices from here.',
     remoteViewOnlyBody: 'Once a simulator is opened for this task on the other computer, it appears here. Update the Device Simulator plugin there to choose or create devices from here.',
     remotePausedBody: 'Simulators are turned off on the other computer. Turn them on there in Plugins → Device Simulator.',
+    remoteUnconfirmed: 'Could not confirm whether the operation completed. Check the device on the remote computer before taking further action.',
     remoteRestartFailed: 'Could not confirm the restart completed. Check the device on the remote computer before taking further action.', remoteRestarting: 'Restarting…', remoteStopping: 'Shutting down…', remoteFailed: (code) => `The other computer did not complete it (${code}). Check the device there and try again.`,
     remoteCreate: (name) => name ? `New device on ${name}` : 'New device on the other computer',
     // One tab for both in such a task: this computer's own devices and that computer's.
@@ -42,6 +43,7 @@ const TEXT = {
     remotePluginUpdate: '需要先更新另一台电脑上的「设备模拟器」插件，才能在这里选择、启动或新建它的设备。',
     remoteViewOnlyBody: '在另一台电脑上为这个任务打开模拟器后，会自动显示在这里。更新那台电脑上的「设备模拟器」插件后，可以在这里选择或新建设备。',
     remotePausedBody: '另一台电脑上的模拟器运行已关闭，请在那台电脑的「插件 → 设备模拟器」里打开。',
+    remoteUnconfirmed: '无法确认操作是否完成。请先检查远程电脑上的设备状态，再决定下一步。',
     remoteRestartFailed: '无法确认重启是否完成。请先检查远程电脑上的设备状态，再决定下一步。', remoteRestarting: '正在重启…', remoteStopping: '正在关闭…', remoteFailed: (code) => `另一台电脑没有完成这次操作（${code}）。请在那台电脑上核对设备后重试。`,
     remoteCreate: (name) => name ? `在「${name}」上新建设备` : '在另一台电脑上新建设备',
     hereDevices: '这台电脑', createHere: '在这台电脑新建…', createThere: (name) => name ? `在「${name}」上新建…` : '在另一台电脑上新建…',
@@ -243,12 +245,19 @@ function render() {
   }
   inner.append(h('p', { class: 'status' + (note?.error ? ' error' : ''), text: note?.text || '' }));
 }
+// Only explicit non-execution allows the existing retry advice. Read-only
+// connection failures still use errorText and do not imply an operation ran.
+function operationErrorText(action, error, terminal = false) {
+  if (action === 'restart_device') return T.remoteRestartFailed;
+  if (far() && ['task_boot', 'shutdown'].includes(action) && error?.execution !== 'not_executed') return T.remoteUnconfirmed;
+  return terminal ? T.remoteFailed(error?.errorCode || 'FAILED') : errorText(error);
+}
 // Both an action reply and a later poll can carry the provider's terminal result.
 function acceptOperation(r) {
   const op = far() && r.operation;
   if (!op) return true;
   if (op.state === 'failed') {
-    note = {text:op.call === 'restart_device' ? T.remoteRestartFailed : T.remoteFailed(op.errorCode || 'FAILED'),error:true,sticky:true};
+    note = {text:operationErrorText(op.call, op, true),error:true,sticky:true};
     return false;
   }
   if (op.memoryMode) M.showMemoryNotice({memoryMode:op.memoryMode},lang,op.memoryMode.requested,
@@ -289,7 +298,7 @@ async function act(action, params, marker) {
     choosing = false; accept(r);
     if (!acceptOperation(r)) return;
     return true;
-  } catch (error) { if (pending === request) note = { text: action === 'restart_device' ? T.remoteRestartFailed : errorText(error), error: true, sticky: true }; }
+  } catch (error) { if (pending === request) note = { text: operationErrorText(action, error), error: true, sticky: true }; }
   finally { busy = null; render(); if (pending === request) { pending = null; if (!viewerUrl) refresh(); } }
 }
 // Same sheet as the management view (name, OS version, model); the new device

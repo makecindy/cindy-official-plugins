@@ -399,3 +399,49 @@ Final validation: focused real-page/logic/HTTP suites 80 passed, 0 failed
 922 passed, 0 failed (69.11 seconds), Node v22.21.1. Manifest validation and
 whitespace checks passed. No local Forge package or runtime install is claimed;
 CI packaging will run on the pushed head.
+
+## Round 16 execution-outcome checkpoint (2026-11-25, 0.3.60)
+
+Invariant: boot, shutdown and restart preserve the worker's execution evidence;
+only explicit `not_executed` may eventually receive retry advice. Missing,
+unclassified or rejected results mean `unknown`, never non-execution. This is
+one outcome-loss family, not three independent action-specific fixes.
+
+Owner: the existing provider remoteOps entry owns each operation's terminal
+outcome. The existing state response delivers it once; reading it does not run
+another mutation. task.js acceptOperation remains the single consumer of
+immediate and polled terminal results. No new state machine, queue, retry,
+lock, cache or persistence is needed. Existing per-computer identity remains
+necessary for the original correct-device requirement.
+
+| Event | Running | Terminal, not yet read | After terminal read |
+| --- | --- | --- | --- |
+| Worker resolves failure with valid execution | Store code + exact execution | Keep | No replay |
+| Missing/invalid evidence or worker rejection | Store code + unknown | Keep | No replay |
+| Initial response or later task-state read | Report running | Deliver same code + execution, remove once | No repeat delivery |
+| Approved UI choice | Existing progress | Only not_executed keeps retry hint; otherwise inspect remote state | Buttons stay usable; no auto replay |
+
+Symmetric audit covers task_boot, shutdown and restart_device, both immediate
+and deferred completion, all three execution values, missing/invalid values,
+and rejection. A single matrix regression covers all 36 combinations, one-time
+delivery, no replay on reads, and no viewing-computer fallback. It fails against
+69de9005's main.js and passes with the prepared transport fix. Existing remote
+page tests pass. This is VM/channel regression evidence, not dual-computer
+runtime acceptance. The user approved the boot/shutdown copy on 2026-11-25.
+The page now preserves retry advice only for explicit not_executed; unknown,
+executed-but-failed, omitted and invalid evidence use the approved conservative
+notice in both languages. Restart keeps its existing conservative notice.
+A shared formatter covers terminal responses and action exceptions; read-only
+connection failures remain separate. The bilingual actual-page fixtures cover
+80 outcome/action/delivery combinations plus 12 timeout/unavailable/offline cases,
+usable buttons, one mutation per action, no local fallback and no replay on reads.
+Both new language regressions fail against 69de9005's task.js and pass after the fix.
+
+Validation: focused remote-task suite 16 passed, 0 failed (5.23 seconds).
+Both old-page counterexamples fail on unknown immediate boot results as expected;
+the prior old-main counterexample also fails. Forge validated and packaged
+cindy-simulator-0.3.60.cindy successfully; this did not install or restart anything.
+Required repository suites and simulator aggregate: 934 passed, 0 failed
+(77.00 seconds). JavaScript syntax, whitespace and preflight checks passed.
+The updated package was not installed; real dual-computer memory-mode restart
+acceptance remains outstanding under the existing user authorization.

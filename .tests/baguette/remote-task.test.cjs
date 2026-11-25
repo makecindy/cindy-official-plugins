@@ -96,7 +96,7 @@ test('choosing, starting, shutting down and creating run on the computer that ow
   assert.equal(provider.calls.filter(c=>c.method==='boot').length,1);
   // What that computer could not finish is told once.
   boot({ok:false,errorCode:'BOOT_TIMEOUT'});await settle();
-  assert.deepEqual(plain((await viewer.ask({call:'task_state',sessionId:'task-1'})).operation),{call:'task_boot',udid:'SIM-2',state:'failed',errorCode:'BOOT_TIMEOUT'});
+  assert.deepEqual(plain((await viewer.ask({call:'task_state',sessionId:'task-1'})).operation),{call:'task_boot',udid:'SIM-2',state:'failed',errorCode:'BOOT_TIMEOUT',execution:'unknown'});
   assert.equal((await viewer.ask({call:'task_state',sessionId:'task-1'})).operation,undefined);
   state.device={...OFF,state:'Booted',thisTask:true};
   await viewer.ask({call:'shutdown',sessionId:'task-1',udid:'SIM-2'});
@@ -204,7 +204,7 @@ test('in a remote task the one simulator tab holds both computers’ devices, an
   assert.ok(text().includes('Remote · Mac Studio'));assert.ok(text().includes('Starting…'));
   assert.deepEqual(posted.at(-1),{data:{type:'cindy-simulator-remote-result',action:'use',ok:true},origin:'http://127.0.0.1:9'});
   // That computer could not finish: said once, with its reason.
-  there={ok:true,remote,device:theirs[1],devices:theirs,settings:{enabled:true},operation:{call:'task_boot',udid:'SIM-2',state:'failed',errorCode:'BOOT_TIMEOUT'}};clock+=2000;poll();await settle();
+  there={ok:true,remote,device:theirs[1],devices:theirs,settings:{enabled:true},operation:{call:'task_boot',udid:'SIM-2',state:'failed',errorCode:'BOOT_TIMEOUT',execution:'not_executed'}};clock+=2000;poll();await settle();
   assert.ok(text().some(line=>line.includes('BOOT_TIMEOUT')));
   // Choosing: both computers' devices in the one tab, each under its own name, and a new one on either.
   there={ok:true,remote,device:null,devices:theirs,settings:{enabled:true}};clock+=9000;poll();await settle();
@@ -248,7 +248,7 @@ test('in a remote task the one simulator tab holds both computers’ devices, an
   assert.ok(get('task-notice').children.flatMap(flatten).some(n=>n.props?.text?.includes('Could not confirm the restart completed')));
   assert.equal(calls.filter(c=>c.params.call==='restart_device').length,1);
   for(const action of ['task_boot','shutdown','restart_device']){
-   there={ok:true,remote,device:theirs[0],devices:theirs,settings:{enabled:true},operation:{call:action,udid:'SIM-1',state:'failed',errorCode:'IMMEDIATE_FAILURE'}};
+   there={ok:true,remote,device:theirs[0],devices:theirs,settings:{enabled:true},operation:{call:action,udid:'SIM-1',state:'failed',errorCode:'IMMEDIATE_FAILURE',execution:'not_executed'}};
    assert.equal(await vm.runInContext(`act('${action}',{udid:'SIM-1'},'SIM-1')`,context),undefined);
    assert.ok(text().some(line=>line.includes(action==='restart_device'?'Could not confirm':'IMMEDIATE_FAILURE')));
   }
@@ -361,4 +361,102 @@ test('completed remote restart preserves mode warnings once, including immediate
  const result=await world.viewer.ask({call:'restart_device',sessionId:'task-1',udid:'SIM-1',memoryMode:'standard'});
  assert.equal(result.operation.state,'completed');assert.deepEqual(plain(result.operation.memoryMode),memoryMode);
  assert.equal((await world.viewer.ask({call:'task_state',sessionId:'task-1'})).operation,undefined);
+});
+
+
+test('remote operation failure keeps execution evidence across immediate and delayed completion',async()=>{
+  for(const call of ['task_boot','shutdown','restart_device']) for(const timing of ['immediate','delayed']) {
+    for(const execution of ['not_executed','executed','unknown',undefined,'invalid','reject']) {
+      let finish;
+      const result={ok:false,errorCode:'AFTER_ACTION',...(execution!==undefined?{execution}:{})};
+      const world=computers({providerWorker:async r=>{
+        if(r.method==='remote_task_state')return {ok:true,device:SIM,devices:[SIM],settings:{enabled:true}};
+        if(timing==='delayed')return new Promise((resolve,reject)=>finish=()=>execution==='reject'?reject(Error('lost reply')):resolve(result));
+        if(execution==='reject')throw Error('lost reply');
+        return result;
+      }});
+      await world.viewer.ask({call:'task_state',sessionId:'task-1'});
+      let response=await world.viewer.ask({call,sessionId:'task-1',udid:'SIM-1'});
+      if(timing==='delayed'){
+        assert.equal(response.operation.state,'running');finish();await settle();
+        response=await world.viewer.ask({call:'task_state',sessionId:'task-1'});
+      }
+      assert.deepEqual(plain(response.operation),{call,udid:'SIM-1',state:'failed',
+        errorCode:execution==='reject'?'NODE_UNAVAILABLE':'AFTER_ACTION',
+        execution:['not_executed','executed'].includes(execution)?execution:'unknown'},`${call}/${timing}/${execution}`);
+      assert.equal((await world.viewer.ask({call:'task_state',sessionId:'task-1'})).operation,undefined);
+      const mutations=world.provider.calls.filter(r=>['boot','settings_shutdown','settings_restart'].includes(r.method));
+      assert.equal(mutations.length,1,'reading a failure must not replay its operation');
+      assert.equal(world.viewer.calls.some(r=>['boot','settings_shutdown','settings_restart'].includes(r.method)),false,'no local fallback');
+    }
+  }
+});
+
+for (const language of ['en', 'zh-CN']) test(`remote boot/shutdown outcome advice stays conservative in ${language}`, async () => {
+  const nodes = new Map(), calls = [];
+  const get = id => {
+    if (!nodes.has(id)) nodes.set(id, {children: [], replaceChildren(...children) {this.children = children;}, append(...children) {this.children.push(...children);}});
+    return nodes.get(id);
+  };
+  const device = {udid: 'SIM-1', name: 'iPhone Air', state: 'Shutdown'};
+  const state = {ok: true, remote: {computer: 'Studio', manage: true}, device, devices: [device], settings: {enabled: true}};
+  let reply = state, reading = state;
+  const context = {URL, URLSearchParams, location: {search: '?session=task-1&device=studio'},
+    localStorage: {getItem() {}, setItem() {}}, addEventListener() {}, setInterval() {},
+    document: {hidden: false, documentElement: {}, getElementById: get, addEventListener() {}},
+    CindySimPages: {locale: async () => language, h: (tag, props, children = []) => ({tag, props, children}),
+      GLYPH: {}, onPush() {}, memoryPicker() {}, memoryBadge() {}, memoryArgs: () => ({}),
+      rpc: async (action, params) => {
+        calls.push({action, params: plain(params)});
+        if (action === 'manage_state') return {ok: true, devices: []};
+        const result = params.call === 'task_state' ? reading : reply;
+        if (typeof result === 'function') return result();
+        return result;
+      }},
+    CindySimModel: {runtimeLabel: () => '', deviceRows: () => [],
+      createResourceSummary: () => ({prune() {}, label() {}, update() {}})}};
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync('cindy-simulator/task.js', 'utf8'), context);
+  await settle();
+  const flatten = n => [n, ...(n.children || []).filter(Boolean).flatMap(flatten)];
+  const shown = () => get('inner').children.flatMap(flatten);
+  const text = () => shown().map(n => n.props?.text).filter(Boolean);
+  const conservative = language === 'en'
+    ? 'Could not confirm whether the operation completed. Check the device on the remote computer before taking further action.'
+    : '无法确认操作是否完成。请先检查远程电脑上的设备状态，再决定下一步。';
+  const mutationCount = () => calls.filter(c => ['task_boot', 'shutdown'].includes(c.params.call)).length;
+  for (const action of ['task_boot', 'shutdown']) {
+    for (const execution of ['unknown', 'executed', undefined, 'invalid', 'not_executed']) {
+      for (const route of ['immediate', 'poll', 'response', 'throw']) {
+        const failure = {ok: false, errorCode: 'FAILED', execution};
+        const terminal = {...state, operation: {call: action, udid: device.udid, state: 'failed', ...failure}};
+        reading = state;
+        reply = route === 'throw' ? () => {throw failure;} : route === 'response' ? failure : route === 'poll' ? state : terminal;
+        const before = mutationCount();
+        await vm.runInContext(`act('${action}', {udid:'SIM-1'}, 'SIM-1')`, context);
+        await settle();
+        if (route === 'poll') {reading = terminal; await vm.runInContext('refresh()', context);}
+        assert.equal(text().includes(conservative), execution !== 'not_executed', `${action}/${execution}/${route}`);
+        if (execution === 'not_executed') assert.ok(text().some(t => t.includes(language === 'en' ? 'try again' : '重试')));
+        const open = shown().find(n => n.tag === 'button' && n.props.text === (language === 'en' ? 'Open' : '打开'));
+        assert.equal(open?.props.disabled, false, 'the device action remains usable');
+        reading = state;
+        await vm.runInContext('refresh()', context);
+        assert.equal(mutationCount(), before + 1, 'reading after failure never replays the mutation');
+        assert.equal(calls.some(c => ['task_boot', 'shutdown'].includes(c.action)), false, 'no local mutation fallback');
+      }
+    }
+    for (const errorCode of ['TIMEOUT', 'NODE_UNAVAILABLE', 'DEVICE_OFFLINE']) {
+      reading = state;
+      reply = () => {throw {errorCode};};
+      await vm.runInContext(`act('${action}', {udid:'SIM-1'}, 'SIM-1')`, context);
+      await settle();
+      assert.ok(text().includes(conservative), `${action}/${errorCode}`);
+    }
+  }
+  // Read-only connection loss is not classified as a failed mutation.
+  vm.runInContext('note = null', context);
+  reading = () => {throw {errorCode: 'DEVICE_OFFLINE'};};
+  await vm.runInContext('refresh()', context);
+  assert.equal(text().includes(conservative), false);
 });

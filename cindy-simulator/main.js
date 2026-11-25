@@ -192,11 +192,11 @@ const remoteOps = new Map();
 function remoteStart(sessionId, call, udid, run) {
   const op = {call, udid, state:'running', at:Date.now()};
   remoteOps.set(sessionId, op);
-  run().then(r => { if (r?.ok === false) Object.assign(op, {state:'failed', errorCode:r.errorCode || 'FAILED'}); else if (remoteOps.get(sessionId) === op) {
+  run().then(r => { if (r?.ok === false) Object.assign(op, {state:'failed', errorCode:r.errorCode || 'FAILED', execution:['not_executed','executed'].includes(r.execution) ? r.execution : 'unknown'}); else if (remoteOps.get(sessionId) === op) {
       if (r?.memoryMode) Object.assign(op,{state:'completed',memoryMode:{mode:r.memoryMode.mode,requested:r.memoryMode.requested,verified:r.memoryMode.verified===true,warning:typeof r.memoryMode.warning==='string'?r.memoryMode.warning.slice(0,500):undefined}});
       else remoteOps.delete(sessionId);
     } },
-    () => Object.assign(op, {state:'failed', errorCode:'NODE_UNAVAILABLE'}));
+    () => Object.assign(op, {state:'failed', errorCode:'NODE_UNAVAILABLE', execution:'unknown'}));
   holdWhileRunning();
 }
 async function remoteServe(d) {
@@ -246,7 +246,7 @@ async function remoteServe(d) {
   // Phones attached to that computer are not offered to other computers.
   let devices = (s.devices || []).filter(x => x.kind !== 'physical').map(slimDevice);
   const state = () => ({device:s.device?.kind === 'physical' ? null : slimDevice(s.device), devices, settings:{enabled:s.settings?.enabled !== false},
-    ...(op ? {operation:{call:op.call, udid:op.udid, state:op.state, ...(op.errorCode ? {errorCode:op.errorCode} : {}), ...(op.memoryMode ? {memoryMode:op.memoryMode} : {})}} : {})});
+    ...(op ? {operation:{call:op.call, udid:op.udid, state:op.state, ...(op.errorCode ? {errorCode:op.errorCode,execution:op.execution} : {}), ...(op.memoryMode ? {memoryMode:op.memoryMode} : {})}} : {})});
   while (devices.length > 8 && JSON.stringify(state()).length > REMOTE_BYTES) devices = devices.slice(0, Math.ceil(devices.length / 2));
   return {ok:true, state:state()};
 }
