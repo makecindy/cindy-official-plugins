@@ -225,3 +225,168 @@ test('a whole project is fully re-checked every few minutes even without new act
   const lists = h.requests.filter((url) => url.includes('/merge_requests?')).length;
   assert.equal(lists, 2, 'baseline + one sweep in six quiet minutes');
 });
+
+test('previously inactive existing objects still emit their first updated or reopened event', async () => {
+  const h = harness({
+    subscriptions: [{
+      events: ['merge_request.updated', 'merge_request.reopened', 'merge_request.comment'],
+      filters: [{ field: 'project', operator: 'equals', value: 'group/app' }],
+    }],
+    routes: {
+      '/api/v4/user': { id: 1, username: 'me' },
+      '/projects/group%2Fapp/events': [{ id: 1 }],
+      '/projects/group%2Fapp/merge_requests?': [mr()],
+    },
+  });
+  await h.cycle();
+  assert.deepEqual(h.published(), []);
+
+  const fresh = new Date(Date.now() + 2000).toISOString();
+  h.state.routes['/projects/group%2Fapp/events'] = [{ id: 2 }];
+  // MR !3 and MR !4 were created months ago and fell outside the initial baseline page, then woke up.
+  h.state.routes['/projects/group%2Fapp/merge_requests?'] = [
+    mr({ id: 403, iid: 3, created_at: '2025-06-01T00:00:00Z', updated_at: fresh, references: { full: 'group/app!3' } }),
+    mr({ id: 404, iid: 4, created_at: '2025-06-01T00:00:00Z', updated_at: fresh, references: { full: 'group/app!4' } }),
+    mr({ id: 405, iid: 5, created_at: '2025-06-01T00:00:00Z', updated_at: fresh, references: { full: 'group/app!5' } }),
+  ];
+  h.state.routes['/merge_requests/3/notes'] = [];
+  h.state.routes['/merge_requests/4/notes'] = [
+    { id: 301, body: 'reopened', system: true, created_at: fresh, author: { username: 'alice' } },
+  ];
+  h.state.routes['/merge_requests/5/notes'] = [
+    { id: 302, body: 'just a comment', system: false, created_at: fresh, author: { username: 'bob' } },
+  ];
+  await h.cycle();
+  assert.deepEqual(
+    h.published().map((e) => [e.type, e.data.iid]),
+    [
+      ['merge_request.updated', 3],
+      ['merge_request.reopened', 4],
+      ['merge_request.comment', 5],
+    ],
+  );
+});
+
+test('retries notes on transient failure without advancing the snapshot, and paginates past >100 notes', async () => {
+  let failNotes = true;
+  const fresh = '2026-01-02T00:05:00Z';
+  const page1 = Array.from({ length: 100 }, (_, i) => ({
+    id: 1000 - i,
+    body: 'mentioned in commit abc',
+    system: true,
+    created_at: '2026-01-02T00:04:00Z',
+    author: { username: 'bot' },
+  }));
+  const page2 = [
+    { id: 202, body: 'approved this merge request', system: true, created_at: '2026-01-02T00:02:00Z', author: { username: 'reviewer' } },
+    { id: 201, body: 'Early review remark', system: false, created_at: '2026-01-02T00:01:00Z', author: { username: 'reviewer' } },
+    { id: 100, body: 'before baseline', system: false, created_at: '2025-12-31T00:00:00Z', author: { username: 'alice' } },
+  ];
+  const h = harness({
+    subscriptions: watchMr,
+    routes: {
+      '/api/v4/user': { id: 1, username: 'me' },
+      '/projects/group%2Fapp/merge_requests/7': mr({ head_pipeline: null }),
+      '/merge_requests/7/notes': (url) => {
+        if (failNotes) return json({ message: 'gateway timeout' }, 502);
+        return json(url.includes('page=2') ? page2 : page1);
+      },
+    },
+  });
+  await h.cycle();
+  assert.deepEqual(h.statuses(), ['listening']);
+
+  h.state.routes['/projects/group%2Fapp/merge_requests/7'] = mr({ updated_at: fresh, head_pipeline: null });
+  await h.cycle();
+  assert.deepEqual(h.statuses(), ['listening', 'error'], 'failed notes read reports error and keeps retry cursor');
+  assert.deepEqual(h.published(), []);
+
+  failNotes = false;
+  await h.cycle();
+  assert.deepEqual(h.statuses(), ['listening', 'error', 'listening']);
+  assert.deepEqual(
+    h.published().map((e) => [e.type, e.data.noteId]),
+    [['merge_request.comment', 201], ['merge_request.approved', 202]],
+  );
+});
+
+test('drains >20 changed items across cycles without letting unchanged items consume the per-cycle budget', async () => {
+  const unchanged = Array.from({ length: 20 }, (_, i) => mr({
+    id: 100 + i, iid: i + 1, references: { full: `group/app!${i + 1}` },
+  }));
+  const h = harness({
+    subscriptions: [{ events: ['merge_request.opened'], filters: [{ field: 'project', operator: 'equals', value: 'group/app' }] }],
+    routes: {
+      '/api/v4/user': { id: 1, username: 'me' },
+      '/projects/group%2Fapp/events': [{ id: 1 }],
+      '/projects/group%2Fapp/merge_requests?': unchanged,
+      '/notes': [],
+    },
+  });
+  await h.cycle();
+  assert.deepEqual(h.published(), []);
+
+  const baseMs = Date.now() + 1000;
+  const burst = Array.from({ length: 25 }, (_, i) => {
+    const ts = new Date(baseMs + i * 10).toISOString();
+    return mr({
+      id: 300 + i, iid: 101 + i, created_at: ts, updated_at: ts, references: { full: `group/app!${101 + i}` },
+    });
+  });
+  h.state.routes['/projects/group%2Fapp/events'] = [{ id: 2 }];
+  h.state.routes['/projects/group%2Fapp/merge_requests?'] = (url) =>
+    json(url.includes('page=2') ? [] : [...unchanged, ...burst]);
+
+  await h.cycle();
+  assert.equal(h.published().length, 20, 'first active cycle handles 20 newly changed MRs after skipping 20 unchanged ones');
+
+  // Even without another project `/events` change, the remaining 5 MRs drain on the very next cycle.
+  await h.cycle();
+  assert.deepEqual(
+    h.published().map((e) => e.data.iid),
+    Array.from({ length: 25 }, (_, i) => 101 + i),
+  );
+});
+
+test('retains finished pipelines on MR lookup errors or lookup cap until all are queued', async () => {
+  let failMrLookup = true;
+  const h = harness({
+    subscriptions: [{ events: ['merge_request.pipeline'], filters: [{ field: 'project', operator: 'equals', value: 'group/app' }] }],
+    routes: {
+      '/api/v4/user': { id: 1, username: 'me' },
+      '/projects/group%2Fapp/events': [{ id: 1 }],
+      '/projects/group%2Fapp/pipelines?': [],
+      '/projects/group%2Fapp/merge_requests?': [],
+      '/projects/group%2Fapp/merge_requests/': (url) => {
+        if (failMrLookup) return json({ message: 'server error' }, 500);
+        const iid = Number(url.split('/').pop());
+        return json(mr({ id: 800 + iid, iid, references: { full: `group/app!${iid}` } }));
+      },
+    },
+  });
+  await h.cycle();
+
+  const baseMs = Date.now() + 1000;
+  const finished = Array.from({ length: 12 }, (_, i) => ({
+    id: 900 + i,
+    status: 'success',
+    ref: `refs/merge-requests/${i + 1}/head`,
+    updated_at: new Date(baseMs + i * 10).toISOString(),
+  }));
+  h.state.routes['/projects/group%2Fapp/events'] = [{ id: 2 }];
+  h.state.routes['/projects/group%2Fapp/pipelines?'] = finished;
+
+  await h.cycle();
+  assert.deepEqual(h.statuses(), ['listening', 'error']);
+  assert.deepEqual(h.published(), []);
+
+  failMrLookup = false;
+  await h.cycle();
+  assert.equal(h.published().length, 10, 'caps MR lookups to 10 per cycle without marking #11 and #12 done');
+
+  await h.cycle();
+  assert.deepEqual(
+    h.published().map((e) => e.data.iid),
+    Array.from({ length: 12 }, (_, i) => i + 1),
+  );
+});
