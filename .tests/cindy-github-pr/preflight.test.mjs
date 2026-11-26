@@ -170,3 +170,30 @@ test('finds the default branch itself when origin/HEAD is unset and a PR targets
   git(work, 'checkout', '-q', 'main');
   assert.match(preflight(work, { base: 'release' }).blocks.join('\n'), /default branch main/);
 });
+
+test('prints the post-publish pr_card handoff reminder in text output while keeping --json valid', (t) => {
+  const { work, git, commit } = repo(t);
+  git(work, 'checkout', '-q', '-b', 'fix');
+  commit('a.txt');
+  const script = fileURLToPath(new URL('../../cindy-github/skills/pr/scripts/pr-preflight.mjs', import.meta.url));
+  const textOut = execFileSync('node', [script, work], { encoding: 'utf8' });
+  assert.match(textOut, /After publishing or pushing/);
+  assert.match(textOut, /pr_card.*published: true/);
+  assert.match(textOut, /pr_follow_settings/);
+  const jsonOut = execFileSync('node', [script, work, '--json'], { encoding: 'utf8' });
+  assert.equal(JSON.parse(jsonOut).branch, 'fix');
+});
+
+test('pr SKILL.md stays concise and every referenced scenario doc exists', () => {
+  const skillDir = fileURLToPath(new URL('../../cindy-github/skills/pr', import.meta.url));
+  const skillText = fs.readFileSync(path.join(skillDir, 'SKILL.md'), 'utf8');
+  assert.ok(Buffer.byteLength(skillText, 'utf8') < 12 * 1024, 'main SKILL.md should stay concise via references/');
+  for (const heading of ['## 1. ', '## 2. ', '## 3. ', '## 4. ', '## 5. ', '## 6. ']) {
+    assert.ok(skillText.includes(heading), `SKILL.md must preserve ${heading}`);
+  }
+  const refs = [...new Set([...skillText.matchAll(/references\/([a-z0-9-]+\.md)/g)].map((m) => m[1]))];
+  assert.ok(refs.length >= 5, 'SKILL.md should route scenarios to references/');
+  for (const ref of refs) {
+    assert.ok(fs.existsSync(path.join(skillDir, 'references', ref)), `missing referenced file: references/${ref}`);
+  }
+});

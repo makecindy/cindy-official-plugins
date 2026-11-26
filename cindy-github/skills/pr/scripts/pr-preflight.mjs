@@ -219,6 +219,12 @@ function main() {
   lines.push(result.templateContent
     ? `\n── PR template (${result.template}); fill it truthfully ──\n${result.templateContent.trimEnd()}`
     : '\nNo PR template: describe what changed and why, how it was verified, and the risks.');
+  lines.push(
+    '',
+    '── After publishing or pushing (required before final reply) ──',
+    '- New PR: read back the published body, then call cindy-github `pr_card` with `repo`, `pr`, and `published: true` (pass `card_id` if one exists; on IM use `pr_follow_settings`) so auto-follow and auto-rename run.',
+    '- Existing PR update: refresh `pr_card` and verify follow-up state. Report the actual follow-up state alongside the PR link (never end with only "waiting for CI/review").',
+  );
   process.stdout.write(`${lines.join('\n')}\n`);
   process.exit(result.blocks.length ? 1 : 0);
 }
