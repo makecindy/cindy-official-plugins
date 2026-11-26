@@ -120,6 +120,7 @@ if (JSON.stringify(args) !== ${JSON.stringify(JSON.stringify(EXPECTED_ACP_ARGS))
 if (process.env.FAKE_AGY_ARGSFILE) fs.writeFileSync(process.env.FAKE_AGY_ARGSFILE, JSON.stringify(args));
 if (process.env.FAKE_AGY_PIDFILE) fs.writeFileSync(process.env.FAKE_AGY_PIDFILE, String(process.pid));
 process.stderr.write('fake-agy: ready\\n');
+if (process.env.FAKE_AGY_CRASH === '1') process.exit(3);
 const STATE = process.env.FAKE_AGY_STATE;
 if (STATE) {
   // Sign-in mode: an agent that offers Google sign-in and logout (like agy 1.5.12), keeps its sign-in
@@ -128,6 +129,14 @@ if (STATE) {
   const TIER = { antigravity: { tier: { name: 'Google AI Pro', id: 'g1-pro-tier', upgradeUri: 'https://example.test/upgrade' } } };
   const send = (message) => process.stdout.write(JSON.stringify(Object.assign({ jsonrpc: '2.0' }, message)) + '\\n');
   const authRequired = (id) => send({ id, error: { code: -32000, message: 'Authentication required' } });
+  const sendAfterGate = (file, message) => {
+    if (!file) return send(message);
+    const timer = setInterval(() => {
+      if (!fs.existsSync(file)) return;
+      clearInterval(timer);
+      send(message);
+    }, 10);
+  };
   let lines = '';
   process.stdin.on('data', (chunk) => {
     lines += chunk.toString('utf8');
@@ -153,10 +162,11 @@ if (STATE) {
         send({ id, result: {} });
       } else if (method === 'session/list' || method === 'session/resume') {
         if (!signedIn()) authRequired(id);
-        else send({ id, result: method === 'session/list' ? { sessions: [] } : { _meta: TIER } });
+        else sendAfterGate(method === 'session/resume' && process.env.FAKE_AGY_RESUME_GATE,
+          { id, result: method === 'session/list' ? { sessions: [] } : { _meta: TIER } });
       } else if (method === 'session/new') {
         if (!signedIn()) authRequired(id);
-        else send({ id, result: { sessionId: 'fake-session', configOptions: [{ id: 'model', category: 'model', type: 'select', currentValue: 'fake-model',
+        else sendAfterGate(process.env.FAKE_AGY_MODEL_GATE, { id, result: { sessionId: 'fake-session', configOptions: [{ id: 'model', category: 'model', type: 'select', currentValue: 'fake-model',
           options: [{ value: 'fake-model', name: 'Fake ' + (process.env.FAKE_AGY_VERSION || '0.2.2') }] }] } });
       } else {
         send({ id, result: {} });
@@ -727,7 +737,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     page.onmessage = (event) => received.push(event.data);
     page.postMessage({ type: 'detect-request', reqId: 'r1' });
     await waitFor(() => puts.some((body) => body.harnesses[0].modes), 3_000, 'models and modes published');
-    assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: true, reportsUsage: true, version: '1.5.12',
+    assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: true, reportsUsage: true, ...(official ? { accounts: { methods: [] } } : {}), version: '1.5.12',
       models: [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high' }],
       modes: ['default', 'acceptEdits', 'auto', 'plan'], defaultMode: 'default' }] });
     assert.equal(calls('listModels').length, 2);
@@ -770,6 +780,156 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.deepEqual((await login).result, { ok: false, error: 'cancelled' });
     await waitFor(() => !isAlive(agyPid), 5_000, 'agy stopped');
     await worker.close();
+  });
+
+  if (official) test('accountStatus reports agy’s one login with its tier as the plan, without opening agy sessions', async (t) => {
+    const fixture = makeFixture(t);
+    const state = path.join(fixture.dir, 'agy-state');
+    fixture.env.FAKE_AGY_STATE = state;
+    const worker = startWorker(fixture.env);
+    t.after(() => worker.close());
+    let id = 0;
+    const call = async (method, params) => (await worker.call({ jsonrpc: '2.0', id: ++id, method, params })).result;
+    const accountStatus = (params = { harnessId: 'agy' }) => call('accountStatus', params);
+    const sent = (method) => fs.readFileSync(state + '.log', 'utf8').trim().split('\n').filter((line) => line === method).length;
+
+    assert.deepEqual(await accountStatus(), { state: 'signed-out' });
+    assert.equal((await call('login', {})).ok, true);
+    // Signed in before any model listing: there is no session to read the tier from, so no plan.
+    assert.deepEqual(await accountStatus(), { state: 'signed-in' });
+    assert.equal((await call('listModels', {})).sessionId, 'fake-session');
+    const opened = sent('session/new');
+    const resumed = sent('session/resume');
+    assert.deepEqual(await accountStatus(), { state: 'signed-in', plan: 'Google AI Pro' });
+    assert.equal(sent('session/new'), opened, 'accountStatus opened no session');
+    assert.equal(sent('session/resume'), resumed + 1, 'accountStatus resumed the model-list session');
+
+    // Cindy can never add an Antigravity account: an account directory or another engine has no status.
+    assert.equal(await accountStatus({ harnessId: 'agy', accountDir: path.join(fixture.dir, 'account-1') }), null);
+    assert.equal(await accountStatus({ harnessId: 'other' }), null);
+
+    assert.deepEqual(await call('logout', {}), { ok: true });
+    assert.deepEqual(await accountStatus(), { state: 'signed-out' });
+  });
+
+  // Why: 0.4.x kept the model-list session only in main.js's /kv, and start-up skips the listing when a
+  // list was saved; without the hand-over Cindy shows the upgraded login without its plan until models
+  // are listed again.
+  if (official) test('after an upgrade, start-up hands the saved model-list session to the worker so accountStatus reports the plan', async (t) => {
+    const fixture = makeFixture(t);
+    const state = path.join(fixture.dir, 'agy-state');
+    fs.writeFileSync(state, 'signed-in');
+    fixture.env.FAKE_AGY_STATE = state;
+    const worker = startWorker(fixture.env);
+    t.after(() => worker.close());
+    let id = 0;
+    const call = async (method, params) => (await worker.call({ jsonrpc: '2.0', id: ++id, method, params })).result;
+    const sent = (method) => (fs.existsSync(state + '.log')
+      ? fs.readFileSync(state + '.log', 'utf8').trim().split('\n').filter((line) => line === method).length
+      : 0);
+    // Before main.js starts, the worker has no session of its own to read the tier from.
+    assert.deepEqual(await call('accountStatus', { harnessId: 'agy' }), { state: 'signed-in' });
+
+    const answered = [];
+    class Channel { constructor() { this.onmessage = null; } postMessage() {} }
+    const context = vm.createContext({
+      BroadcastChannel: Channel,
+      setTimeout,
+      clearTimeout,
+      cindy: {
+        request: async () => ({ ok: true, context: { locale: 'en', uiLocale: 'en' } }),
+        node: {
+          request: async (request) => {
+            const result = await call(request.method, JSON.parse(JSON.stringify(request.params || {})));
+            answered.push(request.method);
+            return { ok: true, result };
+          },
+        },
+        onHostMessage: () => () => {},
+      },
+      fetch: async (url, init) => {
+        if (url === '/kv' && !init) {
+          return { ok: true, json: async () => ({ models: [{ id: 'fake-model', name: 'Fake' }], modelsListedAt: Date.now(),
+            modelSessionId: 'saved-session' }) };
+        }
+        return { ok: true, status: 204 };
+      },
+    });
+    vm.runInContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context, { filename: 'main.js' });
+    await waitFor(() => answered.includes('adoptModelSession'), 8_000, 'saved session handed to the worker');
+    await waitFor(() => answered.includes('detect'), 8_000, 'start-up detection finished');
+    assert.ok(!answered.includes('listModels'), 'start-up with a saved list does not list models');
+
+    const opened = sent('session/new');
+    const resumed = sent('session/resume');
+    assert.deepEqual(await call('accountStatus', { harnessId: 'agy' }), { state: 'signed-in', plan: 'Google AI Pro' });
+    assert.equal(sent('session/new'), opened, 'no agy session was opened');
+    assert.equal(sent('session/resume'), resumed + 1);
+    // A session the worker already remembers is kept.
+    assert.deepEqual(await call('adoptModelSession', { sessionId: 'older-session' }), { ok: true, adopted: false });
+  });
+
+  if (official) test('a late model probe cannot restore the previous custom path session', async (t) => {
+    const fixture = makeFixture(t);
+    const state = path.join(fixture.dir, 'agy-state');
+    const modelGate = path.join(fixture.dir, 'finish-model-probe');
+    fs.writeFileSync(state, 'signed-in');
+    fixture.env.FAKE_AGY_STATE = state;
+    fixture.env.FAKE_AGY_MODEL_GATE = modelGate;
+    // Copy the platform-specific test launcher to a new configured path.
+    const customBin = path.join(fixture.dir, isWin ? 'custom-agy.cmd' : 'custom-agy');
+    fs.copyFileSync(fixture.agyPath, customBin);
+    if (!isWin) fs.chmodSync(customBin, 0o755);
+    const worker = startWorker(fixture.env);
+    t.after(() => { if (fs.existsSync(fixture.dir)) fs.writeFileSync(modelGate, ''); return worker.close(); });
+    const listing = worker.call({ jsonrpc: '2.0', id: 1, method: 'listModels', params: {} });
+    const sent = () => fs.existsSync(state + '.log') ? fs.readFileSync(state + '.log', 'utf8') : '';
+    await waitFor(() => sent().includes('session/new'), 5_000, 'old model probe reached agy');
+    const saved = await worker.call({ jsonrpc: '2.0', id: 2, method: 'setCustomPath', params: { path: customBin } });
+    assert.equal(saved.result.ok, true);
+    fs.writeFileSync(modelGate, '');
+    assert.equal((await listing).result.sessionId, 'fake-session');
+    const status = await worker.call({ jsonrpc: '2.0', id: 3, method: 'accountStatus', params: { harnessId: 'agy' } });
+    assert.deepEqual(status.result, { state: 'signed-in' });
+    assert.ok(!sent().includes('session/resume'), 'the new path never resumes the old probe');
+  });
+
+  if (official) test('a late account read is discarded after signing out', async (t) => {
+    const fixture = makeFixture(t);
+    const state = path.join(fixture.dir, 'agy-state');
+    const resumeGate = path.join(fixture.dir, 'finish-account-read');
+    fs.writeFileSync(state, 'signed-in');
+    fixture.env.FAKE_AGY_STATE = state;
+    fixture.env.FAKE_AGY_RESUME_GATE = resumeGate;
+    const worker = startWorker(fixture.env);
+    t.after(() => { if (fs.existsSync(fixture.dir)) fs.writeFileSync(resumeGate, ''); return worker.close(); });
+    const args = { harnessId: 'agy' };
+    assert.equal((await worker.call({ jsonrpc: '2.0', id: 1, method: 'listModels', params: {} })).result.sessionId, 'fake-session');
+    const pending = worker.call({ jsonrpc: '2.0', id: 2, method: 'accountStatus', params: args });
+    await waitFor(() => fs.readFileSync(state + '.log', 'utf8').includes('session/resume'), 5_000, 'account request has read old sign-in');
+    assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 3, method: 'logout', params: {} })).result, { ok: true });
+    fs.writeFileSync(resumeGate, '');
+    assert.equal((await pending).result, null);
+    assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 4, method: 'accountStatus', params: args })).result, { state: 'signed-out' });
+  });
+
+  if (official) test('accountStatus answers null instead of guessing when agy is missing or the check fails', async (t) => {
+    if (systemHasAgy()) {
+      t.skip('a real agy is installed in a fixed system directory on this machine');
+      return;
+    }
+    const request = { jsonrpc: '2.0', id: 1, method: 'accountStatus', params: { harnessId: 'agy' } };
+    const missing = startWorker(makeFixture(t, { withAgy: false }).env);
+    t.after(() => missing.close());
+    assert.equal((await missing.call(request)).result, null);
+
+    const crashing = makeFixture(t, { extraEnv: { FAKE_AGY_CRASH: '1' } });
+    crashing.env.FAKE_AGY_STATE = path.join(crashing.dir, 'agy-state');
+    const worker = startWorker(crashing.env);
+    t.after(() => worker.close());
+    assert.equal((await worker.call(request)).result, null);
+    // The settings page still sees the failure itself.
+    assert.equal((await worker.call({ jsonrpc: '2.0', id: 2, method: 'account', params: {} })).result.error, 'status-failed');
   });
 
   // 登录前就开始读取模型时，它晚于登录返回的「未登录」不能把引擎改回未登录。
@@ -841,7 +1001,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     finishFirstListing();
     await waitFor(() => puts.length && puts.at(-1).models, 3_000, 'models read again after the sign-in');
     assert.ok(puts.every((entry) => entry.available), 'the late listing never marks the engine signed out');
-    assert.deepEqual(puts.at(-1), { id: 'agy', available: true, reportsUsage: true, version: '1.5.12', models: [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon' }] });
+    assert.deepEqual(puts.at(-1), { id: 'agy', available: true, reportsUsage: true, ...(official ? { accounts: { methods: [] } } : {}), version: '1.5.12', models: [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon' }] });
 
     page.postMessage({ type: 'account-request', reqId: 'a2', op: 'logout' });
     await waitFor(() => result('a2'), 3_000, 'sign-out result');
@@ -2127,7 +2287,7 @@ test('usage polling returns quota and skips CLI self-update on Windows', async (
   const worker = startWorker({ ...fixture.env, FAKE_AGY_LAUNCHFILE: launchFile });
   t.after(() => worker.close());
   const { result } = await worker.call({ jsonrpc: '2.0', id: 1, method: 'usage' });
-  assert.deepEqual(result.windows, [{ label: 'Test · weekly', remainingPercent: 50 }]);
+  assert.deepEqual(result.windows, [{ label: 'Test · weekly', remainingPercent: 50, ...(official ? { windowMinutes: 10080 } : {}) }]);
   assert.equal(fs.readFileSync(launchFile, 'utf8'), isWin ? 'true' : 'false');
 });
 
@@ -2137,11 +2297,12 @@ test('native /usage preserves exhausted groups and ignores model turns and disab
     { window: 'weekly', remaining_fraction: 0, reset_time: '2030-01-01T00:00:00Z' },
     { window: '5h', remaining_fraction: 0.5, disabled: true },
     { window: 'unreported', remaining_fraction: null },
-  ] }, { name: 'Claude/GPT', buckets: [{ window: '5h', remaining_fraction: 1 }] }] } };
+  ] }, { name: 'Claude/GPT', buckets: [{ window: '5h', remaining_fraction: 1 }, { window: 'monthly', remaining_fraction: 0.25 }] }] } };
   const usage = usageFromReport({ status: 'SUCCESS', num_turns: 0, command });
   assert.deepEqual(usage.windows, [
-    { label: 'Gemini · weekly', remainingPercent: 0, resetsAt: Date.UTC(2030, 0, 1) },
-    { label: 'Claude/GPT · 5h', remainingPercent: 100 },
+    { label: 'Gemini · weekly', remainingPercent: 0, resetsAt: Date.UTC(2030, 0, 1), ...(official ? { windowMinutes: 10080 } : {}) },
+    { label: 'Claude/GPT · 5h', remainingPercent: 100, ...(official ? { windowMinutes: 300 } : {}) },
+    { label: 'Claude/GPT · monthly', remainingPercent: 25 },
   ]);
   assert.equal(usageFromReport({ status: 'SUCCESS', num_turns: 1, command }), null);
 });

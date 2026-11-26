@@ -19,6 +19,16 @@
  *     subscription tier name agy reports.
  *   account({ sessionId? }) -> { supported: true, signedIn, tier?, canSignIn, canSignOut }
  *      | { supported: false, reason } | { supported: true, error, detail? }
+ *   accountStatus({ harnessId, accountDir? }) -> { state: 'signed-in', plan? } | { state: 'signed-out' } | null
+ *     Cindy's engine accounts (the engine publishes `accounts: { methods: [] }`): agy's one login and
+ *     its tier name as `plan`, read like `account` with the dedicated model-list session the last
+ *     listModels used. null when agy is missing, the check fails or takes longer than 20 s, and for
+ *     an `accountDir` (the plugin never offers to add accounts).
+ *   adoptModelSession({ sessionId }) -> { ok: true, adopted } | { ok: false, error: 'invalid' | 'busy' }
+ *     main.js hands over the model-list session it saved, so accountStatus can read the tier before
+ *     the next listing (plugins upgraded from 0.4.x kept it only in main.js). Kept only when the worker
+ *     remembers none; starts no agy.
+ *   usage({ harnessId }) -> { updatedAt, windows } | null   (agy's native /usage, see agy-usage.js)
  *   login() -> { ok: true, tier? } | { ok: false, error, detail? }
  *     agy's Google sign-in: agy opens the browser; answers when the sign-in finished, was cancelled
  *     or after 5 minutes. Sends a `progress` notification every 10 s meanwhile (keeps Cindy's
@@ -37,8 +47,12 @@
 const readline = require('node:readline');
 const maintain = require('./cli-installer.cjs');
 const { detectAgy, readCustomAgyConfig, runVersion, validateCustomPath, writeCustomAgyPath } = require('./resolve-agy.js');
-const { listModels } = require('./agy-models.js');
+const { listModels, readModelSession, rememberModelSession } = require('./agy-models.js');
 const account = require('./agy-account.js');
+
+const HARNESS_ID = 'agy';
+/** Cindy waits 26 s for accountStatus; answer "unknown" before that rather than not at all. */
+const ACCOUNT_STATUS_DEADLINE_MS = 20_000;
 
 function reply(message) {
   process.stdout.write(JSON.stringify(message) + '\n');
@@ -48,9 +62,20 @@ function replyError(id, code, message) {
   reply({ jsonrpc: '2.0', id, error: { code, message } });
 }
 
+/** `promise`'s value, or `fallback` once `ms` passed (the work itself still finishes and cleans up). */
+function withDeadline(promise, ms, fallback) {
+  let timer;
+  const expired = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
+}
+
 let usageRead;
+let accountStatusRead;
 let maintenanceActive = false;
 let customPathPending = 0;
+let modelSourceRevision = 0;
 let customPathQueue = Promise.resolve();
 let activeLoginPromise = null;
 
@@ -67,6 +92,10 @@ async function applyCustomPath(params) {
   const saved = writeCustomAgyPath(params.path);
   if (!saved.ok) return { ok: false, error: saved.error };
   usageRead = undefined;
+  accountStatusRead = undefined;
+  // Like main.js, start the model listing of the new executable afresh.
+  modelSourceRevision += 1;
+  rememberModelSession(null);
   const pendingLogin = activeLoginPromise;
   if (pendingLogin) {
     account.cancelLogin();
@@ -117,6 +146,22 @@ const handlers = {
       detail: String((error && error.message) || error).slice(0, 300),
     }));
   },
+  accountStatus(params) {
+    if (params && (params.accountDir != null || (params.harnessId !== undefined && params.harnessId !== HARNESS_ID))) {
+      return null;
+    }
+    if (!accountStatusRead) {
+      // Callers share one check (one agy at a time), each with its own deadline.
+      const sessionId = readModelSession();
+      const read = account.accountStatus(sessionId ? { sessionId } : {})
+        .then((result) => accountStatusRead === read ? result : null, () => null)
+        .finally(() => {
+          if (accountStatusRead === read) accountStatusRead = undefined;
+        });
+      accountStatusRead = read;
+    }
+    return withDeadline(accountStatusRead, ACCOUNT_STATUS_DEADLINE_MS, null);
+  },
   login() {
     if (customPathPending > 0) return Promise.resolve({ ok: false, error: 'busy' });
     usageRead = undefined;
@@ -125,6 +170,8 @@ const handlers = {
       reply({ jsonrpc: '2.0', method: 'progress', params: { stage: 'waiting-for-browser' } });
     })).finally(() => {
       if (activeLoginPromise === run) activeLoginPromise = null;
+      // A status read that started before the sign-in finished may describe the old state.
+      accountStatusRead = undefined;
     });
     activeLoginPromise = run;
     return run;
@@ -135,14 +182,29 @@ const handlers = {
   async logout() {
     if (customPathPending > 0) return { ok: false, error: 'busy' };
     usageRead = undefined;
-    return account.logout();
+    return account.logout().finally(() => { accountStatusRead = undefined; });
   },
   async listModels(params) {
-    return listModels(params).catch((error) => ({
+    const revision = modelSourceRevision;
+    return listModels(params).then((result) => {
+      if (revision === modelSourceRevision && typeof result?.sessionId === 'string') {
+        rememberModelSession(result.sessionId);
+      }
+      return result;
+    }, (error) => ({
       supported: true,
       error: 'list-failed',
       detail: String((error && error.message) || error).slice(0, 300),
     }));
+  },
+  adoptModelSession(params) {
+    const sessionId = params && params.sessionId;
+    if (typeof sessionId !== 'string' || !sessionId) return { ok: false, error: 'invalid' };
+    // The saved session belongs to the executable being replaced.
+    if (customPathPending > 0) return { ok: false, error: 'busy' };
+    if (readModelSession()) return { ok: true, adopted: false };
+    rememberModelSession(sessionId);
+    return { ok: true, adopted: readModelSession() === sessionId };
   },
 };
 
