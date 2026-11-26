@@ -201,6 +201,10 @@ export function settleState({ snap, headSeenAt, expected, now }) {
 export function pacingDue(previous, now, { triggered = false } = {}) {
   if (triggered) return { due: true, pace: 'fast', reason: 'host-trigger' };
   if (!previous?.watch) return { due: true, pace: 'fast', reason: 'first-check' };
+  const terminalBackoffUntil = Number(previous.terminalBackoffUntil) || 0;
+  if ((previous.merged || previous.closed) && terminalBackoffUntil > now) {
+    return { due: false, pace: 'terminal-backoff', reason: 'terminal-backoff', nextAt: terminalBackoffUntil };
+  }
   const watch = previous.watch;
   const lastLook = Math.max(
     Number(previous.lastFullReadAt) || 0,
@@ -215,7 +219,8 @@ export function pacingDue(previous, now, { triggered = false } = {}) {
     || waitIsDue(previous.wait, now)
     || (awaited !== null && now - awaited >= 15 * 60_000)
     || (Number(previous.settleUntil) || 0) > 0
-    || Number(previous.retryBackoffUntil) > 0;
+    || Number(previous.retryBackoffUntil) > 0
+    || (terminalBackoffUntil > 0 && now >= terminalBackoffUntil);
   if (fast) return { due: true, pace: 'fast', reason: 'fast' };
   const recent = (value) => Number.isFinite(Number(value)) && Number(value) > 0 && now - Number(value) < ACTIVE_WINDOW_MS;
   let pace;

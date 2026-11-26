@@ -300,6 +300,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       closed
       merged
       isDraft
+      mergeable
       mergedAt
       closedAt
       createdAt
@@ -367,6 +368,8 @@ query($owner: String!, $name: String!, $number: Int!) {
               contexts(first: 100) {
                 totalCount
                 pageInfo { hasNextPage }
+                checkRunCountsByState { state count }
+                statusContextCountsByState { state count }
                 nodes {
                   __typename
                   ... on CheckRun { name isRequired(pullRequestNumber: $number) status conclusion detailsUrl startedAt completedAt checkSuite { app { databaseId slug } } }
@@ -378,17 +381,20 @@ query($owner: String!, $name: String!, $number: Int!) {
         }
       }
       reviews(last: 50) {
+        totalCount
         nodes {
           id
           author { login __typename }
           state
           body
           submittedAt
+          updatedAt
           url
           commit { oid }
         }
       }
       reactions(last: 30) {
+        totalCount
         nodes { content createdAt user { login } }
       }
       comments(last: 100) {
@@ -679,6 +685,9 @@ async function main() {
     reactions: (pr.reactions?.nodes || []).map((r) => ({ content: r.content ?? null, at: r.createdAt ?? null, author: r.user?.login ?? null })),
     // Older top-level comments beyond the 100 read (a PR with more than that; the gate watches new ones only).
     commentsOmitted: Math.max(0, (pr.comments?.totalCount ?? 0) - (pr.comments?.nodes?.length ?? 0)),
+    // Fresh probe fingerprint from this same GraphQL read so triggered/targeted full snapshots
+    // refresh the gate's probe baseline instead of wiping it.
+    probe: probeFingerprint(pr),
   };
 
   process.stdout.write(JSON.stringify(out, null, 2) + '\n');
