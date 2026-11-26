@@ -37,7 +37,14 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { completeInitializeResult, isObject, isSessionOpen, normalizeMcpToolCall } = require('./agy-mcp.js');
+const {
+  adaptAgyNativeToolUpdate,
+  clientSupportsElicitationForm,
+  completeInitializeResult,
+  isObject,
+  isSessionOpen,
+  normalizeMcpToolCall,
+} = require('./agy-mcp.js');
 
 const REMOTE_WORKSPACE_ARG = '--cindy-remote-workspace';
 const GUEST_WORKSPACE_ARG = '--cindy-guest-workspace';
@@ -141,6 +148,8 @@ function agentDefinition(serverNames) {
     'description: Works on a project that is on another computer, through the tools Cindy provides.',
     'tools:',
     '  - search_web',
+    '  - ask_question',
+    '  - update_steps',
     'mcpServers:',
     ...serverNames.map((name) => `  - name: ${name}`),
     '---',
@@ -252,6 +261,7 @@ function startRemoteWorkspace(agyPath, host) {
   let stdinEnded = false;
   const queued = [];
   const seenCalls = new Map();
+  const seenSteps = new Map();
   let serverNames = [];
 
   const running = (child) => Boolean(child) && child.exitCode === null && child.signalCode === null;
@@ -462,6 +472,17 @@ function startRemoteWorkspace(agyPath, host) {
     if (verdict.type === 'mcp') {
       toClient({ ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }, agent.stdout);
       return;
+    }
+    if (isToolUpdate) {
+      const adapted = adaptAgyNativeToolUpdate(update, {
+        elicitationForm: clientSupportsElicitationForm(initRequest?.params),
+        seenSteps,
+      });
+      if (adapted?.action === 'drop') return;
+      if (adapted?.action === 'replace') {
+        toClient({ ...message, params: { ...params, update: adapted.update } }, agent.stdout);
+        return;
+      }
     }
     toClientLine(line, agent.stdout);
   };

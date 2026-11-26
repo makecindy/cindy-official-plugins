@@ -421,7 +421,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.deepEqual(launch.files, ['.agents'], 'agy runs in a directory holding only the agent definition');
     assert.ok(!samePath(launch.cwd, os.tmpdir()), 'not the shared temp folder');
     // One harmless tool of agy's own; the servers by name only. Their address and the task token stay in session/new.
-    assert.match(launch.definition, /^tools:\n  - search_web\nmcpServers:\n  - name: cindy_exec\n  - name: cindy\n---$/m);
+    assert.match(launch.definition, /^tools:\n  - search_web\n  - ask_question\n  - update_steps\nmcpServers:\n  - name: cindy_exec\n  - name: cindy\n---$/m);
     assert.doesNotMatch(launch.definition, /task-secret|127\.0\.0\.1/);
     assert.deepEqual(launch.session, { cwd: '/shadow/p', mcpServers: [server('cindy_exec'), server('cindy')] });
 
@@ -2570,4 +2570,74 @@ test('installation verifies the archive and staged CLI before activating it', {
   fs.rmdirSync(target);
   assert.deepEqual(install(digest), { state: 'installed', version: '1.5.14' });
   assert.deepEqual(fs.readFileSync(target), fs.readFileSync(cli));
+});
+
+test('adapts Antigravity update_steps into ACP plan updates and normalizes ask_question when form elicitation is negotiated', async () => {
+  const mcp = await import(pathToFileURL(path.join(root, 'agy-mcp.js')));
+  assert.equal(mcp.clientSupportsElicitationForm({ clientCapabilities: { elicitation: { form: {} } } }), true);
+  assert.equal(mcp.clientSupportsElicitationForm({ clientCapabilities: { fs: { readTextFile: false } } }), false);
+
+  const seenSteps = new Map();
+  const firstSteps = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'steps-1',
+    name: 'update_steps',
+    title: 'Run update_steps',
+    status: 'in_progress',
+    rawInput: {
+      steps: [
+        { title: 'Inspect codebase', status: 'done' },
+        { title: 'Apply fix', status: 'in_progress' },
+        { title: 'Skip optional', status: 'skipped' },
+      ],
+    },
+  }, { elicitationForm: true, seenSteps });
+  assert.deepEqual(firstSteps, {
+    action: 'replace',
+    update: {
+      sessionUpdate: 'plan',
+      entries: [
+        { content: 'Inspect codebase', priority: 'medium', status: 'completed' },
+        { content: 'Apply fix', priority: 'medium', status: 'in_progress' },
+        { content: 'Skip optional', priority: 'medium', status: 'cancelled' },
+      ],
+    },
+  });
+
+  // Duplicate completed update for the same toolCallId is dropped instead of rendering a raw tool card.
+  const duplicateSteps = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'steps-1',
+    name: 'update_steps',
+    status: 'completed',
+    rawInput: {
+      steps: [
+        { title: 'Inspect codebase', status: 'done' },
+        { title: 'Apply fix', status: 'in_progress' },
+        { title: 'Skip optional', status: 'skipped' },
+      ],
+    },
+  }, { elicitationForm: true, seenSteps });
+  assert.deepEqual(duplicateSteps, { action: 'drop' });
+
+  // ask_question is normalized to AskUserQuestion only when the client negotiated form elicitation.
+  const askWithForm = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'ask-1',
+    name: 'ask_question',
+    title: 'Run ask_question',
+    status: 'in_progress',
+  }, { elicitationForm: true, seenSteps });
+  assert.equal(askWithForm?.action, 'replace');
+  assert.equal(askWithForm?.update.name, 'AskUserQuestion');
+  assert.equal(askWithForm?.update.title, 'AskUserQuestion');
+
+  const askWithoutForm = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'ask-2',
+    name: 'ask_question',
+    title: 'Run ask_question',
+    status: 'in_progress',
+  }, { elicitationForm: false, seenSteps });
+  assert.equal(askWithoutForm, null);
 });
