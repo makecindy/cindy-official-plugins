@@ -957,6 +957,74 @@ test('超过 24 小时的人工等待在探测一致时跳过完整快照；首�
   assert.equal(badCredsPlan.diagnosis.kind, 'auth');
 });
 
+test('探针收到明确限流时直接进入退避、保留 retryAt，且零次调用完整快照', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-probe-rate-limit-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const fakeSnapshot = path.join(dir, 'fake-snapshot.mjs');
+  fs.writeFileSync(fakeSnapshot, '// placeholder for existsSync check\n', 'utf8');
+
+  let clock = T0;
+  let probeCalls = 0;
+  let snapshotCalls = 0;
+  let probeReply = { code: 0, stdout: JSON.stringify({ status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' }), stderr: '' };
+  const currentSnap = snap({ verdict: 'READY' });
+  const run = async (extra = []) => {
+    let stdout = '';
+    let stderr = '';
+    const code = await runGate([PR_URL, '--state-dir', stateDir, '--snapshot', fakeSnapshot, '--min-pass-spacing-minutes', '0', '--no-pacing', ...extra], {
+      now: () => clock,
+      runProbe: async () => { probeCalls += 1; return probeReply; },
+      runSnapshot: async () => { snapshotCalls += 1; return { code: 0, stdout: JSON.stringify(currentSnap), stderr: '' }; },
+      readTrigger: async () => null,
+      out: (text) => { stdout += text; },
+      err: (text) => { stderr += text; },
+    });
+    return { code, stdout, stderr };
+  };
+
+  // Seed baseline and acknowledge so the next tick uses probe first.
+  assert.equal((await run()).code, 0);
+  assert.equal((await run(['--ack'])).code, 0);
+  const readsBefore = snapshotCalls;
+
+  // Probe receives explicit rate limit with retryAt: must enter backoff directly with 0 full snapshots.
+  clock += 5 * MIN;
+  const resetAt = clock + 45 * MIN;
+  probeReply = {
+    code: 1,
+    stdout: '',
+    stderr: `[gh-rate-limit] retryAt=${resetAt}\n[gh] fatal on graphql: gh: API rate limit already exceeded (HTTP 403)\n`,
+  };
+  const blocked = await run();
+  assert.equal(blocked.code, 1, 'first rate-limit failure notifies once');
+  assert.match(blocked.stderr, /GitHub API rate limit reached/);
+  assert.equal(snapshotCalls, readsBefore, 'probe rate limit must not trigger a full snapshot');
+  const diagMatch = /CINDY_PR_CHECK_DIAGNOSIS (\{[^\n]+\})/.exec(blocked.stdout);
+  assert.ok(diagMatch, blocked.stdout);
+  assert.deepEqual(JSON.parse(diagMatch[1]), { kind: 'rate-limit', failures: 1, retryAt: resetAt + 1000 });
+  const saved = JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'));
+  assert.equal(saved.snapshotFailureBackoffUntil, resetAt + 1000);
+  assert.equal(saved.consecutiveSnapshotFailures, 1);
+
+  // Before retryAt, scheduled ticks skip immediately with 0 probes and 0 snapshots.
+  const probesBeforeBackoff = probeCalls;
+  clock += 10 * MIN;
+  const skipped = await run(['--json']);
+  assert.equal(skipped.code, 2);
+  assert.equal(JSON.parse(skipped.stdout).reason, 'snapshot-failure-backoff');
+  assert.equal(probeCalls, probesBeforeBackoff);
+  assert.equal(snapshotCalls, readsBefore);
+
+  // After retryAt passes, gate recovers via full snapshot and clears failure state.
+  clock = resetAt + 2000;
+  probeReply = { code: 0, stdout: JSON.stringify({ status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' }), stderr: '' };
+  const recovered = await run(['--json']);
+  assert.equal(recovered.code, 2);
+  assert.equal(snapshotCalls, readsBefore + 1);
+  assert.equal(JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8')).consecutiveSnapshotFailures, 0);
+});
+
 test('从未放行过的跟进也能数满静默时长:起点固定在首次检查,不随每轮刷新', async (t) => {
   const fx = createFixture(t);
   const probe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' };

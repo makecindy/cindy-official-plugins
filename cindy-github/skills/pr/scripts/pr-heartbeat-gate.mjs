@@ -1332,11 +1332,15 @@ function runSnapshot(snapshotPath, repo, number) {
   });
 }
 
-/** 低成本探测(pr-snapshot.mjs --probe)。永不 throw;失败时 gate 照常做完整读取。 */
+/** 低成本探测(pr-snapshot.mjs --probe)。永不 throw;除明确限流外失败时 gate 照常做完整读取。 */
 function runProbe(snapshotPath, repo, number) {
   return new Promise((resolve) => {
     execFile(process.execPath, [snapshotPath, String(number), '--repo', repo, '--probe'], { encoding: 'utf8' },
-      (err, stdout, stderr) => resolve({ code: err ? 1 : 0, stdout: stdout ?? '', stderr: stderr ?? '' }));
+      (err, stdout, stderr) => resolve({
+        code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
+        stdout: stdout ?? '',
+        stderr: stderr ?? '',
+      }));
   });
 }
 
@@ -1658,7 +1662,8 @@ async function gateMain(argv, ctx) {
   // Counts alone cannot reveal a named check's rerun or a thread being resolved/replied to.
   // While explicitly waiting on those items, inspect them each tick rather than waiting 30 minutes.
   const targetedWait = previous?.wait && (previous.wait.checks.length > 0 || previous.wait.threads.length > 0);
-  const probe = triggered || targetedWait || recovering ? null : parseProbe(await ctx.runProbe(args.snapshot, args.repo, args.number));
+  const probeRun = triggered || targetedWait || recovering ? null : await ctx.runProbe(args.snapshot, args.repo, args.number);
+  const probe = parseProbe(probeRun);
   if (!triggered && probeAllowsSkip(previous, probe, now, args.maxSilenceMs)) {
     const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'unchanged', detail: 'probe matches the last full read', checkedAt: now };
     persist(file, { ...previous, lastProbeAt: now, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
@@ -1666,7 +1671,14 @@ async function gateMain(argv, ctx) {
     if (!args.json) out('CINDY_PRECHECK_OK\n');
     return EXIT_SKIP;
   }
-  const run = await ctx.runSnapshot(args.snapshot, args.repo, args.number);
+  // An explicit GitHub rate limit on the probe must enter the existing backoff path immediately
+  // without issuing a second (full snapshot) set of API calls while already rate-limited.
+  const probeRateLimited = Boolean(
+    probeRun && probeRun.code !== 0 && snapshotDiagnosis(String(probeRun.stderr ?? '')).kind === 'rate-limit',
+  );
+  const run = probeRateLimited
+    ? { code: probeRun.code, stdout: '', stderr: String(probeRun.stderr ?? '') }
+    : await ctx.runSnapshot(args.snapshot, args.repo, args.number);
 
   let snap = null;
   if (run.code === 0) {
