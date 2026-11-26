@@ -1869,6 +1869,34 @@ test('first publish pr_card respects following: false and binds schedule to the 
   }
 });
 
+test('ordinary refresh preserves publish-time following: false after settings become readable again', async () => {
+  for (const withScheduler of [true, false]) {
+    const scheduler = withScheduler ? followScheduler() : null;
+    const options = {
+      github: prGraphql(),
+      ...(scheduler ? { hostApi: scheduler.hostApi } : {}),
+      kvFails: true,
+      kv: { prCard: { autoRename: true, autoFollow: true } },
+    };
+    const rt = createPrRuntime(options);
+    const first = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, following: false });
+    assert.equal(first.reply.ok, true);
+    assert.ok(first.reply.result.note.includes(zhCopy.prSettingsLater));
+    assert.equal(first.reply.result.follow_state, undefined);
+    assert.equal(first.reply.result.todo, undefined);
+
+    options.kvFails = false;
+    const refreshed = await rt.tool({ card_id: first.callId });
+    assert.equal(refreshed.reply.ok, true);
+    assert.equal(refreshed.reply.result.follow_state, undefined);
+    assert.deepEqual(refreshed.reply.result.todo, [fill(zhCopy.prTodoRename, { title: '#42 Built-in PR skill' })]);
+    if (scheduler) {
+      assert.equal(scheduler.rows.size, 0);
+      assert.equal(scheduler.calls.includes('schedule_create'), false);
+    }
+  }
+});
+
 test('rejected creation stays stopped and can be retried from the card', async () => {
   const fault = { reject: true };
   const { hostApi, rows } = followScheduler(fault);
