@@ -534,7 +534,14 @@ preservation or validation of any CI budget request, check the earlier
 `<selected-base>/cindy-pr/ci-retry` root read-only. Any existing entry there,
 even an empty directory, symlink or malformed file, stops for reconciliation
 without moving, deleting or allocating anything. Unreadable/unknown roots also
-stop. This does not scan arbitrary past custom roots: changing the selected
+stop. A leaf ENOENT is not absence proof: lstat each missing component upward
+to the nearest existing ancestor, and require that entry to be a real directory.
+A visible symlink/junction at that boundary, including a dangling intermediate
+link, or an unknown/non-directory result stops before preservation or budget
+evaluation; never follow, remove, repair or wait for that link to qualify. Repeat on the next
+invocation; storage becoming available does not authorize migration or new quota.
+This is a read-only observation, not atomic protection against later path changes.
+This does not scan arbitrary past custom roots: changing the selected
 base still requires establishing prior outcomes and never grants fresh quota.
 
 The gate preserves earlier cache receipt

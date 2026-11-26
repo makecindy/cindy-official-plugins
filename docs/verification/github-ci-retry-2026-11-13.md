@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.59, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.60, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1549,3 +1549,18 @@ The transfer argv, receipt I/O, slots/caps, identity-epoch exclusion, lock/hook/
 Against the unchanged source58 guide, the eight native cases plus two parents fail (0 pass / 10 fail); source59 passes10/10 (32.30s). These tests execute the existing read/push argv to reproduce the risk, then verify the documented refusal boundary; they are not a mechanical recovery executor. Forge exact-content: **30 files, 256324 archive bytes, 724007 uncompressed bytes**. New59 package deleted and absence verified.
 
 Final mandatory four suites plus plugin: **606 passed / 38 skipped / 0 failed (334.90 s)**. Skips remain 17 unsupported native full-directory-sync success cases, 19 earlier skips and two inherited POSIX-only command-line cases not executed on Windows. No new runtime acceptance or installation.
+
+
+## Confirm missing old roots without following unavailable links — 2026-11-27 Asia/Shanghai (source1.5.60, not installed)
+
+Source1.5.60 keeps the existing alternate-root refusal owner. A leaf ENOENT alone cannot establish that the old namespace is absent: lstat may have followed a dangling intermediate symlink. The same read-only check now walks the missing suffix upward until the nearest existing entry. Only a real directory there confirms absence. A link/junction at that boundary, a non-directory, an unreadable/unknown result or no confirmed ancestor stops before preservation, semantic budget validation or allocation. It does not follow/repair/remove the observed link, create directories, migrate receipts or add a cache/marker/lock/allocator/retry.
+
+Native Windows10.0.26100 / Node22.22.3 directory junction fixtures reproduce the unavailable-storage case at the old namespace parent, selected base and an ancestor of the selected base. For both status and reservation, six subcases use fresh CLI processes and real isolated files/links; sync acknowledgements alone are modeled to make earlier Windows quota behavior observable. Old59 returns available for all three status cases and creates a canonical slot in the namespace-parent reservation case; the other two reservations fail later at I/O instead of the required earlier-root boundary. New regressions first fail0/7 including parent, then new+existing equivalent-XDG tests pass10/10 (3.46s).
+
+The fixture then makes the original storage visible and invokes another fresh process: the old root still stops recovery, original unknown bytes/link/ordinary observation stay unchanged, and no canonical store, slot, copy or trace is created. Tests clean their private fixture; no user receipt, real quota, remote fixture, live plugin, preference, permission or blocked residual is touched. These are native local junction observations plus modeled-sync CLI coverage, not actual Cindy/GitHub refusal, native Linux symlink or power-loss acceptance. The reviewer separately supplied the original unavailable-link report in [the review](https://github.com/makecindy/cindy-official-plugins/pull/332#discussion_r4711896869).
+
+This confirms a missing suffix against its nearest existing ancestor at that read; it is not atomic protection against later path changes or reconstruction of pre-invocation erased history. Arbitrary previous custom bases still require reconciliation. Existing receipt I/O, prefix slots, caps, raw preservation, URL/identity/lock/hook/signing/encoding/message guards and UI/locales are unchanged. Source60 is not installed; current runtime prerequisites and blocked cleanup residuals remain.
+
+Forge1.5.60 exact-content verification passed: **30 files, 256759 archive bytes, 725168 uncompressed bytes**. The new package was deleted and absence verified; no installed plugin or blocked cleanup residual was changed.
+
+Final mandatory four suites plus plugin: **613 passed / 38 skipped / 0 failed (361.99 s)**. Skips remain 17 unsupported native full-directory-sync success cases, 19 earlier skips and two inherited POSIX-only command-line cases not run on Windows. Automated local/model coverage does not complete current-version runtime acceptance.

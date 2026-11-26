@@ -1464,6 +1464,50 @@ process.exitCode = await runGate(process.argv.slice(3));
   });
 });
 
+test('alternate-root absence never follows a visible ancestor link to grant quota', async t => {
+  for (const mode of ['--ci-retry-status', '--reserve-ci-retry']) for (const location of ['namespace parent', 'selected base', 'base ancestor']) await t.test(`${mode} / ${location}`, t => {
+    const fx = fixture(t), base = path.join(fx.root, 'durable');
+    const selected = location === 'base ancestor' ? path.join(base, 'child') : base;
+    const link = location === 'namespace parent' ? path.join(base, 'cindy-pr') : base;
+    const missing = path.join(fx.root, 'unavailable-storage'), stored = path.join(fx.root, 'preserved-storage');
+    const legacy = path.join(stored, ...(location === 'namespace parent' ? [] : location === 'selected base' ? ['cindy-pr'] : ['child', 'cindy-pr']), 'ci-retry');
+    fs.mkdirSync(path.dirname(link), { recursive: true });
+    fs.mkdirSync(legacy, { recursive: true });
+    const raw = '{old result is unknown; retain original bytes';
+    fs.writeFileSync(path.join(legacy, 'old-receipt'), raw);
+    fs.symlinkSync(missing, link, process.platform === 'win32' ? 'junction' : 'dir');
+    const originalLink = fs.readlinkSync(link);
+    assert.equal(fs.lstatSync(link).isSymbolicLink(), true);
+    assert.equal(fs.existsSync(link), false, 'native dangling directory link, not a missing directory');
+    fs.mkdirSync(fx.stateDir);
+    const observation = stateFilePath(fx.stateDir, 'example/repo', 42), observed = '{"headOid":"ordinary-state"}';
+    fs.writeFileSync(observation, observed);
+    const loader = path.join(fx.root, 'supported-link-root.mjs');
+    fs.writeFileSync(loader, `import fs from 'node:fs';
+// Native fixture links/files; sync acknowledgements modeled on Windows.
+fs.fsyncSync = () => {};
+const { runGate } = await import(process.argv[2]);
+process.exitCode = await runGate(process.argv.slice(3));
+`);
+    const canonical = path.join(selected, 'Cindy', 'pr-recovery');
+    const invoke = () => spawnSync(process.execPath, [loader, pathToFileURL(gate).href, ...fx.args([mode, ...(mode === '--reserve-ci-retry' ? [oldHead] : [])])],
+      { env: { ...fx.env, XDG_STATE_HOME: selected }, encoding: 'utf8' });
+    for (const restored of [false, true]) {
+      if (restored) fs.renameSync(stored, missing); // test-only storage becomes visible
+      const result = invoke(); // separate process rechecks the same visible link
+      assert.equal(result.status, 1, result.stdout + result.stderr);
+      assert.match(result.stderr, /alternate CI retry root.*reconcile/i);
+      assert.doesNotMatch(result.stdout, /ci-retry-reserved|"available":true/);
+      assert.equal(fs.existsSync(canonical), false, 'no new canonical store or slot');
+      assert.equal(fs.readlinkSync(link), originalLink, 'never remove or repair the link');
+      assert.equal(fs.readFileSync(observation, 'utf8'), observed);
+      const kept = restored ? path.join(missing, path.relative(stored, legacy), 'old-receipt') : path.join(legacy, 'old-receipt');
+      assert.equal(fs.readFileSync(kept, 'utf8'), raw);
+      assert.deepEqual(fs.readdirSync(fx.stateDir), [path.basename(observation)], 'no trace or legacy copy');
+    }
+  });
+});
+
 test('equivalent default XDG settings share quota and old alternate roots fail closed', async t => {
   for (const initialExplicit of [false, true]) await t.test(initialExplicit ? 'explicit to implicit' : 'implicit to explicit', t => {
   const fx = fixture(t), loader = path.join(fx.root, 'supported-roots.mjs');

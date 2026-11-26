@@ -629,8 +629,19 @@ function refuseAlternateCiRetryRoot(retryDir) {
   // value. Earlier XDG writers used a different suffix; never grant fresh
   // quota over that possible history or move/delete it automatically.
   const alternate = path.join(path.dirname(path.dirname(retryDir)), 'cindy-pr', 'ci-retry');
-  try { fs.lstatSync(alternate); }
-  catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  // ENOENT can hide an unavailable intermediate link. Walk the missing suffix
+  // with lstat until a real directory confirms absence; never follow a visible
+  // link (including a junction), create a directory or repair the old root.
+  for (let current = alternate;;) {
+    try {
+      const stat = fs.lstatSync(current);
+      if (current !== alternate && stat.isDirectory() && !stat.isSymbolicLink()) return;
+      break;
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
   throw new Error('Existing alternate CI retry root; reconcile its previous outcome before any budget operation. Keep both roots and receipts; do not delete, reset, switch roots or retry.');
 }
 
