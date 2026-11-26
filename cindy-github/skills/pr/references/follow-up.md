@@ -8,7 +8,7 @@ The schedule fires every 5 minutes (older schedules: every 10, switched by their
 - **exit 2:** skip this run. No model call, no tokens, nothing in the task.
 - **anything else:** the run is recorded as failed and the user is notified.
 
-Each check saves its decision, reason, detail and list as `lastResult`. The agent reads it with the read-only `--last-result --json`, which also returns the current `wait` and the acknowledged/released `waitContext`.
+Each real scheduled check saves its decision, reason, detail and list as `lastResult`. The host’s “Test run” and hook self-test are read-only previews: they never consume an existing wait, pending event, retry budget or trace history. The agent reads it with the read-only `--last-result --json`, which also returns the current `wait` and the acknowledged/released `waitContext`.
 
 ## Pace: most firings end at once
 

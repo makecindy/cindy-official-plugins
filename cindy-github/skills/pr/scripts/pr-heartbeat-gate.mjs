@@ -1447,7 +1447,13 @@ async function gateMain(argv, ctx) {
   }
 
   const file = stateFilePath(args.stateDir, args.repo, args.number);
-  adoptLegacyStateFile(args.stateDir, args.repo, args.number, file);
+  const trigger = await ctx.readTrigger();
+  // Host test/self-test calls only preview the hook; they do not inject a
+  // model turn. Never consume pending observations, waits, retries or trace
+  // history on behalf of the real schedule.
+  const diagnostic = trigger?.kind === 'diagnostic';
+  if (!diagnostic) adoptLegacyStateFile(args.stateDir, args.repo, args.number, file);
+  const persist = diagnostic ? () => {} : writeState;
   const now = ctx.now();
 
   // --last-result:只读最近一轮普通 gate 的实际结果。preRunHook 本身只负责 run/skip；
@@ -1499,6 +1505,7 @@ async function gateMain(argv, ctx) {
 
   // Finish commands are local: validate before acknowledging or changing any wait.
   if (args.ack || args.deferMinutes !== undefined || args.waitFile || args.resumeReason) {
+    if (diagnostic) throw new Error('A diagnostic hook cannot acknowledge or replace a real follow-up wait.');
     const previous = readState(file) ?? {};
     const facts = previous.pendingWatch?.waitFacts ?? previous.watch?.waitFacts;
     if (!args.waitFile && !args.resumeReason) {
@@ -1543,7 +1550,7 @@ async function gateMain(argv, ctx) {
     } else if (notice === 'reminder') {
       detail += `; still waiting for human action after ${formatDuration(now - wait.since)}: state progress and the blocker; if the user must decide, ask for that specific decision again with a recommendation (in a background round also schedule_notify_current_run)`;
     }
-    writeState(file, next);
+    persist(file, next);
     emit(args, {
       exitCode: EXIT_PASS,
       repo: args.repo,
@@ -1566,14 +1573,13 @@ async function gateMain(argv, ctx) {
   // acknowledged failures or waits after the user stopped and started following again.
   // A deferred first run can execute the hook several times; keep the ID so retries
   // use the ordinary pending-watch protocol instead of resetting on every attempt.
-  const trigger = await ctx.readTrigger();
   const newFollow = Boolean(trigger?.firstScheduleId && previous?.followStartId !== trigger.firstScheduleId);
   if (newFollow) {
     previous = { ...previous, followStartId: trigger.firstScheduleId };
     for (const key of ['watch', 'wait', 'fingerprint', 'pendingFingerprint', 'pendingWatch',
       'pendingKey', 'pendingPassCount', 'retryBackoffUntil', 'nextAllowAt', 'probe',
       'lastPassAt', 'lastFullReadAt', 'lastCheckedAt', 'silenceSince']) delete previous[key];
-    writeState(file, previous);
+    persist(file, previous);
   }
   const backoffUntil = Number(previous?.snapshotFailureBackoffUntil) || 0;
   const backingOff = backoffUntil > now;
@@ -1582,12 +1588,12 @@ async function gateMain(argv, ctx) {
   if (backingOff && hookTrigger?.source !== 'pr-status') {
     const detail = `nextProbeAt=${new Date(backoffUntil).toISOString()}`;
     const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'snapshot-failure-backoff', detail, checkedAt: now };
-    writeState(file, { ...previous, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
+    persist(file, { ...previous, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
     emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
     return EXIT_SKIP;
   }
   // 宿主看到这个 PR 的状态变了而提前触发的一轮:不看节奏,也不做探测(宿主已经知道有变化)。
-  const triggered = args.triggered || (hookTrigger?.kind === 'watch') || newFollow;
+  const triggered = args.triggered || (hookTrigger?.kind === 'watch') || newFollow || diagnostic;
   // Neither an idle tick nor an unchanged summary proves that a failed snapshot recovered.
   const recovering = previous?.consecutiveSnapshotFailures > 0;
   // 按阶段决定这一轮要不要看:不到时间就直接跳过,不调用 GitHub,也不改状态。
@@ -1613,7 +1619,7 @@ async function gateMain(argv, ctx) {
   const probe = triggered || targetedWait || recovering ? null : parseProbe(await ctx.runProbe(args.snapshot, args.repo, args.number));
   if (!triggered && probeAllowsSkip(previous, probe, now, args.maxSilenceMs)) {
     const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'unchanged', detail: 'probe matches the last full read', checkedAt: now };
-    writeState(file, { ...previous, lastProbeAt: now, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
+    persist(file, { ...previous, lastProbeAt: now, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
     emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
     if (!args.json) out('CINDY_PRECHECK_OK\n');
     return EXIT_SKIP;
@@ -1636,7 +1642,7 @@ async function gateMain(argv, ctx) {
     const { failures } = plan;
     const { summary, ...cause } = plan.diagnosis;
     const detail = `${summary}; snapshotExit=${run.code} failures=${failures}/${args.maxSnapshotFailures}`;
-    writeState(file, {
+    persist(file, {
       ...(previous ?? {}),
       consecutiveSnapshotFailures: failures,
       lastSnapshotFailureAt: now,
@@ -1699,7 +1705,7 @@ async function gateMain(argv, ctx) {
     decision.nextPendingWatch = { ...decision.nextPendingWatch, inventoryRecoveryOwed: true };
   }
   if (passed && snap.gate?.requiredChecksUnavailable) decision.detail += '; rules unknown: observed check results are not proof the PR is ready to merge';
-  writeState(repoFile, { ...repoState, reviewerBots: repoBots });
+  persist(repoFile, { ...repoState, reviewerBots: repoBots });
   // 回合状态:per-head 持久化,供「回合制与收敛止损」的机判使用(references/review-convergence.md)。
   // 这些信息理论上能从即时快照推导,但快照的 reviews 窗口只有 50 条、defer 痕迹又只活
   // 一轮,推导出的判据在边界上会失效 —— 所以由 gate 用确定性代码跨轮累积:
@@ -1750,7 +1756,7 @@ async function gateMain(argv, ctx) {
       : null;
   // 上次读到检查在跑或合并态还没算出:下一轮不靠探测跳过,直接完整读取。
   const inFlight = !mergeSignalKnown(snap) || (snap.checks ?? []).some((c) => checkOutcome(c) === 'pending');
-  writeState(file, {
+  persist(file, {
     // watch 只由 --ack / --defer 或「没有新事件」推进,放行时不推进
     watch: decision.nextWatch,
     ...(previous?.followStartId ? { followStartId: previous.followStartId } : {}),
@@ -1833,7 +1839,7 @@ async function gateMain(argv, ctx) {
     repo: args.repo,
     number: args.number,
     reason: decision.reason,
-    detail: decision.detail,
+    detail: diagnostic ? `${decision.detail}; diagnostic only, follow-up state unchanged` : decision.detail,
     report: decision.report,
     verdict: snap.verdict ?? null,
     ...(passed ? { finish: FINISH_HINT } : {}),
@@ -1890,6 +1896,10 @@ export async function readHookTrigger(stdin = process.stdin, timeoutMs = 500) {
   try {
     const payload = JSON.parse(text);
     const trigger = payload && typeof payload.trigger === 'object' ? payload.trigger : null;
+    if (payload?.event === 'schedule-pre-run' &&
+      (payload.scheduleId === 'test' || payload.scheduleId === 'self-test') && payload.runId === payload.scheduleId) {
+      return { kind: 'diagnostic' };
+    }
     if (payload?.event === 'schedule-pre-run' && typeof payload.scheduleId === 'string'
       && payload.scheduleId && payload.lastFinishedAt == null) {
       return { ...trigger, firstScheduleId: payload.scheduleId };
@@ -1937,6 +1947,11 @@ export async function runGate(argv, {
       runProbe: async (...a) => { const value = await probeRunner(...a); if (record) { try { record.probe = value.code === 0 ? JSON.parse(value.stdout) : null; } catch { record.probe = null; } } return value; },
       readTrigger: async () => {
         const event = await readTrigger();
+        if (event?.kind === 'diagnostic') {
+          // Do not append a diagnostic observation to the replayable production trace.
+          record = null;
+          return { kind: 'diagnostic' };
+        }
         const url = `https://github.com/${args.repo}/pull/${args.number}`;
         let trigger = null;
         if (event?.kind === 'watch') {

@@ -321,6 +321,39 @@ test('必需检查全部通过报一次;还在跑的其它检查结束时再报�
   assert.deepEqual(kinds(r), [], '后来冒出的非必需检查不唤起');
 });
 
+test('host test and self-test preview an existing wait and unacknowledged event without writing any follow state', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', checks: [{ name: 'build' }], threads: [] });
+  fx.advance(5);
+  fx.setSnapshot({ ...red, checks: [...red.checks, check('lint', 'failed')] });
+  assert.equal((await fx.run()).code, 0);
+  assert.ok(fx.readState().wait && fx.readState().pendingWatch);
+  const dir = path.dirname(fx.stateFile());
+  const files = () => Object.fromEntries(fs.readdirSync(dir).sort().map(name =>
+    [name, fs.readFileSync(path.join(dir, name), 'utf8')]));
+  const before = files();
+  // The actual Host uses these two pairs of IDs without lastFinishedAt.
+  // A preview which sees new work must still not change the production state.
+  fx.setSnapshot({ ...red, checks: [...red.checks, check('lint', 'failed'), check('package', 'failed')] });
+  for (const id of ['test', 'self-test']) {
+    const result = await fx.runVia(gatePath, [], { event: 'schedule-pre-run',
+      scheduleId: id, scheduleName: 'PR #42', runId: id, firedAt: Date.now() });
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /diagnostic only, follow-up state unchanged/);
+    assert.deepEqual(files(), before, 'PR state, repository state and trace stay byte-identical');
+  }
+  const production = await fx.run();
+  assert.equal(production.code, 0, 'the real schedule can still deliver its pending event');
+  const first = createFixture(t);
+  first.setSnapshot(red);
+  assert.equal((await first.runVia(gatePath, [], { event: 'schedule-pre-run',
+    scheduleId: 'test', runId: 'test', firedAt: Date.now() })).code, 0);
+  assert.equal(fs.existsSync(first.stateFile()), false, 'diagnostics do not create a new follower');
+});
+
 test('a partially failed batch reports its final result once even with no new failure', async (t) => {
   const fx = createFixture(t);
   const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing', 'pending_checks'],
