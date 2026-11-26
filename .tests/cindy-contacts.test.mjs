@@ -229,7 +229,7 @@ function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSy
       waiters.set(callId, resolve);
       for (const l of listeners) l({ type: 'tool-call', tool, args, callId });
     });
-  const view = (method, params = {}) =>
+  const view = (method, params = {}, context = {}) =>
     new Promise((resolve) => {
       const ch = new BroadcastChannel('cindy-contacts');
       const id = `req-${++n}`;
@@ -239,7 +239,7 @@ function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSy
           resolve(ev.data);
         }
       };
-      ch.postMessage({ kind: 'req', id, method, params });
+      ch.postMessage({ kind: 'req', id, method, params, ...context });
     });
   const close = () => {
     vm.runInContext('clearTimeout(syncTimer); syncStatus.supported = false;', ctx);
@@ -865,6 +865,9 @@ test('按时间段整理：第一次只看最近两周；之后从上次整理�
     assert.ok(a.schedules[0].prompt.length <= 2000);
     // 宿主是中文时，自动化和整理任务用中文名
     assert.equal(a.schedules[0].name, '整理通讯录');
+    await a.view('requestAutomation', { mobilePageId: 'forged-param' }, { mobilePageId: 'host-mobile-page' });
+    assert.equal(a.schedules[1].mobilePageId, 'host-mobile-page', 'the native draft returns to the host-injected phone page');
+    assert.equal(a.schedules[0].mobilePageId, undefined, 'desktop requests retain desktop routing');
     await a.view('tidy', { scope: 'recent' });
     assert.equal(a.tasks.created.at(-1).title, '通讯录 · 整理');
     assert.match(a.tasks.sent.at(-1).text, /path: "tidy"/);

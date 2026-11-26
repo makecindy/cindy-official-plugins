@@ -1569,7 +1569,7 @@ function automationPrompt(profile) {
   ].join('\n');
 }
 
-async function requestAutomation() {
+async function requestAutomation(mobilePageId) {
   const settings = await getSettings();
   const p = PROFILES[settings.profile] || PROFILES.colleagues;
   if (!cindy.agent || typeof cindy.agent.requestSchedule !== 'function') {
@@ -1587,6 +1587,7 @@ async function requestAutomation() {
     prompt: automationPrompt(settings.profile),
     intervalMs: p.intervalHours * 3600 * 1000,
     ...(preRunCheck ? { preRunCheck: true } : {}),
+    ...(typeof mobilePageId === 'string' ? { mobilePageId } : {}),
   });
   if (!r || r.ok === false) throw fail((r && r.errorCode) || 'SCHEDULE_FAILED', (r && r.message) || '没有打开自动化面板');
   const requested = { at: nowIso(), profile: settings.profile };
@@ -2993,7 +2994,7 @@ const VIEW_METHODS = {
   pin: (p) => setPin(p),
   opened: () => opened(),
   settings: (p) => setSettings(p || {}),
-  requestAutomation: () => requestAutomation(),
+  requestAutomation: (_params, context) => requestAutomation(context?.mobilePageId),
 };
 const MUTATING = new Set(['save', 'logEvent', 'deleteEvent', 'relate', 'organize', 'merge', 'delete', 'groups', 'importSystem', 'importLegacy', 'unmerge', 'loop', 'pin']);
 
@@ -3026,7 +3027,7 @@ function startViewChannel() {
       }
       await ensureReady();
       if (pendingImport) await pendingImport;
-      return serial(() => handler(msg.params || {}));
+      return serial(() => handler(msg.params || {}, { mobilePageId: msg.mobilePageId }));
     };
     run()
       .then((result) => ({ kind: 'res', id: msg.id, ok: true, result }))
