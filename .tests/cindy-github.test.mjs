@@ -2046,57 +2046,56 @@ test('same-name project script, custom shell command and terminal PR remain unto
 test('POSIX single-quoted stabilized hooks are recognized for legacy repair and verified launcher checks', async () => {
   const url = 'https://github.com/octo/repo/pull/42';
   const posixSingle = (p) => `'${p.replace(/'/g, `'\\''`)}'`;
+  const runFreshAdoption = async (skillDir, command) => {
+    const { hostApi, calls, rows } = followScheduler({ skillDir });
+    const existing = {
+      id: 'existing-single', targetSessionId: 's1', status: 'active', recurring: true,
+      prompt: 'Follow ' + url, preRunHook: { command, timeoutMs: 180000 },
+    };
+    rows.set(existing.id, existing);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    return { opened, rt, calls, rows, existing };
+  };
+
   for (const skillDir of [
     '/approved skills/agent-skills/skills/_root__cindy-github--pr',
     "/Users/O'Brien/Library/Application Support/Cindy/agent-skills/skills/_root__cindy-github--pr",
   ]) {
-    const { hostApi, calls, rows } = followScheduler({ skillDir });
-    const legacySingle = {
-      command: `node ${posixSingle(`${skillDir}/scripts/pr-heartbeat-gate.mjs`)} ${url}`,
-      timeoutMs: 180000,
-    };
-    const old = {
-      id: 'legacy-single', targetSessionId: 's1', status: 'active', recurring: true,
-      prompt: 'Follow ' + url, preRunHook: legacySingle,
-    };
-    rows.set(old.id, old);
-    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
-    // Legacy single-quoted hook should be recognized and return legacy_hook_repair (not prScheduleHookUnknown).
-    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
-    assert.equal(opened.reply.result.follow_state, 'unverified');
-    assert.equal(opened.reply.result.legacy_hook_repair.schedule_id, old.id);
+    // 1. Legacy single-quoted hook adopted on a fresh card returns unverified + legacy_hook_repair.
+    const legacyCommand = `node ${posixSingle(`${skillDir}/scripts/pr-heartbeat-gate.mjs`)} ${url}`;
+    const legacyRun = await runFreshAdoption(skillDir, legacyCommand);
+    assert.equal(legacyRun.opened.reply.result.follow_state, 'unverified');
+    assert.equal(legacyRun.opened.reply.result.legacy_hook_repair.schedule_id, legacyRun.existing.id);
     assert.equal(
-      opened.reply.result.legacy_hook_repair.command,
+      legacyRun.opened.reply.result.legacy_hook_repair.command,
       `node "${skillDir}/scripts/pr-node.cjs" pr-heartbeat-gate.mjs ${url}`,
     );
-    assert.equal(calls.includes('schedule_update'), false);
+    assert.equal(legacyRun.calls.includes('schedule_update'), false);
 
-    // Refreshing an existing owning card with a single-quoted legacy hook must also surface legacy_hook_repair.
-    const refreshedLegacy = await rt.tool({ card_id: opened.callId });
+    // Refreshing an already-bound owning card with a single-quoted legacy hook exercises legacyFollowRepair.
+    const refreshedLegacy = await legacyRun.rt.tool({ card_id: legacyRun.opened.callId });
     assert.equal(refreshedLegacy.reply.result.follow_state, 'unverified');
-    assert.equal(refreshedLegacy.reply.result.legacy_hook_repair.schedule_id, old.id);
+    assert.equal(refreshedLegacy.reply.result.legacy_hook_repair.schedule_id, legacyRun.existing.id);
 
-    // Modern pr-node.cjs launcher stabilized with POSIX single quotes should verify active cleanly.
-    rows.set(old.id, {
-      ...old,
-      preRunHook: {
-        command: `node ${posixSingle(`${skillDir}/scripts/pr-node.cjs`)} pr-heartbeat-gate.mjs ${url}`,
-        timeoutMs: 180000,
-      },
-    });
-    const verified = await rt.tool({ card_id: opened.callId });
-    assert.equal(verified.reply.result.follow_state, 'active');
-    assert.equal(verified.reply.result.legacy_hook_repair, undefined);
+    // 2. Modern pr-node.cjs launcher stabilized with POSIX single quotes verifies active via exactFollowHook on fresh adoption.
+    const launcherCommand = `node ${posixSingle(`${skillDir}/scripts/pr-node.cjs`)} pr-heartbeat-gate.mjs ${url}`;
+    const launcherRun = await runFreshAdoption(skillDir, launcherCommand);
+    assert.equal(launcherRun.opened.reply.result.follow_state, 'active');
+    assert.equal(launcherRun.opened.reply.result.legacy_hook_repair, undefined);
+    assert.equal(launcherRun.calls.includes('schedule_update'), false);
 
-    // Mismatched quotes and foreign single-quoted scripts remain rejected.
+    // 3. Mismatched quotes and foreign single-quoted scripts are rejected (follow_state === 'failed') on fresh adoption.
     for (const bad of [
       `node '${skillDir}/scripts/pr-heartbeat-gate.mjs" ${url}`,
       `node "${skillDir}/scripts/pr-node.cjs' pr-heartbeat-gate.mjs ${url}`,
       `node '/project/scripts/pr-heartbeat-gate.mjs' ${url}`,
+      `node '/project/scripts/pr-node.cjs' pr-heartbeat-gate.mjs ${url}`,
     ]) {
-      rows.set(old.id, { ...old, preRunHook: { command: bad, timeoutMs: 180000 } });
-      const rejected = await rt.tool({ card_id: opened.callId });
-      assert.equal(rejected.reply.result.legacy_hook_repair, undefined);
+      const rejectedRun = await runFreshAdoption(skillDir, bad);
+      assert.equal(rejectedRun.opened.reply.result.follow_state, 'failed', `expected rejection for: ${bad}`);
+      assert.equal(rejectedRun.opened.reply.result.legacy_hook_repair, undefined);
+      assert.equal(rejectedRun.calls.includes('schedule_create'), false);
     }
   }
 });
