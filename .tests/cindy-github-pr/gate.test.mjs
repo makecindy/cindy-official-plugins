@@ -949,8 +949,8 @@ test('new follower reads the 1.5.35 failure state and deduplicates it through ex
   const args = ['--max-snapshot-failures', '1'];
   assert.equal((await fx.run(args, fail)).code, 1);
   const old = fx.readState();
-  delete old.snapshotFailureSummary;
-  fx.writeState(old);
+  fx.writeState({ snapshotFailureSummary: undefined });
+  assert.equal(Object.hasOwn(fx.readState(), 'snapshotFailureSummary'), false);
   const reads = fx.snapshotRuns();
   fx.setTrigger({ firstScheduleId: 'new-follower' });
   const result = await fx.run(args, fail);
@@ -2216,6 +2216,25 @@ test('inventory failure survives resume; new CI failures still wake', async t =>
   for(let n=0;n<12;n++){fx.advance(5);assert.equal((await fx.run()).code,2);}
   fx.setSnapshot({...s,checks:[check('new-failure','failed')]});fx.advance(5);
   assert.equal((await fx.run()).code,0);
+});
+
+test('new follower gets the persistent inventory failure without inheriting the old notice window', async t => {
+  const fx = createFixture(t);
+  fx.setSnapshot(snap({ verdict: 'NEEDS_WORK', blockers: ['required_checks_unavailable'],
+    gate: { requiredChecksUnavailable: true }, checks: [] }));
+  await fx.run();
+  await fx.run(['--resume', 'observed']);
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /required-checks-unavailable/);
+  await fx.run(['--resume', 'noted persistent outage']);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /required-checks-unavailable/);
+  await fx.run(['--resume', 'new owner informed']);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
 });
 
 test('trace records continuous decisions and receipts without comment or resume text', async t => {

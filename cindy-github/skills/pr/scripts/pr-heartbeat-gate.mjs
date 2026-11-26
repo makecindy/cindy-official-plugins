@@ -1578,7 +1578,7 @@ async function gateMain(argv, ctx) {
     previous = { ...previous, followStartId: trigger.firstScheduleId };
     for (const key of ['watch', 'wait', 'fingerprint', 'pendingFingerprint', 'pendingWatch',
       'pendingKey', 'pendingPassCount', 'retryBackoffUntil', 'nextAllowAt', 'probe',
-      'lastPassAt', 'lastFullReadAt', 'lastCheckedAt', 'silenceSince', 'snapshotFailureReports']) delete previous[key];
+      'lastPassAt', 'lastFullReadAt', 'lastCheckedAt', 'silenceSince', 'snapshotFailureReports', 'inventoryNoticeAt']) delete previous[key];
     persist(file, previous);
   }
   const backoffUntil = Number(previous?.snapshotFailureBackoffUntil) || 0;

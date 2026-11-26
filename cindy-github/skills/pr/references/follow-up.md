@@ -133,7 +133,7 @@ only choose human waiting when every failing check and unresolved thread is acco
 The `wait-set` receipt of such a wait carries `notice` when the user is owed a message: `entered`
 the first time on this head, then `reminder` on every model renewal, including a same-day renewal.
 Each actual round states progress and the blocker; if the user must decide, ask that specific
-question again with a recommendation. No-change polls still skip without a message or model call.
+question again with a recommendation under the continuing-follow decision rule in SKILL.md section 5; end the round without blocking on a reply. No-change polls still skip without a message or model call.
 An absent receipt notice does not override a pending user decision known to the agent. A wait recorded before this rule existed is reviewed a day after it was set
 and reported once.
 

@@ -2411,6 +2411,56 @@ test('an externally stopped follow-up stays stopped after refresh', async () => 
   assert.equal(calls.filter(c => c === 'schedule_create').length, 1);
 });
 
+test('a persisted pre-upgrade Stop settles from a bound read without deleting the schedule', async () => {
+  for (const status of ['active', 'paused', 'absent']) {
+    const fault = {};
+    const { hostApi, rows, calls } = followScheduler(fault);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    const key = `pr-cards/${opened.callId}.json`;
+    const old = JSON.parse(rt.files.get(key));
+    delete old.manualStop;
+    old.pending = old.scheduleAction = 'stop';
+    rt.files.set(key, JSON.stringify(old));
+    if (status === 'absent') rows.clear();
+    else rows.get('sch-1').status = status;
+    fault.failGet = true;
+    await rt.tool({ card_id: opened.callId });
+    assert.equal(JSON.parse(rt.files.get(key)).scheduleAction, 'stop');
+    fault.failGet = false;
+    const refreshed = await rt.tool({ card_id: opened.callId });
+    assert.equal(refreshed.reply.result.follow_state, status === 'absent' ? 'stopped' : status);
+    assert.equal(JSON.parse(rt.files.get(key)).pending, null);
+    assert.equal(JSON.parse(rt.files.get(key)).scheduleAction, null);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /正在停止/);
+    if (status !== 'absent') {
+      assert.equal(rows.get('sch-1').status, status);
+      assert.match(rt.lastCard(opened.callId).html, /sch-1/);
+      rows.clear();
+      assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'stopped');
+    }
+    assert.equal(calls.includes('schedule_delete'), false);
+  }
+});
+
+test('terminal PR shows the actual final schedule state, not an ended label while still present', async () => {
+  for (const status of ['active', 'paused']) {
+    const { hostApi, rows, calls } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+    rows.set('old', { id: 'old', targetSessionId: 's1', status, recurring: true,
+      preRunHook: oldFollowHook('https://github.com/octo/repo/pull/42') });
+    rt.setGithub(prGraphql({ state: 'CLOSED' }));
+    assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, status);
+    assert.match(rt.lastCard(opened.callId).html, status === 'active' ? /跟进中/ : /跟进已暂停/);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /跟进已结束/);
+    rows.delete('old');
+    assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'stopped');
+    assert.match(rt.lastCard(opened.callId).html, /跟进已结束/);
+    assert.equal(calls.includes('schedule_delete'), false);
+  }
+});
+
 test('paused follow-up refreshes, retains its reservation and shows terminal PR status', async () => {
   const { hostApi, rows, calls } = followScheduler();
   const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });

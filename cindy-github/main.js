@@ -3336,7 +3336,11 @@ function renderPrCard(card, settings) {
     } else {
       tile = card.stage === 'merged' ? prTile('merged', 'merged') : prTile('closed', 'muted');
       meta = [prEsc(card.repo), prEsc(card.stage === 'merged' ? t('prStateMerged') : t('prStateClosed'))];
-      if (card.followedEver) meta.push(prEsc(t('prFollowEnded')));
+      if (card.followedEver) meta.push(prEsc(t(
+        card.scheduleId && card.following ? 'prStateFollowing' :
+          card.scheduleStatus === 'paused' ? 'prFollowPaused' :
+            card.scheduleId || unverifiedLegacyFollow(card) || card.scheduleError ? 'prFollowUnverified' : 'prFollowEnded'
+      )));
       left = prContextLine(card);
     }
   }
@@ -3750,7 +3754,8 @@ async function prCardTool(args, callId) {
   // The PR fetch can take time. Read the bound schedule after it, so a
   // user pause, deletion, or change of ownership during refresh is reflected
   // in the receipt and no stale hook is used for a repair suggestion.
-  if (card.scheduleId && hasCardScheduler() && !card.scheduleAction) {
+  var legacyStop = card.scheduleAction === 'stop' && manualFollowStop(card);
+  if (card.scheduleId && hasCardScheduler() && (!card.scheduleAction || legacyStop)) {
     try {
       var currentSchedule = await prSchedule('schedule_get', { id: card.scheduleId });
       if (currentSchedule && (!ownedFollowSchedule(currentSchedule, card) || currentSchedule.id !== card.scheduleId))
@@ -3760,7 +3765,15 @@ async function prCardTool(args, callId) {
         return fail(t('prScheduleFailed', { detail: currentSchedule.status }));
       card.following = !!currentSchedule && currentSchedule.status === 'active';
       card.scheduleStatus = currentSchedule && !card.following ? currentSchedule.status : null;
+      if (legacyStop) {
+        // A persisted pre-upgrade Stop cannot authorize a deletion. Converge
+        // through the ordinary bound read, not another write or stale intent.
+        card.pending = card.scheduleAction = null;
+        card.managedFollow = true;
+        card.scheduleError = null;
+      }
       if (!currentSchedule) {
+        card.manualStop = false;
         card.scheduleId = null;
         if (a.following === true) return fail(t('prScheduleFailed', { detail: 'schedule_get' }));
       }
