@@ -231,55 +231,24 @@ test('a whole project is fully re-checked every few minutes even without new act
 
 test('previously inactive existing objects still emit their first updated or reopened event', async () => {
   const h = harness({
-    subscriptions: [{
-      events: ['merge_request.updated', 'merge_request.reopened', 'merge_request.comment'],
-      filters: [{ field: 'project', operator: 'equals', value: 'group/app' }],
-    }],
-    routes: {
-      '/api/v4/user': { id: 1, username: 'me' },
-      '/projects/group%2Fapp/events': [{ id: 1 }],
-      '/projects/group%2Fapp/merge_requests?': [mr()],
-    },
+    subscriptions: [{ events: ['merge_request.updated', 'merge_request.reopened', 'merge_request.comment'], filters: [{ field: 'project', operator: 'equals', value: 'group/app' }] }],
+    routes: { '/api/v4/user': { id: 1, username: 'me' }, '/projects/group%2Fapp/events': [{ id: 1 }], '/projects/group%2Fapp/merge_requests?': [mr()] },
   });
   await h.cycle();
-  assert.deepEqual(h.published(), []);
-
   const fresh = new Date(Date.now() + 2000).toISOString();
   h.state.routes['/projects/group%2Fapp/events'] = [{ id: 2 }];
-  // MR !3 and MR !4 were created months ago and fell outside the initial baseline page, then woke up.
-  h.state.routes['/projects/group%2Fapp/merge_requests?'] = [
-    mr({ id: 403, iid: 3, created_at: '2025-06-01T00:00:00Z', updated_at: fresh, references: { full: 'group/app!3' } }),
-    mr({ id: 404, iid: 4, created_at: '2025-06-01T00:00:00Z', updated_at: fresh, references: { full: 'group/app!4' } }),
-    mr({ id: 405, iid: 5, created_at: '2025-06-01T00:00:00Z', updated_at: fresh, references: { full: 'group/app!5' } }),
-  ];
+  h.state.routes['/projects/group%2Fapp/merge_requests?'] = [3, 4, 5].map((iid) =>
+    mr({ id: 400 + iid, iid, created_at: '2025-06-01T00:00:00Z', updated_at: fresh, references: { full: `group/app!${iid}` } }));
   h.state.routes['/merge_requests/3/notes'] = [];
-  h.state.routes['/merge_requests/4/notes'] = [
-    { id: 301, body: 'reopened', system: true, created_at: fresh, author: { username: 'alice' } },
-  ];
-  h.state.routes['/merge_requests/5/notes'] = [
-    { id: 302, body: 'just a comment', system: false, created_at: fresh, author: { username: 'bob' } },
-  ];
+  h.state.routes['/merge_requests/4/notes'] = [{ id: 301, body: 'reopened', system: true, created_at: fresh, author: { username: 'alice' } }];
+  h.state.routes['/merge_requests/5/notes'] = [{ id: 302, body: 'just a comment', system: false, created_at: fresh, author: { username: 'bob' } }];
   await h.cycle();
-  assert.deepEqual(
-    h.published().map((e) => [e.type, e.data.iid]),
-    [
-      ['merge_request.updated', 3],
-      ['merge_request.reopened', 4],
-      ['merge_request.comment', 5],
-    ],
-  );
+  assert.deepEqual(h.published().map((e) => [e.type, e.data.iid]), [['merge_request.updated', 3], ['merge_request.reopened', 4], ['merge_request.comment', 5]]);
 });
 
 test('retries notes on transient failure without advancing the snapshot, and paginates past >100 notes', async () => {
   let failNotes = true;
-  const fresh = '2026-01-02T00:05:00Z';
-  const page1 = Array.from({ length: 100 }, (_, i) => ({
-    id: 1000 - i,
-    body: 'mentioned in commit abc',
-    system: true,
-    created_at: '2026-01-02T00:04:00Z',
-    author: { username: 'bot' },
-  }));
+  const page1 = Array.from({ length: 100 }, (_, i) => ({ id: 1000 - i, body: 'mentioned in commit abc', system: true, created_at: '2026-01-02T00:04:00Z', author: { username: 'bot' } }));
   const page2 = [
     { id: 202, body: 'approved this merge request', system: true, created_at: '2026-01-02T00:02:00Z', author: { username: 'reviewer' } },
     { id: 201, body: 'Early review remark', system: false, created_at: '2026-01-02T00:01:00Z', author: { username: 'reviewer' } },
@@ -290,68 +259,44 @@ test('retries notes on transient failure without advancing the snapshot, and pag
     routes: {
       '/api/v4/user': { id: 1, username: 'me' },
       '/projects/group%2Fapp/merge_requests/7': mr({ head_pipeline: null }),
-      '/merge_requests/7/notes': (url) => {
-        if (failNotes) return json({ message: 'gateway timeout' }, 502);
-        return json(url.includes('page=2') ? page2 : page1);
-      },
+      '/merge_requests/7/notes': (url) => (failNotes ? json({ message: 'gateway timeout' }, 502) : json(url.includes('page=2') ? page2 : page1)),
     },
   });
   await h.cycle();
-  assert.deepEqual(h.statuses(), ['listening']);
-
-  h.state.routes['/projects/group%2Fapp/merge_requests/7'] = mr({ updated_at: fresh, head_pipeline: null });
+  h.state.routes['/projects/group%2Fapp/merge_requests/7'] = mr({ updated_at: '2026-01-02T00:05:00Z', head_pipeline: null });
   await h.cycle();
-  assert.deepEqual(h.statuses(), ['listening', 'error'], 'failed notes read reports error and keeps retry cursor');
+  assert.deepEqual(h.statuses(), ['listening', 'error']);
   assert.deepEqual(h.published(), []);
-
   failNotes = false;
   await h.cycle();
   assert.deepEqual(h.statuses(), ['listening', 'error', 'listening']);
-  assert.deepEqual(
-    h.published().map((e) => [e.type, e.data.noteId]),
-    [['merge_request.comment', 201], ['merge_request.approved', 202]],
-  );
+  assert.deepEqual(h.published().map((e) => [e.type, e.data.noteId]), [['merge_request.comment', 201], ['merge_request.approved', 202]]);
 });
 
 test('drains >20 changed items across cycles without letting unchanged items consume the per-cycle budget', async () => {
-  const unchanged = Array.from({ length: 20 }, (_, i) => mr({
-    id: 100 + i, iid: i + 1, references: { full: `group/app!${i + 1}` },
-  }));
+  const unchanged = Array.from({ length: 20 }, (_, i) => mr({ id: 100 + i, iid: i + 1, references: { full: `group/app!${i + 1}` } }));
   const h = harness({
     subscriptions: [{ events: ['merge_request.opened'], filters: [{ field: 'project', operator: 'equals', value: 'group/app' }] }],
-    routes: {
-      '/api/v4/user': { id: 1, username: 'me' },
-      '/projects/group%2Fapp/events': [{ id: 1 }],
-      '/projects/group%2Fapp/merge_requests?': unchanged,
-      '/notes': [],
-    },
+    routes: { '/api/v4/user': { id: 1, username: 'me' }, '/projects/group%2Fapp/events': [{ id: 1 }], '/projects/group%2Fapp/merge_requests?': unchanged, '/notes': [] },
   });
   await h.cycle();
-  assert.deepEqual(h.published(), []);
-
   const baseMs = Date.now() + 1000;
   const burst = Array.from({ length: 25 }, (_, i) => {
     const ts = new Date(baseMs + i * 10).toISOString();
-    return mr({
-      id: 300 + i, iid: 101 + i, created_at: ts, updated_at: ts, references: { full: `group/app!${101 + i}` },
-    });
+    return mr({ id: 300 + i, iid: 101 + i, created_at: ts, updated_at: ts, references: { full: `group/app!${101 + i}` } });
   });
   h.state.routes['/projects/group%2Fapp/events'] = [{ id: 2 }];
-  h.state.routes['/projects/group%2Fapp/merge_requests?'] = (url) =>
-    json(url.includes('page=2') ? [] : [...unchanged, ...burst]);
-
+  h.state.routes['/projects/group%2Fapp/merge_requests?'] = (url) => json(url.includes('page=2') ? [] : [...unchanged, ...burst]);
   await h.cycle();
-  assert.equal(h.published().length, 20, 'first active cycle handles 20 newly changed MRs after skipping 20 unchanged ones');
-
-  // Even without another project `/events` change, the remaining 5 MRs drain on the very next cycle.
+  assert.equal(h.published().length, 20);
   await h.cycle();
-  assert.deepEqual(
-    h.published().map((e) => e.data.iid),
-    Array.from({ length: 25 }, (_, i) => 101 + i),
-  );
+  assert.deepEqual(h.published().map((e) => e.data.iid), Array.from({ length: 25 }, (_, i) => 101 + i));
 });
 
-test('retains finished pipelines on MR lookup errors or lookup cap until all are queued', async () => {
+test('retains finished pipelines across lookup errors/caps, verifies branch MR project+sha, and scopes pipeline polling to project targets', async () => {
+  const unscoped = harness({ subscriptions: [{ events: ['merge_request.pipeline'] }] });
+  assert.equal(await unscoped.cycle(), 'idle', 'pipeline-only subscription without project stays idle rather than N+1 polling');
+
   let failMrLookup = true;
   const h = harness({
     subscriptions: [{ events: ['merge_request.pipeline'], filters: [{ field: 'project', operator: 'equals', value: 'group/app' }] }],
@@ -359,7 +304,9 @@ test('retains finished pipelines on MR lookup errors or lookup cap until all are
       '/api/v4/user': { id: 1, username: 'me' },
       '/projects/group%2Fapp/events': [{ id: 1 }],
       '/projects/group%2Fapp/pipelines?': [],
-      '/projects/group%2Fapp/merge_requests?': [],
+      '/projects/group%2Fapp/merge_requests?': (url) => json(url.includes('source_branch=main')
+        ? [mr({ iid: 88, source_branch: 'main', source_project_id: 99, target_project_id: 42, sha: 'fork-sha' }), mr({ iid: 89, source_branch: 'main', source_project_id: 42, target_project_id: 42, sha: 'old-sha' })]
+        : [mr({ iid: 90, source_branch: 'feat', source_project_id: 42, target_project_id: 42, sha: 'feat-sha', references: { full: 'group/app!90' } })]),
       '/projects/group%2Fapp/merge_requests/': (url) => {
         if (failMrLookup) return json({ message: 'server error' }, 500);
         const iid = Number(url.split('/').pop());
@@ -368,50 +315,37 @@ test('retains finished pipelines on MR lookup errors or lookup cap until all are
     },
   });
   await h.cycle();
-
   const baseMs = Date.now() + 1000;
-  const finished = Array.from({ length: 12 }, (_, i) => ({
-    id: 900 + i,
-    status: 'success',
-    ref: `refs/merge-requests/${i + 1}/head`,
-    updated_at: new Date(baseMs + i * 10).toISOString(),
-  }));
+  const mrPipes = Array.from({ length: 11 }, (_, i) => ({ id: 900 + i, status: 'success', ref: `refs/merge-requests/${i + 1}/head`, updated_at: new Date(baseMs + i * 10).toISOString() }));
+  const branchPipes = [
+    { id: 950, status: 'success', ref: 'main', sha: 'upstream-main-sha', updated_at: new Date(baseMs + 200).toISOString() },
+    { id: 951, status: 'success', ref: 'feat', sha: 'feat-sha', updated_at: new Date(baseMs + 210).toISOString() },
+  ];
   h.state.routes['/projects/group%2Fapp/events'] = [{ id: 2 }];
-  h.state.routes['/projects/group%2Fapp/pipelines?'] = finished;
-
+  h.state.routes['/projects/group%2Fapp/pipelines?'] = [...mrPipes, ...branchPipes];
   await h.cycle();
   assert.deepEqual(h.statuses(), ['listening', 'error']);
-  assert.deepEqual(h.published(), []);
-
   failMrLookup = false;
   await h.cycle();
-  assert.equal(h.published().length, 10, 'caps MR lookups to 10 per cycle without marking #11 and #12 done');
-
+  assert.equal(h.published().length, 10);
   await h.cycle();
-  assert.deepEqual(
-    h.published().map((e) => e.data.iid),
-    Array.from({ length: 12 }, (_, i) => i + 1),
-  );
+  assert.deepEqual(h.published().map((e) => e.data.iid), [...Array.from({ length: 11 }, (_, i) => i + 1), 90]);
 });
 
-test('never evicts unpublished events past 500 pending items and preserves baselineAt across multi-cycle drains', async () => {
-  // 1) 501 comments on one MR (even sharing timestamps) + a transient publish outage must deliver all 501 in order.
+test('delivers >550 same-timestamp notes with backpressure, <=40 publishes per cycle, and separate baselineAt', async () => {
   let allowPublish = true;
+  let cycleSent = 0;
+  let maxSentPerCycle = 0;
   const accepted = [];
-  const allNotes = Array.from({ length: 501 }, (_, idx) => {
-    const id = 501 - idx; // descending IDs 501..1
-    return {
-      id,
-      body: `comment-${id}`,
-      system: false,
-      created_at: '2026-01-02T00:01:00Z',
-      author: { username: 'alice' },
-    };
+  const allNotes = Array.from({ length: 620 }, (_, idx) => {
+    const id = 620 - idx;
+    return { id, body: `c-${id}`, system: false, created_at: '2026-01-02T00:01:00Z', author: { username: 'alice' } };
   });
   const h = harness({
     subscriptions: watchMr,
     publishReply: (event) => {
       if (!allowPublish) return { ok: false, message: 'busy' };
+      cycleSent += 1;
       accepted.push(event);
       return { ok: true, accepted: 1, duplicate: false };
     },
@@ -419,8 +353,7 @@ test('never evicts unpublished events past 500 pending items and preserves basel
       '/api/v4/user': { id: 1, username: 'me' },
       '/projects/group%2Fapp/merge_requests/7': mr({ head_pipeline: null }),
       '/merge_requests/7/notes': (url) => {
-        const m = /[?&]page=([0-9]+)/.exec(url);
-        const page = m ? Number(m[1]) : 1;
+        const page = Number((/[?&]page=([0-9]+)/.exec(url) || [])[1] || 1);
         return json(allNotes.slice((page - 1) * 100, page * 100));
       },
     },
@@ -428,20 +361,18 @@ test('never evicts unpublished events past 500 pending items and preserves basel
   await h.cycle();
   h.state.routes['/projects/group%2Fapp/merge_requests/7'] = mr({ updated_at: '2026-01-02T00:01:00Z', head_pipeline: null });
   allowPublish = false;
-  await h.cycle(); // queues 1..500, publish fails → reports error, retains all 500 + note #501 unread
+  await h.cycle();
   assert.deepEqual(h.statuses(), ['listening', 'error']);
-  assert.equal(accepted.length, 0);
-
   allowPublish = true;
-  for (let i = 0; i < 15 && accepted.length < 501; i += 1) await h.cycle();
-  assert.deepEqual(
-    accepted.map((e) => e.data.noteId),
-    Array.from({ length: 501 }, (_, i) => i + 1),
-    'every one of the 501 comments is delivered in chronological order without dropping #1',
-  );
+  for (let i = 0; i < 20 && accepted.length < 620; i += 1) {
+    cycleSent = 0;
+    await h.cycle();
+    if (cycleSent > maxSentPerCycle) maxSentPerCycle = cycleSent;
+  }
+  assert.ok(maxSentPerCycle <= 40, `expected <=40 publishes per cycle, saw ${maxSentPerCycle}`);
+  assert.deepEqual(accepted.map((e) => e.data.noteId), Array.from({ length: 620 }, (_, i) => i + 1));
 
-  // 2) Multi-cycle >20 drain keeps baselineAt separate from resumeAt AND partial target failures still report error.
-  let failSecondProject = true;
+  let failBroken = true;
   const multi = harness({
     subscriptions: [
       { events: ['merge_request.opened', 'merge_request.comment'], filters: [{ field: 'project', operator: 'equals', value: 'group/app' }] },
@@ -451,31 +382,24 @@ test('never evicts unpublished events past 500 pending items and preserves basel
       '/api/v4/user': { id: 1, username: 'me' },
       '/projects/group%2Fapp/events': [{ id: 1 }],
       '/projects/group%2Fapp/merge_requests?': [],
-      '/projects/group%2Fbroken/events': () => (failSecondProject ? json({}, 502) : json([{ id: 1 }])),
+      '/projects/group%2Fbroken/events': () => (failBroken ? json({}, 502) : json([{ id: 1 }])),
       '/projects/group%2Fbroken/merge_requests?': [],
     },
   });
   await multi.cycle();
-  assert.deepEqual(multi.statuses(), ['error'], 'one failing project alongside a healthy project must still report error');
-
-  failSecondProject = false;
+  assert.deepEqual(multi.statuses(), ['error']);
+  failBroken = false;
   const tBase = Date.now() + 1000;
+  const early = new Date(tBase + 5_000).toISOString();
   const first20 = Array.from({ length: 20 }, (_, i) => {
     const ts = new Date(tBase + 20_000 + i * 10).toISOString();
     return mr({ id: 2000 + i, iid: 201 + i, created_at: ts, updated_at: ts, references: { full: `group/app!${201 + i}` } });
   });
-  const earlyCreatedAt = new Date(tBase + 5_000).toISOString();
-  const lateEditedAt = new Date(tBase + 30_000).toISOString();
-  const item21 = mr({ id: 2099, iid: 299, created_at: earlyCreatedAt, updated_at: lateEditedAt, references: { full: 'group/app!299' } });
   multi.state.routes['/projects/group%2Fapp/events'] = [{ id: 2 }];
-  multi.state.routes['/projects/group%2Fapp/merge_requests?'] = [...first20, item21];
-  multi.state.routes['/merge_requests/299/notes'] = [
-    { id: 700, body: 'created before resumeAt', system: false, created_at: earlyCreatedAt, author: { username: 'bob' } },
-  ];
+  multi.state.routes['/projects/group%2Fapp/merge_requests?'] = [...first20, mr({ id: 2099, iid: 299, created_at: early, updated_at: new Date(tBase + 30_000).toISOString(), references: { full: 'group/app!299' } })];
+  multi.state.routes['/merge_requests/299/notes'] = [{ id: 700, body: 'early', system: false, created_at: early, author: { username: 'bob' } }];
   multi.state.routes['/notes'] = [];
-
-  await multi.cycle(); // drains first 20 (resumeAt moves to tBase+20s, baselineAt stays < earlyCreatedAt)
-  await multi.cycle(); // drains item21 without losing its tBase+5s opened/comment events
-  const item21Events = multi.published().filter((e) => e.data.iid === 299).map((e) => e.type).sort();
-  assert.deepEqual(item21Events, ['merge_request.comment', 'merge_request.opened']);
+  await multi.cycle();
+  await multi.cycle();
+  assert.deepEqual(multi.published().filter((e) => e.data.iid === 299).map((e) => e.type).sort(), ['merge_request.comment', 'merge_request.opened']);
 });

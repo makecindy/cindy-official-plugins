@@ -58,7 +58,7 @@
       },
       {
         "type": "merge_request.pipeline",
-        "name": "MR 流水线出结果",
+        "name": "MR 流水线出结果(需指定 project)",
         "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft", "pipelineId", "pipelineStatus"]
       },
       {
