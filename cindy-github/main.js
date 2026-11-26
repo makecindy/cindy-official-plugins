@@ -151,6 +151,7 @@ var MESSAGES = {
     prLegacyHookRepair: '旧版前置检查未自动修改。请在自动化设置中改用新版启动器，保留原超时。',
     prFollowNeedsRepair: '跟进待修复',
     prRepairSchedule: '调度 ID：{id}。选中复制下方完整命令：',
+    prScheduleHookUnknown: '无法确认这条调度仍使用插件生成的前置检查，请在自动化设置中查看或停止它。',
     prReadyFailed: '没能转为正式 PR：{detail}',
     prReadyUnknown: '不确定是否已转为正式 PR，请先到 GitHub 核对，不要重复点',
     prSaveFailed: '卡片状态没能保存，请稍后重试',
@@ -301,6 +302,7 @@ var MESSAGES = {
     prLegacyHookRepair: 'The old pre-run hook was left unchanged. Switch to the new launcher in Automation settings, keeping the timeout.',
     prFollowNeedsRepair: 'Follow-up needs repair',
     prRepairSchedule: 'Schedule ID: {id}. Select and copy the full command below:',
+    prScheduleHookUnknown: 'Cannot confirm this schedule still uses the plugin-generated pre-run hook. View or stop it in Automation settings.',
     prReadyFailed: 'Could not mark it ready for review: {detail}',
     prReadyUnknown: 'Not sure the PR was marked ready. Check it on GitHub before clicking again.',
     prSaveFailed: 'Could not save the card state. Try again in a moment.',
@@ -451,6 +453,7 @@ var MESSAGES = {
     prLegacyHookRepair: '旧版の事前チェックは変更していません。自動化設定でタイムアウトを維持したまま新しいランチャーに切り替えてください。',
     prFollowNeedsRepair: 'フォローの修復が必要',
     prRepairSchedule: 'スケジュール ID：{id}。下のコマンド全体を選択してコピーしてください：',
+    prScheduleHookUnknown: 'このスケジュールがプラグインの事前チェックを使っているか確認できません。自動化設定で確認または停止してください。',
     prReadyFailed: '正式な PR にできませんでした：{detail}',
     prReadyUnknown: 'PR が正式になったか分かりません。もう一度押す前に GitHub で確認してください',
     prSaveFailed: 'カードの状態を保存できませんでした。しばらくしてからもう一度お試しください',
@@ -601,6 +604,7 @@ var MESSAGES = {
     prLegacyHookRepair: '이전 사전 실행 검사는 변경하지 않았습니다. 자동화 설정에서 제한 시간을 유지한 채 새 실행기로 변경하세요.',
     prFollowNeedsRepair: '팔로우 복구 필요',
     prRepairSchedule: '자동화 ID: {id}. 아래 전체 명령을 선택하여 복사하세요:',
+    prScheduleHookUnknown: '이 자동화가 플러그인이 생성한 사전 실행 검사를 사용 중인지 확인할 수 없습니다. 자동화 설정에서 확인하거나 중지하세요.',
     prReadyFailed: '정식 PR로 전환하지 못했습니다: {detail}',
     prReadyUnknown: '정식 PR로 전환됐는지 확실하지 않습니다. 다시 누르기 전에 GitHub에서 확인하세요',
     prSaveFailed: '카드 상태를 저장하지 못했습니다. 잠시 후 다시 시도하세요',
@@ -3452,18 +3456,59 @@ function cardFollowCommand(dir, url) {
   return 'node "' + dir + '/scripts/pr-node.cjs" pr-heartbeat-gate.mjs ' + url;
 }
 
-// Only the exact old generated command from this approved Skill is ours.
-// The public scheduler API has no caller-supplied compare-and-update guard;
-// a read followed by a write could overwrite a user's concurrent edit.
-async function legacyFollowRepair(row, card) {
+// Only exact generated commands from this approved Skill confer native
+// schedule ownership. URL owner/repo case is immaterial, not shell syntax.
+function exactFollowHook(row, card, dir) {
   var url = followUrl(card);
   var command = row.preRunHook.command;
   var match = typeof command === 'string' && /^(.*) (https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+)$/.exec(command);
-  if (!match || match[2].toLowerCase() !== url) return null;
+  if (!dir || !match || match[2].toLowerCase() !== url) return null;
+  var legacy = match[1] === 'node "' + dir + '/scripts/pr-heartbeat-gate.mjs"';
+  if (!legacy && match[1] !== 'node "' + dir + '/scripts/pr-node.cjs" pr-heartbeat-gate.mjs') return null;
+  // The public scheduler API has no caller-supplied compare-and-update guard:
+  // report a replacement for the old command, never write it automatically.
+  return { repair: legacy ? { schedule_id: row.id, command: cardFollowCommand(dir, url) } : null };
+}
+
+async function legacyFollowRepair(row, card) {
+  if (typeof row.preRunHook.command !== 'string' || row.preRunHook.command.indexOf('/scripts/pr-heartbeat-gate.mjs" ') < 0) return null;
   var dir;
   try { dir = await cardFollowSkillDir(); } catch (_) { return null; }
-  if (match[1] !== 'node "' + dir + '/scripts/pr-heartbeat-gate.mjs"') return null;
-  return { schedule_id: row.id, command: cardFollowCommand(dir, url) };
+  var hook = exactFollowHook(row, card, dir);
+  return hook && hook.repair;
+}
+
+// Reconcile all ID-less legacy follow fields in one place, using only the
+// final read of a unique, same-PR schedule. No user configuration is changed.
+async function reconcileLegacyFollow(card) {
+  var rows = await schedulesForPr(card);
+  var row = null, hook = null, error = null;
+  if (rows.length) {
+    var candidate = rows.length === 1 && rows[0];
+    if (!candidate || !candidate.id || !ownedFollowSchedule(candidate, card)) {
+      error = t('prOwnershipUnknown');
+    } else {
+      var dir;
+      try { dir = await cardFollowSkillDir(); } catch (_) {}
+      var saved = await prSchedule('schedule_get', { id: candidate.id });
+      if (saved) {
+        if (saved.id !== candidate.id || !ownedFollowSchedule(saved, card)) error = t('prOwnershipUnknown');
+        else {
+          hook = exactFollowHook(saved, card, dir);
+          if (!hook) error = t('prScheduleHookUnknown');
+          else row = saved;
+        }
+      }
+    }
+  }
+  card.managedFollow = true;
+  card.followedEver = true;
+  card.scheduleId = row ? row.id : null;
+  card.following = !!row && row.status === 'active';
+  card.scheduleStatus = row && !card.following ? row.status : null;
+  card.legacyHookRepair = card.following && hook ? hook.repair : null;
+  card.scheduleError = error ? t('prScheduleFailed', { detail: error }) : null;
+  card.note = card.scheduleError || (card.legacyHookRepair ? t('prLegacyHookRepair') : null);
 }
 
 async function createCardSchedule(card, settings) {
@@ -3514,16 +3559,25 @@ async function syncCardSchedule(card, settings, start) {
         card.pending = card.scheduleAction = null;
         throw new Error(t('prOwnershipUnknown'));
       }
+      var dir = await cardFollowSkillDir();
       var saved = await prSchedule('schedule_get', { id: row.id });
       if (!ownedFollowSchedule(saved, card) || saved.status !== 'active' || saved.id !== row.id) throw new Error('schedule_get');
-      repair = await legacyFollowRepair(saved, card);
+      var hook = exactFollowHook(saved, card, dir);
+      if (!hook) {
+        card.pending = card.scheduleAction = null;
+        throw new Error(t('prScheduleHookUnknown'));
+      }
+      repair = hook.repair;
       card.scheduleId = row.id;
       card.scheduleStatus = null;
       card.followedEver = true;
     } else {
+      var stopDir;
+      try { stopDir = await cardFollowSkillDir(); } catch (_) {}
       var owned = await prSchedule('schedule_get', { id: card.scheduleId });
       if (owned) {
         if (!ownedFollowSchedule(owned, card) || owned.id !== card.scheduleId) throw new Error(t('prOwnershipUnknown'));
+        if (!exactFollowHook(owned, card, stopDir)) throw new Error(t('prScheduleHookUnknown'));
         await prSchedule('schedule_delete', { id: owned.id });
         if (await prSchedule('schedule_get', { id: owned.id })) throw new Error('schedule_delete');
       }
@@ -3684,38 +3738,17 @@ async function prCardTool(args, callId) {
     try {
       if (currentSchedule && currentSchedule.status === 'active') {
         card.legacyHookRepair = await legacyFollowRepair(currentSchedule, card);
+        if (card.legacyHookRepair) card.note = t('prLegacyHookRepair');
       } else if (legacyFollow) {
-        // Never create/restart a schedule while discovering an old card's
-        // hook. A single matching PR schedule and its exact task are required.
-        var legacyRows = await schedulesForPr(card);
-        var candidate = legacyRows.length === 1 && legacyRows[0];
-        if (candidate && candidate.id && candidate.status === 'active' && ownedFollowSchedule(candidate, card) &&
-            await legacyFollowRepair(candidate, card)) {
-          var confirmed = await prSchedule('schedule_get', { id: candidate.id });
-          if (!confirmed) {
-            card.following = false;
-            card.managedFollow = true;
-          } else {
-            if (!ownedFollowSchedule(confirmed, card) || confirmed.id !== candidate.id)
-              throw new Error(t('prOwnershipUnknown'));
-            if (confirmed.status === 'active') card.legacyHookRepair = await legacyFollowRepair(confirmed, card);
-          }
-          if (confirmed && (card.legacyHookRepair || confirmed.status !== 'active')) {
-            card.scheduleId = confirmed.id;
-            card.following = confirmed.status === 'active';
-            card.scheduleStatus = card.following ? null : confirmed.status;
-            card.managedFollow = true;
-          }
-        }
+        await reconcileLegacyFollow(card);
       }
-      if (card.legacyHookRepair) card.note = t('prLegacyHookRepair');
     } catch (err) { return fail(t('prScheduleFailed', { detail: String(err.message || err) })); }
   }
 
   // A claim is permission to create a schedule, not a report that one already exists.
   // Keep stop reservations until deletion is confirmed; contradictory requests never reacquire.
   var pendingBefore = card.pending;
-  if (a.claim_follow === true && a.following !== false && card.stage === 'open' && card.pending !== 'stop' && !card.following && !card.scheduleId) {
+  if (!legacyFollow && a.claim_follow === true && a.following !== false && card.stage === 'open' && card.pending !== 'stop' && !card.following && !card.scheduleId) {
     card.pending = 'follow';
   }
 
@@ -3731,7 +3764,7 @@ async function prCardTool(args, callId) {
     card.settingsApplied = true;
     card.publishedHere = true;
     if (settings.autoRename && !card.renamed) todo.push(t('prTodoRename', { title: prTaskTitle(card) }));
-    if (settings.autoFollow && a.following !== false && card.pending !== 'stop' && !card.following && !card.scheduleId && !card.pr.draft) {
+    if (!legacyFollow && settings.autoFollow && a.following !== false && card.pending !== 'stop' && !card.following && !card.scheduleId && !card.pr.draft) {
       card.pending = 'follow';
       nativeStart = hasCardScheduler();
       if (!nativeStart) todo.push(t('prTodoFollow', { url: card.pr.url }));

@@ -25,6 +25,20 @@ const manifest = JSON.parse(
   readFileSync(new URL('../cindy-github/ghost.json', import.meta.url), 'utf8'),
 );
 
+test('legacy repair is disclosed in release notes and the four-language pr_card tool contract', () => {
+  assert.match(manifest.releaseNotes, /新建或已手动修复前置检查的调度/);
+  assert.match(manifest.releaseNotes, /刷新 PR 卡片查看修复说明/);
+  const base = manifest.tools.find(tool => tool.name === 'pr_card').description;
+  for (const locale of ['zh-CN', 'en', 'ja', 'ko']) {
+    const catalog = JSON.parse(readFileSync(new URL(`../cindy-github/locales/${locale}.json`, import.meta.url), 'utf8'));
+    const description = catalog.tools.pr_card.description;
+    assert.ok(description.length <= 1024, `${locale}: exceeds host tool-description limit`);
+    for (const term of ['unverified', 'legacy_hook_repair', 'schedule_id', 'command'])
+      assert.ok(description.includes(term), `${locale}: missing ${term}`);
+    if (locale === 'zh-CN') assert.equal(description, base);
+  }
+});
+
 function jsonResponse(data, status = 200) {
   return { ok: true, status, body: JSON.stringify(data), headers: {} };
 }
@@ -2028,26 +2042,111 @@ test('refresh of a pre-native following card discovers its sole active legacy ho
   assert.equal(rows.size, 0, 'stop deletes the same verified schedule');
 });
 
-test('discovery of an ID-less legacy card reports the final read after an active list result', async () => {
-  for (const action of ['pause', 'delete', 'rebind']) {
+test('discovery of an ID-less legacy card reports the final read after an active list result without acquiring a custom hook', async () => {
+  for (const action of ['pause', 'delete', 'rebind', 'pause-and-custom']) {
     const { hostApi, calls, rows } = followScheduler({ beforeGet(rows, id) {
       if (action === 'pause') rows.get(id).status = 'paused';
       else if (action === 'delete') rows.delete(id);
-      else rows.get(id).targetSessionId = 's2';
+      else if (action === 'rebind') rows.get(id).targetSessionId = 's2';
+      else {
+        const row = rows.get(id);
+        row.status = 'paused';
+        row.preRunHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" https://github.com/octo/repo/pull/42', timeoutMs: 98765 };
+      }
     } });
     const rt = createPrRuntime({ github: prGraphql(), hostApi });
     const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
     rows.set('old', { id: 'old', targetSessionId: 's1', status: 'active', recurring: true,
       preRunHook: oldFollowHook('https://github.com/octo/repo/pull/42') });
-    const refreshed = await rt.tool({ card_id: opened.callId });
-    if (action === 'rebind') {
-      assert.equal(refreshed.reply.ok, false);
-      assert.equal(rows.get('old').targetSessionId, 's2');
+    const refreshed = await rt.tool({ card_id: opened.callId, ...(action === 'pause-and-custom' ? { claim_follow: true } : {}) });
+    const card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(card.following, false);
+    assert.equal(card.legacyHookRepair, null);
+    if (action === 'rebind' || action === 'pause-and-custom') {
+      assert.equal(refreshed.reply.result.follow_state, 'failed');
+      assert.equal(card.scheduleId, null);
+      if (action === 'rebind') assert.equal(rows.get('old').targetSessionId, 's2');
+      else {
+        assert.equal(rows.get('old').status, 'paused');
+        assert.match(refreshed.reply.result.note, /无法确认这条调度仍使用插件生成的前置检查/);
+        assert.equal(rows.get('old').preRunHook.timeoutMs, 98765);
+        assert.equal(refreshed.reply.result.follow_claimed, false);
+      }
     } else {
       assert.equal(refreshed.reply.result.follow_state, action === 'pause' ? 'paused' : 'stopped');
       assert.equal(refreshed.reply.result.legacy_hook_repair, undefined);
+      assert.equal(card.scheduleId, action === 'pause' ? 'old' : null);
+    }
+    if (action !== 'pause') {
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/);
+      const saved = JSON.stringify([...rows.values()]);
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(rt.agentRuns.length, 0, 'no fallback Stop can reach an unverified schedule');
+      assert.equal(JSON.stringify([...rows.values()]), saved);
     }
     assert.deepEqual(calls, ['schedule_list', 'schedule_get']);
+  }
+});
+
+test('an ID-less old card reflects a pause before GitHub returns, not its saved following flag', async () => {
+  const { hostApi, calls, rows } = followScheduler();
+  const rt = createPrRuntime({ github: prGraphql(), hostApi });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const old = { id: 'old', targetSessionId: 's1', status: 'active', recurring: true,
+    preRunHook: oldFollowHook('https://github.com/octo/repo/pull/42') };
+  rows.set(old.id, old);
+  rt.setGithub(request => {
+    assert.deepEqual(calls, []);
+    rows.get(old.id).status = 'paused';
+    return prGraphql()(request);
+  });
+  const refreshed = await rt.tool({ card_id: opened.callId });
+  assert.equal(refreshed.reply.result.follow_state, 'paused');
+  const card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+  assert.equal(card.scheduleId, old.id);
+  assert.equal(card.following, false);
+  assert.equal(card.scheduleStatus, 'paused');
+  assert.match(visibleText(rt.lastCard(opened.callId).html).join('\n'), /跟进已暂停/);
+  assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-live-label=/);
+  assert.deepEqual(calls, ['schedule_list', 'schedule_get']);
+  await rt.click(opened.callId, 'pr:stop');
+  assert.equal(rows.size, 0, 'a verified plugin-owned pause can be explicitly stopped');
+});
+
+test('a previously verified card cannot delete a schedule changed to a custom same-name hook before Stop', async () => {
+  const { hostApi, calls, rows } = followScheduler();
+  const rt = createPrRuntime({ github: prGraphql(), hostApi });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const old = { id: 'old', targetSessionId: 's1', status: 'paused', recurring: true,
+    preRunHook: oldFollowHook('https://github.com/octo/repo/pull/42') };
+  rows.set(old.id, old);
+  assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'paused');
+  const custom = { ...old, preRunHook: { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" https://github.com/octo/repo/pull/42', timeoutMs: 98765 } };
+  rows.set(old.id, custom);
+  await rt.click(opened.callId, 'pr:stop');
+  assert.deepEqual(rows.get(old.id), custom);
+  assert.equal(calls.includes('schedule_delete'), false);
+  assert.equal(rt.agentRuns.length, 0);
+});
+
+test('ID-less discovery and native reuse accept the exact launcher, not a project script', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  for (const native of [false, true]) {
+    for (const custom of [false, true]) {
+      const { hostApi, calls, rows } = followScheduler();
+      const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: native } } });
+      const row = { id: 'old', targetSessionId: 's1', status: 'active', recurring: true, preRunHook: {
+        command: custom ? 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url :
+          oldFollowHook(url).command.replace('pr-heartbeat-gate.mjs"', 'pr-node.cjs" pr-heartbeat-gate.mjs'), timeoutMs: 98765 } };
+      const opened = native ? null : await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+      rows.set(row.id, row);
+      const result = native ? await rt.tool({ repo: 'octo/repo', pr: 42, published: true }) : await rt.tool({ card_id: opened.callId });
+      const cardId = result.reply.result.card_id;
+      assert.equal(result.reply.result.follow_state, custom ? 'failed' : 'active');
+      assert.equal(JSON.parse(rt.files.get(`pr-cards/${cardId}.json`)).scheduleId || null, custom ? null : row.id);
+      assert.deepEqual(rows.get(row.id), row);
+      assert.equal(calls.some(c => ['schedule_update', 'schedule_create', 'schedule_delete'].includes(c)), false);
+    }
   }
 });
 
@@ -2070,7 +2169,10 @@ test('pre-native discovery never creates a schedule or changes an ambiguous, pau
     const result = await rt.tool({ card_id: opened.callId, ...refresh });
     assert.equal(result.reply.ok, true, label);
     assert.equal(result.reply.result.legacy_hook_repair, undefined, label);
-    assert.ok(!JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleId, label);
+    const card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(card.following, false, label);
+    assert.equal(card.scheduleId || null, label === 'paused' ? old.id : null, label);
+    if (label !== 'stopping') assert.equal(result.reply.result.follow_state, label === 'paused' ? 'paused' : label === 'absent' ? 'stopped' : 'failed', label);
     assert.deepEqual([...rows.values()], candidates, label);
     assert.equal(calls.some(c => ['schedule_create', 'schedule_update', 'schedule_delete'].includes(c)), false, label);
   }
