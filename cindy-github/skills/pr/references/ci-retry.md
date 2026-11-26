@@ -214,6 +214,19 @@ name/email stable, and allow the date to advance naturally. Never change a
 pinned date/configuration, inject a nonce or probe an amend to qualify. The later
 new-SHA and raw-payload checks remain mandatory.
 
+Before quota or amend, reject an empty or whitespace-only original raw message.
+After the strict UTF-8 validation below, require at least one non-whitespace
+character in the complete original message, even when DCO trailers would be added.
+This applies to roots, single-parent and merge heads, signed or unsigned.
+Missing, truncated or unknown raw-message reads also stop. Do not use a rendered
+subject, strip comment lines or rely on `--no-edit` to retain the original
+`--allow-empty-message` permission. The fixed amend argv does not retain permission for an empty message;
+whitespace-only messages do not qualify either. Do not add `--allow-empty-message`,
+invent a subject, append a nonce/trailer solely to qualify or amend as a probe.
+Recheck the pinned raw message before budget status/reservation, amend and push.
+The existing post-amend raw-message/trailer comparison remains required for
+supported messages, including literal comment lines preserved by verbatim cleanup.
+
 Before quota or amend, reject an empty root or single-parent head. Use the
 original raw parent count, never a replacement-aware or shallow view. For one
 parent, read that pinned parent's raw commit with the same argument boundary

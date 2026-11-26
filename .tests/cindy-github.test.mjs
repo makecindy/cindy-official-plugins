@@ -102,7 +102,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.53');
+  assert.equal(manifest.version, '1.5.54');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',

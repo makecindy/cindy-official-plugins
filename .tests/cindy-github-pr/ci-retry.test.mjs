@@ -1194,6 +1194,43 @@ test('empty root and single-parent heads are excluded before quota or amend', as
   });
 });
 
+test('empty and whitespace-only raw messages are excluded before quota or amend', async t => {
+  for (const [label, message] of [['empty', ''], ['blank lines', '\n\n'], ['ASCII whitespace', ' \t\r\n'], ['ordinary control', 'original intent\n'], ['verbatim comment control', '# literal intent\n']]) await t.test(label, t => {
+    const fx = fixture(t), work = path.join(fx.root, 'message-head'); fs.mkdirSync(work);
+    const global = path.join(fx.root, 'global'); fs.writeFileSync(global, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1', GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' };
+    const git = (args, encoding = 'utf8') => execFileSync('git', args, { cwd: work, env, encoding, stdio: ['ignore', 'pipe', 'pipe'] });
+    git(['init', '-b', 'main']);
+    for (const [name, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false']]) git(['config', name, value]);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'base\n'); git(['add', 'code.txt']); git(['commit', '-m', 'base']);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'nonempty change\n'); git(['add', 'code.txt']);
+    const messageFile = path.join(fx.root, 'message'); fs.writeFileSync(messageFile, message);
+    git(['commit', '--allow-empty-message', '--cleanup=verbatim', '-F', messageFile]);
+    const original = git(['rev-parse', 'HEAD']).trim(), raw = git(['--no-replace-objects', 'cat-file', 'commit', original], 'buffer');
+    const rawMessage = bytes => bytes.subarray(bytes.indexOf(Buffer.from('\n\n')) + 2);
+    assert.deepEqual(rawMessage(raw), Buffer.from(message));
+    const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    // Native counterexample/control only: no quota operation, remote or DCO repair.
+    const amend = spawnSync('git', plan.amendArgs, { cwd: work, env: { ...env, GIT_COMMITTER_DATE: '2026-01-01T00:00:01Z' }, encoding: 'utf8' });
+    if (message.trim() === '') {
+      assert.notEqual(amend.status, 0);
+      assert.match(amend.stderr, /empty commit message/);
+      assert.equal(git(['rev-parse', 'HEAD']).trim(), original);
+    } else {
+      assert.equal(amend.status, 0, amend.stderr);
+      assert.notEqual(git(['rev-parse', 'HEAD']).trim(), original);
+      assert.deepEqual(rawMessage(git(['cat-file', 'commit', 'HEAD'], 'buffer')), rawMessage(raw));
+    }
+    assert.equal(fs.existsSync(fx.retryDir), false);
+    const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    assert.ok(/Before quota or amend, reject an empty or whitespace-only original raw message/.test(guide));
+    assert.ok(/even when DCO trailers would be added/.test(guide));
+    assert.ok(/Do not add `--allow-empty-message`/.test(guide));
+    assert.ok(/Recheck the pinned raw message before budget status\/reservation, amend and push/.test(guide));
+  });
+});
+
 test('unsigned heads cannot inherit automatic signing before quota or amend', t => {
   const fx = fixture(t), work = path.join(fx.root, 'unsigned'); fs.mkdirSync(work);
   const key = path.join(fx.root, 'key');

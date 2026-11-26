@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.53, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.54, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1440,3 +1440,20 @@ remain byte-identical. All 187 inherited non-feature paths matched fetched main;
 prior README feature pointers and both languages were retained. Preflight has no
 blockers; pending-merge/main-ahead and task/old-artifact warnings were accounted
 for without including unrelated untracked work. No installation or live recovery.
+
+
+## Empty-message eligibility before reservation — 2026-11-26 (source 1.5.54, not installed)
+
+The pre-reservation invariant is: a predictable amend refusal must not consume a retry slot. Source 1.5.54 narrows supported original messages to complete, strictly valid UTF-8 with at least one non-whitespace character. This is read from the pinned raw payload, not the displayed subject. The same condition applies before budget status/reservation, amend and push, to roots, single-parent and merge heads, signed or unsigned, even if a required DCO trailer would otherwise be appended. No allow-empty-message exception, invented subject or probe amend is introduced; normal raw-message/trailer comparisons remain.
+
+| Original message | Before budget status/reservation | Later boundary or result |
+| --- | --- | --- |
+| Empty / whitespace only | Stop, original head and slots unchanged | Never amend to test eligibility |
+| Missing / truncated / invalid UTF-8 / unknown | Stop | A changed or unknown re-read stops without repair/refund |
+| Nonempty, including literal comment text | Continue only if every existing prerequisite holds | Recheck pinned bytes before amend/push; compare resulting raw message/trailers |
+
+The Agent remains the sole workflow decision owner; the existing receipt owner and exclusive slot lifecycle are unchanged. These are documented Agent predicates, not an added mechanical Git executor. No new state, lock, storage, bypass option or configuration change.
+
+Windows 10.0.26100, Node 22.22.3 and Git 2.54.0.windows.1 native single-parent fixtures independently reproduce failed amend and unchanged HEAD for zero bytes, blank lines and ASCII whitespace. Ordinary and literal-comment controls produce a new SHA and preserve raw message bytes. Fixtures use nonempty tree changes and no DCO addition, reservation, remote or push. The corrected regression fails against source53's guide (0 pass/6 fail), then passes against source54. This is local Git/policy coverage, not live Cindy/GitHub recovery acceptance. Existing UI/launcher/disable/signed-head/causal-attribution gaps and blocked cleanup residuals remain; this source was not installed.
+
+Validation on the final runtime/guide/test content: mandatory four suites plus the plugin suite **562 passed / 36 skipped / 0 failed (294.90 s)**; 17 skips are native success paths unsupported by this full-directory-sync environment and 19 are existing skips. Forge exact-content comparison: **30 files, 251846 archive bytes, 710244 uncompressed bytes**; the newly generated package was deleted and absence checked. No additional candidate copy or live recovery was created.
