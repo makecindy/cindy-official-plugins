@@ -10,6 +10,7 @@ import { execFile } from 'node:child_process';
 import { resolvePullRequestTarget } from './lib/repo-target.mjs';
 import { applyRequiredChecks, requiredChecksOf } from './lib/required-checks.mjs';
 import { classifyMergeQueue } from './lib/merge-queue.mjs';
+import { uncorroboratedApprovalCommits } from './lib/follow-pacing.mjs';
 
 const PASS_CONCLUSIONS = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL']);
 const FAIL_CONCLUSIONS = new Set(['FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED', 'STALE', 'STARTUP_FAILURE']);
@@ -476,6 +477,42 @@ async function probe(args) {
   process.stdout.write(JSON.stringify(probeFingerprint(pr)) + '\n');
 }
 
+async function fetchReviewCommitChecks(owner, name, oids) {
+  if (!oids.length) return {};
+  const varDefs = oids.map((_, i) => `$oid${i}: GitObjectID!`).join(', ');
+  const fields = oids
+    .map((_, i) => `    c${i}: object(oid: $oid${i}) { ... on Commit { oid statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { checkSuite { app { databaseId slug } } } } } } } }`)
+    .join('\n');
+  const query = `query($owner: String!, $name: String!, ${varDefs}) {\n  repository(owner: $owner, name: $name) {\n${fields}\n  }\n}`;
+  const vars = { owner, name };
+  oids.forEach((oid, i) => { vars[`oid${i}`] = oid; });
+  try {
+    const res = await ghGraphQL(query, vars, { includeHeaders: true, fatalExit: false, retries: 1 });
+    const repo = res?.data?.repository ?? {};
+    const out = {};
+    oids.forEach((oid, i) => {
+      const commit = repo[`c${i}`];
+      if (!commit || commit.oid !== oid) return;
+      const contexts = commit.statusCheckRollup?.contexts;
+      if (contexts?.pageInfo?.hasNextPage) return;
+      const seen = new Map();
+      for (const n of contexts?.nodes ?? []) {
+        if (n?.__typename !== 'CheckRun') continue;
+        const appSlug = n.checkSuite?.app?.slug ?? null;
+        const appId = n.checkSuite?.app?.databaseId ?? null;
+        if (appSlug && Number.isInteger(appId) && appId > 0 && !seen.has(appSlug)) {
+          seen.set(appSlug, { appSlug, appId });
+        }
+      }
+      out[oid] = [...seen.values()];
+    });
+    return out;
+  } catch {
+    // Best-effort historical check lookup; missing entries stay unverified (fail-closed).
+    return {};
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   await ensureBinary();
@@ -615,6 +652,14 @@ async function main() {
   }
   const strictExitCode = VERDICT_EXIT_CODES[gate.verdict] ?? 50;
 
+  const latestCommitOid = pr.headRefOid || latestCommit?.oid || ghView.head?.sha || null;
+  const reviews = (pr.reviews?.nodes || []).map(normalizeReview);
+  const reactions = (pr.reactions?.nodes || []).map((r) => ({ content: r.content ?? null, at: r.createdAt ?? null, author: r.user?.login ?? null }));
+  const approvalCommits = uncorroboratedApprovalCommits({ latestCommitOid, reviews, reviewThreads, reactions, reviewerChecks });
+  const reviewCommitChecks = approvalCommits.length
+    ? await fetchReviewCommitChecks(args.owner, args.name, approvalCommits)
+    : {};
+
   const out = {
     fetchedAt: new Date().toISOString(),
     repo: args.repo,
@@ -640,7 +685,7 @@ async function main() {
     // Match the lightweight probe's live base ref. REST pull.base.sha can remain
     // at the PR's old base after the branch advances, hiding baseline fixes.
     baseCommitOid: pr.baseRef?.target?.oid ?? null,
-    latestCommitOid: pr.headRefOid || latestCommit?.oid || ghView.head?.sha || null,
+    latestCommitOid,
     // diff 规模(REST /pulls 自带):供 gate 的「范围膨胀」机判用。刻意不进 gate 指纹
     // (指纹按字段显式挑选),base 移动等噪声不会因此制造无谓唤起。
     additions: Number.isFinite(ghView.additions) ? ghView.additions : null,
@@ -659,6 +704,7 @@ async function main() {
     checks: checkRollup,
     requiredChecks,
     reviewerChecks,
+    reviewCommitChecks,
     mergeQueue,
     checksSummary: {
       total: checksSummary.total,
@@ -674,10 +720,10 @@ async function main() {
       actionRequiredRuns: checksSummary.actionRequiredRuns,
     },
     reviewThreads,
-    reviews: (pr.reviews?.nodes || []).map(normalizeReview),
+    reviews,
     comments: (pr.comments?.nodes || []).map(normalizeTopComment),
     // Reactions on the PR itself: a bot reviewer's 👍 can be its whole answer to a push.
-    reactions: (pr.reactions?.nodes || []).map((r) => ({ content: r.content ?? null, at: r.createdAt ?? null, author: r.user?.login ?? null })),
+    reactions,
     // Older top-level comments beyond the 100 read (a PR with more than that; the gate watches new ones only).
     commentsOmitted: Math.max(0, (pr.comments?.totalCount ?? 0) - (pr.comments?.nodes?.length ?? 0)),
   };

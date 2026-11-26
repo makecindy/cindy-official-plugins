@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { REVIEWER_BOTS_VERSION, botKey, botsAnswered, breaksSettle, expectedBots, pacingDue, resolvePrReviewerBots, reviewerBotsOf, settleState, updateRepoBots } from '../../cindy-github/skills/pr/scripts/lib/follow-pacing.mjs';
+import { REVIEWER_BOTS_VERSION, botKey, botsAnswered, breaksSettle, expectedBots, pacingDue, resolvePrReviewerBots, reviewerBotsOf, settleState, uncorroboratedApprovalCommits, updateRepoBots } from '../../cindy-github/skills/pr/scripts/lib/follow-pacing.mjs';
 
 const T0 = Date.parse('2026-11-06T00:00:00Z');
 const MIN = 60_000;
@@ -181,45 +181,74 @@ test('approval-only and auto-merge bots are not recorded as expected reviewer bo
   assert.deepEqual(botsAnswered(activeReviewers, ['greptile-apps'], 'h2', T0), ['greptile-apps']);
 });
 
-test('legacy per-PR reviewerBots drops approval-only bots on upgrade while keeping real reviewers', () => {
+test('legacy per-PR reviewerBots drops verified approval-only bots while keeping real reviewers across pushes', () => {
   const oldAt = new Date(T0 - 20 * 24 * 60 * MIN).toISOString();
-  const autoOnlySnap = {
-    latestCommitOid: 'bbb',
-    reviews: [{ author: 'cindy-auto-merge-bot', authorIsBot: true, state: 'APPROVED', body: 'ok', commitOid: 'aaa', submittedAt: oldAt }],
+  const autoOnlyVerifiedSnap = {
+    latestCommitOid: 'bbb2222',
+    reviews: [{ author: 'cindy-auto-merge-bot', authorIsBot: true, state: 'APPROVED', body: 'ok', commitOid: 'aaa1111', submittedAt: oldAt }],
+    reviewerChecks: [],
+    reviewCommitChecks: { aaa1111: [{ appSlug: 'github-actions', appId: 15368 }] },
   };
-  const repoBots = updateRepoBots({}, autoOnlySnap, T0);
+  const repoBots = updateRepoBots({}, autoOnlyVerifiedSnap, T0);
   assert.deepEqual(repoBots, {});
 
-  // Legacy state (no reviewerBotsVersion): drops cindy-auto-merge-bot and closes settle window.
+  // Legacy state with verified historical commit checks showing no reviewer App: drops cindy-auto-merge-bot.
   const legacyOnly = { reviewerBots: ['cindy-auto-merge-bot'] };
-  const expected = expectedBots({ snap: autoOnlySnap, previous: legacyOnly, repoBots });
+  const expected = expectedBots({ snap: autoOnlyVerifiedSnap, previous: legacyOnly, repoBots });
   assert.deepEqual(expected, []);
-  assert.equal(settleState({ snap: autoOnlySnap, headSeenAt: T0, expected, now: T0 + MIN }).open, false);
-  assert.deepEqual(resolvePrReviewerBots(legacyOnly, autoOnlySnap), { bots: [], version: REVIEWER_BOTS_VERSION });
+  assert.equal(settleState({ snap: autoOnlyVerifiedSnap, headSeenAt: T0, expected, now: T0 + MIN }).open, false);
+  assert.deepEqual(resolvePrReviewerBots(legacyOnly, autoOnlyVerifiedSnap), { bots: [], version: REVIEWER_BOTS_VERSION });
 
-  // Legacy state with both an approval-only bot and a real reviewer bot: drops only the auto-merge bot.
-  const mixedSnap = {
-    latestCommitOid: 'bbb',
+  // Current-head APPROVED without own App check drops even without reviewCommitChecks.
+  const autoCurrentHead = {
+    latestCommitOid: 'bbb2222',
+    reviews: [{ author: 'cindy-auto-merge-bot', authorIsBot: true, state: 'APPROVED', body: 'ok', commitOid: 'bbb2222', submittedAt: oldAt }],
+    reviewerChecks: [],
+  };
+  assert.deepEqual(resolvePrReviewerBots(legacyOnly, autoCurrentHead), { bots: [], version: REVIEWER_BOTS_VERSION });
+
+  // Real reviewer (Greptile) approved an older head with its own App check, new head has no checks yet:
+  // 1) with historical commit check evidence -> keeps Greptile, drops cindy-auto-merge-bot, migrates to v2.
+  const mixedHistoricalSnap = {
+    latestCommitOid: 'bbb2222',
     reviews: [
-      { author: 'cindy-auto-merge-bot', authorIsBot: true, state: 'APPROVED', body: 'ok', commitOid: 'aaa', submittedAt: oldAt },
-      { author: 'greptile-apps', authorIsBot: true, state: 'COMMENTED', body: 'nit', commitOid: 'aaa', submittedAt: oldAt },
+      { author: 'cindy-auto-merge-bot', authorIsBot: true, state: 'APPROVED', body: 'ok', commitOid: 'aaa1111', submittedAt: oldAt },
+      { author: 'greptile-apps', authorIsBot: true, state: 'APPROVED', body: 'LGTM', commitOid: 'aaa1111', submittedAt: oldAt },
     ],
+    reviewerChecks: [],
+    reviewCommitChecks: {
+      aaa1111: [
+        { appSlug: 'greptile-apps', appId: 99 },
+        { appSlug: 'github-actions', appId: 15368 },
+      ],
+    },
   };
   const legacyMixed = { reviewerBots: ['cindy-auto-merge-bot', 'greptile-apps'] };
-  assert.deepEqual(expectedBots({ snap: mixedSnap, previous: legacyMixed, repoBots: {} }), ['greptile-apps']);
-  assert.deepEqual(resolvePrReviewerBots(legacyMixed, mixedSnap), { bots: ['greptile-apps'], version: REVIEWER_BOTS_VERSION });
+  const mixedExpected = expectedBots({ snap: mixedHistoricalSnap, previous: legacyMixed, repoBots: {} });
+  assert.deepEqual(mixedExpected, ['greptile-apps']);
+  assert.equal(settleState({ snap: mixedHistoricalSnap, headSeenAt: T0, expected: mixedExpected, now: T0 + MIN }).open, true);
+  assert.deepEqual(resolvePrReviewerBots(legacyMixed, mixedHistoricalSnap), { bots: ['greptile-apps'], version: REVIEWER_BOTS_VERSION });
+
+  // 2) without historical commit check data for aaa1111 -> conservatively retains legacy bot and leaves migration at v1.
+  const unverifiedOlderSnap = {
+    latestCommitOid: 'bbb2222',
+    reviews: [{ author: 'greptile-apps', authorIsBot: true, state: 'APPROVED', body: 'LGTM', commitOid: 'aaa1111', submittedAt: oldAt }],
+    reviewerChecks: [],
+  };
+  const legacyGreptile = { reviewerBots: ['greptile-apps'] };
+  const retainedExpected = expectedBots({ snap: unverifiedOlderSnap, previous: legacyGreptile, repoBots: {} });
+  assert.deepEqual(retainedExpected, ['greptile-apps']);
+  assert.equal(settleState({ snap: unverifiedOlderSnap, headSeenAt: T0, expected: retainedExpected, now: T0 + MIN }).open, true);
+  assert.deepEqual(resolvePrReviewerBots(legacyGreptile, unverifiedOlderSnap), { bots: ['greptile-apps'], version: 1 });
+  assert.deepEqual(uncorroboratedApprovalCommits(unverifiedOlderSnap), ['aaa1111']);
+  assert.deepEqual(uncorroboratedApprovalCommits(mixedHistoricalSnap), []);
 
   // Incomplete/truncated snapshot: preserves legacy list and leaves migration pending.
-  const truncatedSnap = { ...autoOnlySnap, checksSummary: { unavailable: true } };
+  const truncatedSnap = { ...autoOnlyVerifiedSnap, checksSummary: { unavailable: true } };
   assert.deepEqual(resolvePrReviewerBots(legacyOnly, truncatedSnap), { bots: ['cindy-auto-merge-bot'], version: 1 });
 
   // Vetted v2 state: keeps previously verified reviewer bot even before checks register on a new head.
-  const cleanApprovedSnap = {
-    latestCommitOid: 'bbb',
-    reviews: [{ author: 'greptile-apps', authorIsBot: true, state: 'APPROVED', body: 'LGTM', commitOid: 'aaa', submittedAt: oldAt }],
-    reviewerChecks: [],
-  };
   const v2Prev = { reviewerBots: ['greptile-apps'], reviewerBotsVersion: REVIEWER_BOTS_VERSION };
-  assert.deepEqual(expectedBots({ snap: cleanApprovedSnap, previous: v2Prev, repoBots: {} }), ['greptile-apps']);
-  assert.deepEqual(resolvePrReviewerBots(v2Prev, cleanApprovedSnap), { bots: ['greptile-apps'], version: REVIEWER_BOTS_VERSION });
+  assert.deepEqual(expectedBots({ snap: unverifiedOlderSnap, previous: v2Prev, repoBots: {} }), ['greptile-apps']);
+  assert.deepEqual(resolvePrReviewerBots(v2Prev, unverifiedOlderSnap), { bots: ['greptile-apps'], version: REVIEWER_BOTS_VERSION });
 });

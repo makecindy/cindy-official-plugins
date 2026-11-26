@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import nodeTest from 'node:test';
 
 import { runGate, decide, isHumanOnlyReviewPending, watchFromSnapshot, evaluateWatch } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
+import { expectedBots, resolvePrReviewerBots, settleState } from '../../cindy-github/skills/pr/scripts/lib/follow-pacing.mjs';
 import { splitHttpResponse, rateLimitRetryAt } from '../../cindy-github/skills/pr/scripts/lib/gh.mjs';
 import {
   parseGitHubRemote,
@@ -45,6 +46,7 @@ if [ "$1" = api ] && [ "$2" = graphql ]; then
   q=""
   for a in "$@"; do case "$a" in query=*) q="$a" ;; esac; done
   case "$q" in *checkRunCountsByState*) cat "$d/resp-probe.json"; exit 0 ;; esac
+  case "$q" in *GitObjectID*) cat "$d/resp-commit-checks.json"; exit 0 ;; esac
   for f in mergeQueueEntry beforeCommit ADDED_TO_MERGE_QUEUE_EVENT headRefOid baseRef; do
     case "$q" in *"$f"*) ;; *) echo "Missing query field: $f" >&2; exit 1 ;; esac
   done
@@ -72,6 +74,7 @@ exit 1
     write('resp-prview.json', { headRefOid: data.checkHead, statusCheckRollup: data.rollup ?? [{ __typename: 'CheckRun', name: 'PR check', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
     write('resp-graphql.json', { data: { viewer: { login: 'me' }, repository: { pullRequest: data.pr } } });
     write('resp-probe.json', { data: { repository: { pullRequest: data.pr } } });
+    write('resp-commit-checks.json', { data: { repository: data.commitChecks ?? {} } });
     write('resp-compare.json', { status: data.comparison });
     write('resp-rest.json', { base: { sha: data.restBase ?? 'old-base' }, head: { sha: data.restHead }, mergeable: true, state: 'open', html_url: 'https://github.com/acme/game/pull/54' });
     return JSON.parse(execFileSync(process.execPath, [script, 'https://github.com/acme/game/pull/54', ...(data.args ?? [])], {
@@ -433,4 +436,46 @@ test('two policies for the same absent name produce one wait target',t=>{
  const rules=[{type:'required_status_checks',parameters:{required_status_checks:[{context:'late',integration_id:42},{context:'late'}]}}];
  const s=run({timelineItems:{nodes:[]}},'ahead',{rules});
  assert.equal(s.checks.filter(c=>c.name==='late').length,1);
+});
+
+test('snapshot looks up historical commit check apps for older uncorroborated bot approvals', t => {
+  const run = fixture(t);
+  const oldSha = 'aaaa1111bbbb2222cccc3333dddd4444eeee5555';
+  const oldAt = '2026-10-01T00:00:00Z';
+  const snap = run({
+    timelineItems: { nodes: [] },
+    reviews: {
+      nodes: [
+        { id: 'R1', author: { login: 'greptile-apps', __typename: 'Bot' }, state: 'APPROVED', body: 'LGTM', submittedAt: oldAt, url: 'https://gh/R1', commit: { oid: oldSha } },
+        { id: 'R2', author: { login: 'cindy-auto-merge-bot', __typename: 'Bot' }, state: 'APPROVED', body: 'auto', submittedAt: oldAt, url: 'https://gh/R2', commit: { oid: oldSha } },
+      ],
+    },
+  }, 'ahead', {
+    commitChecks: {
+      c0: {
+        oid: oldSha,
+        statusCheckRollup: {
+          contexts: {
+            pageInfo: { hasNextPage: false },
+            nodes: [
+              { __typename: 'CheckRun', checkSuite: { app: { databaseId: 99, slug: 'greptile-apps' } } },
+              { __typename: 'CheckRun', checkSuite: { app: { databaseId: 15368, slug: 'github-actions' } } },
+            ],
+          },
+        },
+      },
+    },
+  });
+  assert.deepEqual(snap.reviewCommitChecks, {
+    [oldSha]: [
+      { appSlug: 'greptile-apps', appId: 99 },
+      { appSlug: 'github-actions', appId: 15368 },
+    ],
+  });
+  const legacy = { reviewerBots: ['cindy-auto-merge-bot', 'greptile-apps'] };
+  const resolved = resolvePrReviewerBots(legacy, snap);
+  assert.deepEqual(resolved, { bots: ['greptile-apps'], version: 2 });
+  const expected = expectedBots({ snap, previous: legacy, repoBots: {} });
+  assert.deepEqual(expected, ['greptile-apps']);
+  assert.equal(settleState({ snap, headSeenAt: Date.now() - 60_000, expected, now: Date.now() }).open, true);
 });
