@@ -18,8 +18,14 @@ Read the gate's event report; `--last-result --json` also provides `waitContext`
 
 Stay silent for observation-only polls and rounds with no user decision or reportable event, including merely waiting for another reviewer's approval or an already-authorized merge. If merging actually needs this user's authorization, it is a user decision and follows the rule above. Also notify for merged/closed, following stopping itself, a problem stuck through several backoff cycles, or a `notice` in the `--wait` receipt. Both `notice: entered` and `notice: reminder` require a message in this round: say who must act and what is needed. When the user can decide (merge with an optional check failing, dismiss an alert, approve a workflow run), ask that specific question with a recommendation instead of merely saying “waiting for a maintainer” or asking only whether to keep following. When only somebody else can act, report that accurately without inventing a decision for the user. A missing `notice` never suppresses a known pending user decision.
 
-**Ending following:** delete the schedule and verify deletion first; then set `following: false` on its card (add `to_latest: true` when notifying). If deletion is uncertain, keep the reservation and resolve it. This order also applies to foreground cleanup and a user stop request.
+## Ending following
 
-**Older schedules:** change a ten-minute schedule once to `cronExpr: "*/5 * * * *"`, `intervalMs: 300000`, preserving its hook. When the prompt's fallback `SKILL.md` path is not under `/agent-skills/skills/`, replace that path once with the `SKILL.md` beside the hook's `scripts` directory. The script filters idle firings; five-minute checks do not imply five-minute model calls.
+Delete the schedule and verify deletion first; then set `following: false` on its card (add `to_latest: true` when notifying). If deletion is uncertain, keep the reservation and resolve it. This order also applies to foreground cleanup and a user stop request (do not run the full background-round steps above for a foreground stop).
 
-**Draft and ready.** When the user asks in text to mark a draft ready, run `gh pr ready <PR_URL>`, refresh the card (`pr_card` with `card_id`, `repo`, `pr`) and apply its follow setting as after opening. When they ask to turn a PR back into a draft, run `gh pr ready --undo <PR_URL>`; if it was being followed, stop following as above, then refresh the card.
+## Older schedules
+
+Change a ten-minute schedule once to `cronExpr: "*/5 * * * *"`, `intervalMs: 300000`, preserving its hook. When the prompt's fallback `SKILL.md` path is not under `/agent-skills/skills/`, replace that path once with the `SKILL.md` beside the hook's `scripts` directory. The script filters idle firings; five-minute checks do not imply five-minute model calls.
+
+## Draft and ready
+
+When the user asks in text to mark a draft ready, run `gh pr ready <PR_URL>`, refresh the card (`pr_card` with `card_id`, `repo`, `pr`) and apply its follow setting as after opening. When they ask to turn a PR back into a draft, run `gh pr ready --undo <PR_URL>`; if it was being followed, stop following as in `## Ending following` above, then refresh the card. (Foreground draft/ready requests do not run the full background-round steps above.)

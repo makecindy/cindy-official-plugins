@@ -36,8 +36,10 @@ For commits and pull requests you create with AI assistance in this workflow, us
 
 - **No PR yet** (a change to make or finish): read `references/publish.md` (sections 1 and 2).
 - **An existing PR** (a link or number, `/pr <link>`, "follow <link>", or the current branch's PR): first show its PR card if this task has none (section 4), do a fix round only if something stands in the way (section 3), then start following it in the background (section 4). Following is the default here; skip it only when the user said to just check or look.
+- **Stopping follow-up or changing draft state in the foreground** (e.g. "stop following", "mark ready", "turn back into draft"): read only the `## Ending following` / `## Draft and ready` subsections of `references/background-round.md` — do not run the full background-round steps.
 - **A background round** (the prompt says so): read `references/background-round.md` (section 5).
 - **An issue to fix** (a link to an issue): start the work as in section 1 (`references/publish.md`) and link the issue in the PR. Claim or comment on the issue only if the repository's CONTRIBUTING asks for it, and ask the user before posting.
+- **Cleanup after merge or close**: read `references/cleanup.md` (and `## Ending following` in `references/background-round.md` first if a follow-up schedule is still active).
 
 ## 1. Start the work
 
@@ -60,7 +62,7 @@ Read `references/fix-round.md` (and `references/review-convergence.md` when grou
 
 ## 4. Following in the background
 
-Read `references/follow-up-setup.md` whenever you need to establish, hand off (group chat / unrelated source task / IM), deduplicate (local + optional bounded remote lookup), or verify a follow-up schedule manually. Gate pacing and wait semantics live in `references/follow-up.md`.
+Read `references/follow-up-setup.md` whenever you need to establish, hand off (group chat / unrelated source task / IM), deduplicate (local + optional bounded remote lookup), or verify a follow-up schedule manually. Gate pacing and wait semantics live in `references/follow-up.md`. To stop following or change draft/ready state in the foreground, read only `## Ending following` / `## Draft and ready` in `references/background-round.md`.
 
 ## 5. Background round
 
