@@ -128,14 +128,15 @@ function createFixture(t) {
       return { code, stdout, stderr, json: () => JSON.parse(stdout) };
     },
     /** 真实子进程调用指定路径的脚本:只给软链入口用例用,验证 CLI 入口判据本身。 */
-    runVia(scriptPath, extraArgs = []) {
+    runVia(scriptPath, extraArgs = [], hookPayload) {
       return new Promise((resolve) => {
-        execFile(process.execPath, [scriptPath, ...gateArgs(extraArgs)], {
+        const child = execFile(process.execPath, [scriptPath, ...gateArgs(extraArgs)], {
           encoding: 'utf8',
           env: { ...process.env, FAKE_SNAPSHOT_OUT: outFile },
         }, (err, stdout, stderr) => {
           resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout: stdout ?? '', stderr: stderr ?? '' });
         });
+        if (hookPayload) child.stdin.end(JSON.stringify(hookPayload));
       });
     },
   };
@@ -271,6 +272,103 @@ test('必需检查全部通过报一次;还在跑的其它检查结束时再报�
   assert.deepEqual(r.events, [{ kind: 'checks-passed', count: 2, required: false }], '欠的那一次');
   r = evaluateWatch(r.next, pushed([check('build', 'passed', { required: true }), check('codeql'), check('late', 'pending')]), T0 + 30 * MIN);
   assert.deepEqual(kinds(r), [], '后来冒出的非必需检查不唤起');
+});
+
+test('a partially failed batch reports its final result once even with no new failure', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing', 'pending_checks'],
+    checks: [check('build', 'failed', { required: true }), check('lint', 'pending'), check('package', 'pending')] });
+  fx.setSnapshot(red);
+  let first = await fx.run();
+  assert.equal(first.code, 0);
+  assert.match(first.stdout, /checks-failed/);
+  assert.match(first.stdout, /notify the user \(schedule_notify_current_run\)/);
+  assert.equal((await fx.run(['--resume', 'Inspected the initial failure.'])).code, 0);
+  fx.advance(5);
+  fx.setSnapshot({ ...red, checks: [red.checks[0], check('lint'), red.checks[2]] });
+  assert.equal((await fx.run()).code, 2);
+  fx.advance(5);
+  const finished = { ...red, blockers: ['ci_failing'], checks: [red.checks[0], check('lint'), check('package')] };
+  fx.setSnapshot(finished);
+  const final = await fx.run();
+  assert.equal(final.code, 0);
+  assert.match(final.stdout, /checks-finished/);
+  assert.match(final.stdout, /All 3 checks finished.*1 still failed/);
+  assert.match(final.stdout, /notify the user \(schedule_notify_current_run\)/);
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /retry-unacked/);
+  assert.equal((await fx.run(['--resume', 'Reported the final failure.'])).code, 0);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
+  // A new follower's first snapshot is already final: exactly the failure event.
+  const fresh = createFixture(t);
+  fresh.setSnapshot(finished);
+  assert.match((await fresh.run()).stdout, /events=\[checks-failed\]/);
+  assert.equal((await fresh.run(['--resume', 'Reported the failure.'])).code, 0);
+  fresh.advance(5);
+  assert.equal((await fresh.run()).code, 2);
+});
+
+test('a new schedule observes an existing failure even if a stopped follower had acknowledged it', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', reason: 'Previous follower investigated.', checks: [{ name: 'build' }], threads: [] });
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2, 'reusing a schedule preserves its recorded wait');
+  fx.setTrigger({ firstScheduleId: 'new-schedule' });
+  fx.advance(5);
+  assert.match((await fx.run(['--pacing'])).stdout, /events=\[checks-failed\]/);
+  assert.equal(fx.readState().wait, undefined, 'stopped follower wait must not suppress the initial failure');
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /retry-unacked/, 'repeated first hook does not reset pending watch');
+  assert.equal((await fx.run(['--resume', 'Reported the existing failure.'])).code, 0);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
+});
+
+test('first hook reads the actual scheduler stdin and re-observes a stopped follower\'s red check', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', checks: [{ name: 'build' }], threads: [] });
+  const payload = { event: 'schedule-pre-run', scheduleId: 'new-follow', runId: 'first', firedAt: Date.now() };
+  const first = await fx.runVia(gatePath, [], payload);
+  assert.equal(first.code, 0, first.stderr);
+  assert.match(first.stdout, /events=\[checks-failed\]/);
+  assert.equal((await fx.runVia(gatePath, ['--resume', 'Reported the red result.'])).code, 0);
+  const later = await fx.runVia(gatePath, [], { ...payload, runId: 'second', lastFinishedAt: Date.now() });
+  assert.equal(later.code, 2, later.stderr);
+});
+
+test('a pre-upgrade partially failing watch still reports completion after unavailable data', () => {
+  const red = snap({ checks: [check('build', 'failed', { required: true }), check('lint', 'pending')] });
+  const old = seenWatch(red);
+  delete old.failureCompletionOwed;
+  const unavailable = evaluateWatch(old, snap({ checks: [], checksSummary: { unavailable: true } }), T0 + MIN);
+  assert.deepEqual(kinds(unavailable), []);
+  const done = evaluateWatch(unavailable.next, snap({ checks: [red.checks[0], check('lint')] }), T0 + 2 * MIN);
+  assert.deepEqual(kinds(done), ['checks-finished']);
+});
+
+test('a timed baseline wait still reports a partial batch becoming final without extending its deadline', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing', 'pending_checks'],
+    checks: [check('build', 'failed', { required: true }), check('lint', 'pending')] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', checks: [{ name: 'build' }], threads: [] });
+  const deadline = fx.readState().wait.until;
+  fx.advance(5);
+  fx.setSnapshot({ ...red, blockers: ['ci_failing'], checks: [red.checks[0], check('lint')] });
+  const result = await fx.run();
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /events=\[checks-finished\]/);
+  assert.equal(fx.readState().wait.until, deadline);
+  // A new commit must not carry this old completion obligation.
+  const nextHead = evaluateWatch(seenWatch(red), snap({ latestCommitOid: 'new-head', checks: [red.checks[0], check('lint')] }), T0 + MIN);
+  assert.deepEqual(kinds(nextHead), ['checks-failed']);
 });
 
 test('读不到检查时保留原状态,不把「没读到」当成「全部通过」或「没有检查」', () => {

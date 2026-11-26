@@ -86,7 +86,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.35');
+  assert.equal(manifest.version, '1.5.36');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -1812,6 +1812,19 @@ test('publication starts exactly one verified follow-up without a model turn and
   await runtime.tool({ card_id: callId });
   assert.equal(rows.size, 0);
   assert.equal(runtime.agentRuns.length, 0);
+});
+
+test('viewing an existing red PR does not start following; explicitly clicking hands its current failures to the owner', async () => {
+  const { hostApi, rows } = followScheduler();
+  const runtime = createPrRuntime({ github: prGraphql({ ci: 'FAILURE' }), hostApi, kv: { prCard: { autoFollow: true } } });
+  const viewed = await runtime.tool({ repo: 'octo/repo', pr: 42 });
+  assert.equal(rows.size, 0);
+  assert.equal(runtime.agentRuns.length, 0);
+  await runtime.click(viewed.callId, 'pr:follow');
+  assert.equal(runtime.agentRuns.length, 1);
+  assert.match(runtime.agentRuns[0].userMessage, /已有失败也必须接手.*首次检查.*归属任务处理并汇报/);
+  const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(other.reply.result.disposition, 'existing_task');
 });
 
 test('publication without an ask card is distinct from viewing a PR or declining follow-up', async () => {

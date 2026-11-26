@@ -777,6 +777,9 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
   let passed = headMoved ? false : Boolean(watch.passed);
   let passedChecks = headMoved ? [] : watch.passedChecks ?? [];
   let owedChecks = headMoved ? [] : watch.owedChecks ?? [];
+  const priorChecks = watch.waitFacts?.complete ? watch.waitFacts.checks ?? [] : [];
+  let failureCompletionOwed = !headMoved && (watch.failureCompletionOwed ??
+    (priorChecks.some((c) => c.outcome === 'failed') && priorChecks.some((c) => c.outcome === 'pending')));
   const checksUnavailable = Boolean(snap?.checksSummary?.unavailable);
   const checks = checksUnavailable ? [] : (snap?.checks ?? []).filter((c) => c?.name);
   if (checks.length > 0) {
@@ -787,6 +790,16 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
     const newlyFailed = failed.filter((c) => !failedChecks.includes(failedKey(c)) && !failedChecks.includes(c.name));
     if (newlyFailed.length > 0) events.push({ kind: 'checks-failed', failed: newlyFailed });
     failedChecks = failed.map(failedKey);
+    // Report the end of the batch once if a failure was seen before all checks finished.
+    // Keep the obligation through partial or unavailable reads and on the acknowledged watch.
+    if (!snap.gate?.truncated && !snap.checksSummary?.truncated) {
+      const pending = checks.some((c) => checkOutcome(c) === 'pending');
+      if (newlyFailed.length && pending) failureCompletionOwed = true;
+      if (!pending && failureCompletionOwed) {
+        if (failed.length) events.push({ kind: 'checks-finished', count: checks.length, failed });
+        failureCompletionOwed = false;
+      }
+    }
 
     const required = checks.filter((c) => c.required === true);
     const gate = required.length > 0 ? required : checks;
@@ -882,7 +895,7 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
     events,
     exhausted: commentsOnly && wakes >= COMMENT_WAKE_LIMIT,
     next: {
-      headSha, failedChecks, passed, passedChecks, owedChecks, remarksThrough, remarkIds,
+      headSha, failedChecks, passed, passedChecks, owedChecks, failureCompletionOwed, remarksThrough, remarkIds,
       conflicting, isDraft, queueProblems, wakes, checksAwaitedSince, noChecksReminded, everHadChecks, baseSha,
       waitFacts: waitFacts(snap), inventoryRecoveryOwed,
     },
@@ -920,6 +933,9 @@ export function eventReport(events, snap, exhausted = false) {
         const outcome = String(c.conclusion ?? c.status ?? '').toLowerCase();
         return `  - ${c.name}${outcome && outcome !== 'failure' ? ` (${outcome})` : ''}${c.detailsUrl ? ` ${c.detailsUrl}` : ''}`;
       }));
+    } else if (e.kind === 'checks-finished') {
+      lines.push(`- All ${e.count} checks finished${commit}; ${e.failed.length} still failed:`,
+        ...listed(e.failed, (c) => `  - ${c.workflowName ? c.workflowName + ' / ' : ''}${c.name}${c.detailsUrl ? ' ' + c.detailsUrl : ''}`));
     } else if (e.kind === 'rules-recovered') {
       lines.push('- Required-check rules are readable again. Reassess the previously withheld ready-to-merge result.');
     } else if (e.kind === 'checks-passed') {
@@ -1144,13 +1160,17 @@ export function decide({
   if (result.events.length > 0) {
     const kinds = [...new Set(result.events.map((e) => e.kind))];
     const reason = result.exhausted ? 'comment-limit' : kinds.length === 1 && kinds[0].startsWith('draft-') ? kinds[0] : 'changed';
-    return passPending(
+    const delivery = passPending(
       reason,
       `events=[${kinds.join(',')}]; verdict=${snap.verdict}`,
       eventReport(result.events, snap, result.exhausted),
       eventKey(result.events),
       result.next,
     );
+    if (delivery.exitCode === EXIT_PASS && kinds.some((kind) => kind === 'checks-failed' || kind === 'checks-finished')) {
+      delivery.detail += '; handle the check results and notify the user (schedule_notify_current_run): report the outcome or exact blocker, even if waiting for CI or an external fix';
+    }
+    return delivery;
   }
 
   // 没有新事件:推送、检查在跑、自己的评论这类变化直接并入基线,不唤起 agent。
@@ -1541,11 +1561,24 @@ async function gateMain(argv, ctx) {
     throw new Error(`snapshot script not found: ${args.snapshot}`);
   }
 
-  const previous = readState(file);
+  let previous = readState(file);
+  // The first hook of a newly created schedule must not inherit the old follower's
+  // acknowledged failures or waits after the user stopped and started following again.
+  // A deferred first run can execute the hook several times; keep the ID so retries
+  // use the ordinary pending-watch protocol instead of resetting on every attempt.
+  const trigger = await ctx.readTrigger();
+  const newFollow = Boolean(trigger?.firstScheduleId && previous?.followStartId !== trigger.firstScheduleId);
+  if (newFollow) {
+    previous = { ...previous, followStartId: trigger.firstScheduleId };
+    for (const key of ['watch', 'wait', 'fingerprint', 'pendingFingerprint', 'pendingWatch',
+      'pendingKey', 'pendingPassCount', 'retryBackoffUntil', 'nextAllowAt', 'probe',
+      'lastPassAt', 'lastFullReadAt', 'lastCheckedAt', 'silenceSince']) delete previous[key];
+    writeState(file, previous);
+  }
   const backoffUntil = Number(previous?.snapshotFailureBackoffUntil) || 0;
   const backingOff = backoffUntil > now;
   const watchRetryDue = Number.isFinite(previous?.snapshotWatchRetryAt) && previous.snapshotWatchRetryAt <= now;
-  const hookTrigger = backingOff && !watchRetryDue ? null : await ctx.readTrigger();
+  const hookTrigger = backingOff && !watchRetryDue ? null : trigger;
   if (backingOff && hookTrigger?.source !== 'pr-status') {
     const detail = `nextProbeAt=${new Date(backoffUntil).toISOString()}`;
     const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'snapshot-failure-backoff', detail, checkedAt: now };
@@ -1554,7 +1587,7 @@ async function gateMain(argv, ctx) {
     return EXIT_SKIP;
   }
   // 宿主看到这个 PR 的状态变了而提前触发的一轮:不看节奏,也不做探测(宿主已经知道有变化)。
-  const triggered = args.triggered || (hookTrigger?.kind === 'watch');
+  const triggered = args.triggered || (hookTrigger?.kind === 'watch') || newFollow;
   // Neither an idle tick nor an unchanged summary proves that a failed snapshot recovered.
   const recovering = previous?.consecutiveSnapshotFailures > 0;
   // 按阶段决定这一轮要不要看:不到时间就直接跳过,不调用 GitHub,也不改状态。
@@ -1720,6 +1753,7 @@ async function gateMain(argv, ctx) {
   writeState(file, {
     // watch 只由 --ack / --defer 或「没有新事件」推进,放行时不推进
     watch: decision.nextWatch,
+    ...(previous?.followStartId ? { followStartId: previous.followStartId } : {}),
     ...(decision.nextWait ? { wait: decision.nextWait } : {}),
     ...(decision.nextPendingWatch
       ? {
@@ -1855,7 +1889,12 @@ export async function readHookTrigger(stdin = process.stdin, timeoutMs = 500) {
   });
   try {
     const payload = JSON.parse(text);
-    return payload && typeof payload.trigger === 'object' ? payload.trigger : null;
+    const trigger = payload && typeof payload.trigger === 'object' ? payload.trigger : null;
+    if (payload?.event === 'schedule-pre-run' && typeof payload.scheduleId === 'string'
+      && payload.scheduleId && payload.lastFinishedAt == null) {
+      return { ...trigger, firstScheduleId: payload.scheduleId };
+    }
+    return trigger;
   } catch {
     return null;
   }
@@ -1907,6 +1946,9 @@ export async function runGate(argv, {
             trigger = { kind: 'watch', source: 'pr-status', detail: url };
           }
         }
+        if (typeof event?.firstScheduleId === 'string' && event.firstScheduleId) {
+          trigger = { ...trigger, firstScheduleId: event.firstScheduleId };
+        }
         if (record) record.trigger = trigger;
         return trigger;
       },
@@ -1924,7 +1966,7 @@ export async function runGate(argv, {
     // Never retain the human/model explanation passed to resume.
     if (record.argv.includes('--resume')) record.argv[record.argv.indexOf('--resume')+1] = 'recorded resume';
     // Pacing-only firings contain no new evidence. Do not duplicate the old state each tick.
-    if (record.snapshot || Object.hasOwn(record,'probe') || ['wait','resume','ack','defer'].includes(record.decision) || record.replayable === false) {
+    if (record.trigger?.firstScheduleId || record.snapshot || Object.hasOwn(record,'probe') || ['wait','resume','ack','defer'].includes(record.decision) || record.replayable === false) {
       // 连续编号放在状态文件旁的小文件里(不动状态本身),写入失败也照常前进:
       // 下一条成功记录的编号会跳号,回放据此标出缺口。
       try {
