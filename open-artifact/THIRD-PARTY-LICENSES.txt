@@ -1,10 +1,11 @@
-Open Artifact CLI, Harness Kit and Protocol 0.14.6
-https://github.com/JimLiu/open-artifact/tree/132c038529e4527d1bc30561a855ffd958aa7302
+Open Artifact CLI 0.16.1
+https://github.com/JimLiu/open-artifact/tree/5757cdf5348d8e33da0ed31cc44d5bb8547869c8
 Apache-2.0; see vendor/OPEN-ARTIFACT-LICENSE and vendor/OPEN-ARTIFACT-NOTICE.
 The CLI archive also carries its original vendor notices and licenses.
-The daemon, frame host and built-in type server are modified by Cindy.
-Their source changes and build instructions are in vendor/runtime-workspace.patch
-and vendor/BUILD.md.
+
+Open Artifact Harness Kit and Protocol 0.14.6 (bundled adapter and generated skill)
+https://github.com/JimLiu/open-artifact/tree/132c038529e4527d1bc30561a855ffd958aa7302
+Apache-2.0; see vendor/OPEN-ARTIFACT-LICENSE and vendor/OPEN-ARTIFACT-NOTICE.
 The plugin icon is the unmodified PNG shipped by Open Artifact:
 https://github.com/JimLiu/open-artifact/blob/132c038529e4527d1bc30561a855ffd958aa7302/plugins/claude-code/assets/icon.png
 

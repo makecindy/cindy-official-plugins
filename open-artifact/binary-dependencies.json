@@ -3,12 +3,12 @@
   "dependencies": [
     {
       "name": "open-artifact-runtime",
-      "version": "0.14.6",
+      "version": "0.16.1",
       "license": "vendor/OPEN-ARTIFACT-LICENSE",
       "assets": [
         {
-          "url": "https://registry.npmjs.org/@open-artifact/cli/-/cli-0.14.6.tgz",
-          "sha256": "f03ac8cb1d97f69e417281b5af42f53bdc72fb21565b061fc872341172de0d5f",
+          "url": "https://registry.npmjs.org/@open-artifact/cli/-/cli-0.16.1.tgz",
+          "sha256": "f46026fb6a1bbce3cefc35f9fe4ff689429fa52908260de4ad4aabaf67ddaebe",
           "format": "file",
           "files": [
             {

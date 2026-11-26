@@ -10,4 +10,4 @@ The plugin starts its bundled Open Artifact runtime on first use. No Node instal
 
 Artifact folders and tool-supplied import and export paths must resolve inside the task workspace. The editor remains bound to the workspace registered for the work as long as the page is open. The plugin checks the extracted runtime against the bundled integrity inventory before reuse.
 
-Based on [Open Artifact](https://github.com/JimLiu/open-artifact) and the [original Cindy integration](https://github.com/makecindy/cindy/pull/12226). The bundled runtime uses Open Artifact 0.14.6 with the workspace changes documented in [vendor/BUILD.md](vendor/BUILD.md). See `THIRD-PARTY-LICENSES.txt`.
+Based on [Open Artifact](https://github.com/JimLiu/open-artifact) and the [original Cindy integration](https://github.com/makecindy/cindy/pull/12226). The plugin bundles the official Open Artifact 0.16.1 runtime with its workspace confinement enabled. See [vendor/BUILD.md](vendor/BUILD.md) and `THIRD-PARTY-LICENSES.txt`.

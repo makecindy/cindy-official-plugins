@@ -1,21 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createHash, webcrypto } from 'node:crypto';
+import { webcrypto } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
-import { gunzipSync } from 'node:zlib';
 import test from 'node:test';
 
 const source = await readFile(new URL('../open-artifact/main.js', import.meta.url), 'utf8');
-
-test('the three runtime replacements match the installed integrity inventory', async () => {
-  const vendor = new URL('../open-artifact/vendor/', import.meta.url);
-  const inventory = JSON.parse(await readFile(new URL('runtime-integrity.json', vendor), 'utf8'));
-  for (const file of ['vendor/open-artifact.mjs', 'vendor/frame-host/frame-host.mjs', 'vendor/type-server/cli.mjs']) {
-    const packed = await readFile(new URL(`runtime-overlay/${file}.gz`, vendor));
-    const bundle = gunzipSync(packed, { maxOutputLength: 8 * 1024 * 1024 });
-    assert.equal(createHash('sha256').update(bundle).digest('hex'), inventory[file], file);
-  }
-});
 
 function harness({ accepted = true, openDuringCall = true, confirmation = { ok: true, confirmed: true }, nodeResponse } = {}) {
   let onMessage;
@@ -261,10 +250,10 @@ test('the worker returns pending comments immediately and waits only when none a
   const { dependencies: [{ version }] } = JSON.parse(await readFile(new URL('binary-dependencies.json', plugin), 'utf8'));
   const fixture = await mkdtemp(join(tmpdir(), 'oa-wait-test-'));
   const scope = '00000000-0000-4000-8000-000000000000';
-  await mkdir(join(fixture, '.cindy-open-artifact', scope, `runtime-${version}-cindy.3`), { recursive: true });
+  await mkdir(join(fixture, '.cindy-open-artifact', scope, `runtime-${version}`), { recursive: true });
   await mkdir(join(fixture, 'node'));
   await mkdir(join(fixture, 'vendor'));
-  for (const file of ['node/worker.cjs', 'node/safety.cjs']) {
+  for (const file of ['binary-dependencies.json', 'node/worker.cjs', 'node/safety.cjs']) {
     await copyFile(new URL(file, plugin), join(fixture, file));
   }
   await writeFile(join(fixture, 'vendor', 'runtime-integrity.json'), '{}');

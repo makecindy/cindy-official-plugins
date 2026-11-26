@@ -10,4 +10,4 @@
 
 作品目录和工具指定的导入、导出路径必须解析到当前任务工作目录内。页面保持打开时，编辑器沿用作品登记的工作目录。复用已解包的运行时前，插件会按随包清单校验文件。
 
-基于 [Open Artifact](https://github.com/JimLiu/open-artifact) 和 [原 Cindy 接入](https://github.com/makecindy/cindy/pull/12226)。随包运行时使用 Open Artifact 0.14.6，工作目录相关改动见 [vendor/BUILD.md](vendor/BUILD.md)。许可证见 `THIRD-PARTY-LICENSES.txt`。
+基于 [Open Artifact](https://github.com/JimLiu/open-artifact) 和 [原 Cindy 接入](https://github.com/makecindy/cindy/pull/12226)。插件随包提供 Open Artifact 官方 0.16.1 运行时，并启用上游的工作目录限制。构建方式见 [vendor/BUILD.md](vendor/BUILD.md)，许可证见 `THIRD-PARTY-LICENSES.txt`。

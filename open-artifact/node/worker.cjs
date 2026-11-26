@@ -3,15 +3,13 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
-const { gunzipSync } = require('node:zlib');
+const { dependencies: [{ version }] } = require('../binary-dependencies.json');
 const { artifactActionArguments, artifactFileArguments, resolveWorkspacePath, verifyRuntime, workspaceArguments } = require('./safety.cjs');
 const runtimeInventory = require('../vendor/runtime-integrity.json');
 
-const version = '0.14.6';
-const runtimeDirectory = `runtime-${version}-cindy.3`;
+const runtimeDirectory = `runtime-${version}`;
 const runtimeArchive = path.join(__dirname, '../vendor/open-artifact-runtime/runtime.tgz');
-const pinnedIntegrity = 'ZxJs17HHSkH8+AOXx+CIgWfoIrTqaqJGTKVVRlyhtTZXWc7sdINlrV0sPrx5I/3ERXT880CEX+KUH74sv+Yz2g==';
-const runtimeOverlays = ['vendor/open-artifact.mjs', 'vendor/frame-host/frame-host.mjs', 'vendor/type-server/cli.mjs'];
+const pinnedIntegrity = 'sc7ZhZZsU+AGawcgeMcva4pzfzz6HU+O6jVmNApOy6RhHy5mQRtBCrYorbgdzI/e+fflM0oHfW+dTOlxP2PYoA==';
 const allowedTools = new Set(['Artifact', 'ArtifactData', 'ArtifactComments']);
 const sessions = new Map();
 const hostRequests = new Map();
@@ -59,11 +57,6 @@ async function prepareRuntime(home, kit) {
       file: runtimeArchive, cwd: stage, strip: 1, strict: true,
       filter: (_, entry) => ['File', 'Directory'].includes(entry.type),
     });
-    for (const file of runtimeOverlays) {
-      const compressed = await fs.readFile(path.join(__dirname, '../vendor/runtime-overlay', file + '.gz'));
-      const content = gunzipSync(compressed, { maxOutputLength: 8 * 1024 * 1024 });
-      await fs.writeFile(path.join(stage, file), content);
-    }
     await verifyRuntime(stage, runtimeInventory);
     await fs.rename(stage, folder);
   } finally {

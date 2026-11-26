@@ -4,7 +4,7 @@
   "id": "open-artifact",
   "name": "Open Artifact",
   "author": "GaoWeiLiuXD",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "icon": "assets/icon.png",
   "description": "Create, edit, and comment on Open Artifact work in the task sidebar.",
   "whenToUse": "Create or edit a deck, design, whiteboard, spreadsheet, dashboard, document, or animation as a live artifact.",
@@ -339,5 +339,5 @@
     "en": "README.md",
     "zh-CN": "README.zh-CN.md"
   },
-  "releaseNotes": "分享状态和作品元数据沿用作品的工作目录校验。显式接管作品需要用户在 Cindy 确认。"
+  "releaseNotes": "随包运行时更新到 Open Artifact 0.16.1，使用上游的工作目录校验。显式接管作品需要用户在 Cindy 确认。"
 }
