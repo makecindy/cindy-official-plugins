@@ -725,10 +725,19 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     const calls = (method) => nodeCalls.filter((call) => call.method === method);
     vm.runInContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context, { filename: 'main.js' });
 
-    // Start-up: agy is installed but refuses a session: unavailable with the sign-in hint.
-    await waitFor(() => puts.some((body) => body.harnesses[0].reason === 'not-signed-in'), 3_000, 'sign-in hint');
-    assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: false, reason: 'not-signed-in', version: '1.5.12',
-      message: 'Antigravity is not signed in. Open the Antigravity plugin settings and select Sign in with Google.' }] });
+    if (official) {
+      // Start-up: agy is installed; default login is signed out, but the engine stays available with
+      // Google sign-in methods so Cindy can sign in or add isolated accounts in the pool.
+      await waitFor(() => calls('listModels').length === 1 && puts.length >= 1, 3_000, 'initial publish and probe');
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: true, reportsUsage: true,
+        accounts: { methods: [{ id: 'oauth-personal', label: 'Google account', kind: 'browser' }] }, version: '1.5.12' }] });
+    } else {
+      // Start-up: agy is installed but refuses a session: unavailable with the sign-in hint.
+      await waitFor(() => puts.some((body) => body.harnesses[0].reason === 'not-signed-in'), 3_000, 'sign-in hint');
+      assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: false, reason: 'not-signed-in', version: '1.5.12',
+        message: 'Antigravity is not signed in. Open the Antigravity plugin settings and select Sign in with Google.' }] });
+    }
 
     // Signed in, then "Check again": listed right away (no one-minute wait) and published with the modes.
     signedIn = true;
@@ -737,7 +746,8 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     page.onmessage = (event) => received.push(event.data);
     page.postMessage({ type: 'detect-request', reqId: 'r1' });
     await waitFor(() => puts.some((body) => body.harnesses[0].modes), 3_000, 'models and modes published');
-    assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: true, reportsUsage: true, ...(official ? { accounts: { methods: [] } } : {}), version: '1.5.12',
+    assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: true, reportsUsage: true,
+      ...(official ? { accounts: { methods: [{ id: 'oauth-personal', label: 'Google account', kind: 'browser' }] } } : {}), version: '1.5.12',
       models: [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high' }],
       modes: ['default', 'acceptEdits', 'auto', 'plan'], defaultMode: 'default' }] });
     assert.equal(calls('listModels').length, 2);
@@ -795,8 +805,8 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
 
     assert.deepEqual(await accountStatus(), { state: 'signed-out' });
     assert.equal((await call('login', {})).ok, true);
-    // Signed in before any model listing: there is no session to read the tier from, so no plan.
-    assert.deepEqual(await accountStatus(), { state: 'signed-in' });
+    // Right after sign-in, the worker already remembers the tier from authenticate even before listing models.
+    assert.deepEqual(await accountStatus(), { state: 'signed-in', plan: 'Google AI Pro' });
     assert.equal((await call('listModels', {})).sessionId, 'fake-session');
     const opened = sent('session/new');
     const resumed = sent('session/resume');
@@ -804,7 +814,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.equal(sent('session/new'), opened, 'accountStatus opened no session');
     assert.equal(sent('session/resume'), resumed + 1, 'accountStatus resumed the model-list session');
 
-    // Cindy can never add an Antigravity account: an account directory or another engine has no status.
+    // A missing account directory or another engine has no status.
     assert.equal(await accountStatus({ harnessId: 'agy', accountDir: path.join(fixture.dir, 'account-1') }), null);
     assert.equal(await accountStatus({ harnessId: 'other' }), null);
 
@@ -1001,14 +1011,20 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     finishFirstListing();
     await waitFor(() => puts.length && puts.at(-1).models, 3_000, 'models read again after the sign-in');
     assert.ok(puts.every((entry) => entry.available), 'the late listing never marks the engine signed out');
-    assert.deepEqual(puts.at(-1), { id: 'agy', available: true, reportsUsage: true, ...(official ? { accounts: { methods: [] } } : {}), version: '1.5.12', models: [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon' }] });
+    assert.deepEqual(puts.at(-1), { id: 'agy', available: true, reportsUsage: true,
+      ...(official ? { accounts: { methods: [{ id: 'oauth-personal', label: 'Google 账号', kind: 'browser' }] } } : {}), version: '1.5.12', models: [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon' }] });
 
     page.postMessage({ type: 'account-request', reqId: 'a2', op: 'logout' });
     await waitFor(() => result('a2'), 3_000, 'sign-out result');
     assert.equal(calls('logout').length, 1);
     assert.equal(result('a2').account.signedIn, false);
-    assert.deepEqual(puts.at(-1), { id: 'agy', available: false, reason: 'not-signed-in', version: '1.5.12',
-      message: 'Antigravity 还没有登录。请打开 Antigravity 插件设置，点「用 Google 登录」。' });
+    if (official) {
+      assert.equal(puts.at(-1).available, true);
+      assert.deepEqual(puts.at(-1).accounts, { methods: [{ id: 'oauth-personal', label: 'Google 账号', kind: 'browser' }] });
+    } else {
+      assert.deepEqual(puts.at(-1), { id: 'agy', available: false, reason: 'not-signed-in', version: '1.5.12',
+        message: 'Antigravity 还没有登录。请打开 Antigravity 插件设置，点「用 Google 登录」。' });
+    }
   });
 
   // agy 的 logout 一调用就登出(2026-11-19 实测)：设置页只在用户确认后才发出退出请求。

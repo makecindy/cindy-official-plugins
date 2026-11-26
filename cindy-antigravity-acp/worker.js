@@ -19,16 +19,20 @@
  *     subscription tier name agy reports.
  *   account({ sessionId? }) -> { supported: true, signedIn, tier?, canSignIn, canSignOut }
  *      | { supported: false, reason } | { supported: true, error, detail? }
- *   accountStatus({ harnessId, accountDir? }) -> { state: 'signed-in', plan? } | { state: 'signed-out' } | null
- *     Cindy's engine accounts (the engine publishes `accounts: { methods: [] }`): agy's one login and
- *     its tier name as `plan`, read like `account` with the dedicated model-list session the last
- *     listModels used. null when agy is missing, the check fails or takes longer than 20 s, and for
- *     an `accountDir` (the plugin never offers to add accounts).
+ *   accountStatus({ harnessId, accountDir? }) -> { state: 'signed-in', identity?, plan?, fingerprint? } | { state: 'signed-out' } | null
+ *     Cindy's engine accounts (the engine publishes `accounts: { methods: [{ id: 'oauth-personal', kind: 'browser' }] }`):
+ *     reads either the original agy login (no `accountDir`) or an isolated account directory Cindy created
+ *     (file-based token storage under `<accountDir>/.gemini/antigravity-cli`).
+ *   accountLogin({ harnessId, accountDir?, methodId: 'oauth-personal' }) -> { ok: true } | { ok: false, error, message? }
+ *     Runs agy's Google browser sign-in for the original login or `accountDir`, sending `progress`
+ *     notifications every 10 s while waiting.
+ *   accountLoginCancel({ harnessId, accountDir? }) -> { ok: true }
+ *     Cancels an in-flight Google sign-in for the matching account.
  *   adoptModelSession({ sessionId }) -> { ok: true, adopted } | { ok: false, error: 'invalid' | 'busy' }
  *     main.js hands over the model-list session it saved, so accountStatus can read the tier before
  *     the next listing (plugins upgraded from 0.4.x kept it only in main.js). Kept only when the worker
  *     remembers none; starts no agy.
- *   usage({ harnessId }) -> { updatedAt, windows } | null   (agy's native /usage, see agy-usage.js)
+ *   usage({ harnessId?, accountDir? }) -> { updatedAt, windows } | null   (agy's native /usage, see agy-usage.js)
  *   login() -> { ok: true, tier? } | { ok: false, error, detail? }
  *     agy's Google sign-in: agy opens the browser; answers when the sign-in finished, was cancelled
  *     or after 5 minutes. Sends a `progress` notification every 10 s meanwhile (keeps Cindy's
@@ -41,11 +45,13 @@
  *     Signs agy out; the settings page only asks after the user confirmed.
  *   login() and logout() answer { ok: false, error: 'busy' } while a custom path is being saved: the account
  *   they would act on is the one of the executable being replaced.
- *   Sign-in stays with agy (see agy-account.js); the plugin never sees credentials or the email.
+ *   OAuth tokens stay in agy's own storage; the worker only reads non-secret display metadata
+ *   (email / tier) for Cindy's account picker and never returns credentials.
  */
 
 const readline = require('node:readline');
 const maintain = require('./cli-installer.cjs');
+const { accountDirProblem } = require('./agy-account-dir.js');
 const { detectAgy, readCustomAgyConfig, runVersion, validateCustomPath, writeCustomAgyPath } = require('./resolve-agy.js');
 const { listModels, readModelSession, rememberModelSession } = require('./agy-models.js');
 const account = require('./agy-account.js');
@@ -53,6 +59,10 @@ const account = require('./agy-account.js');
 const HARNESS_ID = 'agy';
 /** Cindy waits 26 s for accountStatus; answer "unknown" before that rather than not at all. */
 const ACCOUNT_STATUS_DEADLINE_MS = 20_000;
+/** Cindy keeps browser accountLogin alive up to 11 minutes while progress notifications arrive. */
+const ACCOUNT_LOGIN_TIMEOUT_MS = 10 * 60_000;
+const LOGIN_MESSAGE_MAX = 200;
+const ACCOUNT_LOGIN_ERRORS = new Set(['cancelled', 'timeout', 'busy', 'unsupported', 'invalid-secret', 'failed']);
 
 function reply(message) {
   process.stdout.write(JSON.stringify(message) + '\n');
@@ -71,13 +81,44 @@ function withDeadline(promise, ms, fallback) {
   return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
 }
 
-let usageRead;
-let accountStatusRead;
+function cleanLoginMessage(text) {
+  if (typeof text !== 'string') return undefined;
+  // eslint-disable-next-line no-control-regex
+  const flat = text.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!flat) return undefined;
+  return flat.length > LOGIN_MESSAGE_MAX ? flat.slice(0, LOGIN_MESSAGE_MAX - 1) + '…' : flat;
+}
+
+/**
+ * Validates `harnessId` and optional `accountDir` for Cindy's engine-account worker methods.
+ * Returns `{ key, accountDir? }` or `null` when the request is not for this engine or names
+ * an unusable account directory.
+ */
+function targetAccountOf(params, harnessRequired) {
+  const harnessId = params && params.harnessId;
+  if (harnessRequired ? harnessId !== HARNESS_ID : harnessId !== undefined && harnessId !== HARNESS_ID) return null;
+  const accountDir = params && params.accountDir !== undefined ? params.accountDir : undefined;
+  if (accountDir === undefined) return { key: '' };
+  if (accountDirProblem(accountDir)) return null;
+  return { key: accountDir, accountDir };
+}
+
+const usageReads = new Map();
+const accountStatusReads = new Map();
+const rememberedPlans = new Map();
+const signedInAccountDirs = new Set();
 let maintenanceActive = false;
 let customPathPending = 0;
 let modelSourceRevision = 0;
 let customPathQueue = Promise.resolve();
 let activeLoginPromise = null;
+
+function clearAccountCaches() {
+  usageReads.clear();
+  accountStatusReads.clear();
+  rememberedPlans.clear();
+  signedInAccountDirs.clear();
+}
 
 async function applyCustomPath(params) {
   if (maintenanceActive) return { ok: false, error: 'busy' };
@@ -91,8 +132,7 @@ async function applyCustomPath(params) {
   if (maintenanceActive) return { ok: false, error: 'busy' };
   const saved = writeCustomAgyPath(params.path);
   if (!saved.ok) return { ok: false, error: saved.error };
-  usageRead = undefined;
-  accountStatusRead = undefined;
+  clearAccountCaches();
   // Like main.js, start the model listing of the new executable afresh.
   modelSourceRevision += 1;
   rememberModelSession(null);
@@ -103,6 +143,36 @@ async function applyCustomPath(params) {
   }
   const detection = await detectAgy({ locale });
   return { ok: true, customPath: saved.customPath, detection };
+}
+
+function runAccountLogin(accountDir, timeoutMs) {
+  const key = accountDir || '';
+  if (customPathPending > 0) return Promise.resolve({ ok: false, error: 'busy' });
+  usageReads.delete(key);
+  if (activeLoginPromise) return Promise.resolve({ ok: false, error: 'busy' });
+  const options = {
+    ...(accountDir ? { accountDir } : {}),
+    ...(timeoutMs ? { timeoutMs } : {}),
+  };
+  const run = Promise.resolve(account.login(options, () => {
+    reply({ jsonrpc: '2.0', method: 'progress', params: { stage: 'waiting-for-browser' } });
+  })).then((result) => {
+    if (result && result.ok) {
+      if (result.tier && typeof result.tier.name === 'string' && result.tier.name.trim()) {
+        rememberedPlans.set(key, result.tier.name.trim());
+      }
+      if (accountDir) signedInAccountDirs.add(accountDir);
+      reply({ jsonrpc: '2.0', method: 'account-ready', params: {} });
+    }
+    return result;
+  }).finally(() => {
+    if (activeLoginPromise === run) activeLoginPromise = null;
+    // A status read that started before the sign-in finished may describe the old state.
+    accountStatusReads.delete(key);
+    usageReads.delete(key);
+  });
+  activeLoginPromise = run;
+  return run;
 }
 
 const handlers = {
@@ -119,14 +189,20 @@ const handlers = {
     }
     return result;
   },
-  usage() {
-    if (!usageRead) {
-      const read = require('./agy-usage.js').readUsage().catch(() => null).finally(() => {
-        if (usageRead === read) usageRead = undefined;
-      });
-      usageRead = read;
+  usage(params) {
+    const target = targetAccountOf(params, false);
+    if (!target) return null;
+    const { key, accountDir } = target;
+    let read = usageReads.get(key);
+    if (!read) {
+      read = require('./agy-usage.js').readUsage(accountDir ? { accountDir } : undefined)
+        .then((result) => (usageReads.get(key) === read ? result : null), () => null)
+        .finally(() => {
+          if (usageReads.get(key) === read) usageReads.delete(key);
+        });
+      usageReads.set(key, read);
     }
-    return usageRead;
+    return read;
   },
   async detect(params) {
     const locale = params && typeof params.locale === 'string' ? params.locale : undefined;
@@ -147,55 +223,116 @@ const handlers = {
     }));
   },
   accountStatus(params) {
-    if (params && (params.accountDir != null || (params.harnessId !== undefined && params.harnessId !== HARNESS_ID))) {
-      return null;
-    }
-    if (!accountStatusRead) {
-      // Callers share one check (one agy at a time), each with its own deadline.
-      const sessionId = readModelSession();
-      const read = account.accountStatus(sessionId ? { sessionId } : {})
-        .then((result) => accountStatusRead === read ? result : null, () => null)
+    const target = targetAccountOf(params, false);
+    if (!target) return null;
+    const { key, accountDir } = target;
+    let read = accountStatusReads.get(key);
+    if (!read) {
+      // Callers share one check per account (one agy at a time), each with its own deadline.
+      const options = accountDir ? { accountDir } : undefined;
+      const sessionId = readModelSession(options);
+      const fallbackPlan = rememberedPlans.get(key);
+      const statusParams = {
+        ...(sessionId ? { sessionId } : {}),
+        ...(fallbackPlan ? { fallbackPlan } : {}),
+      };
+      read = account.accountStatus(statusParams, options)
+        .then((result) => {
+          if (accountStatusReads.get(key) !== read) return null;
+          if (accountDir) {
+            if (result && result.state === 'signed-in') {
+              const wasKnown = signedInAccountDirs.has(accountDir);
+              signedInAccountDirs.add(accountDir);
+              if (!wasKnown) reply({ jsonrpc: '2.0', method: 'account-ready', params: {} });
+            } else if (result && result.state === 'signed-out') {
+              signedInAccountDirs.delete(accountDir);
+              rememberedPlans.delete(key);
+            }
+          } else if (result && result.state === 'signed-out') {
+            rememberedPlans.delete('');
+          }
+          return result;
+        }, () => null)
         .finally(() => {
-          if (accountStatusRead === read) accountStatusRead = undefined;
+          if (accountStatusReads.get(key) === read) accountStatusReads.delete(key);
         });
-      accountStatusRead = read;
+      accountStatusReads.set(key, read);
     }
-    return withDeadline(accountStatusRead, ACCOUNT_STATUS_DEADLINE_MS, null);
+    return withDeadline(read, ACCOUNT_STATUS_DEADLINE_MS, null);
+  },
+  async accountLogin(params) {
+    if (!params || params.harnessId !== HARNESS_ID) return { ok: false, error: 'unsupported' };
+    if (params.methodId !== account.GOOGLE_METHOD) return { ok: false, error: 'unsupported' };
+    if (params.secret !== undefined) return { ok: false, error: 'invalid-secret' };
+    const accountDir = params.accountDir !== undefined ? params.accountDir : undefined;
+    if (accountDir !== undefined) {
+      const problem = accountDirProblem(accountDir);
+      if (problem) return { ok: false, error: 'failed', message: cleanLoginMessage(problem) };
+    }
+    const result = await runAccountLogin(accountDir, ACCOUNT_LOGIN_TIMEOUT_MS);
+    if (result && result.ok) return { ok: true };
+    const rawError = result && result.error;
+    const error = ACCOUNT_LOGIN_ERRORS.has(rawError) ? rawError : 'failed';
+    const message = cleanLoginMessage(result && result.detail);
+    return { ok: false, error, ...(message ? { message } : {}) };
+  },
+  async accountLoginCancel(params) {
+    if (params && params.harnessId !== undefined && params.harnessId !== HARNESS_ID) return { ok: true };
+    const accountDir = params && params.accountDir !== undefined ? params.accountDir : null;
+    account.cancelLogin({ accountDir });
+    return { ok: true };
   },
   login() {
-    if (customPathPending > 0) return Promise.resolve({ ok: false, error: 'busy' });
-    usageRead = undefined;
-    if (activeLoginPromise) return Promise.resolve({ ok: false, error: 'busy' });
-    const run = Promise.resolve(account.login(undefined, () => {
-      reply({ jsonrpc: '2.0', method: 'progress', params: { stage: 'waiting-for-browser' } });
-    })).finally(() => {
-      if (activeLoginPromise === run) activeLoginPromise = null;
-      // A status read that started before the sign-in finished may describe the old state.
-      accountStatusRead = undefined;
-    });
-    activeLoginPromise = run;
-    return run;
+    return runAccountLogin(undefined);
   },
   async cancelLogin() {
     return account.cancelLogin();
   },
   async logout() {
     if (customPathPending > 0) return { ok: false, error: 'busy' };
-    usageRead = undefined;
-    return account.logout().finally(() => { accountStatusRead = undefined; });
+    usageReads.delete('');
+    rememberedPlans.delete('');
+    return account.logout().finally(() => { accountStatusReads.delete(''); });
   },
   async listModels(params) {
     const revision = modelSourceRevision;
-    return listModels(params).then((result) => {
-      if (revision === modelSourceRevision && typeof result?.sessionId === 'string') {
-        rememberModelSession(result.sessionId);
+    try {
+      const primary = await listModels(params);
+      if (primary && primary.supported) {
+        if (revision === modelSourceRevision && typeof primary.sessionId === 'string') {
+          rememberModelSession(primary.sessionId);
+        }
+        return primary;
       }
-      return result;
-    }, (error) => ({
-      supported: true,
-      error: 'list-failed',
-      detail: String((error && error.message) || error).slice(0, 300),
-    }));
+      if (primary && primary.reason === 'not-signed-in') {
+        // Default login is signed out: fall back to a signed-in isolated account so Cindy still
+        // learns the model catalog and working modes, while reporting defaultSignedOut to main.js.
+        for (const dir of [...signedInAccountDirs]) {
+          if (accountDirProblem(dir)) {
+            signedInAccountDirs.delete(dir);
+            continue;
+          }
+          const options = { accountDir: dir };
+          const savedSession = readModelSession(options);
+          const fallback = await listModels(savedSession ? { sessionId: savedSession } : {}, options).catch(() => null);
+          if (fallback && fallback.supported) {
+            if (revision === modelSourceRevision && typeof fallback.sessionId === 'string') {
+              rememberModelSession(fallback.sessionId, options);
+            }
+            const { sessionId: _unusedSession, tier: _unusedTier, ...catalog } = fallback;
+            return { ...catalog, defaultSignedOut: true };
+          }
+          if (fallback && fallback.reason === 'not-signed-in') signedInAccountDirs.delete(dir);
+        }
+      }
+      return primary;
+    } catch (error) {
+      return {
+        supported: true,
+        error: 'list-failed',
+        detail: String((error && error.message) || error).slice(0, 300),
+      };
+    }
   },
   adoptModelSession(params) {
     const sessionId = params && params.sessionId;

@@ -1,6 +1,7 @@
 'use strict';
 
 const { resolveAgy, spawnAgy, SESSION_SETTINGS, killTree } = require('./resolve-agy.js');
+const { accountDirProblem } = require('./agy-account-dir.js');
 
 const NAMED_PERIODS = { hourly: 60, daily: 1440, weekly: 10080 };
 const PERIOD_UNITS = {
@@ -53,6 +54,8 @@ function usageFromReport(report) {
 }
 
 async function readUsage(options) {
+  const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : undefined;
+  if (accountDir && accountDirProblem(accountDir, options)) return null;
   const executable = resolveAgy(options);
   if (!executable) return null;
   // The Windows updater can open a terminal of its own even when agy is hidden.
@@ -60,10 +63,17 @@ async function readUsage(options) {
   const usageEnv = (options?.platform ?? process.platform) === 'win32'
     ? { ...env, AGY_CLI_DISABLE_AUTO_UPDATE: 'true' }
     : env;
-  const child = spawnAgy(executable, ['--settings', SESSION_SETTINGS, '--output-format', 'json', '--print', '/usage'],
-    { ...options, env: usageEnv, stdio: ['ignore', 'pipe', 'ignore'] });
+  // A closed stdin pipe signals a non-interactive environment so agy never opens a browser if signed out.
+  const child = spawnAgy(executable, ['--settings', SESSION_SETTINGS, '--output-format', 'json', '--print', '/usage'], {
+    ...options,
+    env: usageEnv,
+    ...(accountDir ? { accountDir, accountHome: true } : {}),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  try { child.stdin.end(); } catch { /* already closed */ }
   const chunks = [];
   let length = 0;
+  let stderrTail = '';
   const stop = () => killTree(child, 'SIGKILL');
   const timer = setTimeout(stop, 12000);
   process.once('exit', stop);
@@ -75,6 +85,10 @@ async function readUsage(options) {
         length += chunk.length;
         if (length > 128 * 1024) stop();
         else chunks.push(chunk);
+      });
+      child.stderr.on('data', chunk => {
+        if (stderrTail.length < 2048) stderrTail += chunk.toString('utf8');
+        if (/Authentication required/i.test(stderrTail)) stop();
       });
     });
     return code === 0 && length <= 128 * 1024 ? usageFromReport(JSON.parse(Buffer.concat(chunks).toString('utf8'))) : null;

@@ -43,9 +43,9 @@
   var EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
   /** Cindy permission modes agy's own modes stand for; Full access is always Cindy's. */
   var MODES = ['default', 'acceptEdits', 'auto', 'plan'];
-  var SIGN_IN_MESSAGES = {
-    'zh-CN': 'Antigravity 还没有登录。请打开 Antigravity 插件设置，点「用 Google 登录」。',
-    en: 'Antigravity is not signed in. Open the Antigravity plugin settings and select Sign in with Google.',
+  var ACCOUNT_METHOD_LABELS = {
+    'zh-CN': 'Google 账号',
+    en: 'Google account',
   };
   var ACCOUNT_TIMEOUT_MS = 60000;
   // Sign-in waits for the user in the browser. The worker reports progress every 10 s, so Cindy keeps
@@ -221,21 +221,26 @@
 
   /** Only metadata leaves the plugin: never the executable path or a command. */
   function harnessEntry(result) {
-    var entry = { id: HARNESS_ID, available: result.available === true && !signInRequired };
+    var entry = { id: HARNESS_ID, available: result.available === true };
     if (entry.available) {
       entry.reportsUsage = true;
-      // The worker reports the single local agy login. Older hosts ignore this field.
-      entry.accounts = { methods: [] };
+      // Cindy may manage the original agy login and add more isolated Google accounts in the pool.
+      // Keeping the engine available even while the default login is signed out lets users sign in
+      // or add accounts directly in Cindy's Model Providers view and keeps other accounts usable.
+      entry.accounts = {
+        methods: [{
+          id: 'oauth-personal',
+          label: ACCOUNT_METHOD_LABELS[locale] || ACCOUNT_METHOD_LABELS.en,
+          kind: 'browser',
+        }],
+      };
     }
     if (entry.available && supportsRemoteWorkspace(result.version)) {
       entry.remoteWorkspace = true;
       entry.guestWorkspace = true;
     }
 
-    if (result.available === true && signInRequired) {
-      entry.reason = 'not-signed-in';
-      entry.message = SIGN_IN_MESSAGES[locale] || SIGN_IN_MESSAGES.en;
-    } else if (!entry.available) {
+    if (!entry.available) {
       entry.reason = result.reason === 'not-runnable' ? 'not-runnable' : 'not-installed';
       var messages = result.messages || {};
       var message = shortString(messages[locale], 200) || shortString(messages.en, 200) || shortString(result.message, 200);
@@ -309,9 +314,8 @@
     if (channel) channel.postMessage({ type: 'account-changed', account: accountView() });
   }
 
-  /** Records agy's sign-in state; the engine status Cindy shows follows it (sign-in hint or ready). */
+  /** Records the default agy login's state for the plugin settings page. */
   function applySignedIn(signedIn, tier) {
-    var gen = pathGeneration;
     account.signedIn = signedIn;
     accountSeenAt = Date.now();
     var name = tier && typeof tier === 'object' ? shortString(tier.name, 200) : undefined;
@@ -321,10 +325,7 @@
     signInRequired = !signedIn;
     if (!signedIn) clearUsage();
     else if (changed) void refreshUsage();
-    if (!changed || !lastResult || !lastResult.available) return Promise.resolve();
-    return publish(lastResult).then(function (published) {
-      if (gen === pathGeneration) lastPublish = published;
-    });
+    return Promise.resolve();
   }
 
   function snapshot() {
@@ -496,22 +497,31 @@
         var next = sanitizeModels(result.models);
         var nextModes = sanitizeModes(result.modes);
         var nextDefault = nextModes.indexOf(result.defaultMode) !== -1 ? result.defaultMode : null;
-        var changed = (fresh && signInRequired)
+        var changed = (fresh && !result.defaultSignedOut && signInRequired)
           || JSON.stringify(next) !== JSON.stringify(models || [])
           || JSON.stringify(nextModes) !== JSON.stringify(modes || [])
           || nextDefault !== defaultMode;
         if (fresh) {
-          signInRequired = false;
-          account.signedIn = true;
-          accountSeenAt = Date.now();
-          if (result.tier && shortString(result.tier.name, 200)) account.tier = shortString(result.tier.name, 200);
+          if (result.defaultSignedOut === true) {
+            signInRequired = true;
+            account.signedIn = false;
+            account.tier = null;
+            accountSeenAt = Date.now();
+          } else {
+            signInRequired = false;
+            account.signedIn = true;
+            accountSeenAt = Date.now();
+            if (result.tier && shortString(result.tier.name, 200)) account.tier = shortString(result.tier.name, 200);
+          }
           announceAccount();
         }
         models = next;
         modes = nextModes;
         defaultMode = nextDefault;
         modelsListedAt = Date.now();
-        if (typeof result.sessionId === 'string') modelSessionId = result.sessionId.slice(0, 128);
+        if (!result.defaultSignedOut && typeof result.sessionId === 'string') {
+          modelSessionId = result.sessionId.slice(0, 128);
+        }
         saveState();
         if (!changed || !lastResult) return undefined;
         return publish(lastResult).then(function (published) {
@@ -847,6 +857,12 @@
 
   cindy.onHostMessage(function (message) {
     if (handleCliProgress(message)) return;
+    if (message && message.type === 'event' && message.name === 'node-notification' && message.method === 'account-ready') {
+      stateLoaded.then(function () {
+        if (lastResult && lastResult.available && (!models || !models.length)) return refreshModels('force');
+      });
+      return;
+    }
     // Cindy opened a model picker (its provider-style refresh, with its own cooldown).
     if (message && message.type === 'harnesses-refresh-requested') {
       stateLoaded.then(detect).then(function () { return refreshModels('if-stale'); });
@@ -857,8 +873,8 @@
     if (channel) channel.postMessage({ type: 'locale-changed' });
     if (next === locale) return;
     locale = next;
-    // The stored install / sign-in hint should follow Cindy's language; no new detection needed.
-    if (lastResult && (!lastResult.available || signInRequired)) {
+    // Republish so the install hint or account method label follows Cindy's language; no new detection needed.
+    if (lastResult) {
       publish(lastResult).then(function (published) { lastPublish = published; });
     }
   });

@@ -14,6 +14,7 @@
  */
 
 const { killTree } = require('./resolve-agy.js');
+const { accountDirProblem, ensureAccountSubdirs, readAccountTokenMeta } = require('./agy-account-dir.js');
 const { isSignInRequired, openAgy, tierFromMeta } = require('./agy-client.js');
 const { probeFolder } = require('./agy-models.js');
 
@@ -25,8 +26,12 @@ const PROGRESS_INTERVAL_MS = 10_000;
 const CANCEL_KILL_GRACE_MS = 2_000;
 const MAX_DETAIL = 300;
 
-/** The sign-in in progress (at most one): { agy, child, cancelled }. */
+/** The sign-in in progress (at most one): { key, agy, child, cancelled }. */
 let activeLogin = null;
+
+function accountKeyOf(options) {
+  return options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : 'default';
+}
 
 function detailOf(error) {
   return String((error && error.message) || error).slice(0, MAX_DETAIL);
@@ -95,32 +100,59 @@ async function status(params, options) {
 const MAX_PLAN = 64;
 
 /**
- * The current login as Cindy's engine accounts read it (`accountStatus`): signed in or out, and the
- * tier name as `plan` when the plugin's model-list session is known (resuming it reports the tier).
- * agy keeps one Google sign-in per computer, so this is the only account; ACP does not report the
- * email, so there is no identity. Null when agy is not installed.
- * @returns {Promise<{ state: 'signed-in', plan?: string } | { state: 'signed-out' } | null>}
+ * The account status as Cindy's engine accounts read it (`accountStatus`): signed in or out,
+ * identity (email/name when known from an isolated account's token metadata), fingerprint for
+ * duplicate-login deduplication, and the subscription tier name as `plan`. Null when agy is
+ * not installed or an explicit `accountDir` is unusable.
+ * @returns {Promise<{ state: 'signed-in', identity?: { email?: string, name?: string }, plan?: string, fingerprint?: string } | { state: 'signed-out' } | null>}
  */
 async function accountStatus(params, options) {
+  const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : undefined;
+  if (accountDir && accountDirProblem(accountDir, options)) return null;
   const current = await status(params, options);
   if (!current.supported) return null;
   if (!current.signedIn) return { state: 'signed-out' };
-  const name = current.tier && current.tier.name;
-  const plan = typeof name === 'string' && !/[\u0000-\u001f\u007f-\u009f]/.test(name)
-    ? name.slice(0, MAX_PLAN).trim()
+  const meta = accountDir ? readAccountTokenMeta(accountDir) : {};
+  const rawPlan = (current.tier && current.tier.name)
+    || meta.plan
+    || (params && typeof params.fallbackPlan === 'string' ? params.fallbackPlan : undefined);
+  const plan = typeof rawPlan === 'string' && !/[\u0000-\u001f\u007f-\u009f]/.test(rawPlan)
+    ? rawPlan.slice(0, MAX_PLAN).trim()
     : '';
-  return { state: 'signed-in', ...(plan ? { plan } : {}) };
+  const identity = meta.email || meta.name
+    ? { ...(meta.email ? { email: meta.email } : {}), ...(meta.name ? { name: meta.name } : {}) }
+    : undefined;
+  return {
+    state: 'signed-in',
+    ...(identity ? { identity } : {}),
+    ...(plan ? { plan } : {}),
+    ...(meta.fingerprint ? { fingerprint: meta.fingerprint } : {}),
+  };
 }
 
 /**
  * agy's Google sign-in: agy opens the browser and this resolves when the user finished there,
- * cancelled (cancelLogin) or after 5 minutes. `onProgress` runs every 10 s while waiting.
+ * cancelled (cancelLogin) or timed out. `onProgress` runs every 10 s while waiting.
+ * When `options.accountDir` is set, agy keeps the sign-in in that isolated directory.
  * @returns {Promise<{ ok: true, tier?: { name: string } } | { ok: false, error: 'busy' | 'not-installed'
  *   | 'unsupported' | 'cancelled' | 'timeout' | 'failed', detail?: string }>}
  */
 async function login(options, onProgress) {
   if (activeLogin) return { ok: false, error: 'busy' };
-  const state = { agy: null, child: null, cancelled: false };
+  const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : undefined;
+  if (accountDir) {
+    const problem = accountDirProblem(accountDir, options);
+    if (problem) return { ok: false, error: 'failed', detail: problem };
+    try {
+      ensureAccountSubdirs(accountDir);
+    } catch (error) {
+      return { ok: false, error: 'failed', detail: detailOf(error) };
+    }
+  }
+  const timeoutMs = (options && typeof options.timeoutMs === 'number' && options.timeoutMs > 0)
+    ? options.timeoutMs
+    : LOGIN_TIMEOUT_MS;
+  const state = { key: accountKeyOf(options), agy: null, child: null, cancelled: false };
   activeLogin = state;
   const ticker = setInterval(() => { if (onProgress) onProgress(); }, PROGRESS_INTERVAL_MS);
   try {
@@ -134,7 +166,7 @@ async function login(options, onProgress) {
     if (!state.agy) return { ok: false, error: 'not-installed' };
     if (state.cancelled) return { ok: false, error: 'cancelled' };
     if (!canSignIn(state.agy.init)) return { ok: false, error: 'unsupported' };
-    const result = await state.agy.call('authenticate', { methodId: GOOGLE_METHOD }, LOGIN_TIMEOUT_MS);
+    const result = await state.agy.call('authenticate', { methodId: GOOGLE_METHOD }, timeoutMs);
     const tier = tierFromMeta(result._meta);
     return { ok: true, ...(tier ? { tier } : {}) };
   } catch (error) {
@@ -148,10 +180,18 @@ async function login(options, onProgress) {
   }
 }
 
-/** Stops the sign-in in progress (its agy process ends; the browser page can just be closed). */
-function cancelLogin() {
+/**
+ * Stops the sign-in in progress (its agy process ends; the browser page can just be closed).
+ * When `options.accountDir` is specified (including `null` for the original login), only cancels a
+ * matching login; omitting `options` cancels whichever login is running.
+ */
+function cancelLogin(options) {
   const state = activeLogin;
   if (!state) return { ok: true, cancelled: false };
+  if (options && Object.prototype.hasOwnProperty.call(options, 'accountDir')) {
+    const key = options.accountDir ? options.accountDir : 'default';
+    if (state.key !== key) return { ok: true, cancelled: false };
+  }
   state.cancelled = true;
   const child = (state.agy && state.agy.child) || state.child;
   if (child) stopAgy(child);

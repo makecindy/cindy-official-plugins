@@ -18,6 +18,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
+const { APP_DATA_DIR_NAME, accountDirProblem, geminiDirOf } = require('./agy-account-dir.js');
 
 const INSTALL_PAGE = 'https://antigravity.google';
 const VERSION_TIMEOUT_MS = 10_000;
@@ -46,6 +47,22 @@ function cmdArg(arg) {
 }
 /** How Cindy starts agy: session settings (no paid credits), ACP mode, no telemetry. */
 const ACP_ARGS = Object.freeze(['--settings', SESSION_SETTINGS, 'acp', '--disable-telemetry']);
+
+/**
+ * ACP arguments for the default login (unchanged `ACP_ARGS`) or for an isolated Cindy account
+ * directory (`--gemini-dir <dir>/.gemini --app-data-dir antigravity-cli`).
+ */
+function acpArgsFor(options) {
+  const accountDir = options && options.accountDir;
+  if (!accountDir) return ACP_ARGS;
+  const problem = accountDirProblem(accountDir, options);
+  if (problem) {
+    const error = new Error(problem);
+    error.code = 'INVALID_ACCOUNT_DIR';
+    throw error;
+  }
+  return [...ACP_ARGS, '--gemini-dir', geminiDirOf(accountDir, options), '--app-data-dir', APP_DATA_DIR_NAME];
+}
 const WINDOWS_EXTENSIONS = ['.exe', '.cmd', '.bat'];
 const MAX_NVM_VERSIONS = 16;
 const MAX_CONFIG_BYTES = 16 * 1024;
@@ -402,11 +419,23 @@ function resolveAgy(options) {
  */
 function childEnv(agyPath, options) {
   const ctx = context(options);
+  const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : null;
+  const accountHome = Boolean(accountDir && options && options.accountHome);
   const out = {};
   for (const [key, value] of Object.entries(ctx.env)) {
     if (value === undefined) continue;
-    if (ctx.win ? key.toUpperCase() === 'PATH' : key === 'PATH') continue;
+    const upper = ctx.win ? key.toUpperCase() : key;
+    if (upper === 'PATH') continue;
+    if (accountDir && upper === 'AGY_CLI_FORCE_FILE_TOKEN_STORAGE') continue;
+    if (accountHome && (upper === 'HOME' || (ctx.win && upper === 'USERPROFILE'))) continue;
     out[key] = value;
+  }
+  if (accountDir) {
+    out.AGY_CLI_FORCE_FILE_TOKEN_STORAGE = '1';
+    if (accountHome) {
+      out.HOME = accountDir;
+      if (ctx.win) out.USERPROFILE = accountDir;
+    }
   }
   const parts = [ctx.p.dirname(agyPath), ...splitPathList(envGet(ctx.env, 'PATH', ctx.win), ctx.win)];
   if (!ctx.win) {
@@ -426,15 +455,29 @@ function windowsSystemExe(env, name) {
 }
 
 /**
- * Start agy with constant arguments. Windows `.cmd` / `.bat` shims (what npm creates)
- * can only run through cmd.exe; the path is quoted and rejected if it contains
- * characters cmd.exe would still expand inside quotes.
+ * Start agy with constant arguments (plus the validated `--gemini-dir <dir>/.gemini` pair when an
+ * isolated account directory is configured). Windows `.cmd` / `.bat` shims (what npm creates) can
+ * only run through cmd.exe; paths are quoted and rejected if they contain characters cmd.exe would
+ * still expand inside quotes.
  */
 function spawnAgy(agyPath, args, options) {
   const ctx = context(options);
-  for (const arg of args) {
+  const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : null;
+  let allowedGeminiDir = null;
+  if (accountDir) {
+    const problem = accountDirProblem(accountDir, options);
+    if (problem) {
+      const error = new Error(problem);
+      error.code = 'INVALID_ACCOUNT_DIR';
+      throw error;
+    }
+    allowedGeminiDir = geminiDirOf(accountDir, options);
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
     const constant = typeof arg === 'string' && (SAFE_ARG.test(arg) || CONSTANT_ARGS.has(arg));
-    if (!constant) throw new Error('Refusing to pass a non-constant argument to agy');
+    const isGeminiDirArg = allowedGeminiDir !== null && index > 0 && args[index - 1] === '--gemini-dir' && arg === allowedGeminiDir;
+    if (!constant && !isGeminiDirArg) throw new Error('Refusing to pass a non-constant argument to agy');
   }
   const base = {
     env: childEnv(agyPath, options),
@@ -449,8 +492,14 @@ function spawnAgy(agyPath, args, options) {
       error.code = 'UNSAFE_PATH';
       throw error;
     }
+    if (allowedGeminiDir !== null && /["%!^&|<>\r\n]/.test(allowedGeminiDir)) {
+      const error = new Error('The account directory path contains characters that cmd.exe cannot run safely');
+      error.code = 'UNSAFE_PATH';
+      throw error;
+    }
     const shell = windowsSystemExe(ctx.env, 'cmd.exe') || true;
-    return spawn(['"' + agyPath + '"', ...args.map(cmdArg)].join(' '), { ...base, shell });
+    const formatArg = (arg) => (arg === allowedGeminiDir ? '"' + arg + '"' : cmdArg(arg));
+    return spawn(['"' + agyPath + '"', ...args.map(formatArg)].join(' '), { ...base, shell });
   }
   return spawn(agyPath, args, base);
 }
@@ -621,6 +670,7 @@ module.exports = {
   INSTALL_PAGE,
   MESSAGES,
   SESSION_SETTINGS,
+  acpArgsFor,
   candidateDirs,
   childEnv,
   configFilePath,

@@ -51,7 +51,7 @@ function supportsSteering(agentVersion) {
  * as soon as a new one takes over. Keep Cindy's original request open until
  * the newest prompt finishes and relay all of the session's streamed updates.
  */
-function attachSteering(input, output, child, stop) {
+function attachSteering(input, output, child, stop, errorRelay) {
   const turns = new Map();
   const requests = new Map();
   const openingSessions = new Map();
@@ -104,18 +104,24 @@ function attachSteering(input, output, child, stop) {
     }
 
     const turn = requests.get(message.id);
-    if (!turn) return line;
+    if (!turn) {
+      const classified = errorRelay ? errorRelay.response(message) : message;
+      return classified !== message ? encode(classified) : line;
+    }
     requests.delete(message.id);
     if (message.id === turn.latestId) turn.result = message;
     if (--turn.pending !== 0) return null;
     turns.delete(turn.sessionId);
-    return encode({ ...turn.result, id: turn.originalId });
+    const finalMessage = { ...turn.result, id: turn.originalId };
+    const classified = errorRelay ? errorRelay.response(finalMessage) : finalMessage;
+    return encode(classified);
   });
 
   const toAgent = lineTransform((line) => {
     const message = parse(line);
     if (!message?.method || message.id === undefined) return line;
     const params = message.params;
+    if (errorRelay) errorRelay.request(message);
     if (message.method === 'initialize') initializeId = message.id;
     if (isAntigravity && isSessionOpen(message.method)) {
       const servers = Array.isArray(params?.mcpServers) ? params.mcpServers : [];
