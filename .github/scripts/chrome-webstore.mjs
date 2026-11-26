@@ -65,25 +65,50 @@ export function plan(status, version) {
   return {publish: true, reason: 'A newer extension version is ready'};
 }
 
+// Only publish validation warnings belong in public CI logs. Omit the generic
+// message, arbitrary detail payloads and metadata, which may describe accounts.
+function publishWarningSummary(details, privateValues) {
+  if (!Array.isArray(details)) return '';
+  const warnings = details.flatMap(detail => Array.isArray(detail?.warnings) ? detail.warnings : []);
+  const summaries = [];
+  for (const warning of warnings.slice(0, 5)) {
+    if (typeof warning?.reason !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/i.test(warning.reason)) continue;
+    let text = warning.reason;
+    if (typeof warning.description === 'string') text += ': ' + warning.description;
+    for (const value of privateValues) text = text.replaceAll(value, '[redacted]');
+    summaries.push(text.replace(/https?:\/\/\S+|\S+@\S+|\bBearer\s+\S+|\b(?:token|key|secret|password)\s*[:=]\s*\S+|[\w./+=-]{32,}/gi, '[redacted]')
+      .replace(/[\p{C}\p{Z}]+/gu, ' ').replaceAll('::', ': ').slice(0, 240));
+  }
+  return summaries.length ? ' (' + summaries.join('; ') + ')' : '';
+}
+
 export function createClient({publisher, item, token, fetcher = fetch, sleep = ms => new Promise(resolve => setTimeout(resolve, ms))}) {
   if (!/^[a-zA-Z0-9-]+$/.test(publisher) || !/^[a-p]{32}$/.test(item) || !token) throw new Error('Missing/invalid Chrome Web Store configuration');
   const name = `publishers/${publisher}/items/${item}`;
   const origin = 'https://chromewebstore.googleapis.com';
   async function request(path, method = 'GET', body, contentType = 'application/json') {
-    let response;
+    let failureDetail = 'transport or response validation failure';
     try {
-      response = await fetcher(`${origin}/${path}`, {
+      const response = await fetcher(`${origin}/${path}`, {
         method, redirect: 'error', signal: AbortSignal.timeout(120_000),
         headers: {Authorization: `Bearer ${token}`, 'Content-Type': contentType}, body,
       });
+      if (!response.ok) {
+        failureDetail = `HTTP ${response.status}`;
+        if (path.endsWith(':publish') && response.status === 400) {
+          const data = await response.json();
+          if (['INVALID_ARGUMENT', 'FAILED_PRECONDITION', 'OUT_OF_RANGE'].includes(data?.error?.status)) {
+            failureDetail += ' ' + data.error.status;
+          }
+          failureDetail += publishWarningSummary(data?.error?.details, [token, publisher, item]);
+        }
+        throw new Error('Request failed');
+      }
       const data = await response.json();
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       if (data.name !== name || data.itemId !== item) throw new Error('Store response identity mismatch');
       return data;
-    } catch (error) {
-      // Do not echo remote bodies or credentials, and never blindly retry writes.
-      const detail = /^HTTP \d+$/.test(error.message) ? error.message : 'transport or response validation failure';
-      throw new Error(`${method} ${path.split(':').at(-1)}: ${detail}. ${method === 'GET' ? 'Read failed; earlier writes, if any, may have completed. Inspect the dashboard before retrying.' : 'Outcome may be unknown; inspect the dashboard before retrying.'}`);
+    } catch {
+      throw new Error(`${method} ${path.split(':').at(-1)}: ${failureDetail}. ${method === 'GET' ? 'Read failed; earlier writes, if any, may have completed. Inspect the dashboard before retrying.' : 'Outcome may be unknown; inspect the dashboard before retrying.'}`);
     }
   }
   const status = () => request(`v2/${name}:fetchStatus`);
@@ -99,7 +124,7 @@ export function createClient({publisher, item, token, fetcher = fetch, sleep = m
     }
     if (uploadState !== 'SUCCEEDED') throw new Error(`Upload did not finish successfully (${uploadState}); review was not requested`);
     const result = await request(`v2/${name}:publish`, 'POST', JSON.stringify({
-      publishType: 'DEFAULT_PUBLISH', skipReview: false, blockOnWarnings: false,
+      publishType: 'DEFAULT_PUBLISH', skipReview: false, blockOnWarnings: true,
     }));
     if (!['PENDING_REVIEW', 'PUBLISHED'].includes(result.state)) throw new Error('Publish did not return an accepted review/publication state; inspect the dashboard');
     // A successful publish response alone does not prove the intended version.

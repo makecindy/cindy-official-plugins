@@ -20,6 +20,7 @@ function mock(responses) {
     const next = responses.shift();
     assert.ok(next, 'Unexpected extra API request');
     if (next instanceof Error) throw next;
+    if (next instanceof Response) return next;
     return {ok: true, json: async () => ({...identity, ...next})};
   }});
   return {client, calls};
@@ -69,7 +70,7 @@ test('async upload completes before submission, then verifies the submitted vers
   const writes = calls.filter(call => call.method === 'POST');
   assert.equal(writes.length, 2);
   assert.match(writes[0].url, /\/upload\/v2\//);
-  assert.deepEqual(JSON.parse(writes[1].body), {publishType: 'DEFAULT_PUBLISH', skipReview: false, blockOnWarnings: false});
+  assert.deepEqual(JSON.parse(writes[1].body), {publishType: 'DEFAULT_PUBLISH', skipReview: false, blockOnWarnings: true});
 });
 
 test('status is rechecked before upload; a competing review prevents writes', async () => {
@@ -90,6 +91,19 @@ test('unknown publish outcome is not retried; credentials/remote bodies stay out
   const {client, calls} = mock([published, {uploadState: 'SUCCEEDED', crxVersion: '0.4.60'}, new Error('secret remote content')]);
   await assert.rejects(client.publish(Buffer.from('zip'), '0.4.60'), error => /Outcome may be unknown/.test(error.message) && !/secret/.test(error.message));
   assert.equal(calls.filter(call => call.method === 'POST').length, 2);
+});
+
+test('publish 400 logs warning fields with sensitive values removed', async () => {
+  const error = {message: 'private raw message', details: [{warnings: [{
+    reason: 'EXAMPLE_WARNING', description: 'Check policy for person@example.test at https://example.test/key and test-only'
+  }], metadata: 'private metadata'}]};
+  const {client, calls} = mock([published, {uploadState: 'SUCCEEDED'}, Response.json({error}, {status: 400})]);
+  await assert.rejects(client.publish(Buffer.from('zip'), '0.4.60'), err => {
+    assert.match(err.message, /HTTP 400.*EXAMPLE_WARNING: Check policy/);
+    assert.doesNotMatch(err.message, /example\.test|test-only|private/);
+    return true;
+  });
+  assert.equal(calls.length, 3);
 });
 
 test('wrong identity fails before upload', async () => {
