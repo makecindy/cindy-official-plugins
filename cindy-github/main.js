@@ -3140,11 +3140,11 @@ function prSettingRow(action, label, hint, on) {
 }
 
 // 手机端只看得到按钮的名字(aria-label),选中的那一段在名字里注明「当前」;电脑端显示里面的文字。
-function prSegment(action, label, active, inner) {
+function prSegment(action, label, active, inner, extraAttrs) {
   return prButton(action, active ? t('prChoiceCurrent', { name: label }) : label, 'display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:9999px;' +
     'font-size:12px;font-weight:500;white-space:nowrap;' + (active
       ? 'color:var(--text-primary);--bg:var(--surface-elevated);box-shadow:0 0 0 1px var(--border-default)'
-      : 'color:var(--text-secondary);--hover:' + PR_HOVER), inner);
+      : 'color:var(--text-secondary);--hover:' + PR_HOVER), inner, extraAttrs);
 }
 
 /** 推理档位与速度的显示名(和输入框旁的模型选择器一样跟在模型名后面)。 */
@@ -3178,7 +3178,8 @@ function prModelRow(settings) {
       prEsc(t('prFollowModelTaskHint')) + '</div>') + '</div>' +
     '<div style="display:flex;flex:none;gap:2px;padding:2px;border-radius:9999px;background:var(--surface-chip)">' +
     prSegment('prset:modelTask', t('prFollowModelTask'), !m, prEsc(t('prFollowModelTask'))) +
-    prSegment('prset:model', t('prFollowModelCustom'), !!m, prEsc(t('prFollowModelCustom'))) +
+    prSegment('prset:model', t('prFollowModelCustom'), !!m, prEsc(t('prFollowModelCustom')),
+      !m && !settings.lastFollowModel ? ' data-ghost-model-select=""' : '') +
     '</div></div>';
   var picker = m
     ? '<div style="margin-top:8px">' + prButton('prset:modelPick', t('prFollowModelChangeTo', { name: m.label }),
@@ -3318,7 +3319,13 @@ function renderPrCard(card, settings) {
     left += '<div style="margin-top:4px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
   }
   var openOnly = card.stage === 'open' ? prOpenOnly(card) : '';
-  var body = prHeader(tile, title, meta, card.pr, gear ? prGearButton(card.settingsOpen) : '') + prFooter(left, actions, openOnly, prArchiveButton(card, settings));
+  var body = prHeader(tile, title, meta, card.pr, gear ? prGearButton(card.settingsOpen) : '');
+  var beforeFollow = card.stage === 'ask' ? settings.autoFollow
+    : card.stage === 'open' && !card.following && !card.pending && !card.scheduleId && (!card.pr.draft || settings.autoFollow);
+  if (beforeFollow && !card.settingsOpen && typeof cindy.pickModel === 'function') {
+    body += '<div' + openOnly + '>' + prModelRow(settings) + '</div>';
+  }
+  body += prFooter(left, actions, openOnly, prArchiveButton(card, settings));
   // Settings remain available after merge/close, including when the host updates an open snapshot.
   if (gear && card.settingsOpen) body += prSettingsPanel(settings);
   // 排到本轮末尾、铺满消息列:宿主把卡放在「已更改 N 个文件」卡之后,与它同宽。
@@ -3904,20 +3911,20 @@ async function prCardAction(msg) {
     } catch (e) {
       card.note = t('prSettingFailed');
     }
-  } else if (action === 'prset:model' && settings.followModel) {
-    // 已经是「指定模型」:不重复打开选择器,换模型点下面的模型名。
-  } else if (action === 'prset:model' && settings.lastFollowModel) {
-    try {
-      settings = await writePrSettings(function (next) { next.followModel = next.lastFollowModel; });
-    } catch (e) {
-      card.note = t('prSettingFailed');
-    }
-  } else if (action === 'prset:modelPick' && msg.modelSelection) {
+  } else if ((action === 'prset:model' || action === 'prset:modelPick') && msg.modelSelection) {
     // 新版宿主在卡内下拉框里已选好(并核对过可用),直接记下。
     try {
       var chosen = await savePrFollowModel(settings, msg.modelSelection);
       settings = chosen.settings;
       if (chosen.error) card.note = t('prFollowModelFailed', { detail: chosen.error });
+    } catch (e) {
+      card.note = t('prSettingFailed');
+    }
+  } else if (action === 'prset:model' && settings.followModel) {
+    // 已经是「指定模型」:不重复打开选择器,换模型点下面的模型名。
+  } else if (action === 'prset:model' && settings.lastFollowModel) {
+    try {
+      settings = await writePrSettings(function (next) { next.followModel = next.lastFollowModel; });
     } catch (e) {
       card.note = t('prSettingFailed');
     }
