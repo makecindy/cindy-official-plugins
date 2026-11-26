@@ -1578,11 +1578,21 @@ async function gateMain(argv, ctx) {
     previous = { ...previous, followStartId: trigger.firstScheduleId };
     for (const key of ['watch', 'wait', 'fingerprint', 'pendingFingerprint', 'pendingWatch',
       'pendingKey', 'pendingPassCount', 'retryBackoffUntil', 'nextAllowAt', 'probe',
-      'lastPassAt', 'lastFullReadAt', 'lastCheckedAt', 'silenceSince']) delete previous[key];
+      'lastPassAt', 'lastFullReadAt', 'lastCheckedAt', 'silenceSince', 'snapshotFailureReports']) delete previous[key];
     persist(file, previous);
   }
   const backoffUntil = Number(previous?.snapshotFailureBackoffUntil) || 0;
   const backingOff = backoffUntil > now;
+  if (newFollow && backingOff) {
+    // Notify the new owner of the previous failure without touching GitHub
+    // before the actual retry deadline. The same outage is deduplicated again.
+    const detail = `${previous.snapshotFailureSummary || 'Previous PR snapshot failed'}; retry at ${new Date(backoffUntil).toISOString()}`;
+    const lastResult = { decision: 'block', exitCode: EXIT_BLOCK, reason: 'snapshot-failed', detail, checkedAt: now };
+    const reports = previous.snapshotFailureFingerprint && previous.snapshotFailureSummary ? { [previous.snapshotFailureFingerprint]: now } : {};
+    persist(file, { ...previous, snapshotFailureReports: reports, lastDecision: 'block',
+      lastDecisionReason: lastResult.reason, lastResult });
+    throw new Error(detail);
+  }
   const watchRetryDue = Number.isFinite(previous?.snapshotWatchRetryAt) && previous.snapshotWatchRetryAt <= now;
   const hookTrigger = backingOff && !watchRetryDue ? null : trigger;
   if (backingOff && hookTrigger?.source !== 'pr-status') {
@@ -1647,6 +1657,7 @@ async function gateMain(argv, ctx) {
       consecutiveSnapshotFailures: failures,
       lastSnapshotFailureAt: now,
       snapshotFailureFingerprint: plan.fingerprint,
+      snapshotFailureSummary: summary,
       snapshotFailureBackoffUntil: plan.until,
       snapshotWatchRetryAt: plan.watchRetryAt,
       snapshotFailureReports: plan.reports,

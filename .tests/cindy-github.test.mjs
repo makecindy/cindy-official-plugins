@@ -1858,7 +1858,8 @@ test('reuse identifies the exact old generated hook, preserves it and gives the 
   assert.equal(refreshed.reply.result.legacy_hook_repair, undefined);
   assert.equal(rows.get(old.id).preRunHook.timeoutMs, 123456);
   await rt.click(opened.callId, 'pr:stop');
-  assert.equal(rows.size, 0);
+  assert.equal(rows.size, 1);
+  assert.equal(calls.includes('schedule_delete'), false);
 });
 
 test('a concurrent user command or timeout save during GitHub refresh is never overwritten', async () => {
@@ -2041,7 +2042,7 @@ test('refresh of a pre-native following card discovers its sole active legacy ho
   rows.set(old.id, { ...old, preRunHook: { ...old.preRunHook, command: refreshed.reply.result.legacy_hook_repair.command } });
   assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'active');
   await rt.click(opened.callId, 'pr:stop');
-  assert.equal(rows.size, 0, 'stop deletes the same verified schedule');
+  assert.equal(rows.size, 1, 'adopted schedule must be stopped in Automation');
 });
 
 test('discovery of an ID-less legacy card reports the final read after an active list result without acquiring a custom hook', async () => {
@@ -2112,7 +2113,7 @@ test('an ID-less old card reflects a pause before GitHub returns, not its saved 
   assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-live-label=/);
   assert.deepEqual(calls, ['schedule_list', 'schedule_get']);
   await rt.click(opened.callId, 'pr:stop');
-  assert.equal(rows.size, 0, 'a verified plugin-owned pause can be explicitly stopped');
+  assert.equal(rows.size, 1, 'adopted paused schedule remains intact');
 });
 
 test('a previously verified card cannot delete a schedule changed to a custom same-name hook before Stop', async () => {
@@ -2152,6 +2153,40 @@ test('ID-less discovery and native reuse accept the exact launcher, not a projec
   }
 });
 
+test('first GitHub read failure on an ID-less card retains the claim without opening Stop or a new claim', async () => {
+  const { hostApi, calls, rows } = followScheduler();
+  const rt = createPrRuntime({ github: prGraphql(), hostApi });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+  rows.set('old', { id: 'old', targetSessionId: 's1', status: 'active', recurring: true, preRunHook: oldFollowHook('https://github.com/octo/repo/pull/42') });
+  rt.setGithub(() => jsonResponse({ message: 'GitHub unavailable' }, 503));
+  const failed = await rt.tool({ card_id: opened.callId, claim_follow: true });
+  assert.equal(failed.reply.result.follow_state, 'unverified');
+  assert.equal(failed.reply.result.follow_claimed, false);
+  await rt.click(opened.callId, 'pr:stop');
+  await rt.click(opened.callId, 'pr:follow');
+  assert.equal(rt.agentRuns.length, 0);
+  assert.deepEqual(calls, []);
+  rt.setGithub(prGraphql());
+  assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.legacy_hook_repair.schedule_id, 'old');
+});
+
+test('adopted legacy Stop never invokes a delete even if a prior read was valid', async () => {
+  for (const change of ['hook','owner']) {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+    const row = { id: 'old', targetSessionId: 's1', status: 'active', recurring: true, preRunHook: oldFollowHook('https://github.com/octo/repo/pull/42') };
+    rows.set(row.id,row);
+    await rt.tool({ card_id: opened.callId });
+    const changed = change === 'hook' ? { ...row, preRunHook: {command:'node "/project/scripts/pr-heartbeat-gate.mjs" https://github.com/octo/repo/pull/42',timeoutMs: 12} } : {...row,targetSessionId:'s2'};
+    rows.set(row.id,changed);
+    await rt.click(opened.callId, 'pr:stop');
+    assert.deepEqual(rows.get(row.id), changed);
+    assert.equal(calls.includes('schedule_delete'), false);
+    assert.equal(rt.agentRuns.length, 0);
+  }
+});
+
 test('an ID-less old card retries ordinary refresh after a temporarily unavailable Skill directory', async () => {
   const fault = { failDir: true };
   const { hostApi, calls, rows } = followScheduler(fault);
@@ -2186,10 +2221,15 @@ test('temporary old-card list/get failures preserve the same reservation; stoppe
       rows.set('old', { id: 'old', targetSessionId: 's1', status: 'active', recurring: true, preRunHook: oldFollowHook('https://github.com/octo/repo/pull/42') });
       assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'unverified');
       assert.equal((await rt.tool({ card_id: opened.callId, following: true, claim_follow: true })).reply.result.follow_claimed, false);
-      if (end === 'stop') await rt.tool({ card_id: opened.callId, following: false });
+      if (end === 'stop') { fault[faultKey] = false; rows.delete('old'); await rt.tool({ card_id: opened.callId, following: false }); }
       if (end === 'closed') {
         rt.setGithub(prGraphql({ state: 'CLOSED' }));
-        assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'stopped');
+        assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'unverified');
+        fault[faultKey] = false;
+        assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'active');
+        assert.equal(rows.get('old').status, 'active');
+        rows.delete('old');
+        assert.equal((await rt.tool({ card_id: opened.callId, following: false })).reply.result.follow_state, 'stopped');
         rt.setGithub(prGraphql());
       }
       fault[faultKey] = false;
@@ -2245,10 +2285,10 @@ test('pre-native discovery never creates a schedule or changes an ambiguous, pau
     for (const row of candidates) rows.set(row.id, row);
     const result = await rt.tool({ card_id: opened.callId, ...refresh });
     assert.equal(result.reply.ok, true, label);
-    assert.equal(result.reply.result.legacy_hook_repair, undefined, label);
+    if (label !== 'stopping') assert.equal(result.reply.result.legacy_hook_repair, undefined, label);
     const card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
-    assert.equal(card.following, false, label);
-    assert.equal(card.scheduleId || null, label === 'paused' ? old.id : null, label);
+    assert.equal(card.following, label === 'stopping', label);
+    assert.equal(card.scheduleId || null, ['paused','stopping'].includes(label) ? old.id : null, label);
     if (label !== 'stopping') assert.equal(result.reply.result.follow_state, label === 'paused' ? 'paused' : label === 'absent' ? 'stopped' : 'failed', label);
     assert.deepEqual([...rows.values()], candidates, label);
     assert.equal(calls.some(c => ['schedule_create', 'schedule_update', 'schedule_delete'].includes(c)), false, label);

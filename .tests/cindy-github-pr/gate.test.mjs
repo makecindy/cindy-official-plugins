@@ -923,6 +923,26 @@ test('blocked snapshot reports its underlying cause and scheduled probe', async 
   }
 });
 
+test('new follower reports an inherited snapshot outage once without bypassing its retry deadline', async (t) => {
+  const fx = createFixture(t);
+  const fail = { FAKE_SNAPSHOT_EXIT: '1', FAKE_SNAPSHOT_STDERR: 'HTTP 429' };
+  const args = ['--max-snapshot-failures', '1'];
+  assert.equal((await fx.run(args, fail)).code, 1);
+  const deadline = fx.readState().snapshotFailureBackoffUntil;
+  const reads = fx.snapshotRuns();
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  const next = await fx.run(args, fail);
+  assert.equal(next.code, 1);
+  assert.match(next.stderr, /rate limit/i);
+  assert.equal(fx.snapshotRuns(), reads);
+  assert.equal(fx.readState().snapshotFailureBackoffUntil, deadline);
+  assert.equal((await fx.run(args, fail)).code, 2);
+  assert.equal(fx.snapshotRuns(), reads);
+  fx.advance(31);
+  assert.equal((await fx.run(args, fail)).code, 2);
+  assert.equal(fx.snapshotRuns(), reads+1);
+});
+
 test('a change to the watched PR retries a network failure without moving the scheduled retry', async (t) => {
   const fx = createFixture(t);
   const fail = { FAKE_SNAPSHOT_EXIT: '1', FAKE_SNAPSHOT_STDERR: 'lookup api.github.com: i/o timeout' };
