@@ -2774,7 +2774,7 @@ async function prOtherTask(owner, callId, sessionId, localCard, toLatest, stateO
     await sendPrMovedStub(local, movedFrom, callId);
   }
   var shown = await sendPrCard(local, await readPrSettings(), updating && !movedFrom ? callId : null);
-  if (!updating || movedFrom === local.id) await prunePrCards();
+  if (!updating || movedFrom === local.id) await prunePrCards(local.id);
   // A claim or stop report still needs the answer when no card can be shown (IM).
   if (!shown && !stateOp) return fail(t('prCardNotDelivered'));
   var other = {
@@ -2785,7 +2785,7 @@ async function prOtherTask(owner, callId, sessionId, localCard, toLatest, stateO
   return { ok: true, result: other };
 }
 
-async function prunePrCards() {
+async function prunePrCards(keepId) {
   var r = await cindy.send({ type: 'fs-request', root: 'data', op: 'list', path: PR_CARD_DIR });
   if (!r || !r.ok || !Array.isArray(r.entries) || r.entries.length <= PR_CARD_KEEP) return;
   var cards = Object.create(null);
@@ -2845,8 +2845,8 @@ async function prunePrCards() {
   var openIdle = [];
   for (var k = 0; k < cardList.length; k++) {
     var item = cardList[k];
-    // Active ownership, in-flight publish/ready/schedule operations, and unconfirmed ready writes (plus their live anchor aliases) must never be pruned.
-    if (prCardProtected(item.record)) continue;
+    // Never prune the card just created/moved by this call, active ownership, in-flight publish/ready/schedule operations, or unconfirmed ready writes (plus their live anchor aliases).
+    if (item.id === keepId || prCardProtected(item.record)) continue;
     item.effectiveMtime = item.liveAlias ? Math.max(item.mtime, item.liveAlias.mtime) : item.mtime;
     if (item.record.stage === 'merged' || item.record.stage === 'closed') finished.push(item);
     else if (item.record.stage === 'ask') asks.push(item);
@@ -4027,7 +4027,7 @@ async function prCardTool(args, callId) {
     await sendPrMovedStub(card, movedFrom, callId);
   }
   var delivered = await sendPrCard(card, settings, updating && !movedFrom ? callId : null);
-  if (!updating || movedFrom === card.id) await prunePrCards();
+  if (!updating || movedFrom === card.id) await prunePrCards(card.id);
   // A follow claim or a start/stop report is a state operation: its answer matters even where no card can be shown (IM).
   var stateOp = a.claim_follow === true || typeof a.following === 'boolean';
   // The state is saved but the card did not reach the conversation: do not report a card the user cannot see.

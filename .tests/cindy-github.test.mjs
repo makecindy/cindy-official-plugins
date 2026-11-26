@@ -1773,6 +1773,31 @@ test('hard ceiling evicts finished, then ask, then idle open cards while never e
   assert.ok(runtime.files.has('pr-cards/open-1099.json'));
 });
 
+test('a newly shown ask or merged card is never immediately evicted by its own prune when open cards saturate PR_CARD_MAX', async () => {
+  const runtime = createPrRuntime({ github: prGraphql({ merged: true }) });
+  for (let i = 0; i < 1000; i++) {
+    runtime.files.set(`pr-cards/open-${i}.json`, JSON.stringify({ id: `open-${i}`, repo: 'o/r', stage: 'open', pr: { number: i + 1, draft: true } }));
+  }
+
+  // Creating a new ask card evicts the oldest idle open card instead of the card just shown.
+  const ask = await runtime.tool({ repo: 'octo/repo', head: 'feat/new-ask', session_context: { session_id: 's-ask' } });
+  assert.equal(ask.reply.ok, true);
+  assert.ok(runtime.files.has(`pr-cards/${ask.callId}.json`));
+  assert.equal(runtime.files.has('pr-cards/open-0.json'), false);
+  assert.ok(runtime.files.size <= 1000);
+  await runtime.click(ask.callId, 'pr:publish', { sessionId: 's-ask' });
+  assert.equal(runtime.notices().length, 0);
+  assert.equal(runtime.agentRuns.at(-1).event.card_id, ask.callId);
+
+  // Creating a new merged card under the same saturation also keeps the newly shown card usable.
+  const merged = await runtime.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's-merged' } });
+  assert.equal(merged.reply.ok, true);
+  assert.ok(runtime.files.has(`pr-cards/${merged.callId}.json`));
+  assert.equal(runtime.files.has('pr-cards/open-1.json'), false);
+  await runtime.click(merged.callId, 'prui:settings', { sessionId: 's-merged' });
+  assert.equal(runtime.notices().length, 0);
+});
+
 test('recent merged cards stay available for settings clicks while under the hard ceiling', async () => {
   const runtime = createPrRuntime({ github: prGraphql() });
   for (let i = 0; i < 210; i++) {
