@@ -35,7 +35,7 @@ const DISCOVER = { jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _
 const INITIALIZE = { jsonrpc: '2.0', id: 2, method: 'initialize', params: { clientInfo: CLIENT_INFO, protocolVersion: '2025-11-25', capabilities: CAPABILITIES } };
 
 /** A server like Cindy's bridge behind the tunnel; `log` lists what reached it. */
-async function bridgeServer(t, { delayMs = 0, hang = false } = {}) {
+async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false } = {}) {
   const sessions = new Map();
   const log = [];
   const server = http.createServer((req, res) => {
@@ -48,6 +48,12 @@ async function bridgeServer(t, { delayMs = 0, hang = false } = {}) {
         const message = body ? JSON.parse(body) : {};
         log.push({ method: req.method, rpc: message.method, sid, id: message.id });
         if (req.headers.authorization !== TOKEN) return res.writeHead(401).end();
+        if (req.method === 'GET' && acceptStream) {
+          // A server that keeps an event stream open and sends nothing on it.
+          res.writeHead(200, { 'content-type': 'text/event-stream' });
+          res.flushHeaders();
+          return;
+        }
         if (req.method === 'GET') return res.writeHead(405, { allow: 'POST, DELETE' }).end();
         if (req.method === 'DELETE') {
           sessions.delete(sid);
@@ -63,6 +69,13 @@ async function bridgeServer(t, { delayMs = 0, hang = false } = {}) {
         }
         if (!sessions.has(sid)) return res.writeHead(404).end();
         if (message.id === undefined) return res.writeHead(202).end();
+        if (message.method === 'tools/list' && failTools) return res.writeHead(500).end();
+        if (message.method === 'tools/call' && breakCall) {
+          // The connection to the other computer drops after the answer has started.
+          res.writeHead(200, { 'content-type': 'text/event-stream' });
+          res.write(': started\n\n', () => setTimeout(() => res.socket.destroy(), 20));
+          return;
+        }
         const result = message.method === 'tools/list'
           ? { tools: [{ name: 'Bash', description: 'Run a command.', inputSchema: { type: 'object' } }] }
           : { content: [{ type: 'text', text: `${message.params.name} ran for ${sessions.get(sid)}` }] };
@@ -125,21 +138,54 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     assert.deepEqual(log.at(-1), { method: 'POST', rpc: 'tools/call', sid, id: 4 });
   });
 
+  // Only the client's capabilities differ: the server may answer such a client differently.
   test('a handshake that differs from the warm-up goes to the server, and the warmed session is closed', async (t) => {
     const { entry, log, sessions } = await bridgeServer(t);
     const warmup = warmMcpServers([entry]);
     t.after(() => warmup.close());
     const [given] = await warmup.ready;
     const warmedSession = [...sessions.keys()][0];
-    const other = { ...INITIALIZE, params: { ...INITIALIZE.params, protocolVersion: '2026-07-28' } };
+    const other = { ...INITIALIZE, params: { ...INITIALIZE.params, capabilities: { roots: { listChanged: true } } } };
     const init = await agyRequest(given.url, { message: other });
-    assert.equal(init.body.result.protocolVersion, '2026-07-28', 'the server answered agy’s own request');
     assert.notEqual(init.sid, warmedSession);
     const list = await agyRequest(given.url, { message: { jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }, sid: init.sid });
     assert.deepEqual(list.body.result.tools.map((tool) => tool.name), ['Bash']);
     assert.deepEqual(log.slice(-1)[0], { method: 'POST', rpc: 'tools/list', sid: init.sid, id: 3 }, 'tools/list was not answered from the warm-up');
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.ok(!sessions.has(warmedSession), 'the unused warmed session was ended');
+  });
+
+  test('a handshake that fails after the server opened a session ends that session', async (t) => {
+    const { entry, log, sessions } = await bridgeServer(t, { failTools: true });
+    const warmup = warmMcpServers([entry]);
+    t.after(() => warmup.close());
+    assert.deepEqual(await warmup.ready, [entry], 'agy connects directly');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(sessions.size, 0, 'no session is left open on the other computer');
+    assert.equal(log.at(-1).method, 'DELETE');
+  });
+
+  test('a server that keeps the event stream open does not hold up the task', async (t) => {
+    const { entry } = await bridgeServer(t, { acceptStream: true });
+    const warmup = warmMcpServers([entry], { deadlineMs: 5_000 });
+    t.after(() => warmup.close());
+    const started = Date.now();
+    const [given] = await warmup.ready;
+    assert.ok(Date.now() - started < 1_000, 'the warm-up does not wait for the stream to end');
+    assert.notDeepEqual(given, entry, 'the handshake was still warmed');
+  });
+
+  test('a tool call whose connection drops is reported to agy as broken', async (t) => {
+    const { entry } = await bridgeServer(t, { breakCall: true });
+    const warmup = warmMcpServers([entry]);
+    t.after(() => warmup.close());
+    const [given] = await warmup.ready;
+    const init = await agyRequest(given.url, { message: INITIALIZE });
+    const response = await fetch(given.url, { method: 'POST', headers: { authorization: TOKEN, 'mcp-session-id': init.sid,
+      accept: 'application/json, text/event-stream', 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'Bash', arguments: {} } }) });
+    await assert.rejects(Promise.race([response.text(), new Promise((resolve) => setTimeout(() => resolve('still waiting'), 3_000))]),
+      'the answer ends in an error instead of hanging');
   });
 
   test('a server that is not warmed in time, or not on this computer, is given to agy at its own address', async (t) => {

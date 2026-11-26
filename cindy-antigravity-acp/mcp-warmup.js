@@ -37,6 +37,11 @@ const CLIENT_CAPABILITIES = Object.freeze({ elicitation: { form: {}, url: {} }, 
 const INITIALIZE_PROTOCOL = '2025-11-25';
 const DISCOVER_PROTOCOL = '2026-07-28';
 const META = 'io.modelcontextprotocol/';
+/** The params of the handshake requests sent ahead; agy's must be the same to get the kept answer. */
+const DISCOVER_PARAMS = Object.freeze({ _meta: {
+  [`${META}clientCapabilities`]: CLIENT_CAPABILITIES, [`${META}clientInfo`]: CLIENT_INFO, [`${META}protocolVersion`]: DISCOVER_PROTOCOL,
+} });
+const INITIALIZE_PARAMS = Object.freeze({ clientInfo: CLIENT_INFO, protocolVersion: INITIALIZE_PROTOCOL, capabilities: CLIENT_CAPABILITIES });
 const ACCEPT = 'application/json, text/event-stream';
 /** Request headers that describe this hop only. */
 const HOP_HEADERS = new Set(['host', 'connection', 'content-length', 'transfer-encoding', 'keep-alive', 'upgrade', 'proxy-connection']);
@@ -88,6 +93,29 @@ function exchange(url, { method = 'POST', headers = {}, body, signal }) {
   });
 }
 
+/**
+ * Opens the event stream only to learn whether the server turns it down (Cindy's tunnel answers
+ * requests, not streams). Decided on the status line: an accepted stream is closed at once, not read.
+ */
+function streamRefusal(url, headers, signal) {
+  return new Promise((resolve) => {
+    const request = http.request(new URL(url), { method: 'GET', headers, signal }, (response) => {
+      const status = response.statusCode || 0;
+      if (status < 400) {
+        request.destroy();
+        resolve(null);
+        return;
+      }
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => resolve({ status, headers: response.headers, body: Buffer.concat(chunks) }));
+      response.on('error', () => resolve(null));
+    });
+    request.on('error', () => resolve(null));
+    request.end();
+  });
+}
+
 /** `headers` of an ACP MCP server entry as an HTTP header object. */
 function serverHeaders(server) {
   const out = {};
@@ -129,50 +157,54 @@ function firstResponse(kept) {
   return undefined;
 }
 
-/** Whether agy's request is the one sent ahead. */
-function sameDiscover(params) {
-  const meta = isObject(params) && isObject(params._meta) ? params._meta : {};
-  const info = isObject(meta[`${META}clientInfo`]) ? meta[`${META}clientInfo`] : {};
-  return meta[`${META}protocolVersion`] === DISCOVER_PROTOCOL && info.name === CLIENT_INFO.name;
+/** JSON with object keys in a fixed order, so equal values compare equal. */
+function canonical(value) {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (isObject(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
 }
-function sameInitialize(params) {
-  const info = isObject(params) && isObject(params.clientInfo) ? params.clientInfo : {};
-  return isObject(params) && params.protocolVersion === INITIALIZE_PROTOCOL && info.name === CLIENT_INFO.name;
+
+/** Whether agy's request is exactly the one sent ahead (client, version and capabilities included). */
+function sameParams(params, sent) {
+  return canonical(params) === canonical(sent);
 }
 
 /**
  * Sends one server the handshake agy will send. Resolves with the kept answers, or null when the
- * server cannot be warmed (it is then given to agy at its own address).
+ * server cannot be warmed (it is then given to agy at its own address). A session the server opened
+ * for a handshake that did not finish is ended.
  */
 async function warmServer(server, signal) {
   if (!isLoopback(server.url)) return null;
   const auth = serverHeaders(server);
+  let sessionId = null;
   const post = (message, extra = {}) => exchange(server.url, {
     headers: { ...auth, accept: ACCEPT, 'content-type': 'application/json', ...extra },
     body: JSON.stringify(message),
     signal,
   });
-  const discover = post({ jsonrpc: '2.0', id: 'cindy-warm-discover', method: 'server/discover', params: { _meta: {
-    [`${META}clientCapabilities`]: CLIENT_CAPABILITIES, [`${META}clientInfo`]: CLIENT_INFO, [`${META}protocolVersion`]: DISCOVER_PROTOCOL,
-  } } }, { 'mcp-method': 'server/discover', 'mcp-protocol-version': DISCOVER_PROTOCOL }).catch(() => null);
-  const initialize = await post({ jsonrpc: '2.0', id: 'cindy-warm-initialize', method: 'initialize',
-    params: { clientInfo: CLIENT_INFO, protocolVersion: INITIALIZE_PROTOCOL, capabilities: CLIENT_CAPABILITIES } });
-  const sessionId = initialize.headers['mcp-session-id'];
-  const result = firstResponse(initialize);
-  if (initialize.status !== 200 || typeof sessionId !== 'string' || !isObject(result) || !isObject(result.result)) return null;
-  const protocol = typeof result.result.protocolVersion === 'string' ? result.result.protocolVersion : INITIALIZE_PROTOCOL;
-  const session = { ...auth, 'mcp-session-id': sessionId, 'mcp-protocol-version': protocol };
-  const initialized = await post({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, session);
-  if (initialized.status < 200 || initialized.status >= 300) return null;
-  const [stream, tools] = await Promise.all([
-    // Kept only when the server turns the event stream down (a tunnel answers requests, not streams).
-    exchange(server.url, { method: 'GET', headers: { ...session, accept: 'text/event-stream' }, signal })
-      .then((answer) => (answer.status >= 400 ? answer : null), () => null),
-    post({ jsonrpc: '2.0', id: 'cindy-warm-tools', method: 'tools/list', params: {} }, session),
-  ]);
-  const listed = firstResponse(tools);
-  if (tools.status !== 200 || !isObject(listed) || !isObject(listed.result)) return null;
-  return { sessionId, discover: await discover, initialize, stream, tools };
+  const handshake = async () => {
+    const discover = post({ jsonrpc: '2.0', id: 'cindy-warm-discover', method: 'server/discover', params: DISCOVER_PARAMS },
+      { 'mcp-method': 'server/discover', 'mcp-protocol-version': DISCOVER_PROTOCOL }).catch(() => null);
+    const initialize = await post({ jsonrpc: '2.0', id: 'cindy-warm-initialize', method: 'initialize', params: INITIALIZE_PARAMS });
+    if (typeof initialize.headers['mcp-session-id'] === 'string') sessionId = initialize.headers['mcp-session-id'];
+    const result = firstResponse(initialize);
+    if (initialize.status !== 200 || !sessionId || !isObject(result) || !isObject(result.result)) return null;
+    const protocol = typeof result.result.protocolVersion === 'string' ? result.result.protocolVersion : INITIALIZE_PROTOCOL;
+    const session = { ...auth, 'mcp-session-id': sessionId, 'mcp-protocol-version': protocol };
+    const initialized = await post({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, session);
+    if (initialized.status < 200 || initialized.status >= 300) return null;
+    const [stream, tools] = await Promise.all([
+      streamRefusal(server.url, { ...session, accept: 'text/event-stream' }, signal),
+      post({ jsonrpc: '2.0', id: 'cindy-warm-tools', method: 'tools/list', params: {} }, session),
+    ]);
+    const listed = firstResponse(tools);
+    if (tools.status !== 200 || !isObject(listed) || !isObject(listed.result)) return null;
+    return { sessionId, discover: await discover, initialize, stream, tools };
+  };
+  const warm = await handshake().catch(() => null);
+  if (!warm && sessionId) closeWarmSession(server, { sessionId });
+  return warm;
 }
 
 /** Ends a warmed MCP session nobody will use. */
@@ -209,9 +241,18 @@ function forward(req, res, server, body) {
     for (const [name, value] of Object.entries(answer.headers)) if (!HOP_HEADERS.has(name)) out[name] = value;
     res.writeHead(answer.statusCode || 502, out);
     answer.pipe(res);
+    // The server dropped the connection mid-answer: agy must see it broken, as it would directly.
+    answer.on('error', () => res.destroy());
+    answer.on('close', () => {
+      if (!answer.complete) res.destroy();
+    });
   });
   upstream.on('error', () => {
-    if (!res.headersSent) res.writeHead(502);
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
+    res.writeHead(502);
     res.end();
   });
   // agy gave up on the request (a cancelled tool call): the server hears it the same way.
@@ -260,8 +301,8 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
     let key = null;
     // agy 1.5.17 opens the event stream without its session id; the server turned it down either way.
     if (req.method === 'GET' && (sameSession || !req.headers['mcp-session-id']) && pending.stream && warm.stream) key = 'stream';
-    else if (method === 'server/discover' && pending.discover && warm.discover && sameDiscover(message.params)) key = 'discover';
-    else if (method === 'initialize' && pending.initialize && !req.headers['mcp-session-id'] && sameInitialize(message.params)) key = 'initialize';
+    else if (method === 'server/discover' && pending.discover && warm.discover && sameParams(message.params, DISCOVER_PARAMS)) key = 'discover';
+    else if (method === 'initialize' && pending.initialize && !req.headers['mcp-session-id'] && sameParams(message.params, INITIALIZE_PARAMS)) key = 'initialize';
     else if (method === 'notifications/initialized' && sameSession && pending.initialized) key = 'initialized';
     else if (method === 'tools/list' && sameSession && pending.tools) key = 'tools';
     if (key === 'initialized') {
