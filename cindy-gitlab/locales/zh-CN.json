@@ -1,7 +1,7 @@
 {
   "name": "GitLab",
-  "description": "内置的 GitLab 服务插件，支持 gitlab.com、自建与多实例。添加实例地址和具备 api scope 的 Personal Access Token 后，可读写 issue、MR、code review、仓库、CI、release、搜索等 107 个操作，并通过两段式目录调用。每个 Token 由宿主加密保管，只注入对应实例的请求。",
-  "whenToUse": "用于 gitlab.com、公司或自建 GitLab 实例；github.com 链接请使用 GitHub。可查询或修改 issue 与 MR，提交、回复和发布 code review，合并或 rebase MR，查看仓库、分支、commit、文件、CI pipeline 与 job 日志，管理 release、tag 与分支，搜索实例内容，或下载仓库归档。请先在插件详情页添加实例和 Token。",
+  "description": "内置的 GitLab 服务插件，支持 gitlab.com、自建与多实例。自动复用本机 glab 已登录的实例，也可添加实例地址和具备 api scope 的 Personal Access Token（插件内添加的账号优先），支持读写 issue、MR、code review、仓库、CI、release、搜索等 107 个操作。每个 Token 由宿主加密保管，只注入对应实例的请求。",
+  "whenToUse": "用于 gitlab.com、公司或自建 GitLab 实例；github.com 链接请使用 GitHub。可查询或修改 issue 与 MR，提交、回复和发布 code review，合并或 rebase MR，查看仓库、分支、commit、文件、CI pipeline 与 job 日志，管理 release、tag 与分支，搜索实例内容，或下载仓库归档。自动复用本机 glab 登录，也可在插件详情页添加实例和 Token。",
   "tools": {
     "list_tools": {
       "description": "列出本插件 107 个 GitLab 操作，覆盖 issues、merge_requests、repo、commits、events、search、projects、users、pipelines、jobs、discussions、approvals、draft_notes、reactions、groups、environments、wiki、snippets、releases、meta。不传 category 时返回类目名称、数量和说明；传 category 时返回该类目下所有操作的名称、说明与参数。"

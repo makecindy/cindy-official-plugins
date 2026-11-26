@@ -85,7 +85,8 @@ const watchMr = [{
   ],
 }];
 
-test('manifest declares the published events with every field they carry', () => {
+test('manifest declares glab-cli connection fallback and the published events with every field they carry', () => {
+  assert.equal(manifest.network.connections[0].source, 'glab-cli');
   const types = manifest.routineEvents.events.map((event) => event.type);
   assert.ok(types.includes('merge_request.merged') && types.includes('issue.comment'));
   for (const event of manifest.routineEvents.events) {
@@ -109,7 +110,7 @@ test('a chosen MR: baseline first, then merged, new comments and pipeline change
     routes: {
       '/api/v4/user': { id: 1, username: 'me' },
       '/merge_requests/7/notes': [],
-      '/projects/group%2Fapp/merge_requests/7': mr(),
+      '/projects/group%2Fapp/merge_requests/7': mr({ head_pipeline: null }),
     },
   });
   await h.cycle();

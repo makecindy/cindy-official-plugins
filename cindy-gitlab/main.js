@@ -78,7 +78,7 @@ function extractHash(s) {
 
 /** HTTP 状态 → 人话(401 到这里 = 该实例的 token 没填或已失效)。 */
 function classifyStatus(status, bodySnippet) {
-  if (status === 401) return 'GitLab token 未配置或已失效,请用户到主界面侧边栏「插件」→「GitLab」详情页重新填写该实例的 token(并确认实例地址无误)';
+  if (status === 401) return 'GitLab token 未配置或已失效,请到主界面侧边栏「插件」→「GitLab」详情页重新填写该实例的 token,或在本机运行 glab auth login 重新登录';
   if (status === 403) return '没有权限(HTTP 403,token scope 不够或无该项目权限):' + bodySnippet;
   if (status === 404) return '对象不存在或无访问权(HTTP 404;project_path 是否拼对?)';
   if (status === 409) return 'GitLab 资源冲突(HTTP 409):' + bodySnippet;
@@ -109,7 +109,7 @@ async function resolveInstance(a) {
   }
   var conns = (slot && Array.isArray(slot.connections)) ? slot.connections : [];
   if (!conns.length) {
-    return { err: '尚未添加任何 GitLab 实例——请用户到主界面侧边栏「插件」→「GitLab」详情页添加实例地址与 Personal Access Token' };
+    return { err: '尚未连接任何 GitLab 实例——请用户到主界面侧边栏「插件」→「GitLab」详情页添加实例地址与 Personal Access Token,或在本机用 glab auth login 登录' };
   }
   var hosts = conns.map(function (cn) { return cn.host; });
   if (a && a.instance) {
@@ -1802,7 +1802,7 @@ function eventsDiff(conn, kind, item, me, prev, since) {
     if (prev.draft !== snap.draft) changes.push('draft');
     eventsPush('updated', 'updated:' + item.updated_at, prev.sha !== snap.sha ? '有新提交' : '有更新', item, data, { changes: changes.join(',') }, updatedAt);
   }
-  if (kind === 'mr' && snap.pipeline && prev.pipeline && snap.pipeline !== prev.pipeline && item.head_pipeline &&
+  if (kind === 'mr' && snap.pipeline && snap.pipeline !== prev.pipeline && item.head_pipeline &&
     EVENTS_PIPELINE_DONE[String(item.head_pipeline.status)]) {
     eventsPush('pipeline', 'pipeline:' + snap.pipeline, '流水线' + String(item.head_pipeline.status), item, data, {
       pipelineId: Number(item.head_pipeline.id),

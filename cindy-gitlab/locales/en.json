@@ -1,7 +1,7 @@
 {
   "name": "GitLab",
-  "description": "Built-in GitLab plugin for gitlab.com, self-hosted, and multiple instances. Add an instance URL and api-scope token for 107 operations covering issues, merge requests, reviews, repositories, CI, releases, and search. The host encrypts each token and uses it only for its matching instance.",
-  "whenToUse": "Use for gitlab.com, company, or self-hosted GitLab; use GitHub for github.com. Supports issues, merge requests, reviews, merges, rebases, repositories, branches, commits, files, CI, releases, search, logs, and archives. Add an instance and token in the plugin details first.",
+  "description": "Built-in GitLab plugin for gitlab.com and self-hosted instances. Uses local glab sign-ins automatically, or add an instance URL and api-scope token (prioritized) for 107 operations across issues, MRs, reviews, repos, CI, and search. Each token is injected only for its own instance.",
+  "whenToUse": "Use for gitlab.com, company, or self-hosted GitLab; use GitHub for github.com. Supports issues, MRs, reviews, merges, rebases, repos, branches, commits, files, CI, releases, search, logs, and archives. Uses local glab sign-ins automatically, or add an instance and token in plugin details.",
   "tools": {
     "list_tools": {
       "description": "List this plugin's 107 GitLab operations across issues, merge_requests, repo, commits, events, search, projects, users, pipelines, jobs, discussions, approvals, draft_notes, reactions, groups, environments, wiki, snippets, releases, and meta. With no category, return category names, counts, and descriptions; with a category, return every operation in that category with its description and parameters."

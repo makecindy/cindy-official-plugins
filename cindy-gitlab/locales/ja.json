@@ -1,7 +1,7 @@
 {
   "name": "GitLab",
-  "description": "gitlab.com、セルフホスト、複数インスタンスに対応する GitLab の組み込みサービスプラグインです。インスタンス URL と api scope の Personal Access Token を追加すると、issue、Merge Request、レビュー、リポジトリ、CI、release、検索など、カタログ化された 107 操作を読み書きできます。各トークンはホストが暗号化し、対応するインスタンスへのリクエストにだけ注入します。",
-  "whenToUse": "gitlab.com、社内、セルフホストの GitLab インスタンスに使用します。github.com のリンクには GitHub を使用してください。issue や Merge Request の確認・変更、コードレビューの投稿・返信・公開、Merge Request のマージ・rebase、リポジトリ・ブランチ・commit・ファイル・CI pipeline・job ログの確認、release・tag・ブランチ管理、インスタンス検索、リポジトリアーカイブのダウンロードができます。先にプラグイン詳細でインスタンスとトークンを追加してください。",
+  "description": "gitlab.com やセルフホストに対応する GitLab プラグインです。ローカル glab のログインを自動利用するほか、インスタンス URL と api scope トークンを追加（優先）して issue、MR、レビュー、CI、検索など 107 操作を実行できます。各トークンは対応インスタンスのみに注入されます。",
+  "whenToUse": "gitlab.com、社内、セルフホストの GitLab に使用します（github.com は GitHub を使用）。issue・MR・コードレビュー・マージ・rebase・リポジトリ・CI・release・検索・アーカイブ取得に対応。ローカル glab のログインを自動利用するほか、詳細画面でインスタンスとトークンを追加できます。",
   "tools": {
     "list_tools": {
       "description": "issues、merge_requests、repo、commits、events、search、projects、users、pipelines、jobs、discussions、approvals、draft_notes、reactions、groups、environments、wiki、snippets、releases、meta を含む 107 個の GitLab 操作を一覧表示します。category なしではカテゴリ名・件数・説明を返し、category を指定するとそのカテゴリの全操作と説明・パラメータを返します。"
