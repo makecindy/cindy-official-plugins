@@ -24,9 +24,9 @@ async function fixture(t) {
     const pairNow=async()=>{pinned.push(record);await bridge.request('setTrustedClients',{clients:[...pinned]});};
     if(paired)await pairNow();
     const health=async()=>{let r=await request('/health');if(r.challenge){const proof=Buffer.from(await webcrypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},pair.privateKey,new TextEncoder().encode(r.challenge))).toString('base64url');const response=await fetch('http://127.0.0.1:'+port+'/health',{headers:{'X-My-Browser-Extension':extensionId,'X-My-Browser-Origin':origin,'X-My-Browser-Client':id,'X-My-Browser-Version':version,'X-My-Browser-Family':browser,'X-My-Browser-Key':publicKey,'X-My-Browser-Proof':proof}});r={status:response.status,...await response.json()};}if(native && r.native_binding_required){await fetch('http://127.0.0.1:'+port+'/native/bind',{method:'POST',headers:{Authorization:'Bearer '+nativeToken},body:JSON.stringify({clientId:id,origin,publicKey})});r=await request('/health');}session=r.session;return r;};
-    return {id,origin,extensionId,publicKey,request,health,pair:pairNow};
+    return {id,origin,extensionId,request,health,pair:pairNow};
   }
-  return {bridge,client,nativeToken};
+  return {bridge,client};
 }
 test('official store and bundled extensions authenticate after native registration without manual pairings',async t=>{
   const {bridge,client}=await fixture(t);
@@ -75,16 +75,6 @@ test('unknown Chromium extension identities are not silently trusted',async t=>{
   assert.equal((await bridge.request('status')).clients[0].identitySupported,false);
   assert.equal((await bridge.request('status')).extension_connected,false);
 });
-test('native binding can label a Chromium-family connection as Tabbit for settings cards',async t=>{
-  const {bridge,client,nativeToken}=await fixture(t);
-  const c=await client('chrome');await c.health();
-  const bind=async browser=>fetch('http://127.0.0.1:'+(await bridge.request('status')).port+'/native/bind',{method:'POST',headers:{Authorization:'Bearer '+nativeToken,'Content-Type':'application/json'},body:JSON.stringify({clientId:c.id,origin:c.origin,publicKey:c.publicKey,browser})});
-  assert.equal((await bind('tabbit')).status,200);
-  assert.equal((await bridge.request('status')).clients.find(x=>x.id===c.id).browser,'tabbit');
-  assert.equal((await bind('unknown-browser')).status,200);
-  assert.equal((await bridge.request('status')).clients.find(x=>x.id===c.id).browser,'tabbit');
-});
-
 test('consumer install is honestly blocked until published; local developer setup never claims installation',async()=>{
   const calls=[];const i=createInstallation({platform:'darwin',distribution:{chrome:{storeUrl:null},edge:{storeUrl:null},safari:{appStoreUrl:null}},exists:p=>p.includes('Chrome') || p.includes('Safari'),run:async(...args)=>calls.push(args)});
   assert.equal(i.status().browsers.find(b=>b.browser==='edge').installed,false);
@@ -98,25 +88,6 @@ test('published install URL is allowlisted and Windows launch uses argv, not a s
   const r=await i.open('chrome');assert.equal(r.ok,true);assert.equal(r.installed,false);assert.match(calls[0][0],/chrome\.exe$/);assert.deepEqual(calls[0][1],[catalog.chrome.storeUrl]);
   catalog.chrome.storeUrl='https://example.test/';assert.throws(()=>i.status(),/Invalid packaged store URL/);
 });
-test('Tabbit uses the Chrome Web Store route and chrome://extensions fallback',async()=>{
-  const calls=[];
-  const catalog={chrome:{storeUrl:'https://chromewebstore.google.com/detail/'+'a'.repeat(32)},edge:{storeUrl:null},safari:{appStoreUrl:null}};
-  const i=createInstallation({platform:'darwin',exists:p=>p.includes('Tabbit'),distribution:catalog,run:async(...args)=>calls.push(args)});
-  const tabbit=i.status().browsers.find(b=>b.browser==='tabbit');
-  assert.equal(tabbit.supported,true);assert.equal(tabbit.installed,true);assert.equal(tabbit.published,true);
-  let r=await i.open('tabbit');assert.equal(r.ok,true);assert.equal(calls[0][1].at(-1),catalog.chrome.storeUrl);
-  calls.length=0;r=await i.open('tabbit','developer');assert.equal(r.ok,true);assert.equal(calls[0][1].at(-1),'chrome://extensions/');
-});
-
-test('Tabbit setup is rejected outside macOS',async()=>{
-  for (const platform of ['win32','linux']) {
-    const calls=[];
-    const i=createInstallation({platform,env:{PROGRAMFILES:'C:\\Program Files',WINDIR:'C:\\Windows'},exists:()=>true,run:async(...args)=>calls.push(args)});
-    const r=await i.open('tabbit','developer');
-    assert.equal(r.error,'BROWSER_NOT_INSTALLED');assert.equal(r.execution,'not_executed');assert.equal(calls.length,0);
-  }
-});
-
 test('OS launch failure is unknown and never automatically retried',async()=>{
   let calls=0;const i=createInstallation({platform:'darwin',exists:()=>true,run:async()=>{calls++;throw new Error('failed');}});
   const r=await i.open('chrome','reload');assert.equal(r.execution,'unknown');assert.equal(calls,1);

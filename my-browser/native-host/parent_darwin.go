@@ -9,7 +9,7 @@ import (
 )
 
 // Signed browsers allowed to drive the binding; the team is the certificate's subject.OU.
-const browserRequirement = `anchor apple generic and ((certificate leaf[subject.OU] = "EQHXZ8M8AV" and (identifier "com.google.Chrome" or identifier "com.google.Chrome.forTesting")) or (certificate leaf[subject.OU] = "UBF8T346G9" and identifier "com.microsoft.edgemac") or (certificate leaf[subject.OU] = "KL8N8XSYF4" and (identifier "com.brave.Browser" or identifier "com.brave.Browser.origin")) or (certificate leaf[subject.OU] = "S6N382Y83G" and identifier "company.thebrowser.dia") or (certificate leaf[subject.OU] = "2DE8QTFYGR" and identifier "com.tab-browser.Tabbit"))`
+const browserRequirement = `anchor apple generic and ((certificate leaf[subject.OU] = "EQHXZ8M8AV" and (identifier "com.google.Chrome" or identifier "com.google.Chrome.forTesting")) or (certificate leaf[subject.OU] = "UBF8T346G9" and identifier "com.microsoft.edgemac") or (certificate leaf[subject.OU] = "KL8N8XSYF4" and (identifier "com.brave.Browser" or identifier "com.brave.Browser.origin")) or (certificate leaf[subject.OU] = "S6N382Y83G" and identifier "company.thebrowser.dia"))`
 
 var browserIdentities = map[string]string{
 	"com.google.Chrome":            "EQHXZ8M8AV",
@@ -18,7 +18,6 @@ var browserIdentities = map[string]string{
 	"com.brave.Browser":            "KL8N8XSYF4",
 	"com.brave.Browser.origin":     "KL8N8XSYF4",
 	"company.thebrowser.dia":       "S6N382Y83G",
-	"com.tab-browser.Tabbit":       "2DE8QTFYGR",
 }
 
 // codesign runs the system tool; tests substitute it.
@@ -28,30 +27,6 @@ var codesign = func(args ...string) ([]byte, error) {
 
 func browserParent() error {
 	return verifyParent(fmt.Sprint(os.Getppid()))
-}
-
-// browserName returns the canonical Cindy browser key of the verified caller.
-// It is used only to label the connection; browserParent remains the trust check.
-func browserName() (string, error) {
-	out, err := codesign("-d", "-vv", fmt.Sprint(os.Getppid()))
-	if err != nil {
-		return "", err
-	}
-	_, identifier, _ := signedIdentity(out)
-	switch identifier {
-	case "com.google.Chrome", "com.google.Chrome.forTesting":
-		return "chrome", nil
-	case "com.microsoft.edgemac":
-		return "edge", nil
-	case "com.brave.Browser", "com.brave.Browser.origin":
-		return "brave", nil
-	case "company.thebrowser.dia":
-		return "dia", nil
-	case "com.tab-browser.Tabbit":
-		return "tabbit", nil
-	default:
-		return "", nil
-	}
 }
 
 // verifyParent validates the kernel process identity of the caller, never argv or ps paths.
