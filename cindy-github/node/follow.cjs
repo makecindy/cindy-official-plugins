@@ -19,6 +19,7 @@ function followSkillDir(installation) {
   if (relative.length !== 3 || relative[0] === '..' || relative[1] !== 'skills' || relative[2] !== 'pr')
     throw new Error('Approved PR Skill unavailable');
   fs.accessSync(path.join(dir, 'scripts', 'pr-heartbeat-gate.mjs'), fs.constants.R_OK);
+  fs.accessSync(path.join(dir, 'scripts', 'pr-node.cjs'), fs.constants.R_OK);
   return dir;
 }
 

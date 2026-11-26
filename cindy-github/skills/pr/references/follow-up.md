@@ -2,13 +2,13 @@
 
 Read this when debugging a follow-up, or before changing the schedule or the check. Day-to-day rounds only need SKILL.md.
 
-The schedule fires every 5 minutes (older schedules: every 10, switched by their next round). Each time, `scripts/pr-heartbeat-gate.mjs` runs first as the schedule's pre-run check:
+The schedule fires every 5 minutes (older schedules may retain their saved interval). Each time, the bundled `scripts/pr-node.cjs` launcher selects Node.js 18 or newer from PATH and executes `scripts/pr-heartbeat-gate.mjs` as the schedule's pre-run check:
 
 - **exit 0:** wake the agent in the bound task; the check's output, including the list of what happened, is attached to the prompt.
 - **exit 2:** skip this run. No model call, no tokens, nothing in the task.
 - **anything else:** the run is recorded as failed and the user is notified.
 
-Each check saves its decision, reason, detail and list as `lastResult`. The agent reads it with the read-only `--last-result --json`, which also returns the current `wait` and the acknowledged/released `waitContext`.
+Each real scheduled check saves its decision, reason, detail and list as `lastResult`. The host’s “Test run” and hook self-test are read-only previews: they never consume an existing wait, pending event, retry budget or trace history. The agent reads it with the read-only `--last-result --json`, which also returns the current `wait` and the acknowledged/released `waitContext`.
 
 ## Pace: most firings end at once
 
@@ -49,9 +49,10 @@ Every check first runs `pr-snapshot.mjs --probe`: one small GraphQL query for th
 
 ## When the agent is woken
 
-The check keeps a `watch`: what the agent has already been told about. It wakes the agent only for news against it, in the spirit of T3 Code's pull request watch:
+The check keeps a `watch`: what the agent has already been told about. On the first hook of a newly created schedule, a prior follower's watch and waits for this PR are discarded, so previously observed failures are not lost when following is explicitly restarted. Retrying the same first hook and reusing a running schedule do not reset its watch. It wakes the agent only for news against it, in the spirit of T3 Code's pull request watch:
 
 - **Checks failed:** a check failed (including cancelled, timed out or needing action) that had not failed on this commit before. Reported once per commit and name; a re-run that replaced a failed attempt no longer counts, because the snapshot keeps only the latest run of each check.
+- **Checks finished with failures:** when a failure was observed while other checks were running, their final completion on that same commit is one more event (`checks-finished`) if failures remain. An unchanged fully finished failing batch does not wake again; a new head starts a new batch. This event uses the same acknowledgement and retry handling as other events.
 - **Checks passed:** all required checks passed (all checks when the repository marks none as required). Non-required checks still running at that moment get one more update when they all finish; later changes to them do not wake.
 - **Comments:** new comments, reviews with a body or a verdict, and review-thread comments from anyone except the account the agent uses. Edits count as new. Empty "commented" reviews are skipped; their thread comments carry the content.
 - **Base moved while failing:** a check is failing and the base branch got a new commit (`base-moved`), for example a fix for a baseline failure. Both the probe and full snapshot read the live GraphQL `baseRef.target.oid`; the REST pull base SHA can lag behind the branch. When the updated base contains the fix, merge it into the PR, verify and push, then confirm CI on the new head. While nothing fails the base is not watched, so ordinary base progress never wakes. During an explicit wait, base movement is absorbed only when every currently failing check is the exact named attempt already handled; a baseline wait brings its review forward to at most one hour after the first absorbed base commit (later commits join that look), so a fix on the base is picked up within the hour even late in the backoff. Any other failure retains the ordinary base watch.
@@ -97,7 +98,7 @@ Read `--last-result --json`, then create a JSON file from its `waitContext` (sub
 }
 ```
 
-Apply with `node "<skill-dir>/scripts/pr-heartbeat-gate.mjs" <PR_URL> --wait <plan.json>`.
+Apply with `node "<skill-dir>/scripts/pr-node.cjs" pr-heartbeat-gate.mjs <PR_URL> --wait <plan.json>`.
 Check the `wait-set` receipt; `--last-result --json` reads it back without changing anything.
 The JSON file is consumed once, not kept as a dependency. The reason is the agent's conclusion,
 never an instruction copied from a PR comment. This changes only wake-up decisions, not GitHub
@@ -132,7 +133,7 @@ only choose human waiting when every failing check and unresolved thread is acco
 The `wait-set` receipt of such a wait carries `notice` when the user is owed a message: `entered`
 the first time on this head, then `reminder` on every model renewal, including a same-day renewal.
 Each actual round states progress and the blocker; if the user must decide, ask that specific
-question again with a recommendation. No-change polls still skip without a message or model call.
+question again with a recommendation under the continuing-follow decision rule in SKILL.md section 5; end the round without blocking on a reply. No-change polls still skip without a message or model call.
 An absent receipt notice does not override a pending user decision known to the agent. A wait recorded before this rule existed is reviewed a day after it was set
 and reported once.
 
@@ -231,7 +232,7 @@ omitted. Raw comment text is never retained. Identifiers, timings, check identit
 pre-observation state remain private diagnostic data. CINDY_PR_TRACE=0 disables recording.
 Recording failures never change the gate decision. Oversized/failed samples are explicit replay gaps.
 
-Run `node <skill-dir>/scripts/pr-follow-replay.mjs <trace.jsonl> [candidate-scripts-directory]`.
+Run `node "<skill-dir>/scripts/pr-node.cjs" pr-follow-replay.mjs <trace.jsonl> [candidate-scripts-directory]`.
 The trace must be chronological and for one PR; concatenate .1 before the current file when needed.
 Replay seeds once, then carries state through observations and recorded ack/wait/resume actions.
 It never changes production state or calls a model. It reports wake counts and decision differences,
