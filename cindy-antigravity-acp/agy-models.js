@@ -16,12 +16,21 @@
  * `tier`. A session that cannot start because agy is not signed in reports `not-signed-in`.
  */
 
+const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { isSignInRequired, openAgy, tierFromMeta } = require('./agy-client.js');
+const { configFilePath } = require('./resolve-agy.js');
 
 const PROBE_FOLDER = 'cindy-agy-model-list';
+/**
+ * Where the worker remembers that dedicated session (next to the custom path config), so a status
+ * check can resume it for the tier instead of opening a new session in agy's history.
+ */
+const SESSION_FILE_NAME = 'model-session.json';
+const SESSION_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+const MAX_SESSION_FILE_BYTES = 1024;
 const MAX_MODELS = 200;
 const MAX_TEXT = 200;
 const MAX_ID = 256;
@@ -113,6 +122,47 @@ function probeFolder() {
   return dir;
 }
 
+function sessionFilePath(options) {
+  const config = configFilePath(options);
+  return config ? path.join(path.dirname(config), SESSION_FILE_NAME) : null;
+}
+
+/** The dedicated session of the last listing, or null (none yet, unreadable or malformed). */
+function readModelSession(options) {
+  const file = sessionFilePath(options);
+  if (!file) return null;
+  try {
+    if (fs.statSync(file).size > MAX_SESSION_FILE_BYTES) return null;
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return data && typeof data.sessionId === 'string' && SESSION_ID.test(data.sessionId) ? data.sessionId : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Remembers the dedicated session (best effort; `null` forgets it, e.g. after the agy path changed). */
+function rememberModelSession(sessionId, options) {
+  const file = sessionFilePath(options);
+  if (!file) return;
+  try {
+    if (sessionId === null) {
+      fs.rmSync(file, { force: true });
+      return;
+    }
+    if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId) || readModelSession(options) === sessionId) return;
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    const tmp = `${file}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ sessionId }) + '\n', { encoding: 'utf8', mode: 0o600 });
+    try {
+      fs.renameSync(tmp, file);
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
+  } catch {
+    // Only the tier of a later status check depends on it.
+  }
+}
+
 /**
  * @param {{ sessionId?: string }} [params] the dedicated session from the previous listing
  * @returns {Promise<{ supported: true, models: Array<{id: string, name: string, description?: string, group?: string}>,
@@ -167,4 +217,12 @@ async function listModels(params, options) {
   }
 }
 
-module.exports = { listModels, modelsFromConfigOptions, effortsFromConfigOptions, modesFromConfigOptions, probeFolder };
+module.exports = {
+  listModels,
+  modelsFromConfigOptions,
+  effortsFromConfigOptions,
+  modesFromConfigOptions,
+  probeFolder,
+  readModelSession,
+  rememberModelSession,
+};
