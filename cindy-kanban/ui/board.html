@@ -1,0 +1,1460 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Board</title>
+<style>
+:root{color-scheme:light dark}
+*{box-sizing:border-box}
+body{margin:0;padding:12px;font:13px/1.5 var(--font-sans,system-ui);color:var(--color-text-primary,CanvasText);background:var(--color-background-primary,Canvas);min-height:100vh;display:flex;flex-direction:column}
+svg{flex:none}
+
+.top{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.seg{display:flex;padding:3px;gap:2px;border-radius:10px;background:var(--color-background-secondary,rgba(128,128,128,.1));border:1px solid var(--color-border-primary,rgba(128,128,128,.18))}
+.seg button{display:flex;align-items:center;gap:5px;border:0;background:transparent;border-radius:8px;padding:5px 12px;font:600 12px/1.4 inherit;color:inherit;opacity:.62;cursor:pointer}
+.seg button.on{background:var(--color-background-primary,Canvas);opacity:1;box-shadow:0 1px 4px rgba(0,0,0,.14)}
+.btn{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--color-border-primary,rgba(128,128,128,.25));background:var(--color-background-secondary,rgba(128,128,128,.06));color:inherit;border-radius:8px;padding:5px 12px;font:12px inherit;cursor:pointer}
+.btn:disabled{opacity:.5}
+.btn.primary{background:var(--color-accent,#4f6ef7);border-color:transparent;color:#fff}
+.btn.icon{padding:5px 8px}
+#refresh{margin-left:0}
+
+.summary{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.pill{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;
+  background:var(--color-background-secondary,rgba(128,128,128,.08));border:1px solid var(--color-border-primary,rgba(128,128,128,.18));opacity:.85}
+
+.board{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;align-items:stretch;flex:1;min-height:240px}
+.col{flex:1 0 180px;min-width:180px;border-radius:12px;padding:10px;display:flex;flex-direction:column;max-height:calc(100vh - 130px);overflow-y:auto;
+  background:var(--color-background-secondary,rgba(128,128,128,.07));border:1px solid var(--color-border-primary,rgba(128,128,128,.16))}
+.col-head{display:flex;align-items:center;gap:6px;margin-bottom:9px;padding:0 2px}
+.col-icon{width:15px;height:15px;opacity:.9}
+.col[data-kind="running"] .col-icon{color:#3b82f6}
+.col[data-kind="blocked"] .col-icon{color:#ef4444}
+.col[data-kind="queued"] .col-icon{color:#f59e0b}
+.col[data-kind="idle"] .col-icon{color:#22c55e}
+.col-title{font-size:12px;font-weight:600}
+.count{margin-left:auto;font-size:11px;font-weight:700;padding:1px 7px;border-radius:99px;
+  background:var(--color-background-primary,Canvas);border:1px solid var(--color-border-primary,rgba(128,128,128,.2));opacity:.7}
+.count:empty{display:none}
+
+.card{background:var(--color-background-primary,Canvas);border:1px solid var(--color-border-primary,rgba(128,128,128,.18));
+  border-radius:10px;padding:9px 10px;margin-bottom:8px;overflow-wrap:anywhere;cursor:pointer;
+  box-shadow:0 1px 2px rgba(0,0,0,.05);transition:box-shadow .15s,transform .15s,border-color .15s}
+.card:hover{box-shadow:0 4px 14px rgba(0,0,0,.1);transform:translateY(-1px);border-color:var(--color-accent,#4f6ef7)}
+.card:last-child{margin-bottom:0}
+.card .topline{display:flex;align-items:center;gap:6px}
+.avatar{width:18px;height:18px;border-radius:6px;display:grid;place-items:center;font-size:9px;font-weight:700;color:#fff;flex:none}
+.card .t{font-weight:600;font-size:12.5px;flex:1;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card .meta{font-size:11px;opacity:.6;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{display:inline-block;font-size:10px;font-weight:600;padding:1px 6px;border-radius:99px;margin:5px 4px 0 0;
+  background:var(--color-background-secondary,rgba(128,128,128,.12));border:1px solid var(--color-border-primary,rgba(128,128,128,.2));opacity:.85}
+.badge.warn{color:#b45309;border-color:#f59e0b66;background:#f59e0b1a;opacity:1}
+.cwd{font-family:ui-monospace,monospace;font-size:10px;opacity:.5;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.open-hint{font-size:10px;opacity:0;margin-left:auto;transition:opacity .15s}
+.card:hover .open-hint{opacity:.55}
+
+#agents{flex:1;overflow-y:auto}
+#policy{flex:1;overflow-y:auto}
+.empty{font-size:11px;opacity:.4;text-align:center;padding:14px 0;border:1px dashed var(--color-border-primary,rgba(128,128,128,.25));border-radius:8px}
+#status{font-size:11px;opacity:.55;margin:8px 4px 0;white-space:pre-wrap}
+
+.agent-group{margin-bottom:14px}
+.agent-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:6px 8px;border-radius:10px;
+  background:var(--color-background-secondary,rgba(128,128,128,.08));border:1px solid var(--color-border-primary,rgba(128,128,128,.16))}
+.agent-head .name{font-weight:600;font-size:12.5px;flex:1}
+.agent-tasks{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;padding-left:4px}
+.subtask{border:1px solid var(--color-border-primary,rgba(128,128,128,.16));border-radius:8px;padding:7px 9px;
+  background:var(--color-background-primary,Canvas);cursor:pointer;font-size:12px}
+.subtask:hover{border-color:var(--color-accent,#4f6ef7)}
+.subtask .st{font-size:10px;opacity:.6;margin-top:2px}
+.section-title{font-size:12px;font-weight:700;opacity:.7;margin:14px 2px 8px;text-transform:uppercase;letter-spacing:.06em}
+
+.panel{border:1px solid var(--color-border-primary,rgba(128,128,128,.18));border-radius:12px;padding:12px;margin-bottom:12px;
+  background:var(--color-background-secondary,rgba(128,128,128,.05))}
+.panel h3{margin:0 0 8px;font-size:13px}
+.panel p.hint{font-size:11px;opacity:.6;margin:0 0 8px}
+textarea,input[type=text],select{width:100%;font:12px/1.5 inherit;color:inherit;background:var(--color-background-primary,Canvas);
+  border:1px solid var(--color-border-primary,rgba(128,128,128,.25));border-radius:8px;padding:7px 9px;resize:vertical}
+textarea{min-height:64px}
+.row{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
+.result{white-space:pre-wrap;font-size:12px;margin-top:10px;padding:10px;border-radius:8px;
+  background:var(--color-background-primary,Canvas);border:1px solid var(--color-border-primary,rgba(128,128,128,.18));max-height:320px;overflow:auto}
+.hidden{display:none}
+
+#toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--color-background-primary,Canvas);
+  border:1px solid var(--color-border-primary,rgba(128,128,128,.3));border-radius:10px;padding:8px 14px;font-size:12px;
+  box-shadow:0 6px 24px rgba(0,0,0,.18);opacity:0;pointer-events:none;transition:opacity .2s;z-index:30;max-width:90%}
+#toast.show{opacity:1}
+#toast.err{border-color:#ef4444aa}
+
+.patrol{position:relative;width:100%;height:0;overflow:visible;pointer-events:none}
+.patrol-icon{position:absolute;top:-4px;left:0;opacity:0;color:#3b82f6;
+  filter:drop-shadow(0 2px 6px rgba(59,130,246,.45));will-change:transform,opacity}
+body.patrolling .patrol-icon{animation:patrol-walk 3.6s cubic-bezier(.45,.05,.35,1) infinite}
+body.patrolling .col{animation:col-scan 3.6s ease-in-out infinite}
+body.patrolling .col:nth-child(1){animation-delay:.12s}
+body.patrolling .col:nth-child(2){animation-delay:.5s}
+body.patrolling .col:nth-child(3){animation-delay:.88s}
+body.patrolling .col:nth-child(4){animation-delay:1.26s}
+@keyframes patrol-walk{
+  0%{left:2%;opacity:0;transform:translateY(0) scale(.9)}
+  6%{opacity:1;transform:translateY(-1px) scale(1)}
+  25%{transform:translateY(1px) scale(1)}
+  50%{left:50%;opacity:1;transform:translateY(-1px) scale(1)}
+  75%{transform:translateY(1px) scale(1)}
+  94%{left:94%;opacity:1;transform:translateY(-1px) scale(1)}
+  100%{left:96%;opacity:0;transform:translateY(0) scale(.9)}}
+@keyframes col-scan{
+  0%,100%{box-shadow:inset 0 0 0 rgba(59,130,246,0);background-color:var(--color-background-secondary,rgba(128,128,128,.07))}
+  18%{box-shadow:inset 0 2px 0 #3b82f6dd,0 0 0 1px #3b82f633;background-color:#3b82f60d}
+  36%{box-shadow:inset 0 0 0 rgba(59,130,246,0);background-color:var(--color-background-secondary,rgba(128,128,128,.07))}}
+@media (prefers-reduced-motion:reduce){body.patrolling .patrol-icon,body.patrolling .col{animation:none}}
+
+.term-modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:grid;place-items:center;z-index:20}
+.term-box{width:min(1200px,96vw);height:88vh;max-height:88vh;display:flex;flex-direction:column;border-radius:12px;overflow:hidden;
+  border:1px solid rgba(128,128,128,.35);background:var(--color-background-primary,Canvas);box-shadow:0 18px 60px rgba(0,0,0,.4)}
+.term-head{display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--color-border-primary,rgba(128,128,128,.2));font-size:12px}
+.term-head .t{font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.term-wrap{position:relative;flex:1;display:flex;min-height:0;flex-direction:column}
+.term-body{flex:1;overflow:auto;background:#0c1017;color:#d6e0ee;padding:12px 14px;margin:0;outline:none;
+  font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre;cursor:text}
+.term-prompt{display:flex;align-items:center;gap:6px;padding:7px 12px;background:#0c1017;
+  border-top:1px solid #1e293b;transition:box-shadow .15s,border-color .15s}
+.term-prompt .ps1{color:#64748b;font:600 12px ui-monospace,monospace;transition:color .15s}
+.term-prompt:focus-within{border-top-color:#3b82f6;box-shadow:inset 0 1px 0 #3b82f699}
+.term-prompt:focus-within .ps1{color:#7aa2ff}
+.term-prompt input{flex:1;min-width:0;border:0;outline:none;background:transparent;color:#f8fafc;
+  font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;padding:2px 0}
+.term-prompt input::placeholder{color:#475569}
+.term-prompt.hidden-input{display:none}
+.tiny{border:1px solid #334155;background:#111a26;color:#cbd5e1;border-radius:6px;padding:3px 9px;
+  font:600 11px ui-monospace,monospace;cursor:pointer;flex:none}
+.tiny:hover{border-color:#3b82f6;color:#fff}
+.tiny.primary{background:#2563eb;border-color:transparent;color:#fff}
+.term-prompt input::placeholder{color:#64748b}
+.term-foot{display:flex;gap:10px;align-items:center;padding:5px 12px;border-top:1px solid var(--color-border-primary,rgba(128,128,128,.2));font-size:11px;opacity:.7}
+.term-echo{font-family:ui-monospace,monospace;color:#7aa2ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.iconbtn{position:relative;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex:none;
+  border:1px solid var(--color-border-primary,rgba(128,128,128,.25));background:var(--color-background-secondary,rgba(128,128,128,.06));
+  color:inherit;border-radius:8px;cursor:pointer}
+.iconbtn:hover{border-color:var(--color-accent,#4f6ef7)}
+.iconbtn[data-tip]:hover::after{content:attr(data-tip);position:absolute;top:calc(100% + 6px);left:50%;transform:translateX(-50%);
+  white-space:nowrap;font:11px/1.4 var(--font-sans,system-ui);padding:4px 8px;border-radius:6px;z-index:40;
+  background:var(--color-background-primary,Canvas);border:1px solid var(--color-border-primary,rgba(128,128,128,.3));box-shadow:0 4px 14px rgba(0,0,0,.2)}
+
+.chat{border-top:1px solid var(--color-border-primary,rgba(128,128,128,.2));padding-top:8px;margin-top:6px}
+.chat-log{max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.msg{max-width:85%;padding:6px 10px;border-radius:10px;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.msg.user{align-self:flex-end;background:var(--color-accent,#4f6ef7);color:#fff;border-bottom-right-radius:3px}
+.msg.assistant{align-self:flex-start;background:var(--color-background-secondary,rgba(128,128,128,.12));border:1px solid var(--color-border-primary,rgba(128,128,128,.18));border-bottom-left-radius:3px}
+.chat-row{display:flex;gap:6px}
+.chat-row input{flex:1}
+
+.wd-chips{display:flex;gap:4px;flex-wrap:wrap}
+.wd-chips button{border:1px solid var(--color-border-primary,rgba(128,128,128,.25));background:var(--color-background-secondary,rgba(128,128,128,.06));color:inherit;border-radius:99px;padding:3px 10px;font:11px inherit;cursor:pointer;opacity:.7}
+.wd-chips button.on{opacity:1;background:var(--color-accent,#4f6ef7);color:#fff;border-color:transparent}
+
+.sched-status{font-size:12px;opacity:.8;margin-bottom:8px}
+.report{border-top:1px solid var(--color-border-primary,rgba(128,128,128,.15));padding:8px 2px}
+.report:first-child{border-top:0;padding-top:0}
+.report .v{font-weight:600;font-size:12px}
+.report .b{font-size:11px;opacity:.7;margin-top:3px;white-space:pre-wrap}
+.report .t{font-size:10px;opacity:.45;margin-top:3px}
+</style>
+<div class="top">
+  <div class="seg" role="tablist">
+    <button id="v-cindy" class="on" role="tab"><span></span></button>
+    <button id="v-herdr" role="tab"><span></span></button>
+    <button id="v-agent" role="tab"><span></span></button>
+    <button id="v-policy" role="tab"><span></span></button>
+  </div>
+  <label style="font-size:12px;display:flex;align-items:center;gap:5px;opacity:.8"><input type="checkbox" id="idle-busy" style="width:auto"><span id="idle-busy-label"></span></label>
+  <span id="countdown" style="font-size:11px;opacity:.5;margin-left:auto"></span>
+  <button class="btn" id="refresh" disabled style="margin-left:0"><span></span></button>
+</div>
+<div class="summary" id="summary"></div>
+<div class="patrol" aria-hidden="true"><svg class="patrol-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V5l7-3z"/><circle cx="9.5" cy="11" r="1.2"/><circle cx="14.5" cy="11" r="1.2"/><path d="M9 15.5c1.5 1 4.5 1 6 0"/></svg></div>
+<div class="board" id="board"></div>
+<div id="agents" class="hidden"></div>
+<div id="policy" class="hidden">
+  <div class="panel">
+    <h3 id="t-policy-title"></h3>
+    <p class="hint" id="t-policy-hint"></p>
+    <textarea id="policy-text"></textarea>
+    <div class="row"><button class="btn primary" id="policy-save"><span id="t-policy-save"></span></button></div>
+  </div>
+  <div class="panel">
+    <h3 id="t-plan-title"></h3>
+    <p class="hint" id="t-plan-hint"></p>
+    <div class="sched-status" id="sched-status"></div>
+    <div class="row">
+      <select id="sched-mode">
+        <option value="interval" id="t-mode-interval"></option>
+        <option value="daily" id="t-mode-daily"></option>
+        <option value="weekly" id="t-mode-weekly"></option>
+      </select>
+      <span id="sched-interval-row" style="display:flex;align-items:center;gap:5px">
+        <input type="number" id="sched-every" value="30" min="1" max="999" style="width:64px">
+        <select id="sched-unit"><option value="minutes" id="t-unit-min"></option><option value="hours" id="t-unit-hour"></option></select>
+      </span>
+      <input type="time" id="sched-time" value="09:00" class="hidden">
+      <label style="font-size:12px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="sched-enabled" checked style="width:auto"><span id="t-enabled"></span></label>
+      <button class="btn primary" id="sched-apply"><span id="t-apply"></span></button>
+    </div>
+    <div class="row hidden" id="sched-weekly-row">
+      <div class="wd-chips" id="sched-weekdays"></div>
+    </div>
+  </div>
+  <div class="panel">
+    <h3 id="t-patrol-title"></h3>
+    <p class="hint" id="t-patrol-hint"></p>
+    <textarea id="patrol-text"></textarea>
+    <div class="row"><button class="btn primary" id="patrol-save"><span id="t-patrol-save"></span></button>
+      <button class="btn" id="patrol-now"><span id="t-patrol-now"></span></button>
+      <span id="patrol-model" style="font-size:11px;opacity:.6"></span></div>
+    <div class="result hidden" id="patrol-result"></div>
+  </div>
+  <div class="panel">
+    <h3 id="t-analyze-title"></h3>
+    <p class="hint" id="t-analyze-hint"></p>
+    <div class="row">
+      <button class="btn" id="pick-model"><span id="t-pick-model"></span></button>
+      <span id="model-label" style="font-size:11px;opacity:.6"></span>
+      <button class="btn primary" id="analyze"><span id="t-analyze"></span></button>
+    </div>
+    <input type="text" id="analyze-focus" style="margin-top:8px">
+    <div class="result hidden" id="analyze-result"></div>
+  </div>
+  <div class="panel">
+    <h3 id="t-reports-title"></h3>
+    <p class="hint" id="t-reports-hint"></p>
+    <div id="reports"></div>
+  </div>
+  <div class="panel">
+    <h3 id="t-auto-title"></h3>
+    <p class="hint" id="t-auto-hint"></p>
+    <textarea id="auto-purpose"></textarea>
+    <div class="row">
+      <select id="auto-interval">
+        <option value="1800000" id="t-every30"></option>
+        <option value="3600000" selected id="t-every60"></option>
+        <option value="7200000" id="t-every120"></option>
+        <option value="14400000" id="t-every240"></option>
+      </select>
+      <select id="auto-companion"></select>
+      <button class="btn primary" id="automate"><span id="t-automate"></span></button>
+    </div>
+    <div class="result hidden" id="automate-result"></div>
+  </div>
+</div>
+<p id="status" role="status"></p>
+<div class="chat">
+  <div class="chat-log"></div>
+  <div class="chat-row">
+    <input type="text" id="chat-input">
+    <button class="btn primary" id="chat-send"><span id="t-send"></span></button>
+  </div>
+</div>
+<div id="toast" role="alert"></div>
+<script type="module">
+import { App } from '@modelcontextprotocol/ext-apps';
+
+const I18N = {
+  en: {
+    tabAgent: 'Agent', tabPolicy: 'Policy', idleBusy: 'Count idle as running', refresh: 'Refresh',
+    running: 'In progress', blocked: 'Blocked', queued: 'Queued', idle: 'Idle',
+    none: 'None', noTasks: 'No tasks', tasks: '{n} tasks', mission: 'Mission',
+    policyTitle: 'Standing policy', policyHint: 'Rules for whoever runs the board. Saved policy is passed to every agent that reads board_state.',
+    policyPh: 'e.g. Keep at most 3 in progress; clear blocked items first; give idle claude review-type work.',
+    policySave: 'Save policy', savedPolicy: 'Policy saved.', saveFailed: 'Save failed: {e}',
+    planTitle: 'Patrol schedule', planHint: 'Outlook-style recurring schedule. Changing it edits the real Cindy automation.',
+    modeInterval: 'Every', modeDaily: 'Daily', modeWeekly: 'Weekly', unitMin: 'minutes', unitHour: 'hours',
+    enabled: 'Enabled', apply: 'Apply', planApplied: 'Schedule applied.', planFailed: 'Apply failed: {e}',
+    current: 'Current: {name} · {freq} ({tz}) · {state}{next}',
+    nextAt: ' · next {t}', active: 'enabled', paused: 'paused',
+    noSchedule: 'No patrol automation yet. Create one under Automation below.',
+    patrolTitle: 'Patrol rules', patrolHint: 'What each round should check, what counts as abnormal, and whether to act. Passed to every patrol.',
+    patrolPh: 'e.g. Check blocked and queued; if blocked over 10 min, read the pane, then interrupt with board_pane_action; dispatch only to idle agents.',
+    patrolSave: 'Save patrol rules', patrolOn: 'Run patrol now', defaultModel: 'Default model',
+    analyzeTitle: 'Insight analysis', analyzeHint: 'Reads the whole board with the chosen model and returns an overall judgement plus up to 3 suggestions.',
+    pickModel: 'Choose model', analyze: 'Analyze now', analyzeFocus: 'Optional: what to focus on, e.g. "why is Herdr so blocked"',
+    analyzing: 'Analyzing (this can take minutes)…', analyzeFailed: 'Analysis failed: {e}',
+    reportsTitle: 'Patrol log', reportsHint: 'Judgement basis written by the patrol agent each round, last 10 entries.', noReports: 'No patrol rounds yet',
+    autoTitle: 'Automation', autoHint: 'Describe the goal in plain language; the AI turns it into an executable prompt and opens the automation panel (at least every 30 minutes, saved by you).',
+    autoPh: 'e.g. Every hour, look at the board, push blocked work to idle claude panes, and ping me if it cannot move.',
+    every30: 'Every 30 minutes', every60: 'Every hour', every120: 'Every 2 hours', every240: 'Every 4 hours',
+    companionPick: 'Responsible companion (optional)', automate: 'Set up automation', automating: 'Optimizing the prompt and opening the panel…',
+    send: 'Send', chatPh: 'Command the board: ask status, dispatch work, change policy…',
+    thinking: 'Thinking…', connect: 'Connecting…', loading: 'Reading…', updated: 'Updated {t}', herdrOff: ' · Herdr not connected',
+    notConnected: 'Page not connected, please reopen.', readFailed: 'Read failed: {e}',
+    opening: 'Opening…', opened: 'Opened', focusedPane: 'Pane focused', openFailed: 'Open failed: {e}',
+    standby: 'Standby · agent online', standbyBusy: 'Standby · counted as running', done: 'Done',
+    cindyCompanions: 'Cindy companions', herdrAgents: 'Herdr agents', noAgents: 'No agents',
+    readPane: 'Read pane', refreshPane: 'Refresh', focusHerdr: 'Focus Herdr', close: 'Close',
+    inputPh: 'Type and press Enter to send to the pane…', sendFailed: 'Send failed: {e}',
+    termHint: 'Click the terminal and type directly. Enter sends, Tab completes, Ctrl+C interrupts, Ctrl+V pastes.',
+    autoRefreshTip: 'Auto refresh every {n}s',
+    termPrompt: 'Type here, Enter sends to the pane…',
+    sendEnter: 'Send Enter key to the pane',
+    copied: 'Selection copied',
+    hideInput: 'Hide input bar', showInput: 'Show input bar', inputHidden: 'Input bar hidden',
+    keyTab: 'Tab completion', keyEsc: 'Escape', keyInt: 'Ctrl+C (interrupt)', keyUp: 'Previous', keyDown: 'Next',
+  },
+  'zh-CN': {
+    tabAgent: 'Agent', tabPolicy: '策略', idleBusy: '待命计入在途', refresh: '刷新',
+    running: '在途', blocked: '卡点', queued: '排队', idle: '空闲',
+    none: '无', noTasks: '没有任务', tasks: '{n} 个 task', mission: '主对话',
+    policyTitle: '常驻策略', policyHint: '写给看板管理者（人和 agent）的规则。保存后 board_state 会带给每个读看板的 agent。',
+    policyPh: '例如：在途不超过 3 条；卡点优先；空闲 claude 优先接 review 类活。',
+    policySave: '保存策略', savedPolicy: '策略已保存。', saveFailed: '保存失败：{e}',
+    planTitle: '巡检计划', planHint: '类似 Outlook 的重复事件。改这里会直接修改 Cindy 自动化。',
+    modeInterval: '每隔', modeDaily: '每天', modeWeekly: '每周', unitMin: '分钟', unitHour: '小时',
+    enabled: '启用', apply: '应用', planApplied: '巡检计划已应用。', planFailed: '应用失败：{e}',
+    current: '当前：{name} · {freq}（{tz}）· {state}{next}',
+    nextAt: ' · 下次 {t}', active: '已启用', paused: '已暂停',
+    noSchedule: '还没有巡检自动化。在下方「自动机制」里创建一个。',
+    patrolTitle: '巡检设置', patrolHint: '写给巡检者的规则：每轮检查哪些列、什么阈值算异常、要不要动手处理。保存后 board_state 会带给每次巡检。',
+    patrolPh: '例如：每轮检查 blocked 与 queued；卡点超过 10 分钟先用 board_pane_read 读画面，必要时 board_pane_action 中断；派活只给 idle。',
+    patrolSave: '保存巡检方式', patrolOn: '立即巡检一轮', defaultModel: '默认模型',
+    analyzeTitle: '启发分析', analyzeHint: '用选定模型读整个看板，给出整体判断与最多 3 条建议。',
+    pickModel: '选择模型', analyze: '分析现状', analyzeFocus: '可选：本次关注点，例如「Herdr 卡点为什么这么多」',
+    analyzing: '分析中（需要几分钟）…', analyzeFailed: '分析失败：{e}',
+    reportsTitle: '巡检记录', reportsHint: '负责策略的伙伴每轮巡检写入的判断依据，最近 10 条。', noReports: '还没有巡检记录',
+    autoTitle: '自动机制', autoHint: '用自然语言描述目的，先由 AI 优化成可执行提示词，再打开自动化创建面板（最小 30 分钟一次，需要你亲手保存）。',
+    autoPh: '例如：每小时看一眼看板，把卡点的活推给空闲的 claude，推不动就提醒我。',
+    every30: '每 30 分钟', every60: '每小时', every120: '每 2 小时', every240: '每 4 小时',
+    companionPick: '负责伙伴（可选）', automate: '设置自动机制', automating: '正在优化提示词并打开自动化面板…',
+    send: '发送', chatPh: '指挥看板：问状态、派活、改策略…',
+    thinking: '思考中…', connect: '正在连接…', loading: '读取中…', updated: '更新于 {t}', herdrOff: ' · Herdr 未连接',
+    notConnected: '页面未连接，请重新打开。', readFailed: '读取失败：{e}',
+    opening: '打开中…', opened: '已打开', focusedPane: '已聚焦对应 pane', openFailed: '打开失败：{e}',
+    standby: '待命 · agent 在线', standbyBusy: '待命 · 已计入在途', done: '已完成',
+    cindyCompanions: 'Cindy 伙伴', herdrAgents: 'Herdr Agent', noAgents: '暂无 agent',
+    readPane: '读取画面', refreshPane: '刷新', focusHerdr: '聚焦 Herdr', close: '关闭',
+    inputPh: '输入内容，Enter 发送给 pane…', sendFailed: '发送失败：{e}',
+    termHint: '点击终端直接输入。Enter 发送，Tab 补全，Ctrl+C 中断，Ctrl+V 粘贴。',
+    autoRefreshTip: '每 {n} 秒自动刷新',
+    termPrompt: '在此输入，Enter 发送到 pane…',
+    sendEnter: '向 pane 发送回车键',
+    copied: '已复制选中内容',
+    hideInput: '隐藏输入栏', showInput: '显示输入栏', inputHidden: '输入栏已隐藏',
+    keyTab: 'Tab 补全', keyEsc: 'Esc', keyInt: 'Ctrl+C 中断', keyUp: '上一条', keyDown: '下一条',
+  },
+  'zh-TW': {
+    tabAgent: 'Agent', tabPolicy: '策略', idleBusy: '待命計入在途', refresh: '重新整理',
+    running: '在途', blocked: '卡點', queued: '排隊', idle: '空閒',
+    none: '無', noTasks: '沒有任務', tasks: '{n} 個 task', mission: '主對話',
+    policyTitle: '常駐策略', policyHint: '寫給看板管理者（人和 agent）的規則。儲存後 board_state 會帶給每個讀看板的 agent。',
+    policyPh: '例如：在途不超過 3 條；卡點優先；空閒 claude 優先接 review 類工作。',
+    policySave: '儲存策略', savedPolicy: '策略已儲存。', saveFailed: '儲存失敗：{e}',
+    planTitle: '巡檢計畫', planHint: '類似 Outlook 的重複事件。改這裡會直接修改 Cindy 自動化。',
+    modeInterval: '每隔', modeDaily: '每天', modeWeekly: '每週', unitMin: '分鐘', unitHour: '小時',
+    enabled: '啟用', apply: '套用', planApplied: '巡檢計畫已套用。', planFailed: '套用失敗：{e}',
+    current: '目前：{name} · {freq}（{tz}）· {state}{next}',
+    nextAt: ' · 下次 {t}', active: '已啟用', paused: '已暫停',
+    noSchedule: '還沒有巡檢自動化。在下方「自動機制」裡建立一個。',
+    patrolTitle: '巡檢設定', patrolHint: '寫給巡檢者的規則：每輪檢查哪些欄、什麼門檻算異常、要不要動手處理。',
+    patrolPh: '例如：每輪檢查 blocked 與 queued；卡點超過 10 分鐘先讀畫面，必要時中斷；派活只給 idle。',
+    patrolSave: '儲存巡檢方式', patrolOn: '立即巡檢一輪', defaultModel: '預設模型',
+    analyzeTitle: '啟發分析', analyzeHint: '用選定模型讀整個看板，給出整體判斷與最多 3 條建議。',
+    pickModel: '選擇模型', analyze: '分析現況', analyzeFocus: '可選：本次關注點',
+    analyzing: '分析中（需要幾分鐘）…', analyzeFailed: '分析失敗：{e}',
+    reportsTitle: '巡檢紀錄', reportsHint: '負責策略的夥伴每輪巡檢寫入的判斷依據，最近 10 筆。', noReports: '還沒有巡檢紀錄',
+    autoTitle: '自動機制', autoHint: '用自然語言描述目的，先由 AI 優化成可執行提示詞，再開啟自動化建立面板（最小 30 分鐘一次）。',
+    autoPh: '例如：每小時看一眼看板，把卡點的工作推給空閒的 claude，推不動就提醒我。',
+    every30: '每 30 分鐘', every60: '每小時', every120: '每 2 小時', every240: '每 4 小時',
+    companionPick: '負責夥伴（可選）', automate: '設定自動機制', automating: '正在優化提示詞並開啟面板…',
+    send: '傳送', chatPh: '指揮看板：問狀態、派活、改策略…',
+    thinking: '思考中…', connect: '正在連線…', loading: '讀取中…', updated: '更新於 {t}', herdrOff: ' · Herdr 未連線',
+    notConnected: '頁面未連線，請重新開啟。', readFailed: '讀取失敗：{e}',
+    opening: '開啟中…', opened: '已開啟', focusedPane: '已聚焦對應 pane', openFailed: '開啟失敗：{e}',
+    standby: '待命 · agent 在線', standbyBusy: '待命 · 已計入在途', done: '已完成',
+    cindyCompanions: 'Cindy 夥伴', herdrAgents: 'Herdr Agent', noAgents: '暫無 agent',
+    readPane: '讀取畫面', refreshPane: '重新整理', focusHerdr: '聚焦 Herdr', close: '關閉',
+    inputPh: '輸入內容，Enter 傳送給 pane…', sendFailed: '傳送失敗：{e}',
+    keyTab: 'Tab 補全', keyEsc: 'Esc', keyInt: 'Ctrl+C 中斷', keyUp: '上一筆', keyDown: '下一筆',
+    termHint: "點擊終端直接輸入。Enter 傳送，Tab 補全，Ctrl+C 中斷，Ctrl+V 貼上。",
+  },
+  ja: {
+    tabAgent: 'Agent', tabPolicy: 'ポリシー', idleBusy: '待機を実行中に含める', refresh: '更新',
+    running: '実行中', blocked: '詰まり', queued: '待ち', idle: 'アイドル',
+    none: 'なし', noTasks: 'タスクなし', tasks: '{n} 件', mission: 'メイン会話',
+    policyTitle: '常設ポリシー', policyHint: 'ボードを運用する人と agent へのルール。保存すると board_state で全 agent に渡ります。',
+    policyPh: '例：実行中は 3 件まで。詰まりを優先。アイドルの claude にはレビュー系を割り当てる。',
+    policySave: 'ポリシーを保存', savedPolicy: 'ポリシーを保存しました。', saveFailed: '保存に失敗：{e}',
+    planTitle: '巡回スケジュール', planHint: 'Outlook のような繰り返し設定。ここでの変更は Cindy の自動化を直接書き換えます。',
+    modeInterval: '間隔', modeDaily: '毎日', modeWeekly: '毎週', unitMin: '分', unitHour: '時間',
+    enabled: '有効', apply: '適用', planApplied: 'スケジュールを適用しました。', planFailed: '適用に失敗：{e}',
+    current: '現在：{name} · {freq}（{tz}）· {state}{next}',
+    nextAt: ' · 次回 {t}', active: '有効', paused: '停止中',
+    noSchedule: '巡回の自動化がまだありません。下の「自動化」で作成してください。',
+    patrolTitle: '巡回ルール', patrolHint: '各回で何を確認し、どこから異常とみなし、動くかどうかを書きます。',
+    patrolPh: '例：blocked と queued を確認。10 分超の詰まりは画面を読んで中断。割り当ては idle のみ。',
+    patrolSave: 'ルールを保存', patrolOn: '今すぐ巡回', defaultModel: '既定モデル',
+    analyzeTitle: 'インサイト分析', analyzeHint: '選択したモデルでボード全体を読み、総合判断と最大 3 件の提案を出します。',
+    pickModel: 'モデルを選択', analyze: '分析する', analyzeFocus: '任意：今回の注目点',
+    analyzing: '分析中（数分かかります）…', analyzeFailed: '分析に失敗：{e}',
+    reportsTitle: '巡回ログ', reportsHint: '巡回 agent が毎回書き込む判断根拠（最新 10 件）。', noReports: 'まだ記録はありません',
+    autoTitle: '自動化', autoHint: '目的を自然言語で書くと AI が実行可能なプロンプトに整え、自動作成パネルを開きます（最短 30 分間隔、保存はご自身で）。',
+    autoPh: '例：1 時間ごとにボードを見て、詰まった作業をアイドルの claude に渡し、動かなければ通知する。',
+    every30: '30 分ごと', every60: '1 時間ごと', every120: '2 時間ごと', every240: '4 時間ごと',
+    companionPick: '担当パートナー（任意）', automate: '自動化を設定', automating: 'プロンプトを整えてパネルを開いています…',
+    send: '送信', chatPh: 'ボードへ指示：状態確認、割り当て、ポリシー変更…',
+    thinking: '考え中…', connect: '接続中…', loading: '読み込み中…', updated: '更新 {t}', herdrOff: ' · Herdr 未接続',
+    notConnected: 'ページが未接続です。開き直してください。', readFailed: '読み込み失敗：{e}',
+    opening: '開いています…', opened: '開きました', focusedPane: 'pane にフォーカスしました', openFailed: '開けません：{e}',
+    standby: '待機 · agent オンライン', standbyBusy: '待機 · 実行中として集計', done: '完了',
+    cindyCompanions: 'Cindy パートナー', herdrAgents: 'Herdr agent', noAgents: 'agent なし',
+    readPane: '画面を読む', refreshPane: '更新', focusHerdr: 'Herdr にフォーカス', close: '閉じる',
+    inputPh: 'Enter で pane に送信…', sendFailed: '送信に失敗：{e}',
+    keyTab: 'Tab 補完', keyEsc: 'Esc', keyInt: 'Ctrl+C 中断', keyUp: '前へ', keyDown: '次へ',
+    termHint: "ターミナルをクリックして直接入力します。Enter 送信、Tab 補完、Ctrl+C 中断、Ctrl+V 貼り付け。",
+  },
+  ko: {
+    tabAgent: 'Agent', tabPolicy: '정책', idleBusy: '대기를 진행 중으로 계산', refresh: '새로고침',
+    running: '진행 중', blocked: '막힘', queued: '대기열', idle: '유휴',
+    none: '없음', noTasks: '작업 없음', tasks: '{n}개 작업', mission: '기본 대화',
+    policyTitle: '상시 정책', policyHint: '보드를 운영하는 사람과 agent를 위한 규칙입니다. 저장하면 board_state로 모든 agent에 전달됩니다.',
+    policyPh: '예: 진행 중은 3개까지. 막힘 우선. 유휴 claude에는 리뷰 작업을 준다.',
+    policySave: '정책 저장', savedPolicy: '정책을 저장했습니다.', saveFailed: '저장 실패: {e}',
+    planTitle: '점검 일정', planHint: 'Outlook 같은 반복 일정입니다. 여기서 바꾸면 Cindy 자동화가 직접 수정됩니다.',
+    modeInterval: '간격', modeDaily: '매일', modeWeekly: '매주', unitMin: '분', unitHour: '시간',
+    enabled: '사용', apply: '적용', planApplied: '일정을 적용했습니다.', planFailed: '적용 실패: {e}',
+    current: '현재: {name} · {freq} ({tz}) · {state}{next}',
+    nextAt: ' · 다음 {t}', active: '사용 중', paused: '일시중지',
+    noSchedule: '점검 자동화가 없습니다. 아래 자동화에서 만드세요.',
+    patrolTitle: '점검 규칙', patrolHint: '매 회 무엇을 확인하고, 무엇을 이상으로 보고, 조치할지 적습니다.',
+    patrolPh: '예: blocked와 queued 확인. 10분 넘은 막힘은 화면을 읽고 중단. 배정은 유휴에만.',
+    patrolSave: '규칙 저장', patrolOn: '지금 점검', defaultModel: '기본 모델',
+    analyzeTitle: '인사이트 분석', analyzeHint: '선택한 모델로 보드 전체를 읽고 총평과 최대 3개 제안을 줍니다.',
+    pickModel: '모델 선택', analyze: '분석', analyzeFocus: '선택: 이번 관심사',
+    analyzing: '분석 중(몇 분 소요)…', analyzeFailed: '분석 실패: {e}',
+    reportsTitle: '점검 기록', reportsHint: '점검 agent가 매 회 기록한 판단 근거(최근 10건).', noReports: '기록이 없습니다',
+    autoTitle: '자동화', autoHint: '목적을 자연어로 쓰면 AI가 실행 가능한 프롬프트로 다듬고 자동화 패널을 엽니다(최소 30분 간격, 저장은 직접).',
+    autoPh: '예: 한 시간마다 보드를 보고 막힌 작업을 유휴 claude에 넘기고, 안 되면 알린다.',
+    every30: '30분마다', every60: '매시간', every120: '2시간마다', every240: '4시간마다',
+    companionPick: '담당 파트너(선택)', automate: '자동화 설정', automating: '프롬프트를 다듬고 패널을 여는 중…',
+    send: '보내기', chatPh: '보드에 지시: 상태 질문, 작업 배정, 정책 변경…',
+    thinking: '생각 중…', connect: '연결 중…', loading: '읽는 중…', updated: '업데이트 {t}', herdrOff: ' · Herdr 미연결',
+    notConnected: '페이지가 연결되지 않았습니다. 다시 여세요.', readFailed: '읽기 실패: {e}',
+    opening: '여는 중…', opened: '열었습니다', focusedPane: 'pane에 포커스했습니다', openFailed: '열기 실패: {e}',
+    standby: '대기 · agent 온라인', standbyBusy: '대기 · 진행 중으로 집계', done: '완료',
+    cindyCompanions: 'Cindy 파트너', herdrAgents: 'Herdr agent', noAgents: 'agent 없음',
+    readPane: '화면 읽기', refreshPane: '새로고침', focusHerdr: 'Herdr로 이동', close: '닫기',
+    inputPh: 'Enter로 pane에 전송…', sendFailed: '전송 실패: {e}',
+    keyTab: 'Tab 자동완성', keyEsc: 'Esc', keyInt: 'Ctrl+C 중단', keyUp: '이전', keyDown: '다음',
+    termHint: "터미널을 클릭해 바로 입력합니다. Enter 전송, Tab 자동완성, Ctrl+C 중단, Ctrl+V 붙여넣기.",
+  },
+  es: {
+    tabAgent: 'Agente', tabPolicy: 'Política', idleBusy: 'Contar espera como en curso', refresh: 'Actualizar',
+    running: 'En curso', blocked: 'Bloqueado', queued: 'En cola', idle: 'Inactivo',
+    none: 'Ninguno', noTasks: 'Sin tareas', tasks: '{n} tareas', mission: 'Conversación principal',
+    policyTitle: 'Política permanente', policyHint: 'Reglas para quien opera el tablero. Se envían a cada agente que lea board_state.',
+    policyPh: 'Ej.: máximo 3 en curso; resolver bloqueos primero; dar revisiones al claude inactivo.',
+    policySave: 'Guardar política', savedPolicy: 'Política guardada.', saveFailed: 'Error al guardar: {e}',
+    planTitle: 'Calendario de ronda', planHint: 'Programación recurrente estilo Outlook. Cambiarla modifica la automatización real de Cindy.',
+    modeInterval: 'Cada', modeDaily: 'Diario', modeWeekly: 'Semanal', unitMin: 'minutos', unitHour: 'horas',
+    enabled: 'Activo', apply: 'Aplicar', planApplied: 'Calendario aplicado.', planFailed: 'Error al aplicar: {e}',
+    current: 'Actual: {name} · {freq} ({tz}) · {state}{next}',
+    nextAt: ' · próxima {t}', active: 'activo', paused: 'pausado',
+    noSchedule: 'Aún no hay automatización de ronda. Créala en Automatización abajo.',
+    patrolTitle: 'Reglas de ronda', patrolHint: 'Qué revisar en cada ronda, qué cuenta como anómalo y si actuar.',
+    patrolPh: 'Ej.: revisar blocked y queued; si hay bloqueo de más de 10 min, leer la pantalla y luego interrumpir; asignar solo a inactivos.',
+    patrolSave: 'Guardar reglas', patrolOn: 'Ronda ahora', defaultModel: 'Modelo por defecto',
+    analyzeTitle: 'Análisis', analyzeHint: 'Lee todo el tablero con el modelo elegido y devuelve un juicio y hasta 3 sugerencias.',
+    pickModel: 'Elegir modelo', analyze: 'Analizar', analyzeFocus: 'Opcional: en qué enfocarse',
+    analyzing: 'Analizando (puede tardar minutos)…', analyzeFailed: 'Error de análisis: {e}',
+    reportsTitle: 'Registro de rondas', reportsHint: 'Base de decisión escrita por el agente de ronda, últimas 10.', noReports: 'Sin registros',
+    autoTitle: 'Automatización', autoHint: 'Describe el objetivo en lenguaje natural; la IA lo convierte en un prompt y abre el panel (mínimo 30 min, lo guardas tú).',
+    autoPh: 'Ej.: cada hora mirar el tablero, pasar lo bloqueado al claude inactivo y avisarme si no avanza.',
+    every30: 'Cada 30 min', every60: 'Cada hora', every120: 'Cada 2 h', every240: 'Cada 4 h',
+    companionPick: 'Compañero responsable (opcional)', automate: 'Configurar automatización', automating: 'Optimizando el prompt y abriendo el panel…',
+    send: 'Enviar', chatPh: 'Dirige el tablero: estado, asignar trabajo, cambiar política…',
+    thinking: 'Pensando…', connect: 'Conectando…', loading: 'Leyendo…', updated: 'Actualizado {t}', herdrOff: ' · Herdr sin conexión',
+    notConnected: 'La página no está conectada, vuelve a abrirla.', readFailed: 'Error de lectura: {e}',
+    opening: 'Abriendo…', opened: 'Abierto', focusedPane: 'Pane enfocado', openFailed: 'Error al abrir: {e}',
+    standby: 'En espera · agente en línea', standbyBusy: 'En espera · contado en curso', done: 'Hecho',
+    cindyCompanions: 'Compañeros de Cindy', herdrAgents: 'Agentes de Herdr', noAgents: 'Sin agentes',
+    readPane: 'Leer pane', refreshPane: 'Actualizar', focusHerdr: 'Ir a Herdr', close: 'Cerrar',
+    inputPh: 'Escribe y pulsa Enter para enviar al pane…', sendFailed: 'Error al enviar: {e}',
+    keyTab: 'Autocompletar Tab', keyEsc: 'Escape', keyInt: 'Ctrl+C interrumpir', keyUp: 'Anterior', keyDown: 'Siguiente',
+    termHint: "Haz clic en la terminal y escribe directamente. Enter envía, Tab completa, Ctrl+C interrumpe, Ctrl+V pega.",
+  },
+  fr: {
+    tabAgent: 'Agent', tabPolicy: 'Politique', idleBusy: 'Compter l’attente comme en cours', refresh: 'Actualiser',
+    running: 'En cours', blocked: 'Bloqué', queued: 'En attente', idle: 'Inactif',
+    none: 'Aucun', noTasks: 'Aucune tâche', tasks: '{n} tâches', mission: 'Conversation principale',
+    policyTitle: 'Politique permanente', policyHint: 'Règles pour ceux qui pilotent le tableau. Elles sont transmises à chaque agent qui lit board_state.',
+    policyPh: 'Ex. : 3 en cours maximum ; traiter les blocages d’abord ; donner les revues au claude inactif.',
+    policySave: 'Enregistrer', savedPolicy: 'Politique enregistrée.', saveFailed: 'Échec de l’enregistrement : {e}',
+    planTitle: 'Planning de ronde', planHint: 'Récurrence façon Outlook. La modifier change directement l’automatisation Cindy.',
+    modeInterval: 'Toutes les', modeDaily: 'Chaque jour', modeWeekly: 'Chaque semaine', unitMin: 'minutes', unitHour: 'heures',
+    enabled: 'Actif', apply: 'Appliquer', planApplied: 'Planning appliqué.', planFailed: 'Échec de l’application : {e}',
+    current: 'Actuel : {name} · {freq} ({tz}) · {state}{next}',
+    nextAt: ' · prochaine {t}', active: 'actif', paused: 'en pause',
+    noSchedule: 'Pas encore d’automatisation de ronde. Créez-la dans Automatisation ci-dessous.',
+    patrolTitle: 'Règles de ronde', patrolHint: 'Ce que chaque ronde vérifie, ce qui compte comme anormal, et s’il faut agir.',
+    patrolPh: 'Ex. : vérifier blocked et queued ; au-delà de 10 min, lire l’écran puis interrompre ; n’assigner qu’aux inactifs.',
+    patrolSave: 'Enregistrer les règles', patrolOn: 'Lancer une ronde', defaultModel: 'Modèle par défaut',
+    analyzeTitle: 'Analyse', analyzeHint: 'Lit tout le tableau avec le modèle choisi et renvoie un jugement et jusqu’à 3 suggestions.',
+    pickModel: 'Choisir le modèle', analyze: 'Analyser', analyzeFocus: 'Optionnel : point d’attention',
+    analyzing: 'Analyse en cours (quelques minutes)…', analyzeFailed: 'Échec de l’analyse : {e}',
+    reportsTitle: 'Journal des rondes', reportsHint: 'Base de décision écrite par l’agent de ronde, 10 dernières.', noReports: 'Aucun enregistrement',
+    autoTitle: 'Automatisation', autoHint: 'Décrivez le but en langage naturel ; l’IA en fait un prompt exécutable et ouvre le panneau (30 min minimum, c’est vous qui enregistrez).',
+    autoPh: 'Ex. : chaque heure, regarder le tableau, pousser les blocages vers le claude inactif et m’alerter si rien ne bouge.',
+    every30: 'Toutes les 30 min', every60: 'Chaque heure', every120: 'Toutes les 2 h', every240: 'Toutes les 4 h',
+    companionPick: 'Partenaire responsable (optionnel)', automate: 'Configurer', automating: 'Optimisation du prompt et ouverture du panneau…',
+    send: 'Envoyer', chatPh: 'Pilotez le tableau : état, assignation, politique…',
+    thinking: 'Réflexion…', connect: 'Connexion…', loading: 'Lecture…', updated: 'Mis à jour {t}', herdrOff: ' · Herdr non connecté',
+    notConnected: 'Page non connectée, rouvrez-la.', readFailed: 'Échec de lecture : {e}',
+    opening: 'Ouverture…', opened: 'Ouvert', focusedPane: 'Pane focalisé', openFailed: 'Échec d’ouverture : {e}',
+    standby: 'En attente · agent en ligne', standbyBusy: 'En attente · compté en cours', done: 'Terminé',
+    cindyCompanions: 'Partenaires Cindy', herdrAgents: 'Agents Herdr', noAgents: 'Aucun agent',
+    readPane: 'Lire le pane', refreshPane: 'Actualiser', focusHerdr: 'Aller à Herdr', close: 'Fermer',
+    inputPh: 'Saisir puis Entrée pour envoyer au pane…', sendFailed: 'Échec de l’envoi : {e}',
+    keyTab: 'Complétion Tab', keyEsc: 'Échap', keyInt: 'Ctrl+C interrompre', keyUp: 'Précédent', keyDown: 'Suivant',
+    termHint: "Cliquez dans le terminal et tapez directement. Entrée envoie, Tab complète, Ctrl+C interrompt, Ctrl+V colle.",
+  },
+  de: {
+    tabAgent: 'Agent', tabPolicy: 'Richtlinie', idleBusy: 'Bereitschaft als laufend zählen', refresh: 'Aktualisieren',
+    running: 'Läuft', blocked: 'Blockiert', queued: 'Wartet', idle: 'Untätig',
+    none: 'Keine', noTasks: 'Keine Aufgaben', tasks: '{n} Aufgaben', mission: 'Hauptgespräch',
+    policyTitle: 'Dauerrichtlinie', policyHint: 'Regeln für alle, die das Board steuern. Wird jedem Agenten über board_state mitgegeben.',
+    policyPh: 'Bsp.: höchstens 3 laufend; Blockaden zuerst; untätigem Claude Reviews geben.',
+    policySave: 'Richtlinie speichern', savedPolicy: 'Richtlinie gespeichert.', saveFailed: 'Speichern fehlgeschlagen: {e}',
+    planTitle: 'Rundenplan', planHint: 'Wiederholung wie in Outlook. Änderungen hier bearbeiten die echte Cindy-Automatisierung.',
+    modeInterval: 'Alle', modeDaily: 'Täglich', modeWeekly: 'Wöchentlich', unitMin: 'Minuten', unitHour: 'Stunden',
+    enabled: 'Aktiv', apply: 'Anwenden', planApplied: 'Plan angewendet.', planFailed: 'Anwenden fehlgeschlagen: {e}',
+    current: 'Aktuell: {name} · {freq} ({tz}) · {state}{next}',
+    nextAt: ' · nächste {t}', active: 'aktiv', paused: 'pausiert',
+    noSchedule: 'Noch keine Runden-Automatisierung. Erstelle sie unten unter Automatisierung.',
+    patrolTitle: 'Rundenregeln', patrolHint: 'Was jede Runde prüft, was als abnorm gilt und ob gehandelt wird.',
+    patrolPh: 'Bsp.: blocked und queued prüfen; über 10 Min. Bild lesen, dann abbrechen; nur an Untätige verteilen.',
+    patrolSave: 'Regeln speichern', patrolOn: 'Jetzt prüfen', defaultModel: 'Standardmodell',
+    analyzeTitle: 'Analyse', analyzeHint: 'Liest das ganze Board mit dem gewählten Modell und liefert ein Urteil und bis zu 3 Hinweise.',
+    pickModel: 'Modell wählen', analyze: 'Analysieren', analyzeFocus: 'Optional: heutiger Fokus',
+    analyzing: 'Analyse läuft (kann Minuten dauern)…', analyzeFailed: 'Analyse fehlgeschlagen: {e}',
+    reportsTitle: 'Rundenprotokoll', reportsHint: 'Begründung des Runden-Agenten, letzte 10 Einträge.', noReports: 'Noch keine Einträge',
+    autoTitle: 'Automatisierung', autoHint: 'Ziel in natürlicher Sprache beschreiben; die KI macht daraus einen Prompt und öffnet das Panel (mind. 30 Min., du speicherst).',
+    autoPh: 'Bsp.: stündlich das Board ansehen, Blockaden an untätige Claude geben, sonst benachrichtigen.',
+    every30: 'Alle 30 Min.', every60: 'Stündlich', every120: 'Alle 2 Std.', every240: 'Alle 4 Std.',
+    companionPick: 'Zuständiger Partner (optional)', automate: 'Automatisierung einrichten', automating: 'Prompt wird optimiert und Panel geöffnet…',
+    send: 'Senden', chatPh: 'Board steuern: Status, Arbeit verteilen, Richtlinie ändern…',
+    thinking: 'Denkt…', connect: 'Verbinde…', loading: 'Lese…', updated: 'Aktualisiert {t}', herdrOff: ' · Herdr nicht verbunden',
+    notConnected: 'Seite nicht verbunden, bitte neu öffnen.', readFailed: 'Lesen fehlgeschlagen: {e}',
+    opening: 'Öffne…', opened: 'Geöffnet', focusedPane: 'Pane fokussiert', openFailed: 'Öffnen fehlgeschlagen: {e}',
+    standby: 'Bereit · Agent online', standbyBusy: 'Bereit · als laufend gezählt', done: 'Fertig',
+    cindyCompanions: 'Cindy-Partner', herdrAgents: 'Herdr-Agenten', noAgents: 'Keine Agenten',
+    readPane: 'Pane lesen', refreshPane: 'Aktualisieren', focusHerdr: 'Zu Herdr', close: 'Schließen',
+    inputPh: 'Eingeben, Enter sendet an das Pane…', sendFailed: 'Senden fehlgeschlagen: {e}',
+    keyTab: 'Tab-Vervollständigung', keyEsc: 'Esc', keyInt: 'Ctrl+C abbrechen', keyUp: 'Zurück', keyDown: 'Weiter',
+    termHint: "In das Terminal klicken und direkt tippen. Enter sendet, Tab vervollständigt, Ctrl+C bricht ab, Ctrl+V fügt ein.",
+  },
+  'pt-BR': {
+    tabAgent: 'Agente', tabPolicy: 'Política', idleBusy: 'Contar espera como em andamento', refresh: 'Atualizar',
+    running: 'Em andamento', blocked: 'Bloqueado', queued: 'Na fila', idle: 'Ocioso',
+    none: 'Nenhum', noTasks: 'Sem tarefas', tasks: '{n} tarefas', mission: 'Conversa principal',
+    policyTitle: 'Política permanente', policyHint: 'Regras para quem opera o quadro. É enviada a cada agente que lê board_state.',
+    policyPh: 'Ex.: no máximo 3 em andamento; resolver bloqueios primeiro; dar revisões ao claude ocioso.',
+    policySave: 'Salvar política', savedPolicy: 'Política salva.', saveFailed: 'Falha ao salvar: {e}',
+    planTitle: 'Agenda de ronda', planHint: 'Recorrência estilo Outlook. Alterar aqui modifica a automação real do Cindy.',
+    modeInterval: 'A cada', modeDaily: 'Diário', modeWeekly: 'Semanal', unitMin: 'minutos', unitHour: 'horas',
+    enabled: 'Ativo', apply: 'Aplicar', planApplied: 'Agenda aplicada.', planFailed: 'Falha ao aplicar: {e}',
+    current: 'Atual: {name} · {freq} ({tz}) · {state}{next}',
+    nextAt: ' · próxima {t}', active: 'ativo', paused: 'pausado',
+    noSchedule: 'Ainda não há automação de ronda. Crie em Automação abaixo.',
+    patrolTitle: 'Regras da ronda', patrolHint: 'O que cada ronda verifica, o que conta como anormal e se deve agir.',
+    patrolPh: 'Ex.: verificar blocked e queued; acima de 10 min ler a tela e então interromper; atribuir só a ociosos.',
+    patrolSave: 'Salvar regras', patrolOn: 'Rodar agora', defaultModel: 'Modelo padrão',
+    analyzeTitle: 'Análise', analyzeHint: 'Lê o quadro inteiro com o modelo escolhido e devolve um julgamento e até 3 sugestões.',
+    pickModel: 'Escolher modelo', analyze: 'Analisar', analyzeFocus: 'Opcional: foco desta vez',
+    analyzing: 'Analisando (pode levar minutos)…', analyzeFailed: 'Falha na análise: {e}',
+    reportsTitle: 'Registro das rondas', reportsHint: 'Base de decisão escrita pelo agente de ronda, últimas 10.', noReports: 'Sem registros',
+    autoTitle: 'Automação', autoHint: 'Descreva o objetivo em linguagem natural; a IA transforma em prompt e abre o painel (mínimo 30 min, você salva).',
+    autoPh: 'Ex.: a cada hora ver o quadro, passar o que está bloqueado ao claude ocioso e avisar se não andar.',
+    every30: 'A cada 30 min', every60: 'A cada hora', every120: 'A cada 2 h', every240: 'A cada 4 h',
+    companionPick: 'Companheiro responsável (opcional)', automate: 'Configurar automação', automating: 'Otimizando o prompt e abrindo o painel…',
+    send: 'Enviar', chatPh: 'Comande o quadro: status, atribuir trabalho, mudar política…',
+    thinking: 'Pensando…', connect: 'Conectando…', loading: 'Lendo…', updated: 'Atualizado {t}', herdrOff: ' · Herdr desconectado',
+    notConnected: 'Página não conectada, abra novamente.', readFailed: 'Falha na leitura: {e}',
+    opening: 'Abrindo…', opened: 'Aberto', focusedPane: 'Pane focado', openFailed: 'Falha ao abrir: {e}',
+    standby: 'Em espera · agente online', standbyBusy: 'Em espera · contado em andamento', done: 'Concluído',
+    cindyCompanions: 'Companheiros do Cindy', herdrAgents: 'Agentes do Herdr', noAgents: 'Sem agentes',
+    readPane: 'Ler pane', refreshPane: 'Atualizar', focusHerdr: 'Ir para Herdr', close: 'Fechar',
+    inputPh: 'Digite e pressione Enter para enviar ao pane…', sendFailed: 'Falha ao enviar: {e}',
+    keyTab: 'Completar com Tab', keyEsc: 'Esc', keyInt: 'Ctrl+C interromper', keyUp: 'Anterior', keyDown: 'Próximo',
+    termHint: "Clique no terminal e digite direto. Enter envia, Tab completa, Ctrl+C interrompe, Ctrl+V cola.",
+  },
+  'pt-PT': {
+    tabAgent: 'Agente', tabPolicy: 'Política', idleBusy: 'Contar espera como em curso', refresh: 'Atualizar',
+    running: 'Em curso', blocked: 'Bloqueado', queued: 'Em fila', idle: 'Inativo',
+    none: 'Nenhum', noTasks: 'Sem tarefas', tasks: '{n} tarefas', mission: 'Conversa principal',
+    policyTitle: 'Política permanente', policyHint: 'Regras para quem opera o quadro. É enviada a cada agente que lê board_state.',
+    policyPh: 'Ex.: no máximo 3 em curso; resolver bloqueios primeiro; dar revisões ao claude inativo.',
+    policySave: 'Guardar política', savedPolicy: 'Política guardada.', saveFailed: 'Falha ao guardar: {e}',
+    planTitle: 'Plano de ronda', planHint: 'Recorrência tipo Outlook. Alterar aqui modifica a automação real do Cindy.',
+    modeInterval: 'A cada', modeDaily: 'Diário', modeWeekly: 'Semanal', unitMin: 'minutos', unitHour: 'horas',
+    enabled: 'Ativo', apply: 'Aplicar', planApplied: 'Plano aplicado.', planFailed: 'Falha ao aplicar: {e}',
+    current: 'Atual: {name} · {freq} ({tz}) · {state}{next}',
+    nextAt: ' · próxima {t}', active: 'ativo', paused: 'em pausa',
+    noSchedule: 'Ainda não há automação de ronda. Crie em Automação abaixo.',
+    patrolTitle: 'Regras da ronda', patrolHint: 'O que cada ronda verifica, o que conta como anómalo e se deve agir.',
+    patrolPh: 'Ex.: verificar blocked e queued; acima de 10 min ler o ecrã e então interromper; atribuir só a inativos.',
+    patrolSave: 'Guardar regras', patrolOn: 'Correr agora', defaultModel: 'Modelo predefinido',
+    analyzeTitle: 'Análise', analyzeHint: 'Lê o quadro todo com o modelo escolhido e devolve um juízo e até 3 sugestões.',
+    pickModel: 'Escolher modelo', analyze: 'Analisar', analyzeFocus: 'Opcional: foco desta vez',
+    analyzing: 'A analisar (pode demorar minutos)…', analyzeFailed: 'Falha na análise: {e}',
+    reportsTitle: 'Registo das rondas', reportsHint: 'Base de decisão escrita pelo agente de ronda, últimas 10.', noReports: 'Sem registos',
+    autoTitle: 'Automação', autoHint: 'Descreva o objetivo em linguagem natural; a IA transforma em prompt e abre o painel (mínimo 30 min, guarda você).',
+    autoPh: 'Ex.: a cada hora ver o quadro, passar o que está bloqueado ao claude inativo e avisar se não andar.',
+    every30: 'A cada 30 min', every60: 'A cada hora', every120: 'A cada 2 h', every240: 'A cada 4 h',
+    companionPick: 'Companheiro responsável (opcional)', automate: 'Configurar automação', automating: 'A otimizar o prompt e abrir o painel…',
+    send: 'Enviar', chatPh: 'Comande o quadro: estado, atribuir trabalho, mudar política…',
+    thinking: 'A pensar…', connect: 'A ligar…', loading: 'A ler…', updated: 'Atualizado {t}', herdrOff: ' · Herdr sem ligação',
+    notConnected: 'Página sem ligação, reabra-a.', readFailed: 'Falha na leitura: {e}',
+    opening: 'A abrir…', opened: 'Aberto', focusedPane: 'Pane focado', openFailed: 'Falha ao abrir: {e}',
+    standby: 'Em espera · agente online', standbyBusy: 'Em espera · contado em curso', done: 'Concluído',
+    cindyCompanions: 'Companheiros do Cindy', herdrAgents: 'Agentes do Herdr', noAgents: 'Sem agentes',
+    readPane: 'Ler pane', refreshPane: 'Atualizar', focusHerdr: 'Ir para Herdr', close: 'Fechar',
+    inputPh: 'Escreva e prima Enter para enviar ao pane…', sendFailed: 'Falha ao enviar: {e}',
+    keyTab: 'Completar com Tab', keyEsc: 'Esc', keyInt: 'Ctrl+C interromper', keyUp: 'Anterior', keyDown: 'Seguinte',
+    termHint: "Clique no terminal e escreva diretamente. Enter envia, Tab completa, Ctrl+C interrompe, Ctrl+V cola.",
+  },
+};
+
+const ANSI_BASE = ['#1c1c1c','#f14c4c','#23d18b','#f5f543','#3b8eea','#d670d6','#29b8db','#e5e5e5'];
+const ANSI_BRIGHT = ['#666666','#ff6b6b','#5ce6a2','#fdfd6b','#6db1ff','#e58be5','#6ad8f0','#ffffff'];
+function ansi256(i) {
+  if (i < 8) return ANSI_BASE[i];
+  if (i < 16) return ANSI_BRIGHT[i - 8];
+  const n = i - 16;
+  const levels = [0, 95, 135, 175, 215, 255];
+  return `rgb(${levels[Math.floor(n / 36)]},${levels[Math.floor(n / 6) % 6]},${levels[n % 6]})`;
+}
+function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function ansiToHtml(raw) {
+  const text = String(raw ?? '');
+  let out = '';
+  let fg = null;
+  let bg = null;
+  let bold = false;
+  let dim = false;
+  let italic = false;
+  let underline = false;
+  const open = () => {
+    let style = '';
+    if (fg) style += `color:${fg};`;
+    if (bg) style += `background:${bg};`;
+    if (bold) style += 'font-weight:700;';
+    if (dim) style += 'opacity:.65;';
+    if (italic) style += 'font-style:italic;';
+    if (underline) style += 'text-decoration:underline;';
+    return style ? `<span style="${style}">` : '';
+  };
+  let spanOpen = false;
+  const close = () => {
+    if (!spanOpen) return '';
+    spanOpen = false;
+    return '</span>';
+  };
+  const re = /\x1b\[([0-9;]*)([A-Za-z])/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(text))) {
+    out += esc(text.slice(last, m.index));
+    last = m.index + m[0].length;
+    if (m[2] !== 'm') continue;
+    const codes = m[1] === '' ? [0] : m[1].split(';').map(x => Number(x));
+    let changed = false;
+    for (let i = 0; i < codes.length; i++) {
+      const c = codes[i];
+      if (c === 0) { fg = bg = null; bold = dim = italic = underline = false; }
+      else if (c === 1) bold = true;
+      else if (c === 2) dim = true;
+      else if (c === 3) italic = true;
+      else if (c === 4) underline = true;
+      else if (c === 22) { bold = false; dim = false; }
+      else if (c === 23) italic = false;
+      else if (c === 24) underline = false;
+      else if (c === 39) fg = null;
+      else if (c === 49) bg = null;
+      else if (c >= 30 && c <= 37) fg = ANSI_BASE[c - 30];
+      else if (c >= 40 && c <= 47) bg = ANSI_BASE[c - 40];
+      else if (c >= 90 && c <= 97) fg = ANSI_BRIGHT[c - 90];
+      else if (c >= 100 && c <= 107) bg = ANSI_BRIGHT[c - 100];
+      else if (c === 38 && codes[i + 1] === 5) { fg = ansi256(codes[i + 2] ?? 0); i += 2; }
+      else if (c === 48 && codes[i + 1] === 5) { bg = ansi256(codes[i + 2] ?? 0); i += 2; }
+      else if (c === 38 && codes[i + 1] === 2) { fg = `rgb(${codes[i + 2] ?? 0},${codes[i + 3] ?? 0},${codes[i + 4] ?? 0})`; i += 4; }
+      else if (c === 48 && codes[i + 1] === 2) { bg = `rgb(${codes[i + 2] ?? 0},${codes[i + 3] ?? 0},${codes[i + 4] ?? 0})`; i += 4; }
+      else continue;
+      changed = true;
+    }
+    if (!changed) continue;
+    out += close();
+    const tag = open();
+    if (tag) { out += tag; spanOpen = true; }
+  }
+  out += esc(text.slice(last));
+  out += close();
+  return out;
+}
+
+const app = new App({ name: 'Agent Board', version: '1.0.0' }, {}, { autoResize: true });
+let LOCALE = 'en';
+function normalizeLocale(raw) {
+  const value = String(raw ?? '').trim();
+  if (!value) return 'en';
+  if (I18N[value]) return value;
+  const lower = value.toLowerCase();
+  if (lower.startsWith('zh-hant') || lower === 'zh-tw' || lower === 'zh-hk') return 'zh-TW';
+  if (lower.startsWith('zh')) return 'zh-CN';
+  const base = lower.split('-')[0];
+  for (const key of Object.keys(I18N)) if (key.toLowerCase() === base) return key;
+  if (base === 'pt') return lower.includes('br') ? 'pt-BR' : 'pt-PT';
+  return 'en';
+}
+function t(key, vars) {
+  const dict = I18N[LOCALE] ?? I18N.en;
+  let text = dict[key] ?? I18N.en[key] ?? key;
+  for (const [k, v] of Object.entries(vars ?? {})) text = text.replaceAll(`{${k}}`, String(v));
+  return text;
+}
+
+const status = document.querySelector('#status');
+const board = document.querySelector('#board');
+const summary = document.querySelector('#summary');
+const agentsBox = document.querySelector('#agents');
+const policyBox = document.querySelector('#policy');
+const fmt = ts => ts ? new Date(ts).toLocaleString(LOCALE, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+const shortPath = p => p ? p.replace(/^\/home\/[^/]+/, '~') : '';
+let view = 'cindy';
+let last = null;
+let route = null;
+
+const ICONS = {
+  cindy: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>',
+  herdr: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 9v11"/></svg>',
+  agent: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg>',
+  policy: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>',
+  refresh: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>',
+  running: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  blocked: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
+  queued: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5M12 16h.01"/></svg>',
+  idle: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></svg>',
+  sync: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>',
+  focus: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8V5a2 2 0 0 1 2-2h3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M21 16v3a2 2 0 0 1-2 2h-3"/></svg>',
+  close: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>',
+  terminal: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>',
+};
+const AGENT_COLOR = { claude: '#d97757', codex: '#10a37f', pi: '#6366f1' };
+const agentColor = name => AGENT_COLOR[name] ?? '#64748b';
+const agentInitial = name => (name || '?').slice(0, 1).toUpperCase();
+
+function applyStatic() {
+  document.title = LOCALE === 'en' ? 'Agent Board' : document.title;
+  document.querySelector('#v-cindy span').textContent = 'Cindy';
+  document.querySelector('#v-herdr span').textContent = 'Herdr';
+  document.querySelector('#v-agent span').textContent = t('tabAgent');
+  document.querySelector('#v-policy span').textContent = t('tabPolicy');
+  document.querySelector('#idle-busy-label').textContent = t('idleBusy');
+  document.querySelector('#refresh span').textContent = t('refresh');
+  document.querySelector('#t-policy-title').textContent = t('policyTitle');
+  document.querySelector('#t-policy-hint').textContent = t('policyHint');
+  document.querySelector('#policy-text').placeholder = t('policyPh');
+  document.querySelector('#t-policy-save').textContent = t('policySave');
+  document.querySelector('#t-plan-title').textContent = t('planTitle');
+  document.querySelector('#t-plan-hint').textContent = t('planHint');
+  document.querySelector('#t-mode-interval').textContent = t('modeInterval');
+  document.querySelector('#t-mode-daily').textContent = t('modeDaily');
+  document.querySelector('#t-mode-weekly').textContent = t('modeWeekly');
+  document.querySelector('#t-unit-min').textContent = t('unitMin');
+  document.querySelector('#t-unit-hour').textContent = t('unitHour');
+  document.querySelector('#t-enabled').textContent = t('enabled');
+  document.querySelector('#t-apply').textContent = t('apply');
+  document.querySelector('#t-patrol-title').textContent = t('patrolTitle');
+  document.querySelector('#t-patrol-hint').textContent = t('patrolHint');
+  document.querySelector('#patrol-text').placeholder = t('patrolPh');
+  document.querySelector('#t-patrol-save').textContent = t('patrolSave');
+  document.querySelector('#t-patrol-now').textContent = t('patrolOn');
+  document.querySelector('#patrol-model').textContent = t('defaultModel');
+  document.querySelector('#t-analyze-title').textContent = t('analyzeTitle');
+  document.querySelector('#t-analyze-hint').textContent = t('analyzeHint');
+  document.querySelector('#t-pick-model').textContent = t('pickModel');
+  document.querySelector('#t-analyze').textContent = t('analyze');
+  document.querySelector('#analyze-focus').placeholder = t('analyzeFocus');
+  document.querySelector('#model-label').textContent = t('defaultModel');
+  document.querySelector('#t-reports-title').textContent = t('reportsTitle');
+  document.querySelector('#t-reports-hint').textContent = t('reportsHint');
+  document.querySelector('#t-auto-title').textContent = t('autoTitle');
+  document.querySelector('#t-auto-hint').textContent = t('autoHint');
+  document.querySelector('#auto-purpose').placeholder = t('autoPh');
+  document.querySelector('#t-every30').textContent = t('every30');
+  document.querySelector('#t-every60').textContent = t('every60');
+  document.querySelector('#t-every120').textContent = t('every120');
+  document.querySelector('#t-every240').textContent = t('every240');
+  document.querySelector('#t-automate').textContent = t('automate');
+  document.querySelector('#chat-input').placeholder = t('chatPh');
+  document.querySelector('#t-send').textContent = t('send');
+  document.querySelector('#status').textContent = t('connect');
+  const companion = document.querySelector('#auto-companion');
+  if (companion.options.length) companion.options[0].textContent = t('companionPick');
+  const wd = ['日', '一', '二', '三', '四', '五', '六'];
+  const wdEn = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+  const names = LOCALE.startsWith('zh') || LOCALE === 'ja' ? wd : wdEn;
+  for (const b of document.querySelectorAll('#sched-weekdays button')) b.textContent = names[Number(b.dataset.d)];
+  document.documentElement.lang = LOCALE;
+}
+applyStatic();
+
+document.querySelector('#v-cindy').insertAdjacentHTML('afterbegin', ICONS.cindy);
+document.querySelector('#v-herdr').insertAdjacentHTML('afterbegin', ICONS.herdr);
+document.querySelector('#v-agent').insertAdjacentHTML('afterbegin', ICONS.agent);
+document.querySelector('#v-policy').insertAdjacentHTML('afterbegin', ICONS.policy);
+document.querySelector('#refresh').insertAdjacentHTML('afterbegin', ICONS.refresh);
+
+function debugLog() { /* 公开版无排障工具 */ }
+
+async function call(name, args) {
+  const r = await app.callServerTool({ name, arguments: args });
+  const text = r.content?.filter(b => b.type === 'text').map(b => b.text).join('\n') ?? '';
+  return JSON.parse(text);
+}
+
+let toastTimer = null;
+function toast(text, isErr) {
+  const el = document.querySelector('#toast');
+  el.textContent = text;
+  el.classList.toggle('err', !!isErr);
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+function openTarget(kind, id) {
+  if (kind === 'pane') { openPaneModal(id, id); return; }
+  _openTarget(kind, id);
+}
+
+let termTimer = null;
+const TERM_KEYMAP = {
+  Enter: ['enter'], Tab: ['tab'], Backspace: ['backspace'], Escape: ['escape'],
+  ArrowUp: ['up'], ArrowDown: ['down'], ArrowLeft: ['left'], ArrowRight: ['right'],
+  Delete: ['delete'], Home: ['home'], End: ['end'], PageUp: ['pageup'], PageDown: ['pagedown'],
+};
+const TERM_CTRL = { c: 'ctrl+c', d: 'ctrl+d', l: 'ctrl+l', z: 'ctrl+z', a: 'ctrl+a', e: 'ctrl+e', k: 'ctrl+k', u: 'ctrl+u', w: 'ctrl+w', r: 'ctrl+r' };
+
+async function openPaneModal(paneId, title) {
+  closePaneModal();
+  const modal = document.createElement('div');
+  modal.className = 'term-modal';
+  modal.innerHTML = `<div class="term-box">
+    <div class="term-head"><span class="t"></span>
+      <button class="iconbtn" data-act="refresh">${ICONS.sync}</button>
+      <button class="iconbtn" data-act="toggle-input">${ICONS.terminal}</button>
+      <button class="iconbtn" data-act="focus">${ICONS.focus}</button>
+      <button class="iconbtn" data-act="close">${ICONS.close}</button></div>
+    <div class="term-wrap">
+      <pre class="term-body">${t('loading')}</pre>
+      <div class="term-prompt"><span class="ps1">❯</span><input class="term-line" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <button class="tiny primary" data-act="send-line"></button>
+        <button class="tiny" data-act="send-enter">⏎</button>
+      </div>
+    </div>
+    <div class="term-foot"><span class="term-hint"></span><span class="term-echo"></span></div>
+  </div>`;
+  modal.querySelector('.t').textContent = title || paneId;
+  modal.querySelector('.term-hint').textContent = t('termHint');
+  const tips = { refresh: t('refreshPane'), focus: t('focusHerdr'), close: t('close'), 'toggle-input': '' };
+  for (const btn of modal.querySelectorAll('.iconbtn')) btn.dataset.tip = tips[btn.dataset.act] ?? '';
+  const body = modal.querySelector('.term-body');
+  const line = modal.querySelector('.term-line');
+  const echo = modal.querySelector('.term-echo');
+  line.placeholder = t('termPrompt');
+  let lastText = null;
+
+  function paint() {
+    body.innerHTML = lastText ? ansiToHtml(lastText) : '';
+    body.scrollTop = body.scrollHeight;
+  }
+  async function load() {
+    try {
+      const r = await call('board_pane_read', { paneId, lines: 80 });
+      lastText = r.ok ? (r.text || '—') : t('readFailed', { e: r.message ?? '' });
+    } catch (e) { lastText = t('readFailed', { e: e?.message ?? e }); }
+    paint();
+  }
+
+  let refreshTimer = null;
+  function scheduleRefresh() {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(load, 260);
+  }
+  async function sendKeys(keys) {
+    try {
+      const r = await call('board_pane_action', { paneId, action: 'keys', keys });
+      if (!r.ok) toast(t('sendFailed', { e: r.message ?? r.errorCode ?? '' }), true);
+    } catch (e) { toast(t('sendFailed', { e: e?.message ?? e }), true); }
+    scheduleRefresh();
+  }
+  async function sendLine() {
+    void debugLog('send-click', {});
+    const text = line.value;
+    if (!text) { await sendKeys(['enter']); return; }
+    line.value = '';
+    echo.textContent = `› ${text}`;
+    try {
+      const r = await call('board_pane_action', { paneId, action: 'send', text });
+      if (!r.ok) toast(t('sendFailed', { e: r.message ?? r.errorCode ?? '' }), true);
+    } catch (e) { toast(t('sendFailed', { e: e?.message ?? e }), true); }
+    await sendKeys(['enter']);
+    setTimeout(() => { echo.textContent = ''; }, 1200);
+  }
+
+  const promptRow = modal.querySelector('.term-prompt');
+  const toggleBtn = modal.querySelector('[data-act="toggle-input"]');
+  function setInputVisible(visible) {
+    promptRow.classList.toggle('hidden-input', !visible);
+    toggleBtn.dataset.tip = visible ? t('hideInput') : t('showInput');
+    toggleBtn.style.opacity = visible ? '1' : '.5';
+    if (visible) line.focus();
+    void call('board_policy', { op: 'set', termInputVisible: visible }).catch(() => {});
+  }
+  toggleBtn.onclick = () => {
+    const visible = !promptRow.classList.contains('hidden-input');
+    setInputVisible(!visible);
+    if (!visible) toast(t('inputHidden'));
+  };
+  void call('board_policy', { op: 'get' }).then(r => {
+    if (r && r.termInputVisible === false) setInputVisible(false);
+  }).catch(() => {});
+
+  const sendBtn = modal.querySelector('[data-act="send-line"]');
+  const enterBtn = modal.querySelector('[data-act="send-enter"]');
+  sendBtn.textContent = t('send');
+  tips.sendLine = t('send');
+  sendBtn.dataset.tip = t('send');
+  enterBtn.dataset.tip = t('sendEnter');
+  sendBtn.onclick = () => { void sendLine(); line.focus(); };
+  enterBtn.onclick = () => { void sendKeys(['enter']); line.focus(); };
+
+  let lastEnterAt = 0;
+  function handleKey(e, phase) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const now = Date.now();
+      if (now - lastEnterAt < 250) return;
+      lastEnterAt = now;
+      void debugLog('enter-' + phase, {});
+      void sendLine();
+      return true;
+    }
+    if (e.isComposing) return false;
+    if (e.metaKey) return false;
+    if (e.ctrlKey) {
+      const name = TERM_CTRL[e.key.toLowerCase()];
+      if (name) { e.preventDefault(); void sendKeys([name]); return true; }
+      return false;
+    }
+    const mapped = TERM_KEYMAP[e.key];
+    if (mapped) { e.preventDefault(); void sendKeys(mapped); return true; }
+    return false;
+  }
+  line.addEventListener('keydown', e => {
+    if (line.dataset.logged !== '1') { line.dataset.logged = '1'; void debugLog('keydown', { key: e.key, composing: e.isComposing }); }
+    handleKey(e, 'down');
+  });
+  line.addEventListener('keyup', e => { if (e.key === 'Enter') handleKey(e, 'up'); });
+  // 主进程/宿主可能吞掉元素级按键：document 捕获兜底（只在弹窗打开时生效）
+  const docKeydown = e => {
+    if (!document.querySelector('.term-modal')) return;
+    if (e.target === line) return;
+    if (e.target instanceof HTMLElement && e.target.closest('.term-modal') && e.target !== line) return;
+    handleKey(e, 'doc');
+  };
+  window.__kanbanDocKey = docKeydown;
+  document.addEventListener('keydown', docKeydown, true);
+  modal.querySelector('.term-wrap').onclick = e => { if (!(e.target instanceof HTMLInputElement)) line.focus(); };
+  let copyTimer = null;
+  async function copySelection() {
+    const sel = window.getSelection();
+    const text = sel?.toString() ?? '';
+    if (!text.trim()) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(t('copied'));
+    } catch { /* clipboard blocked */ }
+  }
+  body.addEventListener('mouseup', () => { clearTimeout(copyTimer); copyTimer = setTimeout(copySelection, 120); });
+  body.addEventListener('dblclick', () => { clearTimeout(copyTimer); copyTimer = setTimeout(copySelection, 120); });
+  modal.querySelector('[data-act="refresh"]').onclick = load;
+  modal.querySelector('[data-act="focus"]').onclick = async () => {
+    await call('board_open', { kind: 'pane', id: paneId });
+    toast(t('focusedPane'));
+  };
+  modal.querySelector('[data-act="close"]').onclick = closePaneModal;
+  modal.onclick = e => { if (e.target === modal) closePaneModal(); };
+  document.body.append(modal);
+  line.focus();
+  void debugLog('modal-open', { paneId });
+  await load();
+  termTimer = setInterval(load, 2000);
+}
+function closePaneModal() {
+  if (termTimer) { clearInterval(termTimer); termTimer = null; }
+  if (window.__kanbanDocKey) { document.removeEventListener('keydown', window.__kanbanDocKey, true); window.__kanbanDocKey = null; }
+  document.querySelector('.term-modal')?.remove();
+}
+
+function appendMsg(role, text) {
+  const log = document.querySelector('.chat-log');
+  const el = document.createElement('div');
+  el.className = `msg ${role}`;
+  el.textContent = text;
+  log.append(el); log.scrollTop = log.scrollHeight;
+}
+async function sendChat() {
+  const input = document.querySelector('#chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  appendMsg('user', text);
+  const log = document.querySelector('.chat-log');
+  const thinking = document.createElement('div');
+  thinking.className = 'msg assistant'; thinking.textContent = t('thinking');
+  log.append(thinking); log.scrollTop = log.scrollHeight;
+  try {
+    const r = await call('board_chat', { text, route });
+    thinking.remove();
+    appendMsg('assistant', r.reply ?? r.message ?? (r.ok ? '—' : String(r.status ?? '')));
+  } catch (e) { thinking.textContent = t('sendFailed', { e: e?.message ?? e }); }
+}
+async function loadChat() {
+  try {
+    const r = await call('board_chat', {});
+    for (const m of r.history ?? []) appendMsg(m.role, m.text);
+  } catch { /* ignore */ }
+}
+
+async function _openTarget(kind, id) {
+  toast(t('opening'));
+  try {
+    const r = await call('board_open', { kind, id });
+    if (r.ok) toast(t('opened'));
+    else toast(t('openFailed', { e: r.message ?? r.errorCode ?? '' }), true);
+  } catch (e) { toast(t('openFailed', { e: e?.message ?? e }), true); }
+}
+
+function card(title, { metas = [], badges = [], cwd = '', agent = null, open = null } = {}) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  if (open) el.onclick = () => openTarget(open.kind, open.id);
+  const top = document.createElement('div'); top.className = 'topline';
+  if (agent) {
+    const av = document.createElement('span'); av.className = 'avatar';
+    av.style.background = agentColor(agent); av.textContent = agentInitial(agent);
+    top.append(av);
+  }
+  const ttl = document.createElement('div'); ttl.className = 't'; ttl.textContent = title; top.append(ttl);
+  if (open) { const h = document.createElement('span'); h.className = 'open-hint'; h.textContent = '→'; top.append(h); }
+  el.append(top);
+  if (badges.length) {
+    const g = document.createElement('div');
+    for (const x of badges) {
+      const s = document.createElement('span');
+      s.className = 'badge' + (typeof x === 'object' && x.tone ? ' ' + x.tone : '');
+      s.textContent = typeof x === 'object' ? x.text : x;
+      g.append(s);
+    }
+    el.append(g);
+  }
+  if (metas.length) { const m = document.createElement('div'); m.className = 'meta'; m.textContent = metas.join(' · '); el.append(m); }
+  if (cwd) { const c = document.createElement('div'); c.className = 'cwd'; c.textContent = shortPath(cwd); el.append(c); }
+  return el;
+}
+
+const KIND_KEY = { running: 'running', blocked: 'blocked', queued: 'queued', idle: 'idle' };
+
+function renderBoard(groups) {
+  board.textContent = '';
+  summary.textContent = '';
+  for (const kind of ['running', 'blocked', 'queued', 'idle']) {
+    const cards = groups[kind] ?? [];
+    const col = document.createElement('section');
+    col.className = 'col'; col.dataset.kind = kind;
+    const head = document.createElement('div'); head.className = 'col-head';
+    head.innerHTML = `${ICONS[kind]}<span class="col-title"></span><span class="count"></span>`;
+    head.querySelector('.col-title').textContent = t(KIND_KEY[kind]);
+    head.querySelector('.count').textContent = cards.length || '';
+    col.append(head);
+    if (!cards.length) {
+      const e = document.createElement('div'); e.className = 'empty'; e.textContent = t('none'); col.append(e);
+    } else for (const c of cards) col.append(c);
+    board.append(col);
+    const pill = document.createElement('span'); pill.className = 'pill';
+    pill.innerHTML = `${ICONS[kind]}<span></span>`;
+    pill.querySelector('span').textContent = `${t(KIND_KEY[kind])} ${cards.length}`;
+    summary.append(pill);
+  }
+}
+
+function cindyGroups(d) {
+  const g = { running: [], blocked: [], queued: [], idle: [] };
+  for (const c of d.companions ?? []) {
+    const el = card(c.name, {
+      metas: [c.workingPhase ?? c.phase ?? '', c.summary ?? '', fmt(c.lastReplyAt)].filter(Boolean),
+      badges: c.deviceName ? [{ text: c.deviceName }] : [],
+      agent: c.name, open: { kind: 'companion', id: c.id },
+    });
+    if (!c.online || c.status === 'offline') g.idle.push(el);
+    else if (c.status === 'awaiting' || c.status === 'error') g.blocked.push(el);
+    else if (c.status === 'running') g.running.push(el);
+    else g.idle.push(el);
+    for (const i of c.interactions ?? []) {
+      g.queued.push(card(`${c.name}: ${i.title ?? i.kind}`, {
+        badges: [{ text: i.kind === 'permission' ? 'permission' : i.kind === 'question' ? 'question' : i.kind === 'plan' ? 'plan' : i.kind, tone: 'warn' }],
+        open: { kind: 'companion', id: c.id },
+      }));
+    }
+  }
+  for (const p of d.projects ?? []) {
+    for (const task of p.tasks ?? []) {
+      const el = card(task.title, { metas: [fmt(task.lastActivityAt)], badges: [{ text: p.label }], open: { kind: 'task', id: task.id } });
+      if (task.status === 'running') g.running.push(el);
+      else if (task.status === 'awaiting' || task.status === 'error') g.blocked.push(el);
+      else g.idle.push(el);
+    }
+  }
+  return g;
+}
+
+function herdrGroups(d) {
+  const g = { running: [], blocked: [], queued: [], idle: [] };
+  const idleAsBusy = d.herdrIdleAsBusy === true;
+  for (const a of d.herdrAgents ?? []) {
+    const badges = [{ text: a.agent }, { text: a.paneId }];
+    if (a.status === 'idle') badges.push({ text: idleAsBusy ? t('standbyBusy') : t('standby'), tone: 'warn' });
+    if (a.status === 'done') badges.push({ text: t('done') });
+    const el = card(a.title || a.paneId, { badges, cwd: a.cwd, agent: a.agent });
+    el.onclick = () => openPaneModal(a.paneId, a.title || a.paneId);
+    if (a.status === 'working') g.running.push(el);
+    else if (a.status === 'blocked') g.blocked.push(el);
+    else if (a.status === 'idle' && idleAsBusy) g.running.push(el);
+    else g.idle.push(el);
+  }
+  return g;
+}
+
+function renderAgents(d) {
+  agentsBox.textContent = '';
+  const sections = [
+    { title: t('cindyCompanions'), items: (d.companions ?? []).map(c => ({ ...c, tasks: c.tasks ?? [{ id: c.id, title: t('mission'), status: c.status }] })), kind: 'cindy' },
+    { title: t('herdrAgents'), items: groupHerdr(d.herdrAgents ?? []), kind: 'herdr' },
+  ];
+  for (const sec of sections) {
+    if (!sec.items.length) continue;
+    const h = document.createElement('div'); h.className = 'section-title'; h.textContent = sec.title; agentsBox.append(h);
+    for (const a of sec.items) {
+      const group = document.createElement('div'); group.className = 'agent-group';
+      const head = document.createElement('div'); head.className = 'agent-head';
+      const av = document.createElement('span'); av.className = 'avatar';
+      av.style.background = agentColor(sec.kind === 'herdr' ? a.agent : a.name);
+      av.textContent = agentInitial(sec.kind === 'herdr' ? a.agent : a.name);
+      const name = document.createElement('span'); name.className = 'name';
+      name.textContent = sec.kind === 'herdr' ? a.agent : a.name;
+      const count = document.createElement('span'); count.className = 'pill';
+      count.textContent = t('tasks', { n: (a.tasks ?? []).length });
+      head.append(av, name, count);
+      if (sec.kind === 'cindy' && a.device) {
+        const dev = document.createElement('span'); dev.className = 'pill'; dev.textContent = a.device; head.append(dev);
+      }
+      group.append(head);
+      const grid = document.createElement('div'); grid.className = 'agent-tasks';
+      for (const task of a.tasks ?? []) {
+        const st = document.createElement('div'); st.className = 'subtask';
+        st.textContent = task.title || task.id;
+        const m = document.createElement('div'); m.className = 'st';
+        m.textContent = [task.status, task.cwd ? shortPath(task.cwd) : ''].filter(Boolean).join(' · ');
+        st.append(m);
+        st.onclick = () => openTarget(sec.kind === 'herdr' ? 'pane' : 'companion', task.id);
+        grid.append(st);
+      }
+      if (!(a.tasks ?? []).length) {
+        const e = document.createElement('div'); e.className = 'empty'; e.textContent = t('noTasks'); grid.append(e);
+      }
+      group.append(grid);
+      agentsBox.append(group);
+    }
+  }
+  if (!agentsBox.children.length) {
+    const e = document.createElement('div'); e.className = 'empty'; e.textContent = t('noAgents'); agentsBox.append(e);
+  }
+}
+
+function groupHerdr(list) {
+  const map = new Map();
+  for (const a of list) {
+    const key = a.agent || 'unknown';
+    if (!map.has(key)) map.set(key, { agent: key, tasks: [] });
+    const statusLabel = a.status === 'idle' ? t('standby') : a.status === 'done' ? t('done') : a.status;
+    map.get(key).tasks.push({ id: a.paneId, title: a.title, status: statusLabel, cwd: a.cwd });
+  }
+  return [...map.values()];
+}
+
+function render(d) {
+  if (view === 'policy') return;
+  if (view === 'agent') { board.classList.add('hidden'); summary.classList.add('hidden'); agentsBox.classList.remove('hidden'); renderAgents(d); }
+  else {
+    agentsBox.classList.add('hidden');
+    board.classList.remove('hidden'); summary.classList.remove('hidden');
+    renderBoard(view === 'herdr' ? herdrGroups(d) : cindyGroups(d));
+  }
+  const herdrNote = d.herdrAgents === null ? t('herdrOff') : '';
+  status.textContent = t('updated', { t: fmt(d.observedAt) }) + herdrNote + (d.errors?.length ? '\n' + d.errors.join('\n') : '');
+}
+
+const REFRESH_MS = 15000;
+let nextRefreshAt = Date.now() + REFRESH_MS;
+function tickCountdown() {
+  const el = document.querySelector('#countdown');
+  if (!el) return;
+  const left = Math.max(0, Math.ceil((nextRefreshAt - Date.now()) / 1000));
+  el.textContent = `${left}s`;
+  el.title = t('autoRefreshTip', { n: REFRESH_MS / 1000 });
+  if (left <= 0) {
+    nextRefreshAt = Date.now() + REFRESH_MS;
+    if (!document.querySelector('.term-modal') && !document.body.classList.contains('patrolling')) void refresh();
+  }
+}
+setInterval(tickCountdown, 1000);
+
+async function refresh() {
+  nextRefreshAt = Date.now() + REFRESH_MS;
+  status.textContent = t('loading');
+  document.body.classList.add('patrolling');
+  try {
+    last = await call('board_snapshot', {});
+    if (last) document.querySelector('#idle-busy').checked = last.herdrIdleAsBusy === true;
+    render(last);
+    await loadPolicy(last);
+  } catch (e) { status.textContent = t('readFailed', { e: e?.message ?? e }); }
+  finally { document.body.classList.remove('patrolling'); }
+}
+
+const WD_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
+const wdBox = document.querySelector('#sched-weekdays');
+for (let i = 0; i < 7; i++) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.dataset.d = String(i); b.textContent = WD_NAMES[i];
+  b.onclick = () => b.classList.toggle('on');
+  wdBox.append(b);
+}
+function selectedWeekdays() {
+  return [...wdBox.querySelectorAll('button.on')].map(b => Number(b.dataset.d));
+}
+
+async function loadPolicy(d) {
+  try {
+    const r = await call('board_policy', { op: 'get' });
+    document.querySelector('#policy-text').value = r.policy ?? '';
+    document.querySelector('#patrol-text').value = r.patrol ?? '';
+    const box = document.querySelector('#reports');
+    box.textContent = '';
+    const reports = r.reports ?? [];
+    if (!reports.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = t('noReports'); box.append(e); }
+    for (const rp of reports) {
+      const el = document.createElement('div'); el.className = 'report';
+      const v = document.createElement('div'); v.className = 'v'; v.textContent = rp.verdict || '—'; el.append(v);
+      if (rp.basis) { const b = document.createElement('div'); b.className = 'b'; b.textContent = rp.basis; el.append(b); }
+      const time = document.createElement('div'); time.className = 't'; time.textContent = fmt(rp.at); el.append(time);
+      box.append(el);
+    }
+  } catch { /* ignore */ }
+  const sel = document.querySelector('#auto-companion');
+  sel.textContent = '';
+  const first = document.createElement('option'); first.value = ''; first.textContent = t('companionPick'); sel.append(first);
+  for (const c of d.companions ?? []) {
+    const o = document.createElement('option'); o.value = c.name; o.textContent = c.name; sel.append(o);
+  }
+}
+
+async function loadSchedule() {
+  const box = document.querySelector('#sched-status');
+  try {
+    const r = await call('board_schedule_get', {});
+    if (!r.ok) { box.textContent = r.message ?? ''; return; }
+    if (!r.found) { box.textContent = t('noSchedule'); return; }
+    if (r.intervalMs) {
+      document.querySelector('#sched-mode').value = 'interval';
+      if (r.intervalMs % 3600000 === 0) { document.querySelector('#sched-every').value = r.intervalMs / 3600000; document.querySelector('#sched-unit').value = 'hours'; }
+      else { document.querySelector('#sched-every').value = Math.max(1, Math.round(r.intervalMs / 60000)); document.querySelector('#sched-unit').value = 'minutes'; }
+    } else if (r.cronExpr) {
+      const parts = r.cronExpr.split(' ');
+      if (parts.length === 5 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1])) {
+        document.querySelector('#sched-mode').value = parts[4] === '*' ? 'daily' : 'weekly';
+        document.querySelector('#sched-time').value = `${parts[1].padStart(2, '0')}:${parts[0].padStart(2, '0')}`;
+        if (parts[4] !== '*') {
+          const days = parts[4].split(',').map(Number);
+          for (const b of wdBox.querySelectorAll('button')) b.classList.toggle('on', days.includes(Number(b.dataset.d)));
+        }
+      } else if (parts.length === 5 && parts[0].startsWith('*/')) {
+        document.querySelector('#sched-mode').value = 'interval';
+        document.querySelector('#sched-every').value = Number(parts[0].slice(2)) || 30;
+        document.querySelector('#sched-unit').value = 'minutes';
+      }
+    }
+    document.querySelector('#sched-enabled').checked = r.status === 'active';
+    syncScheduleInputs();
+    const freq = r.intervalMs ? `${r.intervalMs / 60000} min` : r.cronExpr;
+    box.textContent = t('current', {
+      name: r.name, freq, tz: r.timezone,
+      state: r.status === 'active' ? t('active') : t('paused'),
+      next: r.nextFireAt ? t('nextAt', { t: fmt(r.nextFireAt) }) : '',
+    });
+  } catch (e) { box.textContent = t('readFailed', { e: e?.message ?? e }); }
+}
+
+function syncScheduleInputs() {
+  const p = document.querySelector('#sched-mode').value;
+  document.querySelector('#sched-interval-row').style.display = p === 'interval' ? 'flex' : 'none';
+  document.querySelector('#sched-time').classList.toggle('hidden', p === 'interval');
+  document.querySelector('#sched-weekly-row').classList.toggle('hidden', p !== 'weekly');
+}
+
+for (const [id, v] of [['v-cindy', 'cindy'], ['v-herdr', 'herdr'], ['v-agent', 'agent'], ['v-policy', 'policy']]) {
+  document.querySelector(`#${id}`).onclick = () => {
+    view = v;
+    for (const [x, k] of [['v-cindy', 'cindy'], ['v-herdr', 'herdr'], ['v-agent', 'agent'], ['v-policy', 'policy']])
+      document.querySelector(`#${x}`).classList.toggle('on', k === v);
+    policyBox.classList.toggle('hidden', v !== 'policy');
+    if (v === 'policy') {
+      board.classList.add('hidden'); summary.classList.add('hidden'); agentsBox.classList.add('hidden');
+      if (last) loadPolicy(last);
+      void loadSchedule();
+    } else if (last) render(last);
+  };
+}
+
+document.querySelector('#sched-mode').onchange = syncScheduleInputs;
+
+document.querySelector('#sched-apply').onclick = async () => {
+  const btn = document.querySelector('#sched-apply'); btn.disabled = true;
+  try {
+    const r = await call('board_schedule_apply', {
+      mode: document.querySelector('#sched-mode').value,
+      every: Number(document.querySelector('#sched-every').value),
+      unit: document.querySelector('#sched-unit').value,
+      time: document.querySelector('#sched-time').value,
+      weekdays: selectedWeekdays(),
+      enabled: document.querySelector('#sched-enabled').checked,
+    });
+    if (r.ok) { toast(t('planApplied')); await loadSchedule(); }
+    else toast(t('planFailed', { e: r.message ?? '' }), true);
+  } catch (e) { toast(t('planFailed', { e: e?.message ?? e }), true); }
+  btn.disabled = false;
+};
+
+document.querySelector('#idle-busy').onchange = async () => {
+  const on = document.querySelector('#idle-busy').checked;
+  if (last) { last.herdrIdleAsBusy = on; render(last); }
+  try {
+    const r = await call('board_policy', { op: 'set', herdrIdleAsBusy: on });
+    if (!r.ok) toast(t('saveFailed', { e: '' }), true);
+  } catch (e) { toast(t('saveFailed', { e: e?.message ?? e }), true); }
+};
+
+document.querySelector('#policy-save').onclick = async () => {
+  const text = document.querySelector('#policy-text').value.trim();
+  const btn = document.querySelector('#policy-save'); btn.disabled = true;
+  try {
+    const r = await call('board_policy', { op: 'set', policy: text });
+    status.textContent = r.ok ? t('savedPolicy') : t('saveFailed', { e: r.message ?? '' });
+  } catch (e) { status.textContent = t('saveFailed', { e: e?.message ?? e }); }
+  btn.disabled = false;
+};
+
+document.querySelector('#patrol-save').onclick = async () => {
+  const text = document.querySelector('#patrol-text').value.trim();
+  try {
+    const r = await call('board_policy', { op: 'set', patrol: text });
+    status.textContent = r.ok ? t('savedPolicy') : t('saveFailed', { e: r.message ?? '' });
+  } catch (e) { status.textContent = t('saveFailed', { e: e?.message ?? e }); }
+};
+
+document.querySelector('#patrol-now').onclick = async () => {
+  const btn = document.querySelector('#patrol-now'); btn.disabled = true;
+  const out = document.querySelector('#patrol-result');
+  out.classList.remove('hidden');
+  document.body.classList.add('patrolling');
+  out.textContent = t('analyzing');
+  try {
+    const r = await call('board_analyze', { focus: document.querySelector('#patrol-text').value.trim(), route });
+    out.textContent = r.ok ? (r.analysis || '—') : t('analyzeFailed', { e: r.message ?? r.status ?? '' });
+    last = await call('board_snapshot', {});
+    if (last) { render(last); await loadPolicy(last); }
+  } catch (e) { out.textContent = t('analyzeFailed', { e: e?.message ?? e }); }
+  document.body.classList.remove('patrolling');
+  btn.disabled = false;
+};
+
+document.querySelector('#pick-model').onclick = async () => {
+  try {
+    const r = await call('board_pick_model', {});
+    if (r.ok) {
+      route = r.route;
+      document.querySelector('#model-label').textContent = r.label ?? t('defaultModel');
+      document.querySelector('#patrol-model').textContent = r.label ?? t('defaultModel');
+    }
+  } catch { /* ignore */ }
+};
+
+document.querySelector('#analyze').onclick = async () => {
+  const btn = document.querySelector('#analyze'); btn.disabled = true;
+  const out = document.querySelector('#analyze-result');
+  out.classList.remove('hidden'); out.textContent = t('analyzing');
+  try {
+    const r = await call('board_analyze', { focus: document.querySelector('#analyze-focus').value.trim(), route });
+    out.textContent = r.ok ? (r.analysis || '—') : t('analyzeFailed', { e: r.message ?? r.status ?? '' });
+  } catch (e) { out.textContent = t('analyzeFailed', { e: e?.message ?? e }); }
+  btn.disabled = false;
+};
+
+document.querySelector('#automate').onclick = async () => {
+  const btn = document.querySelector('#automate'); btn.disabled = true;
+  const out = document.querySelector('#automate-result');
+  out.classList.remove('hidden'); out.textContent = t('automating');
+  try {
+    const r = await call('board_automate', {
+      purpose: document.querySelector('#auto-purpose').value.trim(),
+      intervalMs: Number(document.querySelector('#auto-interval').value),
+      companionName: document.querySelector('#auto-companion').value,
+      route,
+    });
+    out.textContent = r.ok ? `${r.note}\n\n${r.name}\n\n${r.prompt}` : t('saveFailed', { e: r.message ?? '' });
+  } catch (e) { out.textContent = t('saveFailed', { e: e?.message ?? e }); }
+  btn.disabled = false;
+};
+
+document.querySelector('#chat-send').onclick = sendChat;
+document.querySelector('#chat-input').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
+
+app.onhostcontextchanged = () => {
+  const locale = normalizeLocale(app.getHostContext()?.locale);
+  if (locale !== LOCALE) {
+    LOCALE = locale;
+    applyStatic();
+    if (last) render(last);
+  }
+};
+app.onteardown = async () => ({});
+document.querySelector('#refresh').onclick = refresh;
+
+try {
+  await app.connect();
+  LOCALE = normalizeLocale(app.getHostContext()?.locale);
+  applyStatic();
+  document.querySelector('#refresh').disabled = false;
+  await refresh();
+  await loadChat();
+} catch { status.textContent = t('notConnected'); }
+</script>
+</html>

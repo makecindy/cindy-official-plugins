@@ -134,6 +134,9 @@
       "audience": {
         "emails": []
       }
+    },
+    "cindy-kanban": {
+      "audience": "all"
     }
   }
 }

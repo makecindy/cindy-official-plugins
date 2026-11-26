@@ -1,0 +1,49 @@
+{
+  "name": "Agent ボード",
+  "description": "サイドバーのボード。Cindy のパートナーと Herdr の agent を4列で表示し、カードを押すと会話や pane を開けます。カラー端子、指示用チャット欄、巡回計画と常設ポリシーを備えています。",
+  "whenToUse": "どの agent とタスクが実行中・詰まり・待ち・アイドルかを見たいとき、割り当て方針を決めたいとき、状況を分析したいとき、自動化を設定したいときに使います。",
+  "tools": {
+    "board_snapshot": {
+      "description": "パートナーの状態とこの PC のプロジェクトのタスクを読み、ボードのデータスナップショットを返します。"
+    },
+    "board_state": {
+      "description": "ボードの現在状態と调度ルールを読みます：列の归属、agent ごとの task、常設ポリシー、巡回ルール、前回の報告、詰まり pane の画面要約。调度の前に呼んでください。"
+    },
+    "board_dispatch": {
+      "description": "ボード上の agent に作業を割り当てます。targetKind=herdr は paneId、targetKind=cindy はパートナー id。アイドルまたは待ち列の項目にだけ割り当て、一度に確認できる一件だけにします。"
+    },
+    "board_open": {
+      "description": "ボードカードの背後にある対象を開きます：kind=companion はパートナーとの会話、kind=task はタスク、kind=pane は Herdr の pane にフォーカスします。"
+    },
+    "board_policy": {
+      "description": "常設ポリシー、巡回ルール、表示設定を読み書きします。ポリシーは board_state を通じてボードを読む各 agent に渡されます。"
+    },
+    "board_report": {
+      "description": "巡回の终わりに判断の根拠を記録します：総合結論、诘まりと待ちの一覧、理由、诘まり対象の id（refs、重複除去用）。"
+    },
+    "board_pane_read": {
+      "description": "Herdr の pane の直近画面（ANSI 色を保持）を読み、诘まりの原因を调べます。"
+    },
+    "board_pane_action": {
+      "description": "Herdr の pane を操作します：send はテキスト入力、keys はキー送信、interrupt は Ctrl+C で中断。権限の昇格、サンドボックスの回避、外部公开はオーナーの代わりに行いません。"
+    },
+    "board_schedule_get": {
+      "description": "ボード巡回の自動化の現在状態を読みます：頻度、次回実行时刻、停止中かどうか。"
+    },
+    "board_schedule_apply": {
+      "description": "巡回計画を适用します：N 分または N 時間ごと、毎日、毎週（曜日を複数選択して时刻を指定）、以及有効・停止スイッチ。Cindy の自動化を直接変更します。"
+    },
+    "board_chat": {
+      "description": "ボード下部のチャット栏です。オーナーが指示を出すと、指挥官 agent がボードを読み、作業を割り当てたり方針を変えたりして応答します。text が空の場合は履歴だけを返します。"
+    },
+    "board_pick_model": {
+      "description": "モデル选択画面を開き、ユーザーが選んだ route を返します。分析と自動化で使います。"
+    },
+    "board_analyze": {
+      "description": "選定したモデルで現在のボード状態と常設ポリシーを読み、総合判断と最大3つの提案を出します。"
+    },
+    "board_automate": {
+      "description": "自然言語で書かれた目的を自動化用のプロンプトに整え、あらかじめ入力された自動作成パネルを開いて、オーナーが自分で保存できるようにします。"
+    }
+  }
+}

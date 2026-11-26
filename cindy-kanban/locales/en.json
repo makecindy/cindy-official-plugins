@@ -1,0 +1,49 @@
+{
+  "name": "Agent Board",
+  "description": "A sidebar board: four columns for Cindy companions and Herdr agents, click to open a conversation or pane, with a color terminal, a command chat box, patrol schedules and standing policies.",
+  "whenToUse": "Use it to see which agents and tasks are running, blocked, queued or idle, to set dispatch policy, analyse the board, or set up automation.",
+  "tools": {
+    "board_snapshot": {
+      "description": "Read companion status and the tasks of local projects, returning a board data snapshot."
+    },
+    "board_state": {
+      "description": "Read the current board state and dispatch protocol: column ownership, tasks per agent, standing policy, patrol rules, last report and blocked pane digests. Call it before dispatching."
+    },
+    "board_dispatch": {
+      "description": "Dispatch work to an agent on the board. targetKind=herdr uses a paneId; targetKind=cindy uses a companion id. Only dispatch to idle or queued entries, one verifiable item at a time."
+    },
+    "board_open": {
+      "description": "Open the target behind a board card: kind=companion opens the companion conversation, kind=task opens the task, kind=pane focuses a Herdr pane."
+    },
+    "board_policy": {
+      "description": "Read or save the standing policy, patrol rules and interface preferences. The policy is passed to every agent that reads board_state."
+    },
+    "board_report": {
+      "description": "Write the judgement basis of a patrol round: overall verdict, blocked and queued lists, reasons, and blocked target ids (refs, used for de-duplication)."
+    },
+    "board_pick_model": {
+      "description": "Open the model picker and return the route the user selected, for analysis and automation."
+    },
+    "board_analyze": {
+      "description": "Read the current board state and standing policy with the chosen model, and return an overall judgement plus up to three suggestions."
+    },
+    "board_automate": {
+      "description": "Turn a plain-language goal into an automation prompt and open the pre-filled automation panel for the owner to save."
+    },
+    "board_pane_read": {
+      "description": "Read the recent screen of a Herdr pane (ANSI colours preserved) to diagnose a blockage."
+    },
+    "board_pane_action": {
+      "description": "Act on a Herdr pane: send types text, keys sends keystrokes, interrupt sends Ctrl+C. Never perform privilege escalation, sandbox bypass or outbound publication on the owner's behalf."
+    },
+    "board_schedule_get": {
+      "description": "Read the current state of the board patrol automation: frequency, next fire time, and whether it is paused."
+    },
+    "board_schedule_apply": {
+      "description": "Apply a patrol schedule: every N minutes/hours, daily, or weekly with selectable weekdays and a time, plus an on/off switch. Edits the Cindy automation directly."
+    },
+    "board_chat": {
+      "description": "The chat box at the bottom of the board: the owner gives an instruction and the commander agent reads the board, dispatches work or changes policy, then replies. Returns history only when text is empty."
+    }
+  }
+}

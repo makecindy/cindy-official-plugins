@@ -1,0 +1,49 @@
+{
+  "name": "Agent 看板",
+  "description": "侧栏看板：四列展示 Cindy 伙伴与 Herdr agent，点击跳转对话或 pane，内置彩色终端、底部指挥聊天框、巡检计划与常驻策略。",
+  "whenToUse": "用户想一眼看清各个 agent 和任务谁在跑、谁卡住、谁排队、谁空闲，要制定调度策略、分析现状或设置自动机制时使用。",
+  "tools": {
+    "board_snapshot": {
+      "description": "读取伙伴状态与本机各项目任务状态，返回看板数据快照。"
+    },
+    "board_state": {
+      "description": "读取看板当前状态与调度协议：四列归属、每个 agent 持有的 task、常驻策略、巡检方式、上一轮报告与卡点画面摘要。调度前先调用它。"
+    },
+    "board_dispatch": {
+      "description": "给看板上的某个 agent 派活。targetKind=herdr 按 paneId，targetKind=cindy 按伙伴 id。只派给空闲或排队条目，一次一件可验收的活。"
+    },
+    "board_open": {
+      "description": "打开看板卡片对应的目标：kind=companion 打开伙伴对话，kind=task 打开任务，kind=pane 聚焦 Herdr pane。"
+    },
+    "board_policy": {
+      "description": "读取或保存常驻策略、巡检方式与界面偏好。策略会随 board_state 提供给每个读看板的 agent。"
+    },
+    "board_report": {
+      "description": "巡检结束时写入本次判断依据：整体结论、卡点和排队清单、原因说明，以及卡点目标 id（refs，用于去重）。"
+    },
+    "board_pick_model": {
+      "description": "打开模型选择器，返回用户选中的 route 供分析与自动机制使用。"
+    },
+    "board_analyze": {
+      "description": "用选定模型读当前看板状态与常驻策略，输出整体判断与最多 3 条启发式建议。"
+    },
+    "board_automate": {
+      "description": "把自然语言目的优化成自动化提示词，并打开预填的自动化创建面板让主人亲手保存。"
+    },
+    "board_pane_read": {
+      "description": "读取某个 Herdr pane 的最近画面内容（保留 ANSI 颜色），用于判断卡点原因。"
+    },
+    "board_pane_action": {
+      "description": "对某个 Herdr pane 执行动作：send=输入文本，keys=发送按键，interrupt=发送 Ctrl+C 中断。涉及提权、沙箱与对外发布的动作一律不代拍。"
+    },
+    "board_schedule_get": {
+      "description": "读取看板巡检自动化的当前状态：频率、下次触发、是否暂停。"
+    },
+    "board_schedule_apply": {
+      "description": "应用巡检计划：每隔 N 分钟/小时、每天或每周（可多选星期）并设定时间，以及启用开关。直接修改 Cindy 自动化。"
+    },
+    "board_chat": {
+      "description": "看板底部聊天：主人发指令，指挥官 agent 读看板、派活、改策略后回复。无 text 时只返回历史。"
+    }
+  }
+}
