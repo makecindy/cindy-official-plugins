@@ -1,6 +1,9 @@
 'use strict';
 
-const { resolveAgy, spawnAgy, SESSION_SETTINGS, killTree } = require('./resolve-agy.js');
+const { randomUUID } = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const { configFilePath, resolveAgy, spawnAgy, SESSION_SETTINGS, killTree } = require('./resolve-agy.js');
 
 const NAMED_PERIODS = { hourly: 60, daily: 1440, weekly: 10080 };
 const PERIOD_UNITS = {
@@ -61,7 +64,11 @@ async function readUsage(options) {
     ? { ...env, AGY_CLI_DISABLE_AUTO_UPDATE: 'true' }
     : env;
   const child = spawnAgy(executable, ['--settings', SESSION_SETTINGS, '--output-format', 'json', '--print', '/usage'],
-    { ...options, env: usageEnv, stdio: ['ignore', 'pipe', 'ignore'] });
+    { ...options, env: usageEnv, stdio: ['pipe', 'pipe', 'ignore'] });
+  // agy 1.5.x treats /dev/null as a terminal and may start browser OAuth.
+  // An empty pipe signals a noninteractive caller without sending a prompt.
+  child.stdin.on('error', () => {}); // The CLI may already have exited.
+  child.stdin.end();
   const chunks = [];
   let length = 0;
   const stop = () => killTree(child, 'SIGKILL');
@@ -84,4 +91,65 @@ async function readUsage(options) {
   }
 }
 
-module.exports = { readUsage, usageFromReport, windowMinutesOf };
+// The on-demand worker may be recycled before the next poll. Store only the
+// failure delay and its expiry, never the account or its usage report.
+const MIN_RETRY_MS = 60_000;
+const MAX_RETRY_MS = 15 * 60_000;
+function retryFile() {
+  const config = configFilePath();
+  return config && path.join(path.dirname(config), 'usage-retry.json');
+}
+
+function loadRetry() {
+  try {
+    const file = retryFile();
+    if (!file || fs.statSync(file).size > 256) return null;
+    const { delay, until } = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (Number.isSafeInteger(delay) && delay >= MIN_RETRY_MS && delay <= MAX_RETRY_MS &&
+        Number.isSafeInteger(until) && until <= Date.now() + MAX_RETRY_MS) return { delay, until };
+  } catch { /* Missing or invalid state starts a new retry sequence. */ }
+  return null;
+}
+
+let retry = loadRetry();
+function setRetry(next) {
+  if (!next && !retry) return;
+  retry = next;
+  const file = retryFile();
+  if (!file) return;
+  try {
+    if (!next) {
+      fs.rmSync(file, { force: true });
+      return;
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    const tmp = file + '.' + randomUUID() + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(next), { mode: 0o600, flag: 'wx' });
+    try { fs.renameSync(tmp, file); }
+    finally { fs.rmSync(tmp, { force: true }); }
+  } catch { /* Keep the in-memory cooldown if local storage is unavailable. */ }
+}
+
+let pending;
+function resetUsage() {
+  pending = null;
+  setRetry(null);
+}
+
+function pollUsage() {
+  if (pending) return pending;
+  if (retry && Date.now() < retry.until) return Promise.resolve(null);
+  const read = readUsage().catch(() => null).then(result => {
+    if (pending !== read) return null;
+    if (result) setRetry(null);
+    else {
+      const delay = Math.min(MAX_RETRY_MS, retry ? retry.delay * 2 : MIN_RETRY_MS);
+      setRetry({ delay, until: Date.now() + delay });
+    }
+    return result;
+  }).finally(() => { if (pending === read) pending = null; });
+  pending = read;
+  return read;
+}
+
+module.exports = { readUsage, pollUsage, resetUsage, usageFromReport, windowMinutesOf };

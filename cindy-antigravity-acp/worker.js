@@ -49,6 +49,7 @@ const maintain = require('./cli-installer.cjs');
 const { detectAgy, readCustomAgyConfig, runVersion, validateCustomPath, writeCustomAgyPath } = require('./resolve-agy.js');
 const { listModels, readModelSession, rememberModelSession } = require('./agy-models.js');
 const account = require('./agy-account.js');
+const { pollUsage, resetUsage } = require('./agy-usage.js');
 
 const HARNESS_ID = 'agy';
 /** Cindy waits 26 s for accountStatus; answer "unknown" before that rather than not at all. */
@@ -71,7 +72,6 @@ function withDeadline(promise, ms, fallback) {
   return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
 }
 
-let usageRead;
 let accountStatusRead;
 let maintenanceActive = false;
 let customPathPending = 0;
@@ -91,7 +91,7 @@ async function applyCustomPath(params) {
   if (maintenanceActive) return { ok: false, error: 'busy' };
   const saved = writeCustomAgyPath(params.path);
   if (!saved.ok) return { ok: false, error: saved.error };
-  usageRead = undefined;
+  resetUsage();
   accountStatusRead = undefined;
   // Like main.js, start the model listing of the new executable afresh.
   modelSourceRevision += 1;
@@ -119,15 +119,7 @@ const handlers = {
     }
     return result;
   },
-  usage() {
-    if (!usageRead) {
-      const read = require('./agy-usage.js').readUsage().catch(() => null).finally(() => {
-        if (usageRead === read) usageRead = undefined;
-      });
-      usageRead = read;
-    }
-    return usageRead;
-  },
+  usage: pollUsage,
   async detect(params) {
     const locale = params && typeof params.locale === 'string' ? params.locale : undefined;
     return detectAgy({ locale });
@@ -164,7 +156,7 @@ const handlers = {
   },
   login() {
     if (customPathPending > 0) return Promise.resolve({ ok: false, error: 'busy' });
-    usageRead = undefined;
+    resetUsage();
     if (activeLoginPromise) return Promise.resolve({ ok: false, error: 'busy' });
     const run = Promise.resolve(account.login(undefined, () => {
       reply({ jsonrpc: '2.0', method: 'progress', params: { stage: 'waiting-for-browser' } });
@@ -181,7 +173,7 @@ const handlers = {
   },
   async logout() {
     if (customPathPending > 0) return { ok: false, error: 'busy' };
-    usageRead = undefined;
+    resetUsage();
     return account.logout().finally(() => { accountStatusRead = undefined; });
   },
   async listModels(params) {
