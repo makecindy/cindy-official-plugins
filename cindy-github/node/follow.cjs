@@ -2,7 +2,71 @@
 // must lose access to the hook if the user disables or removes this plugin.
 const path = require('node:path');
 const fs = require('node:fs');
+const childProcess = require('node:child_process');
 const readline = require('node:readline');
+
+const MIN_NODE_MAJOR = 18;
+
+function supportedNodeVersion(version) {
+  return /^\d+\.\d+\.\d+(?:[-+].*)?$/.test(version) &&
+    Number(version.split('.')[0]) >= MIN_NODE_MAJOR;
+}
+
+function envValue(env, name, caseInsensitive) {
+  if (!env || typeof env !== 'object') return '';
+  if (!caseInsensitive) return env[name] || '';
+  const target = name.toLowerCase();
+  const key = Object.keys(env).find(k => k.toLowerCase() === target);
+  return key ? env[key] || '' : '';
+}
+
+// Resolve the exact first executable `node` that a shell would run on PATH
+// without executing relative paths or invoking a shell.
+function firstNodeOnPath(env = process.env, platform = process.platform) {
+  const win = platform === 'win32';
+  const rawPath = envValue(env, 'PATH', win);
+  const delimiter = win ? ';' : ':';
+  const pathImpl = win ? path.win32 : path.posix;
+  const entries = String(rawPath).split(delimiter);
+  const rawExts = win
+    ? String(envValue(env, 'PATHEXT', true) || '.COM;.EXE;.BAT;.CMD')
+        .split(';')
+        .map(e => e.trim().toLowerCase())
+        .filter(e => e.startsWith('.'))
+    : [''];
+  const exts = rawExts.length ? rawExts : ['.com', '.exe', '.bat', '.cmd'];
+  for (let i = 0; i < entries.length; i++) {
+    const dir = entries[i].replace(/^"|"$/g, '');
+    if (!dir || !pathImpl.isAbsolute(dir)) continue;
+    for (let j = 0; j < exts.length; j++) {
+      const ext = exts[j];
+      const candidate = path.join(dir, 'node' + ext);
+      try {
+        const real = fs.realpathSync(candidate);
+        if (!fs.statSync(real).isFile()) continue;
+        if (!win) fs.accessSync(real, fs.constants.X_OK);
+        // On Windows, cmd.exe resolves PATHEXT in order; stay conservative if a
+        // .cmd/.bat/.com wrapper precedes node.exe rather than spawning a shell.
+        if (win && ext !== '.exe') return null;
+        return candidate;
+      } catch (_) {}
+    }
+  }
+  return null;
+}
+
+function defaultNodeSupported(env = process.env, platform = process.platform) {
+  const binary = firstNodeOnPath(env, platform);
+  if (!binary) return false;
+  try {
+    const probe = childProcess.spawnSync(binary, ['-p', 'process.versions.node'], {
+      encoding: 'utf8', timeout: 2000, windowsHide: true, shell: false,
+    });
+    return probe.status === 0 && supportedNodeVersion(String(probe.stdout || '').trim());
+  } catch (_) {
+    return false;
+  }
+}
 
 function followSkillDir(installation) {
   const id = path.basename(installation);
@@ -31,12 +95,17 @@ if (require.main === module || globalThis.__CINDY_NODE__) {
     if (!req || req.id == null) return;
     const reply = { jsonrpc: '2.0', id: req.id };
     try {
-      if (req.method !== 'followSkillDir') throw new Error('Unsupported method');
-      reply.result = followSkillDir(path.resolve(__dirname, '..'));
+      if (req.method === 'followSkillDir') {
+        reply.result = followSkillDir(path.resolve(__dirname, '..'));
+      } else if (req.method === 'defaultNodeSupported') {
+        reply.result = defaultNodeSupported();
+      } else {
+        throw new Error('Unsupported method');
+      }
     } catch (error) {
       reply.error = { code: -32000, message: error.message };
     }
     process.stdout.write(JSON.stringify(reply) + '\n');
   });
 }
-module.exports = { followSkillDir };
+module.exports = { followSkillDir, defaultNodeSupported, firstNodeOnPath };

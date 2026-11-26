@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { createContext, Script } from 'node:vm';
 
@@ -26,8 +29,8 @@ const manifest = JSON.parse(
 );
 
 test('legacy repair is disclosed in release notes and the four-language pr_card tool contract', () => {
-  assert.match(manifest.releaseNotes, /新建或已手动修复前置检查的调度/);
-  assert.match(manifest.releaseNotes, /刷新 PR 卡片查看修复说明/);
+  assert.match(manifest.releaseNotes, /Node\.js 18\+/);
+  assert.match(manifest.releaseNotes, /跟进待修复/);
   const base = manifest.tools.find(tool => tool.name === 'pr_card').description;
   for (const locale of ['zh-CN', 'en', 'ja', 'ko']) {
     const catalog = JSON.parse(readFileSync(new URL(`../cindy-github/locales/${locale}.json`, import.meta.url), 'utf8'));
@@ -100,7 +103,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.37');
+  assert.equal(manifest.version, '1.5.38');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -1801,6 +1804,10 @@ function followScheduler(options = {}) {
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, data }) }] };
     } },
     node: { async request({ method }) {
+      if (method === 'defaultNodeSupported') {
+        if (options.failNodeProbe) throw new Error('node probe unavailable');
+        return { ok: true, result: options.defaultNodeSupported === true };
+      }
       assert.equal(method, 'followSkillDir');
       if (options.failDir) throw new Error('skill directory temporarily unavailable');
       return { ok: true, result: '/approved skills/agent-skills/skills/_root__cindy-github--pr' };
@@ -1846,12 +1853,14 @@ test('native Stop authority requires a successful matching create receipt, not a
     assert.equal(opened.reply.result.follow_state, 'active');
     const row = [...rows.values()][0];
     assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleId, row.id);
-    assert.match(opened.reply.result.note, new RegExp(row.id));
+    assert.doesNotMatch(opened.reply.result.note || '', /已有调度请在自动化设置手动停止/);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止/);
     assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/);
     await rt.click(opened.callId, 'pr:stop');
     assert.equal(calls.includes('schedule_delete'), false);
     assert.equal(rt.agentRuns.length, 0);
     assert.deepEqual(rows.get(row.id), row);
+    assert.match(rt.lastCard(opened.callId).html, new RegExp(`已有调度请在自动化设置手动停止（ID：${row.id}）`));
   }
 });
 
@@ -3009,6 +3018,166 @@ test('the Cindy Node bootstrap starts the PR follow worker when loading it via r
   assert.deepEqual(JSON.parse(result.stdout), {
     id: 1, jsonrpc: '2.0', error: { code: -32000, message: 'Unsupported method' },
   });
+});
+
+test('legacy hook stays active without repair banner when default Node on PATH is 18+', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  // 1. Bound schedule refresh on Node 18+
+  {
+    const { hostApi, rows } = followScheduler({ defaultNodeSupported: true });
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    rows.get('sch-1').preRunHook = oldFollowHook(url);
+    const refreshed = await rt.tool({ card_id: opened.callId });
+    assert.equal(refreshed.reply.result.follow_state, 'active');
+    assert.equal(refreshed.reply.result.legacy_hook_repair, undefined);
+    assert.equal(refreshed.reply.result.note, undefined);
+    const html = rt.lastCard(opened.callId).html;
+    assert.match(html, /data-ghost-live-label="跟进中"/);
+    assert.doesNotMatch(html, /跟进待修复|旧版前置检查未自动修改|pr-node\.cjs|已有调度请在自动化设置手动停止/);
+  }
+  // 2. ID-less legacy discovery on Node 18+
+  {
+    const { hostApi, rows } = followScheduler({ defaultNodeSupported: true });
+    const rt = createPrRuntime({ github: prGraphql(), hostApi });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+    rows.set('old', { id: 'old', targetSessionId: 's1', status: 'active', recurring: true, preRunHook: oldFollowHook(url) });
+    const refreshed = await rt.tool({ card_id: opened.callId });
+    assert.equal(refreshed.reply.result.follow_state, 'active');
+    assert.equal(refreshed.reply.result.legacy_hook_repair, undefined);
+    assert.equal(refreshed.reply.result.note, undefined);
+    const html = rt.lastCard(opened.callId).html;
+    assert.match(html, /data-ghost-live-label="跟进中"/);
+    assert.doesNotMatch(html, /跟进待修复|pr-node\.cjs|已有调度请在自动化设置手动停止/);
+  }
+  // 3. Native Follow reuse on Node 18+
+  {
+    const { hostApi, rows } = followScheduler({ defaultNodeSupported: true });
+    const rt = createPrRuntime({ github: prGraphql(), hostApi });
+    const ask = await rt.tool({ repo: 'octo/repo', head: 'topic' });
+    await rt.tool({ card_id: ask.callId, pr: 42, published: true });
+    rows.set('old', { id: 'old', targetSessionId: 's1', status: 'active', recurring: true, preRunHook: oldFollowHook(url) });
+    await rt.click(ask.callId, 'pr:follow');
+    const html = rt.lastCard(ask.callId).html;
+    assert.match(html, /data-ghost-live-label="跟进中"/);
+    assert.doesNotMatch(html, /跟进待修复|pr-node\.cjs|已有调度请在自动化设置手动停止/);
+  }
+  // 4. Probe failure stays fail-safe and still reports legacy repair
+  {
+    const { hostApi, rows } = followScheduler({ failNodeProbe: true });
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    rows.get('sch-1').preRunHook = oldFollowHook(url);
+    const refreshed = await rt.tool({ card_id: opened.callId });
+    assert.equal(refreshed.reply.result.follow_state, 'unverified');
+    assert.equal(refreshed.reply.result.legacy_hook_repair.schedule_id, 'sch-1');
+  }
+});
+
+test('manual-stop notice stays hidden on ordinary cards and only appears on stop attempts', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  const { hostApi, rows, calls } = followScheduler({ defaultNodeSupported: true });
+  const rt = createPrRuntime({ github: prGraphql(), hostApi });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+  rows.set('old', { id: 'old', targetSessionId: 's1', status: 'active', recurring: true, preRunHook: oldFollowHook(url) });
+  // Active ordinary refresh: no permanent manual-stop line
+  const active = await rt.tool({ card_id: opened.callId });
+  assert.equal(active.reply.result.follow_state, 'active');
+  assert.equal(active.reply.result.note, undefined);
+  assert.doesNotMatch(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止/);
+  // Paused ordinary refresh: no permanent manual-stop line
+  rows.get('old').status = 'paused';
+  const paused = await rt.tool({ card_id: opened.callId });
+  assert.equal(paused.reply.result.follow_state, 'paused');
+  assert.equal(paused.reply.result.note, undefined);
+  assert.doesNotMatch(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止/);
+  // Explicit stale Stop click surfaces manual-stop guidance once, without deleting
+  await rt.click(opened.callId, 'pr:stop');
+  assert.equal(calls.includes('schedule_delete'), false);
+  assert.equal(rt.agentRuns.length, 0);
+  assert.match(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止（ID：old）/);
+  // Subsequent ordinary refresh clears the transient note
+  await rt.tool({ card_id: opened.callId });
+  assert.doesNotMatch(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止/);
+  // Terminal PR with active schedule still does not render permanent manual-stop line
+  rows.get('old').status = 'active';
+  rt.setGithub(prGraphql({ merged: true }));
+  await rt.tool({ card_id: opened.callId });
+  assert.doesNotMatch(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止/);
+});
+
+test('repair guidance survives settings clicks and non-complete chips avoid checkmark glyph', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  const CHECK_GLYPH_RE = /border-right:1\.6px solid currentColor;border-bottom:1\.6px solid currentColor;transform:rotate\(45deg\)/;
+  const { hostApi, rows } = followScheduler({ defaultNodeSupported: false });
+  const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+  rows.get('sch-1').preRunHook = oldFollowHook(url);
+  await rt.tool({ card_id: opened.callId });
+  const beforeClick = rt.lastCard(opened.callId).html;
+  assert.match(beforeClick, /跟进待修复/);
+  assert.match(beforeClick, /旧版前置检查未自动修改/);
+  assert.match(beforeClick, /调度 ID：sch-1/);
+  assert.match(beforeClick, /background:var\(--error-fg,#d93025\)/);
+  assert.doesNotMatch(beforeClick, CHECK_GLYPH_RE, 'needs-repair chip must not render a checkmark');
+  // Toggling settings clears transient card.note but must keep repair guidance + command intact
+  await rt.click(opened.callId, 'prui:settings');
+  await rt.click(opened.callId, 'prui:settings');
+  const afterClick = rt.lastCard(opened.callId).html;
+  assert.match(afterClick, /旧版前置检查未自动修改/);
+  assert.match(afterClick, /调度 ID：sch-1/);
+  assert.match(afterClick, /<pre[^>]*user-select:text/);
+  // Paused chip uses neutral wait dot rather than checkmark
+  rows.get('sch-1').status = 'paused';
+  await rt.tool({ card_id: opened.callId });
+  const pausedHtml = rt.lastCard(opened.callId).html;
+  assert.match(pausedHtml, /跟进已暂停/);
+  assert.doesNotMatch(pausedHtml, CHECK_GLYPH_RE, 'paused chip must not render a checkmark');
+});
+
+test('follow worker defaultNodeSupported inspects only the first executable node on PATH', () => {
+  const require = createRequire(import.meta.url);
+  const entry = fileURLToPath(new URL('../cindy-github/node/follow.cjs', import.meta.url));
+  const { defaultNodeSupported } = require(entry);
+  const modernDir = path.dirname(process.execPath);
+
+  // Empty PATH -> false
+  assert.equal(defaultNodeSupported({ PATH: '' }), false);
+  // Modern node first on PATH -> true (matches running Node 18+ test runtime)
+  assert.equal(defaultNodeSupported({ PATH: modernDir }), true);
+
+  if (process.platform !== 'win32') {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'cindy-gh-node-probe-'));
+    try {
+      const oldDir = path.join(tmp, 'old-bin');
+      const relDir = path.join(tmp, 'rel-bin');
+      chmodSync(tmp, 0o755);
+      spawnSync('mkdir', ['-p', oldDir, relDir]);
+      const fakeOld = path.join(oldDir, 'node');
+      writeFileSync(fakeOld, '#!/bin/sh\necho 8.12.0\n', 'utf8');
+      chmodSync(fakeOld, 0o755);
+      // Old Node 8 first on PATH must return false even when modern Node appears later
+      assert.equal(defaultNodeSupported({ PATH: `${oldDir}:${modernDir}` }), false);
+      // Non-executable file earlier on PATH is skipped, reaching modern Node next
+      chmodSync(fakeOld, 0o644);
+      assert.equal(defaultNodeSupported({ PATH: `${oldDir}:${modernDir}` }), true);
+      // Relative PATH entry is ignored
+      assert.equal(defaultNodeSupported({ PATH: `.` }), false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
+  // JSON-RPC stdio round-trip for defaultNodeSupported
+  const rpc = spawnSync(process.execPath, ['-e', 'globalThis.__CINDY_NODE__ = {}; require(process.argv[1]);', entry], {
+    input: JSON.stringify({ id: 2, method: 'defaultNodeSupported', jsonrpc: '2.0' }) + '\n',
+    env: { ...process.env, PATH: modernDir },
+    encoding: 'utf8',
+    timeout: 5000,
+  });
+  assert.ifError(rpc.error);
+  assert.equal(rpc.status, 0, rpc.stderr);
+  assert.deepEqual(JSON.parse(rpc.stdout), { id: 2, jsonrpc: '2.0', result: true });
 });
 
 test('saved status watches recover after the startup KV read fails', async () => {
