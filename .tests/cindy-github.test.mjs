@@ -3135,10 +3135,62 @@ test('repair guidance survives settings clicks and non-complete chips avoid chec
   assert.doesNotMatch(pausedHtml, CHECK_GLYPH_RE, 'paused chip must not render a checkmark');
 });
 
+test('ID-less pre-upgrade Stop preserves manual-stop guidance when the PR is already merged or closed', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  for (const [label, prOpts, withFault, present] of [
+    ['merged-direct', { merged: true }, false, true],
+    ['closed-direct', { state: 'CLOSED' }, false, true],
+    ['merged-after-outage', { merged: true }, true, true],
+    ['closed-absent', { state: 'CLOSED' }, false, false],
+  ]) {
+    const old = createPrRuntime({ github: prGraphql() });
+    const opened = await old.tool({ repo: 'octo/repo', pr: 42, following: true });
+    await old.click(opened.callId, 'pr:stop');
+    const key = `pr-cards/${opened.callId}.json`;
+    assert.equal(JSON.parse(old.files.get(key)).pending, 'stop', label);
+
+    const fault = { failList: withFault, defaultNodeSupported: true };
+    const { hostApi, rows, calls } = followScheduler(fault);
+    const hook = oldFollowHook(url);
+    hook.command = hook.command.replace('pr-heartbeat-gate.mjs"', 'pr-node.cjs" pr-heartbeat-gate.mjs');
+    if (present) {
+      rows.set('old', { id: 'old', status: 'active', targetSessionId: 's1', recurring: true, preRunHook: hook });
+    }
+    const rt = createPrRuntime({ github: prGraphql(prOpts), hostApi, files: old.files });
+    if (withFault) {
+      const unreadable = await rt.tool({ card_id: opened.callId });
+      assert.equal(unreadable.reply.result.follow_state, 'unverified', label);
+      assert.equal(JSON.parse(rt.files.get(key)).pendingStopNotice, true, label);
+      fault.failList = false;
+    }
+    const settled = await rt.tool({ card_id: opened.callId });
+    const saved = JSON.parse(rt.files.get(key));
+    assert.equal(saved.pending, null, label);
+    assert.equal(saved.pendingStopNotice, undefined, label);
+    assert.equal(settled.reply.result.stage, prOpts.merged ? 'merged' : 'closed', label);
+    if (present) {
+      assert.equal(settled.reply.result.follow_state, 'active', label);
+      assert.equal(saved.scheduleId, 'old', label);
+      assert.match(settled.reply.result.note || '', /已有调度请在自动化设置手动停止（ID：old）/, label);
+      assert.match(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止（ID：old）/, label);
+      // Next ordinary refresh clears the one-time stop notice.
+      const next = await rt.tool({ card_id: opened.callId });
+      assert.equal(next.reply.result.note, undefined, label);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止/, label);
+    } else {
+      assert.equal(settled.reply.result.follow_state, 'stopped', label);
+      assert.equal(settled.reply.result.note, undefined, label);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止/, label);
+    }
+    assert.equal(calls.includes('schedule_delete'), false, label);
+    assert.equal(rt.agentRuns.length, 0, label);
+  }
+});
+
 test('follow worker defaultNodeSupported inspects only the first executable node on PATH', () => {
   const require = createRequire(import.meta.url);
   const entry = fileURLToPath(new URL('../cindy-github/node/follow.cjs', import.meta.url));
-  const { defaultNodeSupported } = require(entry);
+  const { defaultNodeSupported, firstNodeOnPath } = require(entry);
   const modernDir = path.dirname(process.execPath);
 
   // Empty PATH -> false
@@ -3146,13 +3198,19 @@ test('follow worker defaultNodeSupported inspects only the first executable node
   // Modern node first on PATH -> true (matches running Node 18+ test runtime)
   assert.equal(defaultNodeSupported({ PATH: modernDir }), true);
 
+  // Windows relative / drive-relative PATH entries fail conservatively
+  assert.equal(firstNodeOnPath({ PATH: '' }, 'win32'), null);
+  assert.equal(firstNodeOnPath({ PATH: '.;C:\\nodejs' }, 'win32'), null);
+  assert.equal(firstNodeOnPath({ PATH: '\\nodejs;C:\\nodejs' }, 'win32'), null);
+  assert.equal(firstNodeOnPath({ PATH: 'C:nodejs;C:\\nodejs' }, 'win32'), null);
+
   if (process.platform !== 'win32') {
     const tmp = mkdtempSync(path.join(os.tmpdir(), 'cindy-gh-node-probe-'));
     try {
       const oldDir = path.join(tmp, 'old-bin');
-      const relDir = path.join(tmp, 'rel-bin');
+      const emptyDir = path.join(tmp, 'empty-bin');
       chmodSync(tmp, 0o755);
-      spawnSync('mkdir', ['-p', oldDir, relDir]);
+      spawnSync('mkdir', ['-p', oldDir, emptyDir]);
       const fakeOld = path.join(oldDir, 'node');
       writeFileSync(fakeOld, '#!/bin/sh\necho 8.12.0\n', 'utf8');
       chmodSync(fakeOld, 0o755);
@@ -3161,8 +3219,15 @@ test('follow worker defaultNodeSupported inspects only the first executable node
       // Non-executable file earlier on PATH is skipped, reaching modern Node next
       chmodSync(fakeOld, 0o644);
       assert.equal(defaultNodeSupported({ PATH: `${oldDir}:${modernDir}` }), true);
-      // Relative PATH entry is ignored
-      assert.equal(defaultNodeSupported({ PATH: `.` }), false);
+      // Unverified higher-priority relative or empty PATH entries fail conservatively
+      assert.equal(defaultNodeSupported({ PATH: '.' }), false);
+      assert.equal(defaultNodeSupported({ PATH: `.:${modernDir}` }), false);
+      assert.equal(defaultNodeSupported({ PATH: `rel-bin:${modernDir}` }), false);
+      assert.equal(defaultNodeSupported({ PATH: `:${modernDir}` }), false);
+      assert.equal(defaultNodeSupported({ PATH: `${emptyDir}::${modernDir}` }), false);
+      // Trailing empty or relative entries after an already-matched modern Node still succeed
+      assert.equal(defaultNodeSupported({ PATH: `${modernDir}:` }), true);
+      assert.equal(defaultNodeSupported({ PATH: `${modernDir}:.` }), true);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

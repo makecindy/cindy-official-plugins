@@ -3756,8 +3756,9 @@ async function prCardTool(args, callId, fromLegacyStop) {
   }
   // Before native card-managed schedules, following=true or a persisted Stop
   // intent was the whole saved follow record. Both permit read-only discovery.
+  var legacyPendingStop = updating && !card.scheduleId && !card.scheduleAction && card.pending === 'stop';
   var legacyFollow = updating && !card.scheduleId && !card.scheduleAction &&
-    (card.pending === 'stop' || (!card.pending && (card.following === true || unverifiedLegacyFollow(card))));
+    (legacyPendingStop || (!card.pending && (card.following === true || unverifiedLegacyFollow(card))));
   var number = ref ? ref.number : card.pr ? card.pr.number : null;
   if (number) {
     var status;
@@ -3833,7 +3834,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
       if (card.stage === 'open' && !status.err && currentSchedule && currentSchedule.status === 'active') {
         card.legacyHookRepair = await legacyFollowRepair(currentSchedule, card);
       } else if (legacyFollow) {
-        await reconcileLegacyFollow(card, status.err, fromLegacyStop);
+        await reconcileLegacyFollow(card, status.err, fromLegacyStop || legacyPendingStop);
       }
     } catch (err) { return fail(t('prScheduleFailed', { detail: String(err.message || err) })); }
   }

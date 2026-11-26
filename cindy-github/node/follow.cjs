@@ -36,11 +36,18 @@ function firstNodeOnPath(env = process.env, platform = process.platform) {
     : [''];
   const exts = rawExts.length ? rawExts : ['.com', '.exe', '.bat', '.cmd'];
   for (let i = 0; i < entries.length; i++) {
-    const dir = entries[i].replace(/^"|"$/g, '');
-    if (!dir || !pathImpl.isAbsolute(dir)) continue;
+    const dir = win ? entries[i].replace(/^"|"$/g, '') : entries[i];
+    // Never skip past an unverified higher-priority entry (relative path, or an
+    // empty PATH segment which POSIX shells resolve as cwd); fail conservatively.
+    if (!dir) {
+      if (win) continue;
+      return null;
+    }
+    const absolute = win ? /^[a-zA-Z]:[\\/]|^\\\\[^\\]/.test(dir) : pathImpl.isAbsolute(dir);
+    if (!absolute) return null;
     for (let j = 0; j < exts.length; j++) {
       const ext = exts[j];
-      const candidate = path.join(dir, 'node' + ext);
+      const candidate = pathImpl.join(dir, 'node' + ext);
       try {
         const real = fs.realpathSync(candidate);
         if (!fs.statSync(real).isFile()) continue;
