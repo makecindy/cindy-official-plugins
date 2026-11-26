@@ -69,6 +69,8 @@ permission gate.
 | <img src="./ntfy/assets/icon.png" width="22" alt=""> | ntfy | [`ntfy`](./ntfy) | Push notifications to your phone or desktop through your own ntfy server; the access token is stored by Cindy and sent only to that server; opt-in |
 | <img src="./decision-gate/assets/icon.png" width="22" alt=""> | Decision Gate | [`decision-gate`](./decision-gate) | Decides by your rules: picks a model when a new task starts and judges before an automation or routine runs whether it needs to |
 
+| <img src="./cindy-kanban/assets/icon.png" width="22" alt=""> | Agent Board | [`cindy-kanban`](./cindy-kanban) | Sidebar board of every local agent and task in four columns (in progress / blocked / queued / idle), with a colour terminal per Herdr pane, a command chat box, patrol schedules and standing policy; Cindy-only when Herdr is absent |
+
 Missing a plugin you want? [Propose it](#submit-your-plugin) — or build it
 yourself and submit it here.
 

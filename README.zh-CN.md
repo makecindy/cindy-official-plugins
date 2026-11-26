@@ -62,6 +62,8 @@
 | <img src="./ntfy/assets/icon.png" width="22" alt=""> | ntfy | [`ntfy`](./ntfy) | 通过你自己的 ntfy 服务器向手机或电脑发送推送通知；访问令牌由 Cindy 保管，只发送给对应服务器；自选安装 |
 | <img src="./decision-gate/assets/icon.png" width="22" alt=""> | 决策闸门 | [`decision-gate`](./decision-gate) | 按你写的规则开新任务时选模型，并在自动化和例行任务运行前判断要不要跑 |
 
+| <img src="./cindy-kanban/assets/icon.png" width="22" alt=""> | Agent 看板 | [`cindy-kanban`](./cindy-kanban) | 侧栏看板：四列展示本机所有 agent 与任务（在途 / 卡点 / 排队 / 空闲），Herdr pane 可开彩色终端，底部有指挥聊天框，支持巡检计划与常驻策略；无 Herdr 时只显示 Cindy 视图 |
+
 想要的插件不在这里？[提议一个](#提交你的插件)——或者自己写一个提交上来。
 
 ## 提交你的插件
