@@ -590,8 +590,12 @@ process.exit(2);
   assert.deepEqual(calls, [['--version'], ['api', 'repos/acme/game/pulls/54']]);
 });
 
-test('full snapshot emits the same probe fingerprint as --probe so triggered runs refresh the probe cache', (t) => {
+test('full snapshot emits the same probe fingerprint as --probe when check counts agree, and omits probe on skew', (t) => {
   const run = fixture(t);
+  const twoGreen = [
+    { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-11-26T00:00:00Z' },
+    { __typename: 'CheckRun', name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-11-26T00:00:00Z' },
+  ];
   const pr = {
     state: 'OPEN',
     isDraft: false,
@@ -621,7 +625,94 @@ test('full snapshot emits the same probe fingerprint as --probe so triggered run
       }],
     },
   };
-  const probe = run(pr, 'ahead', { args: ['--probe'] });
-  const full = run(pr, 'ahead');
+  const probe = run(pr, 'ahead', { args: ['--probe'], rollup: twoGreen });
+  const full = run(pr, 'ahead', { rollup: twoGreen });
   assert.deepEqual(full.probe, probe);
+
+  // Rerun attempts on the same check name still match GraphQL checkRunCountsByState (computed before latestChecks dedup).
+  const rerunRollup = [
+    { __typename: 'CheckRun', name: 'verify', status: 'COMPLETED', conclusion: 'CANCELLED', startedAt: '2026-11-26T00:00:00Z' },
+    { __typename: 'CheckRun', name: 'verify', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-11-26T00:01:00Z' },
+    { __typename: 'StatusContext', context: 'ci/deploy', state: 'SUCCESS' },
+  ];
+  const rerunPr = {
+    ...pr,
+    commits: {
+      nodes: [{
+        commit: {
+          oid: 'head-sha',
+          statusCheckRollup: {
+            contexts: {
+              totalCount: 3,
+              pageInfo: { hasNextPage: false },
+              checkRunCountsByState: [{ state: 'CANCELLED', count: 1 }, { state: 'SUCCESS', count: 1 }],
+              statusContextCountsByState: [{ state: 'SUCCESS', count: 1 }],
+              nodes: [],
+            },
+          },
+        },
+      }],
+    },
+  };
+  assert.deepEqual(run(rerunPr, 'ahead', { rollup: rerunRollup }).probe, run(rerunPr, 'ahead', { args: ['--probe'], rollup: rerunRollup }));
+
+  // If a check reran and failed between gh pr view (two green checks) and GraphQL (FAILURE:1,SUCCESS:2),
+  // full snapshot must emit probe: null so the gate does not cache the unseen failure.
+  const skewedPr = {
+    ...pr,
+    commits: {
+      nodes: [{
+        commit: {
+          oid: 'head-sha',
+          statusCheckRollup: {
+            contexts: {
+              totalCount: 3,
+              pageInfo: { hasNextPage: false },
+              checkRunCountsByState: [{ state: 'SUCCESS', count: 2 }, { state: 'FAILURE', count: 1 }],
+              statusContextCountsByState: [],
+              nodes: [],
+            },
+          },
+        },
+      }],
+    },
+  };
+  assert.equal(run(skewedPr, 'ahead', { rollup: twoGreen }).probe, null);
+
+  // StatusContext skew and truncated/unavailable checks must also emit probe: null.
+  const statusSkewPr = {
+    ...rerunPr,
+    commits: {
+      nodes: [{
+        commit: {
+          oid: 'head-sha',
+          statusCheckRollup: {
+            contexts: {
+              ...rerunPr.commits.nodes[0].commit.statusCheckRollup.contexts,
+              statusContextCountsByState: [{ state: 'FAILURE', count: 1 }],
+            },
+          },
+        },
+      }],
+    },
+  };
+  assert.equal(run(statusSkewPr, 'ahead', { rollup: rerunRollup }).probe, null);
+  assert.equal(run(pr, 'ahead', { rollup: twoGreen, checkHead: 'old-head' }).probe, null);
+  const truncatedPr = {
+    ...pr,
+    commits: {
+      nodes: [{
+        commit: {
+          oid: 'head-sha',
+          statusCheckRollup: {
+            contexts: {
+              ...pr.commits.nodes[0].commit.statusCheckRollup.contexts,
+              pageInfo: { hasNextPage: true },
+            },
+          },
+        },
+      }],
+    },
+  };
+  assert.equal(run(truncatedPr, 'ahead', { rollup: twoGreen }).probe, null);
 });

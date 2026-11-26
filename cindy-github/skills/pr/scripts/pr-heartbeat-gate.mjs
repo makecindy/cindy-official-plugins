@@ -79,7 +79,7 @@ import { appendTrace, scrub } from './lib/follow-trace.mjs';
 import { createHash } from 'node:crypto';
 import { BACKOFF_STEPS_MIN, baseMovedWait, checkOutcome, handledFailure, inspectWait, makeWait, setsAside, waitDueAt, waitFacts, waitIsDue, waitNotice } from './lib/follow-wait.mjs';
 import { mergeQueueFingerprint } from './lib/merge-queue.mjs';
-import { SETTLE_MAX_MS, TICK_MS, breaksSettle, expectedBots, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
+import { SETTLE_MAX_MS, TICK_MS, breaksSettle, expectedBots, isEmptyPass, isPendingTerminalBackoffRetry, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1031,7 +1031,7 @@ export function decide({
   // 距上次放行太近 = 上一次放行没换来一轮真实处理(宿主顺延/spawn 失败/重启),
   // 本轮照常放行但不消耗额度。理由见 DEFAULT_MIN_PASS_SPACING_MINUTES 的注释。
   const lastPassAt = Number(previous?.lastPassAt) || 0;
-  const emptyPass = minPassSpacingMs > 0 && lastPassAt > 0 && now - lastPassAt < minPassSpacingMs;
+  const emptyPass = isEmptyPass(previous, now, minPassSpacingMs);
   const emptyPassNote = emptyPass
     ? ` (previous release was only ${formatDuration(now - lastPassAt)} ago and produced no real run; not counted)`
     : '';
@@ -1131,15 +1131,19 @@ export function decide({
     const stateLabel = snap.merged ? 'merged' : 'closed';
     const prevTerminalCount = Number(previous?.terminalPassCount) || (pendingKey === 'terminal' ? pendingCount : 0);
     const prevTerminalBackoffUntil = Number(previous?.terminalBackoffUntil) || 0;
-    const repeatBackoffAttempt = emptyPass && previous?.lastDecisionReason === 'terminal-backoff-attempt';
-    const attempt = prevTerminalCount > 0 && emptyPass ? prevTerminalCount : prevTerminalCount + 1;
+    const unackedEmptyPass = Boolean(pendingWatch) && emptyPass;
+    const repeatBackoffAttempt = isPendingTerminalBackoffRetry(previous, now, minPassSpacingMs);
+    const attempt = prevTerminalCount > 0 && unackedEmptyPass ? prevTerminalCount : prevTerminalCount + 1;
     if (attempt > maxPassAttempts) {
       if (repeatBackoffAttempt) {
+        const nextReminderNote = prevTerminalBackoffUntil > 0
+          ? ` (next reminder at ${isoAt(prevTerminalBackoffUntil)})`
+          : '';
         return {
           ...base,
           exitCode: EXIT_PASS,
           reason: 'terminal-backoff-attempt',
-          detail: `${stateLabel}; attempt=${attempt}${emptyPassNote}`,
+          detail: `${stateLabel}; cleanup already attempted ${attempt} times and the schedule is still running${nextReminderNote}: notify the user (schedule_notify_current_run) with the schedule ID so it can be stopped manually if it cannot be deleted automatically${emptyPassNote}`,
           nextWatch: baseline,
           nextPendingWatch: pendingWatch ?? result.next,
           nextPendingKey: 'terminal',
@@ -1158,9 +1162,9 @@ export function decide({
           reason: 'terminal-backoff',
           detail: `${stateLabel}; cleanup already requested ${prevTerminalCount} times, next reminder at ${isoAt(backoffUntil)}`,
           nextWatch: baseline,
-          nextPendingWatch: pendingWatch ?? result.next,
-          nextPendingKey: 'terminal',
-          nextPendingCount: prevTerminalCount,
+          nextPendingWatch: pendingWatch,
+          nextPendingKey: pendingWatch ? 'terminal' : null,
+          nextPendingCount: pendingWatch ? prevTerminalCount : 0,
           nextTerminalPassCount: prevTerminalCount,
           nextTerminalBackoffUntil: backoffUntil,
         };
@@ -1733,7 +1737,7 @@ async function gateMain(argv, ctx) {
   // 按阶段决定这一轮要不要看:不到时间就直接跳过,不调用 GitHub,也不改状态。
   const scheduledRetryDue = backoffUntil > 0 && !backingOff;
   if (args.pacing && !scheduledRetryDue) {
-    const pace = pacingDue(previous, now, { triggered });
+    const pace = pacingDue(previous, now, { triggered, minPassSpacingMs: args.minPassSpacingMs });
     if (!pace.due) {
       emit(args, {
         exitCode: EXIT_SKIP,
@@ -1897,9 +1901,20 @@ async function gateMain(argv, ctx) {
     : typeof previous?.lastKnownConflicting === 'boolean'
       ? previous.lastKnownConflicting
       : null;
-  // 上次读到检查在跑或合并态还没算出:下一轮不靠探测跳过,直接完整读取。
-  const inFlight = !mergeSignalKnown(snap) || (snap.checks ?? []).some((c) => checkOutcome(c) === 'pending');
-  const savedProbe = parseProbeValue(snap?.probe) ?? probe;
+  // 上次读到检查在跑、合并态还没算出、或快照内检查列表与探测计数发生时间错位:
+  // 下一轮不靠探测跳过，按活跃节奏直接完整读取。
+  const checksTrustworthy = !snap.checksSummary?.unavailable && !snap.checksSummary?.truncated;
+  const snapshotHasProbe = snap && Object.hasOwn(snap, 'probe');
+  const snapProbe = snapshotHasProbe ? parseProbeValue(snap.probe) : null;
+  const probeSkewed = !snap.merged && !snap.closed && checksTrustworthy && snapshotHasProbe && !snapProbe;
+  const inFlight = !mergeSignalKnown(snap)
+    || (snap.checks ?? []).some((c) => checkOutcome(c) === 'pending')
+    || probeSkewed;
+  const savedProbe = !checksTrustworthy
+    ? null
+    : snapshotHasProbe
+      ? snapProbe
+      : probe;
   persist(file, {
     // watch 只由 --ack / --defer 或「没有新事件」推进,放行时不推进
     watch: decision.nextWatch,

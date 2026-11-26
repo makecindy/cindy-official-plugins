@@ -455,6 +455,31 @@ query($owner: String!, $name: String!, $number: Int!) {
 
 const counts = (list) => (list ?? []).filter((c) => c.count > 0).map((c) => `${c.state}:${c.count}`).sort().join(',');
 
+/**
+ * Recompute checkRunCountsByState / statusContextCountsByState from the raw `gh pr view`
+ * statusCheckRollup (before latestChecks deduplication). Comparing this with GraphQL's rollup
+ * counts detects checks that changed between the two requests so we never cache a newer probe
+ * baseline over an older check list.
+ */
+function rollupProbeCounts(rawRollup) {
+  const checkRuns = new Map();
+  const statusContexts = new Map();
+  for (const item of rawRollup) {
+    if (item.__typename === 'CheckRun') {
+      const state = item.status === 'COMPLETED' && item.conclusion ? item.conclusion : item.status;
+      if (!state) return null;
+      checkRuns.set(state, (checkRuns.get(state) ?? 0) + 1);
+    } else if (item.__typename === 'StatusContext') {
+      if (!item.state) return null;
+      statusContexts.set(item.state, (statusContexts.get(item.state) ?? 0) + 1);
+    } else {
+      return null;
+    }
+  }
+  const format = (map) => [...map.entries()].map(([state, count]) => `${state}:${count}`).sort().join(',');
+  return { checkRuns: format(checkRuns), statusContexts: format(statusContexts) };
+}
+
 function probeFingerprint(pr) {
   const contexts = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts;
   return {
@@ -492,6 +517,7 @@ async function main() {
   );
   const ghView = prView;
 
+  let rawCheckRollup = [];
   let checkRollup = [];
   let checksUnavailable = false;
   let checksError = null;
@@ -499,15 +525,17 @@ async function main() {
   try {
     const stdoutShape = await ghPrViewJson(args.number, args.repo);
     checksHeadOid = stdoutShape.headRefOid || null;
-    checkRollup = Array.isArray(stdoutShape.statusCheckRollup)
-      ? latestChecks(stdoutShape.statusCheckRollup.map(normalizeCheckRun).filter(Boolean))
+    rawCheckRollup = Array.isArray(stdoutShape.statusCheckRollup)
+      ? stdoutShape.statusCheckRollup.filter((x) => x && typeof x === 'object')
       : [];
+    checkRollup = latestChecks(rawCheckRollup.map(normalizeCheckRun).filter(Boolean));
     if (Array.isArray(stdoutShape.commits) && stdoutShape.commits.length) {
       prView.__ghCommits = stdoutShape.commits;
     }
   } catch (e) {
     checksUnavailable = true;
     checksError = String(e.stderr || e.message || e).slice(0, 1000);
+    rawCheckRollup = [];
     checkRollup = [];
   }
 
@@ -525,6 +553,7 @@ async function main() {
   if (!pr.headRefOid || checksHeadOid !== pr.headRefOid || ghView.head?.sha !== pr.headRefOid) {
     checksUnavailable = true;
     checksError = checksError || 'PR head changed between snapshot requests or check head is unavailable';
+    rawCheckRollup = [];
     checkRollup = [];
     ghView.mergeable = null;
     ghView.mergeable_state = null;
@@ -590,6 +619,12 @@ async function main() {
       appId: n.checkSuite?.app?.databaseId ?? null, appSlug: n.checkSuite?.app?.slug ?? null,
     })) : [];
   const checksTruncated = Boolean(checkContexts?.pageInfo?.hasNextPage);
+  const rawCounts = !checksUnavailable && !checksTruncated && (!checkCommit?.oid || checkCommit.oid === pr.headRefOid)
+    ? rollupProbeCounts(rawCheckRollup)
+    : null;
+  const probeCountsMatch = Boolean(rawCounts)
+    && rawCounts.checkRuns === counts(checkContexts?.checkRunCountsByState)
+    && rawCounts.statusContexts === counts(checkContexts?.statusContextCountsByState);
   const checksSummary = summarizeChecks(
     checkRollup,
     checksUnavailable,
@@ -685,9 +720,10 @@ async function main() {
     reactions: (pr.reactions?.nodes || []).map((r) => ({ content: r.content ?? null, at: r.createdAt ?? null, author: r.user?.login ?? null })),
     // Older top-level comments beyond the 100 read (a PR with more than that; the gate watches new ones only).
     commentsOmitted: Math.max(0, (pr.comments?.totalCount ?? 0) - (pr.comments?.nodes?.length ?? 0)),
-    // Fresh probe fingerprint from this same GraphQL read so triggered/targeted full snapshots
-    // refresh the gate's probe baseline instead of wiping it.
-    probe: probeFingerprint(pr),
+    // Emit the GraphQL probe baseline only when it agrees with the check rollup evaluated in this
+    // snapshot; on skew (or unavailable/truncated checks), return null so the gate forces a full
+    // read on the next tick instead of caching a newer check state.
+    probe: probeCountsMatch ? probeFingerprint(pr) : null,
   };
 
   process.stdout.write(JSON.stringify(out, null, 2) + '\n');
