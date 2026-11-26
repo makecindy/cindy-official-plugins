@@ -3414,7 +3414,7 @@ async function prMergeAction(card, settings, msg, action) {
   var confirmation = card.mergeConfirmation;
   var attempted = false;
   if (action === 'pr:merge' && !confirmation && (prMayMerge(card) || prMayMergeWhenClean(card))) {
-    if (!prMayMerge(card)) await readPrMergeStatus(card);
+    await readPrMergeStatus(card);
     if (prMayMerge(card)) {
       card.mergeRevision = (card.mergeRevision || 0) + 1;
       card.mergeConfirmation = { revision: card.mergeRevision, target: card.pr.merge };

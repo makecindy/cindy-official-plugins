@@ -863,6 +863,19 @@ test('clicking a host-revealed dormant PR merge button verifies live status befo
   assert.deepEqual(runtime.writes, [{ sha: 'c'.repeat(40), merge_method: 'squash' }]);
 });
 
+test('clicking after a new commit refreshes a previously cached merge target before confirmation', async () => {
+  const runtime = mergeablePrRuntime();
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  runtime.pr.headRefOid = 'b'.repeat(40);
+  await runtime.click(cardId, 'pr:merge');
+  const confirmation = runtime.lastCard(cardId).html;
+  assert.match(confirmation, /data-ghost-action="pr:merge-confirm:1" aria-label="确认合并"/);
+  assert.ok(visibleText(confirmation).includes('将提交 bbbbbbbbbbbb 合并到 main？ · 压缩合并'));
+  assert.doesNotMatch(confirmation, /aaaaaaaaaaaa/);
+  await runtime.click(cardId, 'pr:merge-confirm:1');
+  assert.deepEqual(runtime.writes, [{ sha: 'b'.repeat(40), merge_method: 'squash' }]);
+});
+
 test('the PR merge confirmation is unique, checks the expected head and uses an allowed method', async () => {
   const runtime = mergeablePrRuntime();
   const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
