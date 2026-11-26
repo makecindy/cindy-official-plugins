@@ -398,7 +398,15 @@ walking above it, returning null or recreating it. Preparation never calls
 recursive mkdir: an already-existing target needs no mkdir; only a confirmed
 ancestor's missing suffix is created one component at a time with non-recursive
 mkdir, synchronizing each new link. If that parent disappears before creation,
-ENOENT stops instead of rebuilding it. Exclusive slot/copy writes still stop
+ENOENT stops instead of rebuilding it. Occupied fixed slots must form a contiguous prefix. A surviving higher slot
+proves that earlier attempts were consumed: a missing earlier slot stops status,
+reservation and legacy adoption before any slot can be refilled or quota
+reported available. Keep all surviving/raw evidence and reconcile the lost
+receipt; do not repair the hole or refund attempts. This is validated by the
+existing slot reader, without a new ledger or marker. It cannot reconstruct
+external erasure that leaves no surviving evidence before the invocation.
+
+Exclusive slot/copy writes still stop
 if their confirmed parent disappears after preparation. Never-created storage may
 still return unused after confirming the nearest existing ancestor, without
 creating a probe. These are transient observations, not a receipt cache, lock

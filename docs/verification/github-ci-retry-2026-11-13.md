@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.56, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.57, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1491,3 +1491,23 @@ The entire CI-retry guide (including sole-head-consumer and NUL checks), receipt
 This is source synchronization and automated regression coverage, not new runtime acceptance. The inherited auth/probe/wait behavior has not been exercised in the actual Cindy task UI; current UI/read-order/header/repair/disable/shared-consumer/signed-head/causal-attribution gaps remain. Existing blocked cleanup residuals stay disclosed; no new disposable candidate copy was made.
 
 Final mandatory four suites plus plugin: **569 passed / 38 skipped / 0 failed (278.97 s)**. Skips: 17 native success paths unsupported by full directory-sync on this environment, 19 prior skips, plus two inherited POSIX-only fake-gh/symlink command-line cases unavailable on Windows. The new gate/pacing unit regressions ran; those two POSIX command-line cases were not exercised here. Forge exact-content: **30 files, 253719 archive bytes, 715404 uncompressed bytes**; new package removed and absence verified. No new validation copy or cleanup retry.
+
+
+## Reject non-contiguous consumed slots without refilling evidence — 2026-11-27 Asia/Shanghai (source1.5.57, not installed)
+
+Source1.5.57 adds one semantic validation to the existing readCiRetrySlots owner: occupied slots must form a contiguous prefix. A valid higher-numbered slot proves earlier consumption even if its earlier file is missing. The reader rejects that shape before status can report quota or claim/migration can find a reusable slot. It does not create a new ledger, marker, allocator, retry, refund or repair path. The same reader already serves current reservation/status, duplicate-failure lookup and legacy adoption.
+
+| Observed slots / entry | Result |
+| --- | --- |
+| Both absent, no other known evidence | Existing unused-quota semantics only; not proof no prior external erasure |
+| First occupied, second absent | Existing one-consumed behavior and same-failure exclusion remain |
+| Both occupied | Existing two-total hard cap remains |
+| Earlier absent, higher occupied | Stop status, new/same diagnosis reservation and legacy adoption; never refill missing slot |
+| Raw legacy evidence present with the hole | Preserve exclusive raw bytes first; do not use migration to repair slot shape |
+| Fresh process or changed/empty observation cache | Re-read the same durable slots and reject the hole |
+
+The slot reader remains the sole semantic owner; raw preservation and strict receipt I/O remain unchanged. A failure returns no available/reserved result, leaves surviving bytes and observation state untouched, and requires reconciliation. This recognizes surviving proof of a lost earlier receipt; it cannot reconstruct prior external erasure with no surviving proof, provide atomic filesystem observation or establish hardware power-loss durability.
+
+The eight-cell CLI regression first fails on source56 (0 pass/9 fail including parent), then passes9/9 (4.77s). Each isolated case reserves two diagnoses, removes only fixture slot1, and checks status/reserve × new/surviving diagnosis × absent/present stale legacy evidence, with another fresh invocation and changed empty cache. Slot2, raw legacy bytes and ordinary observation state stay unchanged; slot1 remains absent. Real isolated files/CLI are used with fsync acknowledgements modeled on Windows/Node22; this is not native Linux/Cindy recovery or durable receipt acceptance. The reviewer separately reported native Linux6.18/Node24.15 reproduction in the original review comment; it is external evidence, not this task's new native runtime observation. No real user receipts, remote resources, quota, installation or blocked cleanup were touched.
+
+Final mandatory four suites plus plugin: **578 passed / 38 skipped / 0 failed (307.70 s)**; the 38 skips remain 17 unsupported native directory-sync success cases, 19 earlier skips and two inherited POSIX-only command-line cases. Forge exact-content: **30 files, 254107 archive bytes, 716496 uncompressed bytes**; new package deleted and absence verified. External Linux reproduction: [original review](https://github.com/makecindy/cindy-official-plugins/pull/332#discussion_r4711100278). No installation or new runtime acceptance claimed.

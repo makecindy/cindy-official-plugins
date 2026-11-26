@@ -1302,6 +1302,52 @@ test('unsigned heads cannot inherit automatic signing before quota or amend', t 
   assert.match(guide, /unsigned original.*replacement.*gpgsig.*stop.*unpushed/i);
 });
 
+test('a surviving higher slot makes an earlier receipt hole fail closed across status, reserve and migration', async t => {
+  for (const legacy of [false, true]) for (const mode of ['--ci-retry-status', '--reserve-ci-retry']) for (const sameFailure of [false, true]) await t.test(`${legacy ? 'legacy' : 'no legacy'} / ${mode} / ${sameFailure ? 'surviving diagnosis' : 'new diagnosis'}`, t => {
+    const fx = fixture(t), loader = path.join(fx.root, 'supported-sync.mjs');
+    // Only sync acknowledgements are modeled; all receipt/CLI operations use
+    // real isolated files. This is not native durability or Cindy recovery.
+    fs.writeFileSync(loader, `import fs from 'node:fs';
+fs.fsyncSync = () => {};
+const { runGate } = await import(process.argv[2]);
+process.exitCode = await runGate(process.argv.slice(3));
+`);
+    const run = (flags, stateDir = fx.stateDir) => {
+      const argv = fx.args(flags); argv[argv.indexOf('--state-dir') + 1] = stateDir;
+      return spawnSync(process.execPath, [loader, pathToFileURL(gate).href, ...argv], { env: fx.env, encoding: 'utf8' });
+    };
+    const first = run(['--reserve-ci-retry', oldHead]); assert.equal(first.status, 0, first.stderr);
+    const firstFile = ciRetryFilePath(fx.retryDir, prNodeId) + '-1.slot', secondFile = ciRetryFilePath(fx.retryDir, prNodeId) + '-2.slot';
+    const firstRaw = fs.readFileSync(firstFile, 'utf8');
+    const secondFailure = { ...failure, cause: 'second independent fault' };
+    fs.writeFileSync(fx.diagnosis, JSON.stringify(secondFailure));
+    const second = run(['--reserve-ci-retry', newHead]); assert.equal(second.status, 0, second.stderr);
+    assert.equal(JSON.parse(second.stdout).pr_consumed, 2);
+    const secondRaw = fs.readFileSync(secondFile, 'utf8');
+    fs.mkdirSync(fx.stateDir, { recursive: true });
+    const observation = stateFilePath(fx.stateDir, 'example/repo', 42), originalState = '{"headOid":"ordinary-observation"}';
+    fs.writeFileSync(observation, originalState);
+    if (legacy) fs.writeFileSync(ciRetryFilePath(fx.stateDir, prNodeId, failure), firstRaw);
+    // Test-only partial erasure. Never touches the user's receipts or quota.
+    fs.unlinkSync(firstFile);
+    fs.writeFileSync(fx.diagnosis, JSON.stringify(sameFailure ? secondFailure : { ...failure, cause: 'third independent fault' }));
+    const flags = [mode, ...(mode === '--reserve-ci-retry' ? ['c'.repeat(40)] : [])];
+    for (const stateDir of [fx.stateDir, path.join(fx.root, 'new-cache')]) {
+      const result = run(flags, stateDir); // fresh process on each invocation
+      assert.equal(result.status, 1, result.stdout);
+      assert.match(result.stderr, /non-contiguous CI retry receipts.*reconcile/i);
+      assert.doesNotMatch(result.stdout, /ci-retry-reserved|"available":true/);
+      assert.equal(fs.existsSync(firstFile), false, 'never refill the missing earlier slot');
+      assert.equal(fs.readFileSync(secondFile, 'utf8'), secondRaw, 'keep the proof of both consumed attempts');
+      assert.equal(fs.readFileSync(observation, 'utf8'), originalState);
+    }
+    if (legacy) {
+      assert.equal(fs.readFileSync(ciRetryFilePath(fx.stateDir, prNodeId, failure), 'utf8'), firstRaw);
+      assert.equal(fs.readFileSync(ciRetryFilePath(fx.retryDir, prNodeId, failure), 'utf8'), firstRaw, 'raw legacy copy remains preserved without repairing slots');
+    }
+  });
+});
+
 test('equivalent default XDG settings share quota and old alternate roots fail closed', async t => {
   for (const initialExplicit of [false, true]) await t.test(initialExplicit ? 'explicit to implicit' : 'implicit to explicit', t => {
   const fx = fixture(t), loader = path.join(fx.root, 'supported-roots.mjs');

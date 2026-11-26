@@ -662,10 +662,17 @@ function validateCiRetryReservation(value, prNodeId) {
 }
 
 function readCiRetrySlots(retryDir, prNodeId) {
-  return ciRetrySlots(retryDir, prNodeId).map(file => {
+  const slots = ciRetrySlots(retryDir, prNodeId).map(file => {
     const raw = ciRetryReceiptIO.read(file);
     return raw === null ? null : validateCiRetryReservation(JSON.parse(raw), prNodeId);
   });
+  // A higher slot proves earlier consumption, even when its file was lost.
+  // Never refill that hole via reservation or legacy adoption.
+  const firstMissing = slots.indexOf(null);
+  if (firstMissing !== -1 && slots.slice(firstMissing + 1).some(Boolean)) {
+    throw new Error('Non-contiguous CI retry receipts; reconcile the missing earlier slot and previous outcomes. Keep all evidence; do not refill, refund, amend or push.');
+  }
+  return slots;
 }
 
 function claimCiRetrySlot(retryDir, reservation) {
