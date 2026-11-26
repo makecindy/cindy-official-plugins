@@ -100,7 +100,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.37');
+  assert.equal(manifest.version, '1.5.38');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -1803,7 +1803,7 @@ function followScheduler(options = {}) {
     node: { async request({ method }) {
       assert.equal(method, 'followSkillDir');
       if (options.failDir) throw new Error('skill directory temporarily unavailable');
-      return { ok: true, result: '/approved skills/agent-skills/skills/_root__cindy-github--pr' };
+      return { ok: true, result: options.skillDir ?? '/approved skills/agent-skills/skills/_root__cindy-github--pr' };
     } },
   };
   return { hostApi, calls, rows };
@@ -2041,6 +2041,64 @@ test('same-name project script, custom shell command and terminal PR remain unto
   assert.equal(result.reply.result.stage, 'merged');
   assert.equal(result.reply.result.legacy_hook_repair, undefined);
   assert.equal(calls.includes('schedule_update'), false);
+});
+
+test('POSIX single-quoted stabilized hooks are recognized for legacy repair and verified launcher checks', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  const posixSingle = (p) => `'${p.replace(/'/g, `'\\''`)}'`;
+  for (const skillDir of [
+    '/approved skills/agent-skills/skills/_root__cindy-github--pr',
+    "/Users/O'Brien/Library/Application Support/Cindy/agent-skills/skills/_root__cindy-github--pr",
+  ]) {
+    const { hostApi, calls, rows } = followScheduler({ skillDir });
+    const legacySingle = {
+      command: `node ${posixSingle(`${skillDir}/scripts/pr-heartbeat-gate.mjs`)} ${url}`,
+      timeoutMs: 180000,
+    };
+    const old = {
+      id: 'legacy-single', targetSessionId: 's1', status: 'active', recurring: true,
+      prompt: 'Follow ' + url, preRunHook: legacySingle,
+    };
+    rows.set(old.id, old);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    // Legacy single-quoted hook should be recognized and return legacy_hook_repair (not prScheduleHookUnknown).
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_state, 'unverified');
+    assert.equal(opened.reply.result.legacy_hook_repair.schedule_id, old.id);
+    assert.equal(
+      opened.reply.result.legacy_hook_repair.command,
+      `node "${skillDir}/scripts/pr-node.cjs" pr-heartbeat-gate.mjs ${url}`,
+    );
+    assert.equal(calls.includes('schedule_update'), false);
+
+    // Refreshing an existing owning card with a single-quoted legacy hook must also surface legacy_hook_repair.
+    const refreshedLegacy = await rt.tool({ card_id: opened.callId });
+    assert.equal(refreshedLegacy.reply.result.follow_state, 'unverified');
+    assert.equal(refreshedLegacy.reply.result.legacy_hook_repair.schedule_id, old.id);
+
+    // Modern pr-node.cjs launcher stabilized with POSIX single quotes should verify active cleanly.
+    rows.set(old.id, {
+      ...old,
+      preRunHook: {
+        command: `node ${posixSingle(`${skillDir}/scripts/pr-node.cjs`)} pr-heartbeat-gate.mjs ${url}`,
+        timeoutMs: 180000,
+      },
+    });
+    const verified = await rt.tool({ card_id: opened.callId });
+    assert.equal(verified.reply.result.follow_state, 'active');
+    assert.equal(verified.reply.result.legacy_hook_repair, undefined);
+
+    // Mismatched quotes and foreign single-quoted scripts remain rejected.
+    for (const bad of [
+      `node '${skillDir}/scripts/pr-heartbeat-gate.mjs" ${url}`,
+      `node "${skillDir}/scripts/pr-node.cjs' pr-heartbeat-gate.mjs ${url}`,
+      `node '/project/scripts/pr-heartbeat-gate.mjs' ${url}`,
+    ]) {
+      rows.set(old.id, { ...old, preRunHook: { command: bad, timeoutMs: 180000 } });
+      const rejected = await rt.tool({ card_id: opened.callId });
+      assert.equal(rejected.reply.result.legacy_hook_repair, undefined);
+    }
+  }
 });
 
 test('refresh of a pre-native following card discovers its sole active legacy hook and reports a manual repair', async () => {

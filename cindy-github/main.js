@@ -3483,6 +3483,12 @@ function cardFollowCommand(dir, url) {
   return 'node "' + dir + '/scripts/pr-node.cjs" pr-heartbeat-gate.mjs ' + url;
 }
 
+// Cindy's scheduler stabilizes skill-snapshot paths with POSIX single quotes on
+// macOS/Linux (shellQuotePath), while card-created and Windows hooks use double quotes.
+function posixSingleQuoted(filePath) {
+  return "'" + filePath.replace(/'/g, "'\\''") + "'";
+}
+
 // Only exact generated commands from this approved Skill confer native
 // schedule ownership. URL owner/repo case is immaterial, not shell syntax.
 function exactFollowHook(row, card, dir) {
@@ -3490,15 +3496,20 @@ function exactFollowHook(row, card, dir) {
   var command = row.preRunHook.command;
   var match = typeof command === 'string' && /^(.*) (https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+)$/.exec(command);
   if (!dir || !match || match[2].toLowerCase() !== url) return null;
-  var legacy = match[1] === 'node "' + dir + '/scripts/pr-heartbeat-gate.mjs"';
-  if (!legacy && match[1] !== 'node "' + dir + '/scripts/pr-node.cjs" pr-heartbeat-gate.mjs') return null;
+  var gate = dir + '/scripts/pr-heartbeat-gate.mjs';
+  var launcher = dir + '/scripts/pr-node.cjs';
+  var legacy = match[1] === 'node "' + gate + '"' || match[1] === 'node ' + posixSingleQuoted(gate);
+  if (!legacy && match[1] !== 'node "' + launcher + '" pr-heartbeat-gate.mjs' &&
+    match[1] !== 'node ' + posixSingleQuoted(launcher) + ' pr-heartbeat-gate.mjs') return null;
   // The public scheduler API has no caller-supplied compare-and-update guard:
   // report a replacement for the old command, never write it automatically.
   return { repair: legacy ? { schedule_id: row.id, command: cardFollowCommand(dir, url) } : null };
 }
 
 async function legacyFollowRepair(row, card) {
-  if (typeof row.preRunHook.command !== 'string' || row.preRunHook.command.indexOf('/scripts/pr-heartbeat-gate.mjs" ') < 0) return null;
+  if (typeof row.preRunHook.command !== 'string' ||
+    (row.preRunHook.command.indexOf('/scripts/pr-heartbeat-gate.mjs" ') < 0 &&
+      row.preRunHook.command.indexOf("/scripts/pr-heartbeat-gate.mjs' ") < 0)) return null;
   var dir;
   try { dir = await cardFollowSkillDir(); } catch (_) { return null; }
   var hook = exactFollowHook(row, card, dir);
