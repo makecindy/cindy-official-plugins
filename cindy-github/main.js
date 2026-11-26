@@ -3048,13 +3048,24 @@ function prHeader(tile, titleHtml, metaParts, pr, gear) {
 }
 
 /** 下层:左边分支或状态,右边按钮;窄的时候按钮换到下一行。 */
-function prFooter(leftHtml, actionsHtml, openOnly, archiveHtml) {
+function prFooter(leftHtml, actionsHtml, openOnly, archiveHtml, persistentHtml) {
+  if (!persistentHtml) {
+    return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;min-height:52px;padding:10px 16px;border-top:1px solid var(--border-default)">' +
+      '<div style="flex:1 1 220px;min-width:0;font-size:12px;line-height:16px;color:var(--text-secondary)">' + leftHtml + '</div>' +
+      (actionsHtml ? '<div' + (openOnly || '') + ' style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:auto">' + actionsHtml + '</div>' : '') +
+      // 归档按钮不放进 open-only 的那一组:PR 在卡片之外合并后,那一组被藏起,这颗正好露出来。
+      (archiveHtml ? '<div style="display:flex;align-items:center;margin-left:auto">' + archiveHtml + '</div>' : '') +
+      '</div>';
+  }
   return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;min-height:52px;padding:10px 16px;border-top:1px solid var(--border-default)">' +
     '<div style="flex:1 1 220px;min-width:0;font-size:12px;line-height:16px;color:var(--text-secondary)">' + leftHtml + '</div>' +
+    // Keep persistent manual-stop outside open-only so merging/closing the PR on
+    // GitHub never hides the only read-only entry while an old schedule remains.
+    '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:auto">' +
+    persistentHtml +
     (actionsHtml ? '<div' + (openOnly || '') + ' style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:auto">' + actionsHtml + '</div>' : '') +
-    // 归档按钮不放进 open-only 的那一组:PR 在卡片之外合并后,那一组被藏起,这颗正好露出来。
-    (archiveHtml ? '<div style="display:flex;align-items:center;margin-left:auto">' + archiveHtml + '</div>' : '') +
-    '</div>';
+    (archiveHtml || '') +
+    '</div></div>';
 }
 
 /**
@@ -3226,13 +3237,23 @@ function prModelRow(settings) {
   return '<div style="padding:8px">' + head + picker + '</div>';
 }
 
-function prSettingsPanel(settings) {
+function prSettingsPanel(settings, card) {
+  // Include read-only manual-stop guidance inside the settings panel so host
+  // PR summary popovers (which project settingsPanel into the PR Settings dialog)
+  // always surface the schedule ID and instructions without a dead popover button.
+  var manual = card && manualFollowStop(card)
+    ? '<div style="margin-top:4px;padding:8px;border-top:1px solid var(--border-default)">' +
+      '<div style="font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prManualStopEntry')) + '</div>' +
+      '<div style="margin-top:4px;font-size:12px;line-height:1.5;color:var(--text-secondary);user-select:text;overflow-wrap:anywhere">' +
+      prEsc(t('prManualStop', { id: card.scheduleId })) + '</div></div>'
+    : '';
   return '<div style="padding:8px 8px 10px;border-top:1px solid var(--border-default)">' +
     '<div style="padding:4px 8px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prSettings')) + '</div>' +
     prSettingRow('prset:rename', t('prAutoRename'), t('prAutoRenameHint'), settings.autoRename) +
     prSettingRow('prset:follow', t('prAutoFollow'), t('prAutoFollowHint'), settings.autoFollow) +
     prSettingRow('prset:archive', t('prAutoArchive'), t('prAutoArchiveHint'), settings.autoArchive) +
     prModelRow(settings) +
+    manual +
     '</div>';
 }
 
@@ -3295,7 +3316,7 @@ function prHasSettings(card) {
 }
 
 function renderPrCard(card, settings) {
-  var tile, title, meta, left, actions = '';
+  var tile, title, meta, left, actions = '', persistentActions = '';
   var gear = prHasSettings(card);
   if (card.stage === 'ask') {
     tile = prTile('branch');
@@ -3338,12 +3359,15 @@ function renderPrCard(card, settings) {
             : unverifiedLegacyFollow(card)
               ? prChip(t('prFollowUnverified'), 'wait')
               : card.following
-              ? (manualFollowStop(card) ? prQuietButton('pr:manual-stop', t('prManualStopEntry')) : prQuietButton('pr:stop', t('prStop'))) + (card.legacyHookRepair ? prChip(t('prFollowNeedsRepair'), 'warn') : prFollowingPill())
+              ? (manualFollowStop(card) ? '' : prQuietButton('pr:stop', t('prStop'))) + (card.legacyHookRepair ? prChip(t('prFollowNeedsRepair'), 'warn') : prFollowingPill())
               : card.scheduleId
-                ? (manualFollowStop(card) ? prQuietButton('pr:manual-stop', t('prManualStopEntry')) : prQuietButton('pr:stop', t('prStop'))) + prChip(card.scheduleStatus === 'paused' ? t('prFollowPaused') : t('prFollowEnded'), card.scheduleStatus === 'paused' ? 'wait' : undefined)
+                ? (manualFollowStop(card) ? '' : prQuietButton('pr:stop', t('prStop'))) + prChip(card.scheduleStatus === 'paused' ? t('prFollowPaused') : t('prFollowEnded'), card.scheduleStatus === 'paused' ? 'wait' : undefined)
                 : pr.draft
                   ? (card.readyUncertain ? '' : prCtaButton('pr:ready', t('prMarkReady')))
                   : prPillButton('pr:follow', t('prFollow'));
+      if (manualFollowStop(card) && !card.pending && !unverifiedLegacyFollow(card)) {
+        persistentActions = prQuietButton('pr:manual-stop', t('prManualStopEntry'));
+      }
     } else {
       tile = card.stage === 'merged' ? prTile('merged', 'merged') : prTile('closed', 'muted');
       meta = [prEsc(card.repo), prEsc(card.stage === 'merged' ? t('prStateMerged') : t('prStateClosed'))];
@@ -3354,7 +3378,7 @@ function renderPrCard(card, settings) {
       )));
       left = prContextLine(card);
       if (manualFollowStop(card) && !card.pending) {
-        actions = prQuietButton('pr:manual-stop', t('prManualStopEntry'));
+        persistentActions = prQuietButton('pr:manual-stop', t('prManualStopEntry'));
       }
     }
   }
@@ -3362,7 +3386,8 @@ function renderPrCard(card, settings) {
     left += '<div style="margin-top:4px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
   }
   var openOnly = card.stage === 'open' ? prOpenOnly(card) : '';
-  var body = prHeader(tile, title, meta, card.pr, gear ? prGearButton(card.settingsOpen) : '') + prFooter(left, actions, openOnly, prArchiveButton(card, settings));
+  var body = prHeader(tile, title, meta, card.pr, gear ? prGearButton(card.settingsOpen) : '') +
+    prFooter(left, actions, openOnly, prArchiveButton(card, settings), persistentActions);
   // Host copy-link accepts only HTTP(S) URLs. Keep the repair guidance and
   // command together in one panel so ordinary card clicks (e.g. settings) never
   // wipe the explanation while leaving an orphaned command box.
@@ -3374,13 +3399,13 @@ function renderPrCard(card, settings) {
       prEsc(card.legacyHookRepair.command) + '</pre></div>';
   }
   var showManualStopPanel = manualFollowStop(card) && card.manualStopOpen === true &&
-    card.note !== t('prManualStop', { id: card.scheduleId });
+    !(gear && card.settingsOpen) && card.note !== t('prManualStop', { id: card.scheduleId });
   if (showManualStopPanel) {
-    body += '<div style="padding:10px 16px;border-top:1px solid var(--border-default);font-size:12px;line-height:1.5;color:var(--text-secondary);user-select:text">' +
+    body += '<div style="padding:10px 16px;border-top:1px solid var(--border-default);font-size:12px;line-height:1.5;color:var(--text-secondary);user-select:text;overflow-wrap:anywhere">' +
       prEsc(t('prManualStop', { id: card.scheduleId })) + '</div>';
   }
   // Settings remain available after merge/close, including when the host updates an open snapshot.
-  if (gear && card.settingsOpen) body += prSettingsPanel(settings);
+  if (gear && card.settingsOpen) body += prSettingsPanel(settings, card);
   // 排到本轮末尾、铺满消息列:宿主把卡放在「已更改 N 个文件」卡之后,与它同宽。
   return PR_CSS +
     '<div data-ghost-placement="turn-end" data-ghost-width="full" style="display:flex;flex-direction:column;justify-content:space-between;' +
@@ -3394,8 +3419,9 @@ function prCardHeight(card) {
   var h = 120;
   if (card.note) h += 22;
   if (card.stage === 'open' && card.legacyHookRepair) h += 68;
-  if (manualFollowStop(card) && card.manualStopOpen === true && card.note !== t('prManualStop', { id: card.scheduleId })) h += 40;
-  if (card.settingsOpen && prHasSettings(card)) h += 160;
+  var settingsShown = card.settingsOpen && prHasSettings(card);
+  if (manualFollowStop(card) && card.manualStopOpen === true && !settingsShown && card.note !== t('prManualStop', { id: card.scheduleId })) h += 40;
+  if (settingsShown) h += manualFollowStop(card) ? 208 : 160;
   return Math.min(900, h);
 }
 
@@ -4206,7 +4232,12 @@ async function prCardAction(msg) {
     await markPrReady(card, settings, msg);
     return;
   } else if (action === 'pr:manual-stop' && manualFollowStop(card) && !card.pending) {
-    card.manualStopOpen = hadManualStopNote ? false : !card.manualStopOpen;
+    if (card.settingsOpen && !card.manualStopOpen && !hadManualStopNote) {
+      card.settingsOpen = false;
+      card.manualStopOpen = true;
+    } else {
+      card.manualStopOpen = hadManualStopNote ? false : !card.manualStopOpen;
+    }
   } else if (action === 'pr:stop' && card.stage === 'open' && manualFollowStop(card) && !card.pending) {
     card.note = t('prManualStop', { id: card.scheduleId });
   } else if (msg.userActionToken && hasCardScheduler() && (action === 'pr:follow' && card.publishedHere ||

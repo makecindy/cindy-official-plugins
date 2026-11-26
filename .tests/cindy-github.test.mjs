@@ -3161,7 +3161,11 @@ test('refreshed legacy cards expose a visible read-only manual-stop entry across
   assert.deepEqual(rows.get('old'), old);
   assert.match(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止（ID：old）/);
 
-  // Toggling settings gear keeps the opened manual-stop panel intact; clicking entry again collapses it
+  // Toggling settings gear keeps manual-stop guidance visible (deduplicated inside PR settings)
+  // and closing settings restores the standalone panel; clicking pr:manual-stop collapses it.
+  await rt.click(opened.callId, 'prui:settings');
+  const withSettings = rt.lastCard(opened.callId).html;
+  assert.equal((withSettings.match(/已有调度请在自动化设置手动停止（ID：old）/g) || []).length, 1);
   await rt.click(opened.callId, 'prui:settings');
   assert.match(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止（ID：old）/);
   await rt.click(opened.callId, 'pr:manual-stop');
@@ -3207,6 +3211,92 @@ test('refreshed legacy cards expose a visible read-only manual-stop entry across
   const created = await nativeRt.tool({ repo: 'octo/repo', pr: 42, published: true });
   assert.match(nativeRt.lastCard(created.callId).html, /<button data-ghost-action="pr:stop"/);
   assert.doesNotMatch(nativeRt.lastCard(created.callId).html, /data-ghost-action="pr:manual-stop"/);
+});
+
+function stripOpenOnlySubtrees(html) {
+  let out = html;
+  while (true) {
+    const m = /<([a-z][a-z0-9]*)\b[^>]*\bdata-ghost-pr-open-only="[^"]+"[^>]*>/i.exec(out);
+    if (!m) return out;
+    const tag = m[1].toLowerCase();
+    const re = new RegExp(`<(/?)(${tag})\\b[^>]*>`, 'gi');
+    re.lastIndex = m.index + m[0].length;
+    let depth = 1;
+    let end = out.length;
+    for (let next = re.exec(out); next; next = re.exec(out)) {
+      depth += next[1] ? -1 : 1;
+      if (depth === 0) { end = re.lastIndex; break; }
+    }
+    out = out.slice(0, m.index) + out.slice(end);
+  }
+}
+
+function extractOpenOnlyActionsDiv(html) {
+  const re = /<div\b[^>]*\bdata-ghost-pr-open-only="[^"]+"[^>]*>/gi;
+  for (let m = re.exec(html); m; m = re.exec(html)) {
+    const tagRe = /<(\/?)div\b[^>]*>/gi;
+    tagRe.lastIndex = m.index + m[0].length;
+    let depth = 1;
+    let end = html.length;
+    for (let next = tagRe.exec(html); next; next = tagRe.exec(html)) {
+      depth += next[1] ? -1 : 1;
+      if (depth === 0) { end = tagRe.lastIndex; break; }
+    }
+    const fragment = html.slice(m.index, end);
+    if (!/data-ghost-action="prset:/.test(fragment) &&
+        (/data-ghost-action="pr:/.test(fragment) || /margin-left:auto/.test(m[0]))) {
+      return fragment;
+    }
+  }
+  return null;
+}
+
+test('manual-stop guidance works in both host PR summary popovers and open cards after GitHub merge/close', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  const { hostApi, rows, runs, calls } = followScheduler();
+  const rt = createPrRuntime({ github: prGraphql(), hostApi });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const old = { id: 'old', targetSessionId: 's1', status: 'active', recurring: true, updatedAt: 1000, lastFiredAt: 2000, preRunHook: oldFollowHook(url) };
+  rows.set('old', structuredClone(old));
+  runs.set('old', [verifiedNodeRun('old', { firedAt: 2000 })]);
+
+  await rt.tool({ card_id: opened.callId });
+  const openHtml = rt.lastCard(opened.callId).html;
+
+  // Path 1: Host PR summary popover projection (projectPrCard)
+  // - Open-only actions row projects live follow state without a dead pr:manual-stop button
+  // - Clicking gear (prui:settings, as openCardSettings does) projects manual-stop guidance + ID inside settingsPanel
+  const projectedActions = extractOpenOnlyActionsDiv(openHtml);
+  assert.ok(projectedActions, 'host projectPrCard must still find the open-only actions div');
+  assert.match(projectedActions, /data-ghost-live-label="跟进中"/);
+  assert.doesNotMatch(projectedActions, /data-ghost-action="pr:manual-stop"/);
+  assert.match(openHtml, /<button data-ghost-action="prui:settings"/);
+  assert.equal((openHtml.match(/data-ghost-action="pr:manual-stop"/g) || []).length, 1, 'no duplicate mobile button');
+
+  await rt.click(opened.callId, 'prui:settings');
+  const settingsHtml = rt.lastCard(opened.callId).html;
+  const settingsStart = settingsHtml.indexOf('data-ghost-action="prset:rename"');
+  assert.ok(settingsStart > 0);
+  const settingsTail = settingsHtml.slice(settingsStart);
+  assert.match(settingsTail, /手动停止/);
+  assert.match(settingsTail, /已有调度请在自动化设置手动停止（ID：old）/);
+  assert.deepEqual(rows.get('old'), old);
+  await rt.click(opened.callId, 'prui:settings');
+
+  // Path 2: PR merged/closed on GitHub BEFORE plugin card refresh (host applyOpenOnly / omitEndedPrOpenOnly)
+  // - Stripping every data-ghost-pr-open-only subtree still leaves pr:manual-stop visible on the open card
+  // - Clicking pr:manual-stop on that existing card opens the explanation + ID outside open-only, leaving schedule intact
+  const mergedHostViewBeforeClick = stripOpenOnlySubtrees(rt.lastCard(opened.callId).html);
+  assert.doesNotMatch(mergedHostViewBeforeClick, /data-ghost-live-label="跟进中"/);
+  assert.match(mergedHostViewBeforeClick, /<button data-ghost-action="pr:manual-stop" aria-label="手动停止"/);
+
+  await rt.click(opened.callId, 'pr:manual-stop');
+  const mergedHostViewAfterClick = stripOpenOnlySubtrees(rt.lastCard(opened.callId).html);
+  assert.match(mergedHostViewAfterClick, /<button data-ghost-action="pr:manual-stop" aria-label="手动停止"/);
+  assert.match(mergedHostViewAfterClick, /已有调度请在自动化设置手动停止（ID：old）/);
+  assert.deepEqual(rows.get('old'), old);
+  assert.equal(calls.includes('schedule_delete'), false);
+  assert.equal(rt.agentRuns.length, 0);
 });
 
 test('repair guidance survives settings clicks and non-complete chips avoid checkmark glyph', async () => {
