@@ -1586,9 +1586,11 @@ async function gateMain(argv, ctx) {
   if (newFollow && backingOff) {
     // Notify the new owner of the previous failure without touching GitHub
     // before the actual retry deadline. The same outage is deduplicated again.
-    const detail = `${previous.snapshotFailureSummary || 'Previous PR snapshot failed'}; retry at ${new Date(backoffUntil).toISOString()}`;
+    const inheritedReason = previous.snapshotFailureSummary ||
+      (previous.lastResult?.reason === 'snapshot-failed' && previous.lastResult.detail) || 'Previous PR snapshot failed';
+    const detail = `${inheritedReason}; retry at ${new Date(backoffUntil).toISOString()}`;
     const lastResult = { decision: 'block', exitCode: EXIT_BLOCK, reason: 'snapshot-failed', detail, checkedAt: now };
-    const reports = previous.snapshotFailureFingerprint && previous.snapshotFailureSummary ? { [previous.snapshotFailureFingerprint]: now } : {};
+    const reports = previous.snapshotFailureFingerprint ? { [previous.snapshotFailureFingerprint]: now } : {};
     persist(file, { ...previous, snapshotFailureReports: reports, lastDecision: 'block',
       lastDecisionReason: lastResult.reason, lastResult });
     throw new Error(detail);

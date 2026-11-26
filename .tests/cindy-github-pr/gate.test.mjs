@@ -943,6 +943,27 @@ test('new follower reports an inherited snapshot outage once without bypassing i
   assert.equal(fx.snapshotRuns(), reads+1);
 });
 
+test('new follower reads the 1.5.35 failure state and deduplicates it through expiry', async (t) => {
+  const fx = createFixture(t);
+  const fail = { FAKE_SNAPSHOT_EXIT: '1', FAKE_SNAPSHOT_STDERR: 'HTTP 429' };
+  const args = ['--max-snapshot-failures', '1'];
+  assert.equal((await fx.run(args, fail)).code, 1);
+  const old = fx.readState();
+  delete old.snapshotFailureSummary;
+  fx.writeState(old);
+  const reads = fx.snapshotRuns();
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  const result = await fx.run(args, fail);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /rate limit/i);
+  assert.equal(fx.snapshotRuns(), reads);
+  assert.equal(fx.readState().snapshotFailureBackoffUntil, old.snapshotFailureBackoffUntil);
+  assert.ok(fx.readState().snapshotFailureReports[old.snapshotFailureFingerprint]);
+  fx.advance(31);
+  assert.equal((await fx.run(args, fail)).code, 2);
+  assert.equal(fx.snapshotRuns(), reads + 1);
+});
+
 test('a change to the watched PR retries a network failure without moving the scheduled retry', async (t) => {
   const fx = createFixture(t);
   const fail = { FAKE_SNAPSHOT_EXIT: '1', FAKE_SNAPSHOT_STDERR: 'lookup api.github.com: i/o timeout' };

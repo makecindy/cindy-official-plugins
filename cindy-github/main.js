@@ -3585,10 +3585,13 @@ async function syncCardSchedule(card, settings, start) {
   try {
     var repair = null;
     var rows = start ? await schedulesForPr(card) : [];
-    var reused = start && rows.length > 0;
+    var createdId = null;
     if (start && rows.length === 0) {
       var creationError;
-      try { await createCardSchedule(card, settings); } catch (err) { creationError = err; }
+      try {
+        var created = await createCardSchedule(card, settings);
+        createdId = created && typeof created.id === 'string' ? created.id : null;
+      } catch (err) { creationError = err; }
       rows = await schedulesForPr(card);
       if (!rows.length) throw creationError || new Error('schedule_create');
     }
@@ -3608,7 +3611,7 @@ async function syncCardSchedule(card, settings, start) {
       }
       repair = hook.repair;
       card.scheduleId = row.id;
-      card.manualStop = reused;
+      card.manualStop = createdId !== saved.id;
       card.scheduleStatus = null;
       card.followedEver = true;
     } else {
@@ -4045,6 +4048,14 @@ async function prCardAction(msg) {
       await savePrCard(card);
     }
     await sendPrCard(card, settings, null);
+    return;
+  }
+  // An upgrade can leave a legacy Stop button visible before the first card
+  // refresh. Route that click through the same read-only verification, never
+  // through the old agent deletion handoff.
+  if (action === 'pr:stop' && hasCardScheduler() && card.pr && !card.scheduleId &&
+      (card.following || unverifiedLegacyFollow(card)) && !card.pending && !card.scheduleAction) {
+    await prCardTool({ card_id: card.id, session_context: { session_id: msg.sessionId } }, id);
     return;
   }
   // Card actions run one at a time, so a mark-ready flow cannot be running now: a 'ready' left in the record

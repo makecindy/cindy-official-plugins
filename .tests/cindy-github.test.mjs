@@ -1776,10 +1776,17 @@ function followScheduler(options = {}) {
       calls.push(tool);
       let data;
       if (tool === 'schedule_create') {
+        if (options.createRace) {
+          data = { ...args, id: 'other-entry', status: 'active' };
+          rows.set(data.id, data);
+          if (options.createRace !== 'different-receipt') throw new Error('create receipt unavailable');
+          data = { ...data, id: 'created-receipt' };
+        } else {
         if (options.reject) throw new Error('scheduler unavailable');
         data = { ...args, id: 'sch-1', status: 'active' };
         rows.set(data.id, data);
         if (options.loseCreateReceipt) throw new Error('lost receipt');
+        }
       } else if (tool === 'schedule_get') {
         if (options.failGet) throw new Error('cannot verify');
         if (options.beforeGet) options.beforeGet(rows, args.id);
@@ -1803,7 +1810,7 @@ function followScheduler(options = {}) {
 }
 
 test('publication starts exactly one verified follow-up without a model turn and stop removes it', async () => {
-  const { hostApi, calls, rows } = followScheduler({ loseCreateReceipt: true });
+  const { hostApi, calls, rows } = followScheduler();
   const runtime = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: {
     autoFollow: true, followModel: { route: { agentKind: 'cc', providerId: 'chosen', model: 'sonnet',
       effort: 'high', fastMode: false, agentDeviceId: 'remote' } },
@@ -1829,6 +1836,23 @@ test('publication starts exactly one verified follow-up without a model turn and
   await runtime.tool({ card_id: callId });
   assert.equal(rows.size, 0);
   assert.equal(runtime.agentRuns.length, 0);
+});
+
+test('native Stop authority requires a successful matching create receipt, not an empty initial list', async () => {
+  for (const options of [{ loseCreateReceipt: true }, { createRace: 'rejected' }, { createRace: 'different-receipt' }]) {
+    const { hostApi, calls, rows } = followScheduler(options);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_state, 'active');
+    const row = [...rows.values()][0];
+    assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleId, row.id);
+    assert.match(opened.reply.result.note, new RegExp(row.id));
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/);
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(calls.includes('schedule_delete'), false);
+    assert.equal(rt.agentRuns.length, 0);
+    assert.deepEqual(rows.get(row.id), row);
+  }
 });
 
 const oldFollowHook = (url, timeoutMs = 180000) => ({
@@ -2184,6 +2208,23 @@ test('adopted legacy Stop never invokes a delete even if a prior read was valid'
     assert.deepEqual(rows.get(row.id), changed);
     assert.equal(calls.includes('schedule_delete'), false);
     assert.equal(rt.agentRuns.length, 0);
+  }
+});
+
+test('direct Stop on an upgraded unrefreshed old card verifies instead of handing deletion to the agent', async () => {
+  for (const fault of [false, true]) {
+    const { hostApi, calls, rows } = followScheduler({ failDir: fault });
+    const rt = createPrRuntime({ github: prGraphql(), hostApi });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+    const row = { id: 'old', targetSessionId: 's1', status: 'active', recurring: true, preRunHook: oldFollowHook('https://github.com/octo/repo/pull/42') };
+    rows.set(row.id, row);
+    await rt.click(opened.callId, 'pr:stop');
+    const card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(card.scheduleId, fault ? null : row.id);
+    assert.equal(calls.includes('schedule_delete'), false);
+    assert.equal(rt.agentRuns.length, 0);
+    assert.deepEqual(rows.get(row.id), row);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/);
   }
 });
 
