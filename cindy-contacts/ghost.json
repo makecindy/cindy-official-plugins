@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "minCindyVersion": "0.1.97",
+  "minCindyVersion": "0.1.144",
   "id": "cindy-contacts",
   "name": "通讯录",
   "description": "AI 帮你记住打过交道的每个人：整理邮件、日历和聊天里的往来，记录人物档案、最新动态和待办。支持导入 macOS 通讯录与旧版智能通讯录。资料保存在本机；在支持插件同步的 Cindy 中，可开启同账号电脑间的加密同步，两台电脑同时在线时合并修改和删除。",
