@@ -2520,6 +2520,195 @@ process.stdout.write('', () => process.exit(0));
   });
 });
 
+describe('Antigravity remote-workspace steering', () => {
+  const remoteSteerHarness = (t, { version = '1.5.14', args = ['--cindy-remote-workspace'], mode = 'steer' } = {}) => {
+    const fixture = makeFixture(t);
+    const logFile = path.join(fixture.dir, 'remote-steer.log');
+    const script = `'use strict';
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args.length === 1 && args[0] === '--version') {
+  process.stdout.write('agy ${version}\\n');
+  process.exit(0);
+}
+const restricted = args.includes('--agent');
+const send = (message) => process.stdout.write(JSON.stringify(Object.assign({ jsonrpc: '2.0' }, message)) + '\\n');
+let lines = '';
+let promptCount = 0;
+let firstPromptId = null;
+let steer1Id = null;
+let steer2Id = null;
+process.stdin.on('data', (chunk) => {
+  lines += chunk.toString('utf8');
+  let index;
+  while ((index = lines.indexOf('\\n')) !== -1) {
+    const line = lines.slice(0, index);
+    lines = lines.slice(index + 1);
+    if (!line.trim()) continue;
+    const message = JSON.parse(line);
+    if (restricted) fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify(message) + '\\n');
+    if (message.method === 'initialize') {
+      const answer = () => send({
+        id: message.id,
+        result: {
+          protocolVersion: 1,
+          agentInfo: { name: 'Antigravity ACP Server', version: ${JSON.stringify(version)} },
+          agentCapabilities: { loadSession: true },
+          _meta: { retained: true },
+          authMethods: [],
+        },
+      });
+      if (restricted && ${JSON.stringify(mode)} === 'slow-open') setTimeout(answer, 80);
+      else answer();
+    } else if (message.method === 'session/new') {
+      send({ id: message.id, result: { sessionId: 'sess-r', configOptions: [] } });
+    } else if (message.method === 'session/prompt') {
+      promptCount += 1;
+      if (promptCount === 1) {
+        firstPromptId = message.id;
+        send({ method: 'session/update', params: { sessionId: 'sess-r', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'working' } } } });
+      } else if (promptCount === 2) {
+        steer1Id = message.id;
+        if (${JSON.stringify(mode)} === 'native-during-steer') {
+          send({ method: 'session/update', params: { sessionId: 'sess-r', update: { sessionUpdate: 'tool_call', toolCallId: 'native-steer', name: 'write_to_file', kind: 'edit', title: 'escape.txt', status: 'in_progress' } } });
+          return;
+        }
+        send({ id: firstPromptId, result: { stopReason: 'end_turn' } });
+        if (${JSON.stringify(mode)} === 'slow-open') {
+          send({ id: steer1Id, result: { stopReason: 'end_turn', usage: { outputTokens: 11 } } });
+          return;
+        }
+        send({
+          id: 'perm-steer',
+          method: 'session/request_permission',
+          params: {
+            sessionId: 'sess-r',
+            toolCall: {
+              sessionUpdate: 'tool_call', status: 'pending', toolCallId: 'mcp-steer-1',
+              name: 'call_mcp_tool', kind: 'execute', title: 'MCP Tool Bash',
+              rawInput: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+              args: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+            },
+            options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+          },
+        });
+      } else if (promptCount === 3) {
+        steer2Id = message.id;
+        send({ id: steer1Id, result: { stopReason: 'end_turn' } });
+        send({ method: 'session/update', params: { sessionId: 'sess-r', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'done' } } } });
+        send({ id: steer2Id, result: { stopReason: 'end_turn', usage: { outputTokens: 9 } } });
+      }
+    }
+  }
+});
+process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
+`;
+    fs.writeFileSync(path.join(fixture.dir, 'fake-agy.js'), script, 'utf8');
+    const bridge = startBridge(fixture.env, args);
+    t.after(() => bridge.child.kill());
+    const messages = () => bridge.stdout.text().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    const send = (message) => bridge.child.stdin.write(JSON.stringify(message) + '\n');
+    const reply = async (id, what) => {
+      await waitFor(() => messages().some((m) => m.id === id && !m.method), 8_000, what);
+      return messages().find((m) => m.id === id && !m.method);
+    };
+    const serverMessages = () => (fs.existsSync(logFile)
+      ? fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
+      : []);
+    const execServer = {
+      type: 'http', name: 'cindy_exec', url: 'http://127.0.0.1:4711/mcp/cindy_exec',
+      headers: [{ name: 'Authorization', value: 'Bearer task-secret' }],
+    };
+    return { bridge, messages, send, reply, serverMessages, execServer };
+  };
+
+  test('advertises steering and merges concurrent prompts while normalizing MCP tools in remote and guest workspaces', async (t) => {
+    const { bridge, messages, send, reply, serverMessages, execServer } = remoteSteerHarness(t, {
+      args: ['--cindy-remote-workspace', '--cindy-guest-workspace'],
+    });
+    bridge.child.stdin.write(INITIALIZE);
+    const init = await reply(0, 'initialize answer');
+    assert.deepEqual(init.result.agentCapabilities.mcpCapabilities, { http: true });
+    assert.deepEqual(init.result._meta, { retained: true, steering: { supported: true } });
+
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    assert.deepEqual((await reply(1, 'session/new answer')).result, { sessionId: 'sess-r', configOptions: [] });
+
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'first' }] } });
+    await waitFor(() => messages().some((m) => m.method === 'session/update'), 8_000, 'first turn update');
+
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'steer 1' }] } });
+    assert.deepEqual((await reply(3, 'first steer ack')).result, { outcome: 'injected' });
+    await waitFor(() => messages().some((m) => m.method === 'session/request_permission'), 8_000, 'MCP permission during steer');
+    const perm = messages().find((m) => m.method === 'session/request_permission');
+    assert.deepEqual({ title: perm.params.toolCall.title, kind: perm.params.toolCall.kind, rawInput: perm.params.toolCall.rawInput },
+      { title: 'Bash', kind: 'execute', rawInput: { command: 'pwd' } });
+    assert.equal(messages().some((m) => m.id === 2 && !m.method), false, 'original prompt stays open after first prompt settles');
+
+    send({ jsonrpc: '2.0', id: 4, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'steer 2' }] } });
+    assert.deepEqual((await reply(4, 'second steer ack')).result, { outcome: 'injected' });
+    const finalTurn = await reply(2, 'merged final prompt reply');
+    assert.deepEqual(finalTurn.result, { stopReason: 'end_turn', usage: { outputTokens: 9 } });
+
+    // No running turn left: steering asks Cindy to send a regular prompt instead.
+    send({ jsonrpc: '2.0', id: 5, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'late' }] } });
+    assert.deepEqual((await reply(5, 'idle steer reply')).result, { outcome: 'promptRequired', reason: 'noRunningTurn' });
+
+    // Guest isolation still blocks session/list.
+    send({ jsonrpc: '2.0', id: 6, method: 'session/list', params: {} });
+    assert.equal((await reply(6, 'guest session/list refusal')).error.code, -32601);
+
+    const promptsSeen = serverMessages().filter((m) => m.method === 'session/prompt');
+    assert.equal(promptsSeen.length, 3, 'late steer was not forwarded as a prompt');
+    assert.deepEqual(promptsSeen.map((m) => m.params.prompt[0].text), ['first', 'steer 1', 'steer 2']);
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  test('does not advertise steering in remote-workspace mode on prerelease agy versions', async (t) => {
+    const { bridge, reply } = remoteSteerHarness(t, { version: '1.5.14-beta.1' });
+    bridge.child.stdin.write(INITIALIZE);
+    const init = await reply(0, 'initialize answer');
+    assert.deepEqual(init.result.agentCapabilities.mcpCapabilities, { http: true });
+    assert.deepEqual(init.result._meta, { retained: true });
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  test('tracks a prompt queued during the opening phase so steering still attaches to it', async (t) => {
+    const { bridge, send, reply } = remoteSteerHarness(t, { mode: 'slow-open' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [
+      { type: 'http', name: 'cindy_exec', url: 'http://127.0.0.1:4711/mcp/cindy_exec', headers: [] },
+    ] } });
+    // Send session/prompt immediately while the restricted agent is still answering its own initialize.
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-first' }] } });
+    await reply(1, 'session/new answer');
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-steer' }] } });
+    assert.deepEqual((await reply(3, 'steer ack after queued prompt')).result, { outcome: 'injected' });
+    assert.deepEqual((await reply(2, 'merged prompt reply')).result, { stopReason: 'end_turn', usage: { outputTokens: 11 } });
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  test('still abandons the remote-workspace task if agy invokes a local tool during a steered prompt', async (t) => {
+    const { bridge, messages, send, reply, execServer } = remoteSteerHarness(t, { mode: 'native-during-steer' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    await reply(1, 'session/new answer');
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'first' }] } });
+    await waitFor(() => messages().some((m) => m.method === 'session/update'), 8_000, 'first turn update');
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'write locally' }] } });
+    const closed = await Promise.race([bridge.closed, new Promise((resolve) => setTimeout(() => resolve(null), 8_000))]);
+    assert.ok(closed, 'the entry ended the task');
+    assert.equal(closed.code, 78);
+    assert.match(bridge.stderr.text(), /its own tool "write_to_file"/);
+  });
+});
+
 test('a disconnected input rejects pending and subsequent ACP calls', async () => {
   const { connect } = await import(pathToFileURL(path.join(root, 'agy-client.js')));
   const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough() });

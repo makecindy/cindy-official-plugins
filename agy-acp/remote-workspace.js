@@ -38,6 +38,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { completeInitializeResult, isObject, isSessionOpen, normalizeMcpToolCall } = require('./agy-mcp.js');
+const { createSteeringRelay } = require('./agy-steering.js');
 
 const REMOTE_WORKSPACE_ARG = '--cindy-remote-workspace';
 const GUEST_WORKSPACE_ARG = '--cindy-guest-workspace';
@@ -253,6 +254,7 @@ function startRemoteWorkspace(agyPath, host) {
   const queued = [];
   const seenCalls = new Map();
   let serverNames = [];
+  const steering = createSteeringRelay();
 
   const running = (child) => Boolean(child) && child.exitCode === null && child.signalCode === null;
 
@@ -274,6 +276,18 @@ function startRemoteWorkspace(agyPath, host) {
   const toAgentLine = (line) => pipeWrite(agent.stdin, Buffer.concat([line, NEWLINE]), process.stdin);
   const toAgent = (message) => pipeWrite(agent.stdin, JSON.stringify(message) + '\n', process.stdin);
   const refuse = (id, code, message) => toClient({ jsonrpc: '2.0', id, error: { code, message } });
+  const forwardClientLine = (line, parsed) => {
+    const message = parsed === undefined ? parseLine(line) : parsed;
+    if (message) {
+      const handled = steering.handleClientMessage(message);
+      if (handled) {
+        if (handled.toClient) toClient(handled.toClient);
+        if (handled.toAgent) toAgent(handled.toAgent);
+        return;
+      }
+    }
+    toAgentLine(line);
+  };
 
   const finish = (code) => {
     if (finished) return;
@@ -365,7 +379,9 @@ function startRemoteWorkspace(agyPath, host) {
       if (!message || message.id !== request.id || message.method !== undefined) return;
       answered = true;
       phase = 'ready';
-      toClient(message.result !== undefined ? { ...message, result: completeInitializeResult(message.result) } : message);
+      toClient(message.result !== undefined
+        ? { ...message, result: steering.completeInitializeResult(completeInitializeResult(message.result)) }
+        : message);
       try {
         current.stdin.end();
       } catch {
@@ -435,7 +451,17 @@ function startRemoteWorkspace(agyPath, host) {
         toAgent(sessionRequest);
       }
       phase = 'session';
-      for (const pending of queued.splice(0)) toAgentLine(pending);
+      for (const pending of queued.splice(0)) forwardClientLine(pending);
+      return;
+    }
+    if (message.method === undefined && message.id !== undefined) {
+      const handled = steering.handleAgentResponse(message);
+      if (handled.action === 'drop') return;
+      if (handled.action === 'reply') {
+        toClient(handled.message, agent.stdout);
+        return;
+      }
+      toClientLine(line, agent.stdout);
       return;
     }
     const params = isObject(message.params) ? message.params : null;
@@ -476,7 +502,7 @@ function startRemoteWorkspace(agyPath, host) {
       return;
     }
     if (phase === 'session') {
-      toAgentLine(line);
+      forwardClientLine(line, message);
       return;
     }
     if (phase === 'opening') {

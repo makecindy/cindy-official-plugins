@@ -3,8 +3,8 @@
   "id": "agy-acp",
   "name": "Antigravity",
   "description": "Run Cindy tasks with the Google Antigravity CLI (agy) installed on this computer.",
-  "version": "0.4.4",
-  "releaseNotes": "Install Antigravity from the official Cindy plugin marketplace.",
+  "version": "0.4.5",
+  "releaseNotes": "Supports same-turn steering in remote and shared workspaces on Antigravity CLI 1.5.x, in addition to local tasks.",
   "minCindyVersion": "0.1.143",
   "icon": "icon.png",
   "locales": {
