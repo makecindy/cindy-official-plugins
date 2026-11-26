@@ -20,7 +20,7 @@
 
       auto: '每天自动整理',
       autoBtn: '打开自动化页设置', autoAgain: '重新打开自动化页',
-      autoHint: '会打开 Cindy 的自动化页，名称和要做的事已经填好；在那里选模型、确认频率后点保存。保存后每天整理一次，每次都会用到 AI 额度。',
+      autoHint: '会打开 Cindy 的自动化页，名称和要做的事已经填好；在那里选模型、确认频率后点保存。支持增量检查时，已确认所有来源无新增会跳过 AI；有新内容或无法确认时才启动整理。',
       autoOpened: '已打开自动化页：选好模型后点保存，自动整理就开始了。',
       autoLast: (w) => `上次整理：${w}`, autoNever: '还没有整理过。',
       autoStop: '要停用或改频率、换模型：在自动化页编辑或暂停「整理通讯录」。',
@@ -50,7 +50,7 @@
 
       auto: 'Daily tidy-up',
       autoBtn: 'Set up in Automations', autoAgain: 'Open Automations again',
-      autoHint: 'Opens Cindy’s Automations page with the name and instructions filled in. Pick a model, check the schedule and save. It then tidies up once a day; each run uses AI quota.',
+      autoHint: 'Opens Cindy’s Automations page with the name and instructions filled in. Pick a model, check the schedule and save. When change checking is available, confirmed idle runs skip AI; new content or an uncertain check starts the tidy-up.',
       autoOpened: 'Automations is open: pick a model and save to start.',
       autoLast: (w) => `Last tidy-up: ${w}`, autoNever: 'Not tidied up yet.',
       autoStop: 'To pause it or change the schedule or model, edit “Tidy up contacts” on the Automations page.',
