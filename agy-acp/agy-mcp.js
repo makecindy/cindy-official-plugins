@@ -30,17 +30,15 @@ function mapAgyStepStatus(status) {
   switch (typeof status === 'string' ? status.toLowerCase() : '') {
     case 'done':
     case 'completed':
+    case 'skipped':
+    case 'cancelled':
+    case 'canceled':
+    case 'failed':
       return 'completed';
     case 'in_progress':
     case 'inprogress':
     case 'running':
       return 'in_progress';
-    case 'skipped':
-    case 'cancelled':
-    case 'canceled':
-      return 'cancelled';
-    case 'failed':
-      return 'completed';
     default:
       return 'pending';
   }

@@ -62,6 +62,8 @@ const LAUNCH_DIR_PREFIX = 'cindy-agy-remote-';
 /** A launch directory this old belongs to a task that ended without cleaning up (a crash, a hard kill). */
 const STALE_LAUNCH_DIR_MS = 24 * 60 * 60 * 1000;
 
+/** Non-local agy tools explicitly allow-listed in `agentDefinition` (never touch host files or shell). */
+const REMOTE_SAFE_NATIVE_TOOLS = new Set(['search_web', 'ask_question', 'update_steps']);
 /** ACP tool kinds that mean "touched this computer" when the call is not an MCP call. */
 const LOCAL_KINDS = new Set(['read', 'edit', 'delete', 'move', 'execute']);
 /** agy's own file and command tools, by the name it reports. */
@@ -201,6 +203,7 @@ function inspectToolCall(toolCall, seen, serverNames = []) {
   });
   if (mcpCall) return { type: 'mcp', toolCall: mcpCall };
   const name = typeof toolCall.name === 'string' ? toolCall.name : '';
+  if (REMOTE_SAFE_NATIVE_TOOLS.has(name)) return { type: 'other' };
   const kind = typeof toolCall.kind === 'string' ? toolCall.kind : '';
   if (LOCAL_TOOL_NAMES.has(name) || LOCAL_KINDS.has(kind)) return { type: 'local', tool: name || kind };
   return { type: 'other' };
@@ -456,6 +459,17 @@ function startRemoteWorkspace(agyPath, host) {
       toClientLine(line, agent.stdout);
       return;
     }
+    if (isToolUpdate) {
+      const adapted = adaptAgyNativeToolUpdate(update, {
+        elicitationForm: clientSupportsElicitationForm(initRequest?.params),
+        seenSteps,
+      });
+      if (adapted?.action === 'drop') return;
+      if (adapted?.action === 'replace') {
+        toClient({ ...message, params: { ...params, update: adapted.update } }, agent.stdout);
+        return;
+      }
+    }
     const verdict = inspectToolCall(isPermission ? params.toolCall : update, seenCalls, serverNames);
     if (verdict.type === 'local') {
       if (isPermission) {
@@ -472,17 +486,6 @@ function startRemoteWorkspace(agyPath, host) {
     if (verdict.type === 'mcp') {
       toClient({ ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }, agent.stdout);
       return;
-    }
-    if (isToolUpdate) {
-      const adapted = adaptAgyNativeToolUpdate(update, {
-        elicitationForm: clientSupportsElicitationForm(initRequest?.params),
-        seenSteps,
-      });
-      if (adapted?.action === 'drop') return;
-      if (adapted?.action === 'replace') {
-        toClient({ ...message, params: { ...params, update: adapted.update } }, agent.stdout);
-        return;
-      }
     }
     toClientLine(line, agent.stdout);
   };

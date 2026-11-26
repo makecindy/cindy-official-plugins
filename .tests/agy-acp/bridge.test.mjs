@@ -95,6 +95,17 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
         // An agy that ignored the agent's tool list: one of its own tools runs, and the turn stays open.
         send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'call-n',
           name: 'write_to_file', kind: 'edit', title: 'note.txt', status: 'in_progress' } } });
+      } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'cards') {
+        // Native UI tools (even if tagged with edit/execute kinds) are adapted rather than stopping the remote task.
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'steps-r1',
+          name: 'update_steps', kind: 'edit', title: 'Run update_steps', status: 'in_progress',
+          rawInput: { steps: [{ title: 'Inspect', status: 'done' }, { title: 'Optional', status: 'skipped' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'steps-r1',
+          kind: 'edit', status: 'completed',
+          rawInput: { steps: [{ title: 'Inspect', status: 'done' }, { title: 'Optional', status: 'skipped' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ask-r1',
+          name: 'ask_question', kind: 'execute', title: 'Run ask_question', status: 'in_progress' } } });
+        send({ id: message.id, result: { stopReason: 'end_turn' } });
       } else if (message.method === 'session/prompt') {
         promptId = message.id;
         send({ id: 'perm-1', method: 'session/request_permission', params: { sessionId: 'sess-1',
@@ -481,6 +492,41 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.equal(refused.error.code, -32602);
     assert.match(refused.error.message, /cindy_exec/);
     assert.ok(!fs.existsSync(launchFile), 'the session process was never started');
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  test('remote-workspace mode adapts native update_steps and ask_question updates through the relay', async (t) => {
+    const { bridge, messages, send, reply, server } = remoteSession(t, { FAKE_AGY_SCRIPT: 'cards' });
+    send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { elicitation: { form: {} } } },
+    });
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [server('cindy_exec')] } });
+    await reply(1, 'session/new answer');
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'plan and ask' }] } });
+    assert.deepEqual((await reply(2, 'prompt answer')).result, { stopReason: 'end_turn' });
+    const updates = messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates, [
+      {
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Inspect', priority: 'medium', status: 'completed' },
+          { content: 'Optional', priority: 'medium', status: 'completed' },
+        ],
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ask-r1',
+        name: 'AskUserQuestion',
+        kind: 'execute',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+    ]);
     bridge.child.stdin.end();
     assert.equal((await bridge.closed).code, 0);
   });
@@ -2494,6 +2540,99 @@ process.stdout.write('', () => process.exit(0));
    * How much the pipes take before stdout keeps a queue varies with the load, so the burst grows until the
    * relay is still running when Cindy reads. The first such burst leaves only a little queued.
    */
+  test('adapts update_steps into ACP plans, drops duplicates, and renames ask_question only when elicitation.form is negotiated', async (t) => {
+    const withForm = await localRelay(t);
+    withForm.request(1, 'initialize', { clientCapabilities: { elicitation: { form: {} } } });
+    withForm.response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+    withForm.request(2, 'session/new', { cwd: '/repo', mcpServers: [] });
+    withForm.response(2, { sessionId: 'one' });
+
+    withForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'steps-l1',
+          name: 'update_steps',
+          kind: 'other',
+          title: 'Run update_steps',
+          status: 'in_progress',
+          rawInput: { steps: [{ title: 'Check', status: 'in_progress' }, { title: 'Skip', status: 'skipped' }] },
+        },
+      },
+    });
+    withForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'steps-l1',
+          kind: 'other',
+          status: 'completed',
+          rawInput: { steps: [{ title: 'Check', status: 'in_progress' }, { title: 'Skip', status: 'skipped' }] },
+        },
+      },
+    });
+    withForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'ask-l1',
+          name: 'ask_question',
+          kind: 'other',
+          title: 'Run ask_question',
+          status: 'in_progress',
+        },
+      },
+    });
+
+    const updatesWithForm = withForm.client.filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updatesWithForm, [
+      {
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Check', priority: 'medium', status: 'in_progress' },
+          { content: 'Skip', priority: 'medium', status: 'completed' },
+        ],
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ask-l1',
+        name: 'AskUserQuestion',
+        kind: 'other',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+    ]);
+
+    const withoutForm = await localRelay(t);
+    withoutForm.request(1, 'initialize', { clientCapabilities: { fs: { readTextFile: false } } });
+    withoutForm.response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+    withoutForm.request(2, 'session/new', { cwd: '/repo', mcpServers: [] });
+    withoutForm.response(2, { sessionId: 'one' });
+    withoutForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'ask-l2',
+          name: 'ask_question',
+          kind: 'other',
+          title: 'Run ask_question',
+          status: 'in_progress',
+        },
+      },
+    });
+    const updatesWithoutForm = withoutForm.client.filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.equal(updatesWithoutForm.length, 1);
+    assert.equal(updatesWithoutForm[0].name, 'ask_question');
+  });
+
   test('exits right after Cindy has read the last notification, not after the flush timeout', { timeout: 40_000 }, async (t) => {
     const flushTimeoutMs = 2_000;
     let bridge = null;
@@ -2599,7 +2738,7 @@ test('adapts Antigravity update_steps into ACP plan updates and normalizes ask_q
       entries: [
         { content: 'Inspect codebase', priority: 'medium', status: 'completed' },
         { content: 'Apply fix', priority: 'medium', status: 'in_progress' },
-        { content: 'Skip optional', priority: 'medium', status: 'cancelled' },
+        { content: 'Skip optional', priority: 'medium', status: 'completed' },
       ],
     },
   });
