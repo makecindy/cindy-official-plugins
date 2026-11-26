@@ -477,40 +477,94 @@ async function probe(args) {
   process.stdout.write(JSON.stringify(probeFingerprint(pr)) + '\n');
 }
 
-async function fetchReviewCommitChecks(owner, name, oids) {
-  if (!oids.length) return {};
-  const varDefs = oids.map((_, i) => `$oid${i}: GitObjectID!`).join(', ');
-  const fields = oids
-    .map((_, i) => `    c${i}: object(oid: $oid${i}) { ... on Commit { oid statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { checkSuite { app { databaseId slug } } } } } } } }`)
-    .join('\n');
-  const query = `query($owner: String!, $name: String!, ${varDefs}) {\n  repository(owner: $owner, name: $name) {\n${fields}\n  }\n}`;
-  const vars = { owner, name };
-  oids.forEach((oid, i) => { vars[`oid${i}`] = oid; });
-  try {
-    const res = await ghGraphQL(query, vars, { includeHeaders: true, fatalExit: false, retries: 1 });
-    const repo = res?.data?.repository ?? {};
-    const out = {};
-    oids.forEach((oid, i) => {
-      const commit = repo[`c${i}`];
-      if (!commit || commit.oid !== oid) return;
-      const contexts = commit.statusCheckRollup?.contexts;
-      if (contexts?.pageInfo?.hasNextPage) return;
-      const seen = new Map();
-      for (const n of contexts?.nodes ?? []) {
-        if (n?.__typename !== 'CheckRun') continue;
-        const appSlug = n.checkSuite?.app?.slug ?? null;
-        const appId = n.checkSuite?.app?.databaseId ?? null;
-        if (appSlug && Number.isInteger(appId) && appId > 0 && !seen.has(appSlug)) {
-          seen.set(appSlug, { appSlug, appId });
+const COMMIT_CHECK_BATCH_SIZE = 10;
+const MAX_COMMIT_CHECK_PAGES = 5;
+
+const COMMIT_CHECK_PAGE_QUERY = `
+query($owner: String!, $name: String!, $oid: GitObjectID!, $after: String!) {
+  repository(owner: $owner, name: $name) {
+    object(oid: $oid) {
+      ... on Commit {
+        oid
+        statusCheckRollup {
+          contexts(first: 100, after: $after) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              __typename
+              ... on CheckRun { checkSuite { app { databaseId slug } } }
+            }
+          }
         }
       }
-      out[oid] = [...seen.values()];
-    });
-    return out;
-  } catch {
-    // Best-effort historical check lookup; missing entries stay unverified (fail-closed).
-    return {};
+    }
   }
+}
+`;
+
+function collectCheckRunApps(nodes, seen) {
+  for (const n of nodes ?? []) {
+    if (n?.__typename !== 'CheckRun') continue;
+    const appSlug = n.checkSuite?.app?.slug ?? null;
+    const appId = n.checkSuite?.app?.databaseId ?? null;
+    if (appSlug && Number.isInteger(appId) && appId > 0 && !seen.has(appSlug)) {
+      seen.set(appSlug, { appSlug, appId });
+    }
+  }
+}
+
+async function fetchReviewCommitChecks(owner, name, oids) {
+  if (!oids.length) return {};
+  const out = {};
+  for (let offset = 0; offset < oids.length; offset += COMMIT_CHECK_BATCH_SIZE) {
+    const batch = oids.slice(offset, offset + COMMIT_CHECK_BATCH_SIZE);
+    const varDefs = batch.map((_, i) => `$oid${i}: GitObjectID!`).join(', ');
+    const fields = batch
+      .map((_, i) => `    c${i}: object(oid: $oid${i}) { ... on Commit { oid statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage endCursor } nodes { __typename ... on CheckRun { checkSuite { app { databaseId slug } } } } } } } }`)
+      .join('\n');
+    const query = `query($owner: String!, $name: String!, ${varDefs}) {\n  repository(owner: $owner, name: $name) {\n${fields}\n  }\n}`;
+    const vars = { owner, name };
+    batch.forEach((oid, i) => { vars[`oid${i}`] = oid; });
+    let repo;
+    try {
+      const res = await ghGraphQL(query, vars, { includeHeaders: true, fatalExit: false, retries: 1 });
+      repo = res?.data?.repository ?? {};
+    } catch {
+      // Preserve results already fetched by earlier batches; failed batch commits stay unverified.
+      continue;
+    }
+    for (let i = 0; i < batch.length; i++) {
+      const oid = batch[i];
+      const commit = repo[`c${i}`];
+      if (!commit || commit.oid !== oid) continue;
+      let contexts = commit.statusCheckRollup?.contexts;
+      const seen = new Map();
+      collectCheckRunApps(contexts?.nodes, seen);
+      let complete = !contexts?.pageInfo?.hasNextPage;
+      let pages = 1;
+      while (!complete && contexts?.pageInfo?.endCursor && pages < MAX_COMMIT_CHECK_PAGES) {
+        pages += 1;
+        try {
+          const pageRes = await ghGraphQL(
+            COMMIT_CHECK_PAGE_QUERY,
+            { owner, name, oid, after: contexts.pageInfo.endCursor },
+            { includeHeaders: true, fatalExit: false, retries: 1 },
+          );
+          const nextCommit = pageRes?.data?.repository?.object;
+          if (!nextCommit || nextCommit.oid !== oid) break;
+          contexts = nextCommit.statusCheckRollup?.contexts;
+          collectCheckRunApps(contexts?.nodes, seen);
+          complete = !contexts?.pageInfo?.hasNextPage;
+        } catch {
+          // Keep Apps already proved on earlier pages while leaving this commit unverified (`complete: false`).
+          break;
+        }
+      }
+      if (complete || seen.size > 0) {
+        out[oid] = { complete, apps: [...seen.values()] };
+      }
+    }
+  }
+  return out;
 }
 
 async function main() {

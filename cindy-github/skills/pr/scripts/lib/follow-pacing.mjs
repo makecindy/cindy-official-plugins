@@ -54,6 +54,14 @@ const timeOf = (value) => {
 
 const NON_REVIEW_STATES = new Set(['APPROVED', 'DISMISSED', 'PENDING']);
 
+function normalizeCommitCheckEntry(entry) {
+  if (Array.isArray(entry)) return { complete: true, apps: entry };
+  if (entry && typeof entry === 'object' && Array.isArray(entry.apps)) {
+    return { complete: Boolean(entry.complete), apps: entry.apps };
+  }
+  return null;
+}
+
 /**
  * Bots with concrete code-review activity on this snapshot (commented/requested-changes review,
  * inline thread comment, bot reaction, or a dedicated reviewer App check run). Used to decide
@@ -84,9 +92,10 @@ function corroboratedReviewerBots(snap) {
     }
   };
   for (const check of snap?.reviewerChecks ?? []) noteCheckApp(check);
-  for (const checks of Object.values(snap?.reviewCommitChecks && typeof snap.reviewCommitChecks === 'object' ? snap.reviewCommitChecks : {})) {
-    if (!Array.isArray(checks)) continue;
-    for (const check of checks) noteCheckApp(check);
+  for (const raw of Object.values(snap?.reviewCommitChecks && typeof snap.reviewCommitChecks === 'object' ? snap.reviewCommitChecks : {})) {
+    const entry = normalizeCommitCheckEntry(raw);
+    if (!entry) continue;
+    for (const check of entry.apps) noteCheckApp(check);
   }
   bots.delete('');
   return bots;
@@ -108,10 +117,10 @@ export function uncorroboratedApprovalCommits(snap) {
     if (corroborated.has(botKey(review.author))) continue;
     const oid = String(review.commitOid ?? '').trim();
     if (!oid || oid === head || !/^[0-9a-f]{7,64}$/i.test(oid)) continue;
-    if (snap?.reviewCommitChecks && Array.isArray(snap.reviewCommitChecks[oid])) continue;
+    if (commitChecksVerified(snap, oid)) continue;
     oids.add(oid);
   }
-  return [...oids].slice(-10);
+  return [...oids];
 }
 
 function isReviewerBotReview(review, corroborated) {
@@ -195,7 +204,8 @@ function commitChecksVerified(snap, commitOid) {
   if (oid === snap?.latestCommitOid) {
     return !snap.checksSummary?.unavailable && !snap.checksSummary?.truncated;
   }
-  return Boolean(snap?.reviewCommitChecks && Array.isArray(snap.reviewCommitChecks[oid]));
+  const entry = normalizeCommitCheckEntry(snap?.reviewCommitChecks?.[oid]);
+  return Boolean(entry?.complete);
 }
 
 /**

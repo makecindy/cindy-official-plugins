@@ -251,4 +251,33 @@ test('legacy per-PR reviewerBots drops verified approval-only bots while keeping
   const v2Prev = { reviewerBots: ['greptile-apps'], reviewerBotsVersion: REVIEWER_BOTS_VERSION };
   assert.deepEqual(expectedBots({ snap: unverifiedOlderSnap, previous: v2Prev, repoBots: {} }), ['greptile-apps']);
   assert.deepEqual(resolvePrReviewerBots(v2Prev, unverifiedOlderSnap), { bots: ['greptile-apps'], version: REVIEWER_BOTS_VERSION });
+
+  // Partial historical check page (`complete: false`): proved App on page 1 still corroborates its
+  // bot, while uncorroborated bots on that incomplete commit stay conservatively retained at v1.
+  const partialPageSnap = {
+    latestCommitOid: 'bbb2222',
+    reviews: [
+      { author: 'greptile-apps', authorIsBot: true, state: 'APPROVED', body: 'LGTM', commitOid: 'aaa1111', submittedAt: oldAt },
+      { author: 'cindy-auto-merge-bot', authorIsBot: true, state: 'APPROVED', body: 'ok', commitOid: 'aaa1111', submittedAt: oldAt },
+    ],
+    reviewerChecks: [],
+    reviewCommitChecks: {
+      aaa1111: { complete: false, apps: [{ appSlug: 'greptile-apps', appId: 99 }] },
+    },
+  };
+  assert.deepEqual([...reviewerBotsOf(partialPageSnap)], ['greptile-apps']);
+  assert.deepEqual(
+    resolvePrReviewerBots({ reviewerBots: ['cindy-auto-merge-bot', 'greptile-apps'] }, partialPageSnap),
+    { bots: ['cindy-auto-merge-bot', 'greptile-apps'], version: 1 },
+  );
+  assert.deepEqual(uncorroboratedApprovalCommits(partialPageSnap), ['aaa1111']);
+
+  // More than 10 historical approval commits are all returned (not truncated at 10).
+  const elevenOids = Array.from({ length: 11 }, (_, i) => `10000000000000000000000000000000000000${String(i).padStart(2, '0')}`);
+  const elevenSnap = {
+    latestCommitOid: 'bbb2222',
+    reviews: elevenOids.map((oid) => ({ author: 'cindy-auto-merge-bot', authorIsBot: true, state: 'APPROVED', body: 'ok', commitOid: oid, submittedAt: oldAt })),
+    reviewerChecks: [],
+  };
+  assert.deepEqual(uncorroboratedApprovalCommits(elevenSnap), elevenOids);
 });
