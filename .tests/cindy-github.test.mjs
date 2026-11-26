@@ -658,13 +658,13 @@ function visibleText(html) {
     .filter(Boolean);
 }
 
-function prGraphql({ owner = 'octo', repo = 'repo', number = 42, title = 'Built-in PR skill', ci = 'SUCCESS', threads = [], mergeState = 'CLEAN', merged = false, state = merged ? 'MERGED' : 'OPEN' } = {}) {
+function prGraphql({ owner = 'octo', repo = 'repo', number = 42, title = 'Built-in PR skill', ci = 'SUCCESS', threads = [], mergeState = 'CLEAN', merged = false, draft = false, state = merged ? 'MERGED' : 'OPEN' } = {}) {
   return (request) => {
     assert.equal(request.url, 'https://api.github.com/graphql');
     assert.deepEqual(JSON.parse(request.body).variables, { owner, name: repo, number });
     return jsonResponse({ data: { repository: { pullRequest: {
       number, title, url: `https://github.com/${owner}/${repo}/pull/${number}`, state,
-      isDraft: false, merged, mergeStateStatus: mergeState, reviewDecision: null, baseRefName: 'main',
+      isDraft: draft, merged, mergeStateStatus: mergeState, reviewDecision: null, baseRefName: 'main',
       commits: { nodes: [{ commit: { statusCheckRollup: ci ? { state: ci } : null } }] },
       reviewThreads: { nodes: threads.map((isResolved) => ({ isResolved })) },
     } } } });
@@ -1785,6 +1785,7 @@ function followScheduler(options = {}) {
         if (options.beforeGet) options.beforeGet(rows, args.id);
         data = rows.get(args.id) ?? null;
       } else if (tool === 'schedule_list') {
+        if (options.failList) throw new Error('cannot list schedules');
         data = [...rows.values()];
       } else if (tool === 'schedule_delete') {
         data = { deleted: args.id };
@@ -1794,6 +1795,7 @@ function followScheduler(options = {}) {
     } },
     node: { async request({ method }) {
       assert.equal(method, 'followSkillDir');
+      if (options.failDir) throw new Error('skill directory temporarily unavailable');
       return { ok: true, result: '/approved skills/agent-skills/skills/_root__cindy-github--pr' };
     } },
   };
@@ -2148,6 +2150,81 @@ test('ID-less discovery and native reuse accept the exact launcher, not a projec
       assert.equal(calls.some(c => ['schedule_update', 'schedule_create', 'schedule_delete'].includes(c)), false);
     }
   }
+});
+
+test('an ID-less old card retries ordinary refresh after a temporarily unavailable Skill directory', async () => {
+  const fault = { failDir: true };
+  const { hostApi, calls, rows } = followScheduler(fault);
+  const rt = createPrRuntime({ github: prGraphql(), hostApi });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const old = { id: 'old', targetSessionId: 's1', status: 'active', recurring: true,
+    preRunHook: oldFollowHook('https://github.com/octo/repo/pull/42') };
+  rows.set(old.id, old);
+  const failed = await rt.tool({ card_id: opened.callId });
+  assert.equal(failed.reply.result.follow_state, 'unverified');
+  assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:(stop|follow)"/);
+  assert.equal((await rt.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } })).reply.result.disposition, 'existing_task');
+  assert.equal((await rt.tool({ card_id: opened.callId, claim_follow: true })).reply.result.follow_claimed, false);
+  await rt.click(opened.callId, 'pr:stop');
+  await rt.click(opened.callId, 'pr:follow');
+  assert.equal(rt.agentRuns.length, 0);
+  assert.equal(calls.some(c => ['schedule_create', 'schedule_delete', 'schedule_update'].includes(c)), false);
+  fault.failDir = false;
+  const recovered = await rt.tool({ card_id: opened.callId });
+  assert.equal(recovered.reply.result.legacy_hook_repair.schedule_id, old.id);
+  assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleId, old.id);
+  assert.deepEqual(rows.get(old.id), old);
+});
+
+test('temporary old-card list/get failures preserve the same reservation; stopped or terminal cards never resume it', async () => {
+  for (const faultKey of ['failList', 'failGet']) {
+    for (const end of ['recover', 'stop', 'closed']) {
+      const fault = { [faultKey]: true };
+      const { hostApi, calls, rows } = followScheduler(fault);
+      const rt = createPrRuntime({ github: prGraphql({ draft: true }), hostApi });
+      const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+      rows.set('old', { id: 'old', targetSessionId: 's1', status: 'active', recurring: true, preRunHook: oldFollowHook('https://github.com/octo/repo/pull/42') });
+      assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'unverified');
+      assert.equal((await rt.tool({ card_id: opened.callId, following: true, claim_follow: true })).reply.result.follow_claimed, false);
+      if (end === 'stop') await rt.tool({ card_id: opened.callId, following: false });
+      if (end === 'closed') {
+        rt.setGithub(prGraphql({ state: 'CLOSED' }));
+        assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'stopped');
+        rt.setGithub(prGraphql());
+      }
+      fault[faultKey] = false;
+      const count = calls.length;
+      const result = await rt.tool({ card_id: opened.callId });
+      if (end === 'recover') assert.equal(result.reply.result.legacy_hook_repair.schedule_id, 'old');
+      else {
+        assert.equal(result.reply.result.follow_state, 'stopped');
+        assert.equal(calls.length, count);
+      }
+      assert.equal(calls.some(c => ['schedule_create', 'schedule_delete', 'schedule_update'].includes(c)), false);
+    }
+  }
+});
+
+test('existing authorized draft follow-ups are verified read-only, without starting ordinary draft cards', async () => {
+  for (const bound of [false, true]) {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: bound } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, ...(bound ? { published: true } : { following: true }) });
+    const id = bound ? 'sch-1' : 'old';
+    rows.set(id, { id, targetSessionId: 's1', status: 'active', recurring: true,
+      preRunHook: oldFollowHook('https://github.com/octo/repo/pull/42') });
+    rt.setGithub(prGraphql({ draft: true }));
+    const refreshed = await rt.tool({ card_id: opened.callId });
+    assert.equal(refreshed.reply.result.stage, 'draft');
+    assert.equal(refreshed.reply.result.legacy_hook_repair.schedule_id, id);
+    rows.get(id).status = 'paused';
+    assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'paused');
+    assert.equal(calls.filter(c => c === 'schedule_create').length, bound ? 1 : 0);
+  }
+  const { hostApi, calls } = followScheduler();
+  const rt = createPrRuntime({ github: prGraphql({ draft: true }), hostApi, kv: { prCard: { autoFollow: true } } });
+  await rt.tool({ repo: 'octo/repo', pr: 42 });
+  assert.deepEqual(calls, []);
 });
 
 test('pre-native discovery never creates a schedule or changes an ambiguous, paused, foreign or custom hook', async () => {
