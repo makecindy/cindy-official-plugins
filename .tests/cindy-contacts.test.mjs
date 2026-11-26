@@ -1430,6 +1430,44 @@ test('导入过 macOS 通讯录后，超过一天会在自动维护开始时自�
   }
 });
 
+test('an idle scheduled check still reconciles previously imported Mac contacts without a model', async () => {
+  const dir = tmp();
+  const fixture = path.join(dir, 'system.json');
+  const contact = id => ({ name: id, org: '', title: '', id, isCompany: false, emails: [], phones: [] });
+  fs.writeFileSync(fixture, JSON.stringify([contact('AB-1')]));
+  const a = boot({ libDir: dir, systemFixture: fixture, checks: {} });
+  try {
+    ok(await a.call('import_macos', { dry_run: false }));
+    const db = a.library.db('contacts.sqlite');
+    // Empty enabled-source set makes the scheduled check skip without consulting a provider.
+    await a.view('settings', { sources: { mail: false, calendar: false, im: false, cindy: false, github: false } });
+    const fire = async () => {
+      await a.deliver({ type: 'event', name: 'will-schedule-run', hookId: 'mac-idle', deadline: Date.now() + 30000 });
+      assert.equal(a.verdicts.at(-1).action, 'skip');
+      assert.equal(a.tasks.created.length, 0);
+      assert.equal(a.oneshots.length, 0);
+    };
+    const ageImport = () => db.prepare("UPDATE plugin_meta SET value = json_set(value, '$.at', ?) WHERE key = 'system_import'")
+      .run(new Date(Date.now() - 2 * 86400000).toISOString());
+    fs.writeFileSync(fixture, JSON.stringify([contact('AB-1'), contact('AB-2')]));
+    ageImport();
+    await fire();
+    for (let i = 0; i < 40 && ok(await a.call('stats')).people < 2; i++) {
+      await new Promise(r => setTimeout(r, 25));
+    }
+    assert.equal(ok(await a.call('stats')).people, 2);
+    fs.writeFileSync(fixture, JSON.stringify([contact('AB-3')]));
+    await fire();
+    await vm.runInContext('queue', a.ctx);
+    assert.equal(ok(await a.call('stats')).people, 2, 'an idle skip respects the daily cadence');
+    await a.view('settings', { macAutoSync: false });
+    ageImport();
+    await fire();
+    await vm.runInContext('queue', a.ctx);
+    assert.equal(ok(await a.call('stats')).people, 2, 'an idle skip respects opt-out');
+  } finally { a.close(); }
+});
+
 test('几千人的规模：批量写入、列表与查重都在可接受时间内完成', async () => {
   const dir = tmp();
   const a = boot({ libDir: dir });
@@ -2145,6 +2183,34 @@ test('backlog saves exact pagination, deduplicates gaps, backs off blocked work 
     const last = ok(await a.call('maintenance', { action: 'begin' }));
     assert.equal(last.backlog_pending, 1);
     assert.equal(last.backlog.length, 0);
+  } finally { a.close(); }
+});
+
+test('overlapping runs cannot roll back, postpone or complete a newer backlog position', async () => {
+  const a = boot({ libDir: tmp() });
+  try {
+    const first = ok(await a.call('maintenance', { action: 'begin' }));
+    const gap = { where: '工作邮箱', from: first.from, to: first.to, reason: '还有下一页',
+      resume: { account: 'gmail:work@example.test', query: 'after:1 before:2', cursor: 'page-2' } };
+    const coverage = first.sources.map(({ source }) => ({ source, coverage: 'complete' }));
+    ok(await a.call('maintenance', { action: 'end', run_id: first.run_id,
+      coverage: coverage.map(c => c.source === 'mail' ? { ...c, coverage: 'partial', gaps: [gap] } : c) }));
+    const begin = async () => ok(await a.call('maintenance', { action: 'begin' }));
+    const older = await begin(), newer = await begin();
+    const id = newer.backlog[0].id;
+    assert.equal(older.backlog[0].id, id);
+    const progress = (run, status, cursor) => a.call('maintenance', { action: 'progress',
+      run_id: run.run_id, backlog_id: id, status,
+      ...(cursor === undefined ? {} : { remaining: { ...gap, resume: { ...gap.resume, cursor } } }) });
+    ok(await progress(newer, 'partial', 'page-3'));
+    ok(await progress(newer, 'partial', 'page-4'));
+    assert.equal((await progress(older, 'partial', 'page-3')).errorCode, 'STALE_BACKLOG');
+    assert.equal((await progress(older, 'blocked')).errorCode, 'STALE_BACKLOG');
+    assert.equal((await progress(older, 'complete')).errorCode, 'STALE_BACKLOG');
+    ok(await a.call('maintenance', { action: 'end', run_id: older.run_id, coverage, backlog_done: [id] }));
+    assert.equal((await begin()).backlog[0].resume.cursor, 'page-4');
+    ok(await a.call('maintenance', { action: 'end', run_id: newer.run_id, coverage, backlog_done: [id] }));
+    assert.equal((await begin()).backlog_pending, 0);
   } finally { a.close(); }
 });
 

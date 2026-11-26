@@ -43,6 +43,7 @@
 - 新窗口读取中达到预算，用 `coverage.partial.gaps` 保存**精确账号/会话与剩余范围**，不要把已读完整的来源整段再登记。分页的 gap 带 `resume:{ account, query, cursor }`，分别是稳定账号、原始查询（包含固定起止时间等筛选条件）和下一页 token；不要放访问令牌或可执行命令。缺口必须覆盖尚未处理的其余账号/会话；扫描完成但档案尚未保存也属于缺口。
 - 历史补读每处理完一页，立即 `maintenance({ action:"progress", run_id, backlog_id, status:"partial", remaining:{ where, from, to, reason, resume:{account,query,cursor} } })`，只保留未读部分。分页时保留原 account/query；供应商 token 失效则清空 cursor，用同一查询重新列索引并 filter，不能声称完成。
 - 没有前进（权限、限流、附件确实必须但仍读不到）用 `progress` 的 `status:"blocked", note`；原断点保留，重试间隔按连续失败次数为 1、2、4、7 天。未尝试的欠账不用报 blocked，不改变它的失败次数。补完用 `status:"complete"`，或 end 的 `backlog_done`。不得把只补完第一页当整个欠账完成。
+- 如果 `progress` 返回 `STALE_BACKLOG`，说明另一轮已更新这个断点。结束本轮的补读，不要重试旧页或把该缺口加到 `backlog_done`；下次以 `begin` 返回的位置为准。
 - 旧版本没有 budget/filter/ack/progress 时不要调用不存在的 action；仍按任务预算、轻量索引与精确 coverage 收尾，原欠账保留，不伪造分页完成。
 
 ## 邮件与附件

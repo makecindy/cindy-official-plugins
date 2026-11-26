@@ -1726,8 +1726,8 @@ async function maintenanceBegin(input) {
   const allBacklog = scope === 'recent' ? (meta.backlog || []).filter((g) => settings.sources[g.source]) : [];
   const due = allBacklog.filter((g) => !g.retryAfter || Date.parse(g.retryAfter) <= now);
   const backlog = due.slice(0, 1);
-  run.backlogIds = backlog.map((g) => g.id);
-  // Rebuild after adding the issued ids; setMetaStmt serializes immediately.
+  run.backlogPositions = backlog.map((gap) => ({ id: gap.id, revision: gap.revision || null }));
+  // Rebuild after capturing the issued positions; setMetaStmt serializes immediately.
   metaWrites[0] = setMetaStmt(`run:${run.runId}`, run);
   await batch(metaWrites);
   const sources = enabled.map((k) => ({
@@ -1746,7 +1746,7 @@ async function maintenanceBegin(input) {
     sources,
     checked_empty: checkedEmpty,
     available_checks: await availableChangeChecks(),
-    backlog,
+    backlog: backlog.map(({ revision, ...gap }) => gap),
     backlog_pending: allBacklog.length,
     backlog_deferred: allBacklog.length - backlog.length,
     budget: { max_index_items: 200, max_body_reads: 30, max_source_calls: 40, max_backlog_items: 1, max_backlog_index_items: 50 },
@@ -1815,19 +1815,31 @@ async function maintenanceRefs(input) {
   return { acknowledged: keys.length };
 }
 
+function issuedBacklogPosition(run, id) {
+  return run?.backlogPositions?.find(position => position.id === id);
+}
+
+function isCurrentBacklogPosition(position, gap) {
+  return !!position && position.revision === (gap.revision || null);
+}
+
 /** Save a page immediately. A blocked gap retains its cursor and backs off instead of
  * rereading the same old mailbox every day. Unattempted gaps are never counted as failures.
  */
 async function maintenanceProgress(input) {
   const run = await getMeta(`run:${str(input.runId)}`);
   const id = str(input.backlogId);
-  if (!run || !run.backlogIds?.includes(id)) throw fail('INVALID_PARAMS', 'progress 需要本轮 begin 返回的 run_id 和 backlog_id。');
+  const position = issuedBacklogPosition(run, id);
+  if (!position) throw fail('INVALID_PARAMS', 'progress 需要本轮 begin 返回的 run_id 和 backlog_id。');
   if (!['partial', 'blocked', 'complete'].includes(input.status)) throw fail('INVALID_PARAMS', 'progress.status 需要 partial / blocked / complete。');
   const meta = (await getMeta('maintenance')) || { runs: [] };
   const backlog = [...(meta.backlog || [])];
   const index = backlog.findIndex((g) => g.id === id);
   if (index < 0) return { recorded: true, complete: true };
   const prev = backlog[index];
+  if (!isCurrentBacklogPosition(position, prev)) {
+    throw fail('STALE_BACKLOG', '另一轮已更新此欠账。不要重试旧断点，结束本轮并从下一次 begin 返回的位置续读。');
+  }
   if (input.status === 'complete') backlog.splice(index, 1);
   else if (input.status === 'blocked') {
     const attempts = Math.min(10, (Number(prev.attempts) || 0) + 1);
@@ -1842,9 +1854,17 @@ async function maintenanceProgress(input) {
     }
     backlog[index] = { ...prev, ...remaining, attempts: 0, retryAfter: '', lastAttemptAt: nowIso() };
   }
-  await batch([setMetaStmt('maintenance', { ...meta, backlog })]);
-  const current = backlog.find((g) => g.id === id);
-  return { recorded: true, complete: !current, ...(current ? { remaining: current } : {}) };
+  if (input.status === 'complete') {
+    await batch([setMetaStmt('maintenance', { ...meta, backlog })]);
+    return { recorded: true, complete: true };
+  }
+  const { revision: _previousRevision, ...remaining } = backlog[index];
+  // The tool router serializes updates. Advance the gap and its writer's snapshot
+  // in the same batch so only the writer can resume from the position it just saved.
+  backlog[index] = { ...remaining, revision: uuid() };
+  position.revision = backlog[index].revision;
+  await batch([setMetaStmt('maintenance', { ...meta, backlog }), setMetaStmt(`run:${run.runId}`, run)]);
+  return { recorded: true, complete: false, remaining };
 }
 
 function normalizeCoverage(list) {
@@ -1914,7 +1934,8 @@ async function maintenanceEnd(input) {
   if (run && run.scope === 'recent' && Array.isArray(run.sources)) {
     // 只有读全或读了一部分（缺口记成待补）的来源才推进；没读到的来源保持原位。
     const sources = { ...(meta.sources || {}) };
-    let backlog = (meta.backlog || []).filter((g) => !(Array.isArray(input.backlogDone) && input.backlogDone.includes(g.id) && (!run.backlogIds || run.backlogIds.includes(g.id))));
+    let backlog = (meta.backlog || []).filter((g) => !(Array.isArray(input.backlogDone) &&
+      input.backlogDone.includes(g.id) && isCurrentBacklogPosition(issuedBacklogPosition(run, g.id), g)));
     for (const c of covs) {
       if (!run.sources.includes(c.source)) continue;
       if (c.coverage === 'complete' || c.coverage === 'partial') sources[c.source] = { checkpoint: Date.parse(sources[c.source]?.checkpoint) > Date.parse(run.to) ? sources[c.source].checkpoint : run.to, coverage: c.coverage, at: now };
@@ -2050,31 +2071,29 @@ let macSyncing = false;
  */
 async function maybeAutoSyncMac() {
   if (macSyncing || state.importing) return;
+  macSyncing = true;
   try {
-    const settings = await getSettings();
-    let last = await getMeta('system_import');
-    if (!settings.macAutoSync) return;
-    if (!last || !last.at) {
-      // 从旧版智能通讯录迁来、档案里已经关联 Mac 名片的，等同于导入过：照样自动对账补齐
-      const [{ n }] = await q("SELECT count(*) AS n FROM contact_identities WHERE platform = 'apple-contacts'");
-      if (!Number(n)) return;
-      last = { at: '1970-01-01T00:00:00.000Z' };
-    }
-    // 读取的字段变多后（插件升级）不等满一天，马上对一次，把已有的人补齐
-    if (Date.now() - Date.parse(last.at) < 24 * 3600 * 1000 && (Number(last.fields) || 1) >= SYSTEM_FIELDS_VERSION) return;
-    if ((await platform()) !== 'darwin') return;
-    macSyncing = true;
-    serial(() => importSystem({ dryRun: false, auto: true }))
-      .then((r) => {
+    await serial(async () => {
+      if (!(await getSettings()).macAutoSync) return;
+      let last = await getMeta('system_import');
+      if (!last || !last.at) {
+        // 从旧版智能通讯录迁来、档案里已经关联 Mac 名片的，等同于导入过。
+        const [{ n }] = await q("SELECT count(*) AS n FROM contact_identities WHERE platform = 'apple-contacts'");
+        if (!Number(n)) return;
+        last = { at: '1970-01-01T00:00:00.000Z' };
+      }
+      // 读取字段变多时无需等满一天。
+      if (Date.now() - Date.parse(last.at) < DAY && (Number(last.fields) || 1) >= SYSTEM_FIELDS_VERSION) return;
+      if ((await platform()) !== 'darwin') return;
+      try {
+        const r = await importSystem({ dryRun: false, auto: true });
         if (r && (r.created || r.updated)) notifyChanged();
-      })
-      .catch((e) =>
-        serial(() => batch([setMetaStmt('system_import', { ...last, at: nowIso(), lastError: e.code || 'FAILED' })])).catch(() => {}),
-      )
-      .finally(() => {
-        macSyncing = false;
-      });
-  } catch (_) {
+      } catch (e) {
+        await batch([setMetaStmt('system_import', { ...last, at: nowIso(), lastError: e.code || 'FAILED' })]);
+      }
+    });
+  } catch (_) { /* Automatic reconciliation remains best effort. */ }
+  finally {
     macSyncing = false;
   }
 }
@@ -3159,6 +3178,9 @@ cindy.onHostMessage(async (msg) => {
   if (msg?.type === 'event' && msg.name === 'will-schedule-run') {
     let action = 'allow';
     try { action = await checkBeforeTidy(msg.deadline); } catch (_) { /* preserve the existing scan on an unknown result */ }
+    // The Agent's begin normally kicks off Mac reconciliation. A skipped run
+    // still does that local work, without waiting for it or starting the model.
+    if (action === 'skip') void maybeAutoSyncMac();
     await cindy.send({ type: 'event-verdict', hookId: msg.hookId, action });
     return;
   }
