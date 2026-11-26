@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.35",
-  "releaseNotes": "PR 跟进遇到域名解析失败或连接超时时，会说明原因。同一个 PR 有新动态时会提前复查，成功读完后自动清除告警。GitHub 限流时仍按规定时间重试。",
+  "version": "1.5.36",
+  "releaseNotes": "跟进已有 PR 时会接手已失败的检查，不再等待新的 GitHub 动态。部分检查失败、其余仍在运行时，会在全部结束后补报一次最终结果。新建或已手动修复前置检查的调度会自动选用合适的 Node.js，避免被系统旧版 Node.js 阻断。仍使用旧启动命令的已有调度，请刷新 PR 卡片查看修复说明。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -104,7 +104,7 @@
     },
     {
       "name": "pr_card",
-      "description": "在 Cindy 对话中展示 PR 卡片。发布前传 repo、head、base，可附 commits 和 files。当前任务成功发布后传 published=true 和 pr，有原卡片时带上 card_id。开启发完自动跟进且 PR 为非草稿时，卡片在支持的宿主上直接启动跟进；用户明确只要求发布时传 following=false。仅查看已有 PR 时省略 published。若返回 follow_state，跟进由卡片管理，请勿另建任务。active 为运行中，paused 为已暂停，stopped 为已停止，failed 为启动失败，unverified 为状态待核实。旧宿主仅在未返回 follow_state 时按 todo 交接；另建任务前以 claim_follow=true 申请并确认 follow_claimed=true。existing_task 表示已有其他任务负责，卡片中的入口仅用于导航。renamed 和 following 只报告已核实完成的操作。后台轮次用 card_id 刷新，提醒时可用 to_latest。",
+      "description": "在 Cindy 对话中展示 PR 卡片。发布前传 repo、head、base，可附 commits 和 files。当前任务成功发布后传 published=true 和 pr，有原卡片时带上 card_id。开启发完自动跟进且 PR 为非草稿时，卡片在支持的宿主上直接启动跟进；用户明确只要求发布时传 following=false。仅查看已有 PR 时省略 published。若返回 follow_state，跟进由卡片管理，请勿另建任务。active 为运行中，paused 为已暂停，stopped 为已停止，failed 为启动或核验失败，unverified 为状态待核实。若 unverified 同时返回 legacy_hook_repair，将其 schedule_id 和完整 command 原样告知用户，请用户在自动化设置中更换命令、保留原超时，勿自动改写。旧宿主仅在未返回 follow_state 时按 todo 交接；另建任务前以 claim_follow=true 申请并确认 follow_claimed=true。existing_task 表示已有其他任务负责，卡片中的入口仅用于导航。renamed 和 following 只报告已核实完成的操作。后台轮次用 card_id 刷新，提醒时可用 to_latest。",
       "parameters": {
         "type": "object",
         "properties": {
