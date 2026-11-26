@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -227,6 +227,53 @@ test('normalizeConflicting:两套字段域都认,未知窗口 carry-forward', ()
 });
 
 // ── 事件:检查 ──────────────────────────────────────────────────────────────
+
+test('PR launcher selects a supported Node from PATH and preserves hook stdin, exit codes and child snapshot runtime', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-node-launcher-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const launcher = path.join(path.dirname(gatePath), 'pr-node.cjs');
+  const stateDir = path.join(dir, 'state');
+  const fakeSnapshot = path.join(dir, 'fake-snapshot.mjs');
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fs.writeFileSync(fakeSnapshot, `if (Number(process.versions.node.split('.')[0]) < 18) process.exit(9);
+    if (process.argv.includes('--probe')) process.exit(1);
+    process.stdout.write(${JSON.stringify(JSON.stringify(red))});`);
+  // CI need not have an ancient Node installed. Simulate its reported version
+  // and executable identity, while selecting and actually running a modern
+  // executable from PATH. The real old binary is exercised by the dev-app test.
+  const simulateOld = `Object.defineProperty(process.versions,'node',{value:'8.12.0'});
+    Object.defineProperty(process,'execPath',{value:${JSON.stringify(path.join(dir, 'obsolete-node'))}});
+    const file=process.argv[1]; process.argv=[process.execPath,file,...process.argv.slice(2)]; require(file);`;
+  const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'path'));
+  const invoke = (extra = [], payload, modernPath = path.dirname(process.execPath)) => spawnSync(process.execPath,
+    ['-e', simulateOld, launcher, 'pr-heartbeat-gate.mjs', PR_URL,
+      '--state-dir', stateDir, '--snapshot', fakeSnapshot, '--no-pacing', ...extra], {
+      encoding: 'utf8', input: payload ? JSON.stringify(payload) : '', timeout: 15000,
+      env: { ...cleanEnv, PATH: modernPath, CINDY_PR_TRACE: '0' },
+    });
+  const payload = { event: 'schedule-pre-run', scheduleId: 'first-schedule', runId: 'first', firedAt: T0 };
+  const first = invoke([], payload);
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, /events=\[checks-failed\]/);
+  const saved = () => JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'));
+  assert.equal(saved().followStartId, 'first-schedule', 'real hook stdin must reach the modern child');
+  assert.equal(invoke(['--resume', 'Inspected the failed fixture check.']).status, 0);
+  const skipped = invoke([], { ...payload, runId: 'second', lastFinishedAt: T0 });
+  assert.equal(skipped.status, 2, skipped.stderr);
+  assert.match(skipped.stdout, /SKIP/);
+  const before = fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8');
+  const unsupported = invoke([], payload, dir);
+  assert.equal(unsupported.status, 1);
+  assert.match(unsupported.stderr, /needs Node\.js 18 or newer/);
+  assert.equal(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'), before);
+  // A modern Node already running the launcher does not need PATH probing.
+  const current = spawnSync(process.execPath, [launcher, 'pr-heartbeat-gate.mjs', '--help'], {
+    encoding: 'utf8', env: { ...cleanEnv, PATH: dir }, timeout: 15000,
+  });
+  assert.equal(current.status, 0, current.stderr);
+  assert.match(current.stderr, /Usage: node pr-heartbeat-gate/);
+});
 
 test('检查失败按名字每个 head 只报一次;换 head 后再失败会再报', () => {
   const red = snap({ checks: [check('build', 'failed', { required: true }), check('lint')] });

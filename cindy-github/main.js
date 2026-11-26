@@ -3407,7 +3407,7 @@ function ownedFollowSchedule(row, card) {
   if (!row || row.targetSessionId !== card.sessionId || !row.recurring || !row.preRunHook) return false;
   var command = String(row.preRunHook.command).replace(/\\/g, '/').toLowerCase();
   var url = followUrl(card);
-  return /(?:^|\s)node\s+["']?[^\r\n]+\/scripts\/pr-heartbeat-gate\.mjs["']?\s+/.test(command) &&
+  return /(?:^|\s)node\s+["']?[^\r\n]+\/scripts\/(?:pr-heartbeat-gate\.mjs["']?|pr-node\.cjs["']?\s+pr-heartbeat-gate\.mjs)\s+/.test(command) &&
     command.split(/\s+/).pop().replace(/^["']|["']$/g, '') === url && mentionsPr(row, url);
 }
 
@@ -3435,7 +3435,7 @@ async function createCardSchedule(card, settings) {
     recurring: true, cronExpr: '*/5 * * * *', intervalMs: 300000,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
     prTrigger: { url: url, change: 'any' }, silentWhenIdle: true, notify: { desktop: true, feishu: false },
-    preRunHook: { command: 'node "' + dir + '/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 },
+    preRunHook: { command: 'node "' + dir + '/scripts/pr-node.cjs" pr-heartbeat-gate.mjs ' + url, timeoutMs: 180000 },
   };
   if (model) {
     input.modelAgentKind = model.model_agent_kind;

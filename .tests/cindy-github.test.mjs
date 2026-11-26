@@ -1804,7 +1804,7 @@ test('publication starts exactly one verified follow-up without a model turn and
   assert.equal(schedule.effort, 'high');
   assert.equal(schedule.intervalMs, 300000);
   assert.equal(schedule.prTrigger.url, 'https://github.com/octo/repo/pull/42');
-  assert.match(schedule.preRunHook.command, /pr-heartbeat-gate\.mjs" https:\/\/github\.com\/octo\/repo\/pull\/42$/);
+  assert.match(schedule.preRunHook.command, /pr-node\.cjs" pr-heartbeat-gate\.mjs https:\/\/github\.com\/octo\/repo\/pull\/42$/);
   await runtime.tool({ card_id: callId, pr: 42, published: true });
   assert.equal(calls.filter(c => c === 'schedule_create').length, 1);
   await runtime.click(callId, 'pr:stop');
@@ -1812,6 +1812,22 @@ test('publication starts exactly one verified follow-up without a model turn and
   await runtime.tool({ card_id: callId });
   assert.equal(rows.size, 0);
   assert.equal(runtime.agentRuns.length, 0);
+});
+
+test('a legacy direct-node follow hook remains recognized when reusing or stopping its own schedule', async () => {
+  const { hostApi, calls, rows } = followScheduler();
+  const url = 'https://github.com/octo/repo/pull/42';
+  rows.set('old', {
+    id: 'old', targetSessionId: 's1', status: 'active', recurring: true,
+    prompt: 'Follow ' + url, preRunHook: { command: 'node "/approved skills/agent-skills/skills/_root__cindy-github--pr/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 },
+  });
+  const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+  assert.equal(opened.reply.result.follow_state, 'active');
+  assert.equal(calls.includes('schedule_create'), false);
+  assert.equal(rows.size, 1);
+  await rt.click(opened.callId, 'pr:stop');
+  assert.equal(rows.size, 0);
 });
 
 test('viewing an existing red PR does not start following; explicitly clicking hands its current failures to the owner', async () => {

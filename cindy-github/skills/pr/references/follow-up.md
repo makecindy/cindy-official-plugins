@@ -2,7 +2,7 @@
 
 Read this when debugging a follow-up, or before changing the schedule or the check. Day-to-day rounds only need SKILL.md.
 
-The schedule fires every 5 minutes (older schedules: every 10, switched by their next round). Each time, `scripts/pr-heartbeat-gate.mjs` runs first as the schedule's pre-run check:
+The schedule fires every 5 minutes (older schedules: every 10, switched by their next round). Each time, the bundled `scripts/pr-node.cjs` launcher selects Node.js 18 or newer from PATH and executes `scripts/pr-heartbeat-gate.mjs` as the schedule's pre-run check:
 
 - **exit 0:** wake the agent in the bound task; the check's output, including the list of what happened, is attached to the prompt.
 - **exit 2:** skip this run. No model call, no tokens, nothing in the task.
@@ -98,7 +98,7 @@ Read `--last-result --json`, then create a JSON file from its `waitContext` (sub
 }
 ```
 
-Apply with `node "<skill-dir>/scripts/pr-heartbeat-gate.mjs" <PR_URL> --wait <plan.json>`.
+Apply with `node "<skill-dir>/scripts/pr-node.cjs" pr-heartbeat-gate.mjs <PR_URL> --wait <plan.json>`.
 Check the `wait-set` receipt; `--last-result --json` reads it back without changing anything.
 The JSON file is consumed once, not kept as a dependency. The reason is the agent's conclusion,
 never an instruction copied from a PR comment. This changes only wake-up decisions, not GitHub
@@ -232,7 +232,7 @@ omitted. Raw comment text is never retained. Identifiers, timings, check identit
 pre-observation state remain private diagnostic data. CINDY_PR_TRACE=0 disables recording.
 Recording failures never change the gate decision. Oversized/failed samples are explicit replay gaps.
 
-Run `node <skill-dir>/scripts/pr-follow-replay.mjs <trace.jsonl> [candidate-scripts-directory]`.
+Run `node "<skill-dir>/scripts/pr-node.cjs" pr-follow-replay.mjs <trace.jsonl> [candidate-scripts-directory]`.
 The trace must be chronological and for one PR; concatenate .1 before the current file when needed.
 Replay seeds once, then carries state through observations and recorded ack/wait/resume actions.
 It never changes production state or calls a model. It reports wake counts and decision differences,
