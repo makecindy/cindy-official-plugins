@@ -70,24 +70,26 @@ function parseJson(text) {
   }
 }
 
+/** Reads a whole answer to keep it; one larger than MAX_KEPT_BYTES ends the request instead. */
+function keepAnswer(request, response, resolve, reject) {
+  const chunks = [];
+  let size = 0;
+  response.on('data', (chunk) => {
+    size += chunk.length;
+    if (size > MAX_KEPT_BYTES) {
+      request.destroy(new Error('answer too large to keep'));
+      return;
+    }
+    chunks.push(chunk);
+  });
+  response.on('end', () => resolve({ status: response.statusCode || 0, headers: response.headers, body: Buffer.concat(chunks) }));
+  response.on('error', reject);
+}
+
 /** One HTTP exchange with a server; the whole answer is read (none of these answers streams). */
 function exchange(url, { method = 'POST', headers = {}, body, signal }) {
   return new Promise((resolve, reject) => {
-    const target = new URL(url);
-    const request = http.request(target, { method, headers, signal }, (response) => {
-      const chunks = [];
-      let size = 0;
-      response.on('data', (chunk) => {
-        size += chunk.length;
-        if (size > MAX_KEPT_BYTES) {
-          request.destroy(new Error('answer too large to keep'));
-          return;
-        }
-        chunks.push(chunk);
-      });
-      response.on('end', () => resolve({ status: response.statusCode || 0, headers: response.headers, body: Buffer.concat(chunks) }));
-      response.on('error', reject);
-    });
+    const request = http.request(new URL(url), { method, headers, signal }, (response) => keepAnswer(request, response, resolve, reject));
     request.on('error', reject);
     request.end(body);
   });
@@ -106,10 +108,7 @@ function streamRefusal(url, headers, signal) {
         resolve(null);
         return;
       }
-      const chunks = [];
-      response.on('data', (chunk) => chunks.push(chunk));
-      response.on('end', () => resolve({ status, headers: response.headers, body: Buffer.concat(chunks) }));
-      response.on('error', () => resolve(null));
+      keepAnswer(request, response, resolve, () => resolve(null));
     });
     request.on('error', () => resolve(null));
     request.end();

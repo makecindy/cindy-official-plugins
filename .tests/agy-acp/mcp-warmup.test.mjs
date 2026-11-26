@@ -35,7 +35,7 @@ const DISCOVER = { jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _
 const INITIALIZE = { jsonrpc: '2.0', id: 2, method: 'initialize', params: { clientInfo: CLIENT_INFO, protocolVersion: '2025-11-25', capabilities: CAPABILITIES } };
 
 /** A server like Cindy's bridge behind the tunnel; `log` lists what reached it. */
-async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false } = {}) {
+async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false } = {}) {
   const sessions = new Map();
   const log = [];
   const server = http.createServer((req, res) => {
@@ -54,6 +54,7 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
           res.flushHeaders();
           return;
         }
+        if (req.method === 'GET' && hugeRefusal) return res.writeHead(405).end(Buffer.alloc(9 * 1024 * 1024, 0x61));
         if (req.method === 'GET') return res.writeHead(405, { allow: 'POST, DELETE' }).end();
         if (req.method === 'DELETE') {
           sessions.delete(sid);
@@ -173,6 +174,19 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     const [given] = await warmup.ready;
     assert.ok(Date.now() - started < 1_000, 'the warm-up does not wait for the stream to end');
     assert.notDeepEqual(given, entry, 'the handshake was still warmed');
+  });
+
+  // Why: the refusal is read to replay it; an abnormal server must not make this process keep megabytes.
+  test('an oversized event-stream refusal is not kept, and agy gets the server’s own answer', async (t) => {
+    const { entry, log } = await bridgeServer(t, { hugeRefusal: true });
+    const warmup = warmMcpServers([entry]);
+    t.after(() => warmup.close());
+    const [given] = await warmup.ready;
+    assert.notDeepEqual(given, entry, 'the rest of the handshake was still warmed');
+    const before = log.length;
+    const stream = await agyRequest(given.url, { method: 'GET' });
+    assert.equal(stream.status, 405);
+    assert.equal(log.length, before + 1, 'the event stream request went to the server');
   });
 
   test('a tool call whose connection drops is reported to agy as broken', async (t) => {
