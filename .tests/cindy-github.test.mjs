@@ -2470,7 +2470,7 @@ test('a follow claim says it is not running yet and keeps the card starting unti
 });
 
 test('an abandoned claim is released on the next refresh and the follow button comes back', async () => {
-  const runtime = createPrRuntime({ github: prGraphql() });
+  const runtime = createPrRuntime({ github: prGraphql(), hostApi: followScheduler().hostApi });
   const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
   ageClaim(runtime, claimed.callId);
   const refreshed = await runtime.tool({ card_id: claimed.callId });
@@ -2492,7 +2492,7 @@ test('an abandoned claim is released on the next refresh and the follow button c
 });
 
 test('an abandoned claim from another task no longer blocks this task', async () => {
-  const runtime = createPrRuntime({ github: prGraphql() });
+  const runtime = createPrRuntime({ github: prGraphql(), hostApi: followScheduler().hostApi });
   const first = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
   const blocked = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
   assert.equal(blocked.reply.result.disposition, 'existing_task');
@@ -2550,7 +2550,8 @@ test('the claim clock redraws the card by itself after ten minutes, also after a
     timers.push({ fn, delay });
     return timers.length;
   };
-  const runtime = createPrRuntime({ github: prGraphql(), onTimer });
+  const { hostApi } = followScheduler();
+  const runtime = createPrRuntime({ github: prGraphql(), hostApi, onTimer });
   const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
   const clock = timers.find((t) => t.delay > CLAIM_TTL - 5000 && t.delay <= CLAIM_TTL);
   assert.ok(clock, 'claim timer armed');
@@ -2570,7 +2571,7 @@ test('the claim clock redraws the card by itself after ten minutes, also after a
   delete legacy.claimedAt;
   files.set(`pr-cards/${claimed.callId}.json`, JSON.stringify(legacy));
   const woken = [];
-  const restarted = createPrRuntime({ github: prGraphql(), files, onTimer: (fn, delay) => {
+  const restarted = createPrRuntime({ github: prGraphql(), hostApi, files, onTimer: (fn, delay) => {
     if (delay < 60_000 && delay > 0) return setTimeout(fn, delay);
     woken.push({ fn, delay });
     return woken.length;
@@ -2585,4 +2586,61 @@ test('the claim clock redraws the card by itself after ten minutes, also after a
   assert.equal(stamped.pending, 'follow');
   assert.equal(typeof stamped.claimedAt, 'number');
   assert.ok(woken.some((t) => t.delay > CLAIM_TTL - 5000 && t.delay <= CLAIM_TTL));
+});
+
+test('an expired claim is kept when the scheduler cannot be queried, and listing needs no node worker', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  // No scheduler bridge at all: a schedule may exist unreported, so the claim stays and still blocks others.
+  const bare = createPrRuntime({ github: prGraphql() });
+  const claimed = await bare.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  ageClaim(bare, claimed.callId);
+  const refreshed = await bare.tool({ card_id: claimed.callId });
+  assert.equal(refreshed.reply.result.note, undefined);
+  assert.equal(JSON.parse(bare.files.get(`pr-cards/${claimed.callId}.json`)).pending, 'follow');
+  const other = await bare.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(other.reply.result.disposition, 'existing_task');
+
+  // Only the host tool bridge: the running schedule is still found and the card becomes following.
+  const { hostApi, rows } = followScheduler();
+  delete hostApi.node;
+  const listOnly = createPrRuntime({ github: prGraphql(), hostApi });
+  const second = await listOnly.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  rows.set('agent-made', {
+    id: 'agent-made', prompt: 'Follow ' + url, targetSessionId: 's1', recurring: true, status: 'active',
+    preRunHook: { command: 'node "/skills/pr/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 },
+  });
+  ageClaim(listOnly, second.callId);
+  await listOnly.tool({ card_id: second.callId });
+  const saved = JSON.parse(listOnly.files.get(`pr-cards/${second.callId}.json`));
+  assert.equal(saved.following, true);
+  assert.equal(saved.pending, null);
+});
+
+test('every saved follow claim is timed, including the hand-off after marking a draft ready', async () => {
+  let draft = true;
+  const github = (request) => {
+    const { query } = JSON.parse(request.body);
+    if (query.startsWith('mutation')) { draft = false; return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }); }
+    if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+    return jsonResponse({ data: { repository: { pullRequest: {
+      number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: draft, merged: false,
+      mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] },
+    } } } });
+  };
+  const timers = [];
+  const runtime = createPrRuntime({ github, kv: { prCard: { autoRename: false, autoFollow: true } }, onTimer: (fn, delay) => {
+    if (delay < 60_000) return setTimeout(fn, delay);
+    timers.push({ fn, delay });
+    return timers.length;
+  } });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+  await runtime.click(cardId, 'pr:ready');
+  assert.equal(runtime.agentRuns.length, 1);
+  const saved = JSON.parse(runtime.files.get(`pr-cards/${cardId}.json`));
+  assert.equal(saved.pending, 'follow');
+  assert.ok(Math.abs(saved.claimedAt - Date.now()) < 5000);
+  assert.ok(timers.some((t) => t.delay > CLAIM_TTL - 5000 && t.delay <= CLAIM_TTL));
+  // Reporting following clears the clock from the record.
+  await runtime.tool({ card_id: cardId, following: true });
+  assert.equal(JSON.parse(runtime.files.get(`pr-cards/${cardId}.json`)).claimedAt, undefined);
 });

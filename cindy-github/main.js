@@ -2588,11 +2588,16 @@ function prAnchor(card) {
 }
 
 async function savePrCard(card) {
+  // The claim clock lives with the record, so no path that saves a claim can leave it untimed.
+  if (!prClaimWaiting(card)) delete card.claimedAt;
+  else if (typeof card.claimedAt !== 'number') card.claimedAt = Date.now();
   var r = await cindy.send({
     type: 'fs-request', root: 'data', op: 'write',
     path: prCardPath(card.id), content: JSON.stringify(card),
   });
-  return Boolean(r && r.ok);
+  var saved = Boolean(r && r.ok);
+  if (saved && prClaimWaiting(card) && !prClaimTimers[card.id]) armPrClaimTimer(card.id, prClaimDelay(card));
+  return saved;
 }
 
 /** The record must stop saying "following is starting" once the handoff clearly failed: try a few times. */
@@ -3527,6 +3532,15 @@ function prClaimWaiting(card) {
   return !!card && !card.alias && card.pending === 'follow' && !card.scheduleAction && !card.following && !card.scheduleId;
 }
 
+/** Listing schedules needs only the host tool bridge (creating one also needs the node worker). */
+function hasSchedulerQuery() {
+  return !!(cindy.host && typeof cindy.host.call === 'function');
+}
+
+function prClaimExpired(card) {
+  return typeof card.claimedAt === 'number' && Date.now() - card.claimedAt >= PR_CLAIM_TTL;
+}
+
 function prClaimMinutes() {
   return { minutes: Math.round(PR_CLAIM_TTL / 60000) };
 }
@@ -3538,14 +3552,16 @@ function stampPrClaim(card) {
 
 /**
  * Settle an expired, unconfirmed claim. Returns 'following' when a schedule this task owns turned out to be
- * running, 'released' when none was found, 'stamped' for a record saved before claims were timed, or null when
- * nothing changed (not yet expired, the scheduler could not be read, or a schedule exists that is not running).
+ * running, 'released' when the scheduler confirmed there is none, 'stamped' for a record saved before claims were
+ * timed, or null when nothing changed: not yet expired, the scheduler cannot be queried here or failed (an
+ * unconfirmed schedule may still exist), or a schedule exists that is not running.
  */
 async function expirePrClaim(card, now) {
   if (!prClaimWaiting(card)) return null;
   if (typeof card.claimedAt !== 'number') { card.claimedAt = now; return 'stamped'; }
   if (now - card.claimedAt < PR_CLAIM_TTL) return null;
-  if (card.stage === 'open' && card.pr && hasCardScheduler()) {
+  if (card.stage === 'open' && card.pr) {
+    if (!hasSchedulerQuery()) return null;
     var rows;
     try { rows = await schedulesForPr(card); } catch (_) { return null; }
     var mine = rows.filter(function (row) { return row.targetSessionId === card.sessionId; });
@@ -3573,8 +3589,10 @@ async function settlePrClaim(card) {
     armPrClaimTimer(card.id, PR_CLAIM_RETRY);
     return null;
   }
-  if (prClaimWaiting(card)) armPrClaimTimer(card.id, prClaimDelay(card));
-  else if (outcome) await sendPrCard(card, await readPrSettings(), null);
+  // Without a way to query, an expired claim stays until the task reports; do not poll for nothing.
+  if (prClaimWaiting(card)) {
+    if (!(prClaimExpired(card) && !hasSchedulerQuery())) armPrClaimTimer(card.id, prClaimDelay(card));
+  } else if (outcome) await sendPrCard(card, await readPrSettings(), null);
   return outcome;
 }
 
@@ -3757,7 +3775,6 @@ async function prCardTool(args, callId) {
   var movedFrom = updating && a.to_latest === true && prAnchor(card) !== callId ? await movePrCard(card, callId) : null;
   // 状态没存上时按钮点了找不到记录:不显示卡片,让 Agent 稍后重试。
   if (!(await savePrCard(card))) return fail(t('prSaveFailed'));
-  if (prClaimWaiting(card)) armPrClaimTimer(card.id, prClaimDelay(card));
   if (movedFrom) await sendPrMovedStub(card, movedFrom, callId);
   var delivered = await sendPrCard(card, settings, updating && !movedFrom ? callId : null);
   if (!updating) await prunePrCards();
@@ -3932,6 +3949,7 @@ async function markPrReadyInner(card, settings, msg, progress) {
     // Record "following is starting" before handing it to the agent, as the first step does for "ready":
     // if that cannot be saved, nothing is sent, so a later click can never send it a second time.
     card.pending = 'follow';
+    stampPrClaim(card);
     if (!(await savePrCard(card))) {
       card.pending = null;
       card.note = t('prSaveFailed');
@@ -4102,7 +4120,6 @@ async function prCardAction(msg) {
     await sendPrCard(saved, settings, null);
     return;
   }
-  if (recorded && prClaimWaiting(card)) armPrClaimTimer(card.id, prClaimDelay(card));
   // 原地更新被点的卡片:交给 Agent 的动作报 working 直到它用 pr_card 回写结果,其余点击报 done 立即结束。
   await sendPrCard(card, settings, null);
 }
@@ -4517,7 +4534,9 @@ void enqueuePr(async function () {
     var saved = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: listing.entries[i].path });
     var record = null;
     try { record = saved && saved.ok ? JSON.parse(saved.content) : null; } catch (_) {}
-    if (record && record.id === match[1] && prClaimWaiting(record)) armPrClaimTimer(record.id, prClaimDelay(record));
+    if (record && record.id === match[1] && prClaimWaiting(record) && !(prClaimExpired(record) && !hasSchedulerQuery())) {
+      armPrClaimTimer(record.id, prClaimDelay(record));
+    }
   }
 }).catch(function () {});
 
