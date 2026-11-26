@@ -100,7 +100,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.37');
+  assert.equal(manifest.version, '1.5.38');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -2334,6 +2334,111 @@ test('pre-native discovery never creates a schedule or changes an ambiguous, pau
     assert.deepEqual([...rows.values()], candidates, label);
     assert.equal(calls.some(c => ['schedule_create', 'schedule_update', 'schedule_delete'].includes(c)), false, label);
   }
+});
+
+test('a card stuck in schedule verification error recovers on ordinary refresh after hook repair or deletion and never mixes following with stale error', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  const launcherHook = {
+    command: oldFollowHook(url).command.replace('pr-heartbeat-gate.mjs"', 'pr-node.cjs" pr-heartbeat-gate.mjs'),
+    timeoutMs: 180000,
+  };
+  for (const outcome of ['repaired-launcher', 'repaired-legacy', 'deleted']) {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+    const customRow = { id: 'old', targetSessionId: 's1', status: 'active', recurring: true,
+      preRunHook: { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 } };
+    rows.set(customRow.id, customRow);
+
+    // Initial refresh fails hook verification and persists scheduleError.
+    const failed = await rt.tool({ card_id: opened.callId });
+    assert.equal(failed.reply.result.follow_state, 'failed', outcome);
+    assert.match(failed.reply.result.note, /无法确认这条调度仍使用插件生成的前置检查/, outcome);
+
+    // While the custom hook still exists, following: true must not render 跟进中 alongside the red error,
+    // and claim_follow must not grant a duplicate claim.
+    const forged = await rt.tool({ card_id: opened.callId, following: true, claim_follow: true });
+    assert.equal(forged.reply.result.follow_state, 'failed', outcome);
+    assert.equal(forged.reply.result.follow_claimed, false, outcome);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-live-label=/, outcome);
+    assert.match(rt.lastCard(opened.callId).html, /无法确认这条调度仍使用插件生成的前置检查/, outcome);
+
+    // User fixes the hook or removes the schedule in Automation settings.
+    if (outcome === 'repaired-launcher') rows.set(customRow.id, { ...customRow, preRunHook: launcherHook });
+    else if (outcome === 'repaired-legacy') rows.set(customRow.id, { ...customRow, preRunHook: oldFollowHook(url) });
+    else rows.delete(customRow.id);
+
+    const recovered = await rt.tool({ card_id: opened.callId });
+    const card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(card.scheduleError, null, outcome);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /无法确认这条调度仍使用插件生成的前置检查/, outcome);
+    if (outcome === 'repaired-launcher') {
+      assert.equal(recovered.reply.result.follow_state, 'active');
+      assert.equal(card.scheduleId, customRow.id);
+      assert.equal(card.following, true);
+      assert.equal(card.note, null);
+      assert.match(rt.lastCard(opened.callId).html, /data-ghost-live-label=/);
+    } else if (outcome === 'repaired-legacy') {
+      assert.equal(recovered.reply.result.follow_state, 'unverified');
+      assert.equal(card.scheduleId, customRow.id);
+      assert.equal(recovered.reply.result.legacy_hook_repair.schedule_id, customRow.id);
+    } else {
+      assert.equal(recovered.reply.result.follow_state, 'stopped');
+      assert.equal(card.scheduleId, null);
+      assert.equal(card.following, false);
+      assert.equal(card.note, null);
+      assert.equal((await rt.tool({ card_id: opened.callId, claim_follow: true })).reply.result.follow_claimed, true);
+    }
+    assert.equal(calls.some(c => ['schedule_create', 'schedule_update', 'schedule_delete'].includes(c)), false, outcome);
+  }
+});
+
+test('a bound card whose Stop failed on a custom hook clears scheduleError once repaired or deleted', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  for (const outcome of ['repaired', 'deleted']) {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    const validHook = { ...rows.get('sch-1').preRunHook };
+    rows.get('sch-1').preRunHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 };
+
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(calls.includes('schedule_delete'), false, outcome);
+    assert.match(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleError, /无法确认这条调度仍使用插件生成的前置检查/, outcome);
+
+    // Refresh while still custom preserves the error.
+    await rt.tool({ card_id: opened.callId, following: true });
+    assert.match(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleError, /无法确认这条调度仍使用插件生成的前置检查/, outcome);
+
+    if (outcome === 'repaired') rows.get('sch-1').preRunHook = validHook;
+    else rows.delete('sch-1');
+
+    const refreshed = await rt.tool({ card_id: opened.callId });
+    const card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(card.scheduleError, null, outcome);
+    assert.equal(card.note, null, outcome);
+    assert.equal(refreshed.reply.result.follow_state, outcome === 'repaired' ? 'active' : 'stopped', outcome);
+  }
+});
+
+test('a failed creation error survives passive refresh without claiming followedEver and clears on explicit stop', async () => {
+  const fault = { reject: true };
+  const { hostApi } = followScheduler(fault);
+  const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+  assert.equal(opened.reply.result.follow_state, 'failed');
+  const refreshed = await rt.tool({ card_id: opened.callId });
+  const cardAfterRefresh = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+  assert.equal(refreshed.reply.result.follow_state, 'failed');
+  assert.equal(cardAfterRefresh.followedEver, false);
+  assert.match(cardAfterRefresh.scheduleError, /scheduler unavailable/);
+  assert.equal(cardAfterRefresh.scheduleStatus, null);
+
+  const stopped = await rt.tool({ card_id: opened.callId, following: false });
+  const cardAfterStop = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+  assert.equal(cardAfterStop.scheduleError, null);
+  assert.equal(cardAfterStop.note, null);
+  assert.equal(stopped.reply.result.note, undefined);
 });
 
 test('viewing an existing red PR does not start following; explicitly clicking hands its current failures to the owner', async () => {
