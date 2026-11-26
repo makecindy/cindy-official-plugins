@@ -152,6 +152,7 @@ var MESSAGES = {
     prFollowNeedsRepair: '跟进待修复',
     prFollowUnverified: '跟进待核实',
     prManualStop: '已有调度请在自动化设置手动停止（ID：{id}），避免删除用户修改的配置。',
+    prManualStopEntry: '手动停止',
     prRepairSchedule: '调度 ID：{id}。选中复制下方完整命令：',
     prScheduleHookUnknown: '无法确认这条调度仍使用插件生成的前置检查，请在自动化设置中查看或停止它。',
     prReadyFailed: '没能转为正式 PR：{detail}',
@@ -305,6 +306,7 @@ var MESSAGES = {
     prFollowNeedsRepair: 'Follow-up needs repair',
     prFollowUnverified: 'Follow-up unverified',
     prManualStop: 'Stop the existing schedule manually in Automation settings (ID: {id}) to preserve user edits.',
+    prManualStopEntry: 'Manual stop',
     prRepairSchedule: 'Schedule ID: {id}. Select and copy the full command below:',
     prScheduleHookUnknown: 'Cannot confirm this schedule still uses the plugin-generated pre-run hook. View or stop it in Automation settings.',
     prReadyFailed: 'Could not mark it ready for review: {detail}',
@@ -458,6 +460,7 @@ var MESSAGES = {
     prFollowNeedsRepair: 'フォローの修復が必要',
     prFollowUnverified: 'フォロー未確認',
     prManualStop: 'ユーザー設定を守るため、自動化設定で既存スケジュールを手動停止してください（ID：{id}）。',
+    prManualStopEntry: '手動停止',
     prRepairSchedule: 'スケジュール ID：{id}。下のコマンド全体を選択してコピーしてください：',
     prScheduleHookUnknown: 'このスケジュールがプラグインの事前チェックを使っているか確認できません。自動化設定で確認または停止してください。',
     prReadyFailed: '正式な PR にできませんでした：{detail}',
@@ -611,6 +614,7 @@ var MESSAGES = {
     prFollowNeedsRepair: '팔로우 복구 필요',
     prFollowUnverified: '팔로우 미확인',
     prManualStop: '사용자 설정을 보존하려면 자동화 설정에서 기존 일정을 직접 중지하세요 (ID: {id}).',
+    prManualStopEntry: '수동 중지',
     prRepairSchedule: '자동화 ID: {id}. 아래 전체 명령을 선택하여 복사하세요:',
     prScheduleHookUnknown: '이 자동화가 플러그인이 생성한 사전 실행 검사를 사용 중인지 확인할 수 없습니다. 자동화 설정에서 확인하거나 중지하세요.',
     prReadyFailed: '정식 PR로 전환하지 못했습니다: {detail}',
@@ -3334,9 +3338,9 @@ function renderPrCard(card, settings) {
             : unverifiedLegacyFollow(card)
               ? prChip(t('prFollowUnverified'), 'wait')
               : card.following
-              ? (manualFollowStop(card) ? '' : prQuietButton('pr:stop', t('prStop'))) + (card.legacyHookRepair ? prChip(t('prFollowNeedsRepair'), 'warn') : prFollowingPill())
+              ? (manualFollowStop(card) ? prQuietButton('pr:manual-stop', t('prManualStopEntry')) : prQuietButton('pr:stop', t('prStop'))) + (card.legacyHookRepair ? prChip(t('prFollowNeedsRepair'), 'warn') : prFollowingPill())
               : card.scheduleId
-                ? (manualFollowStop(card) ? '' : prQuietButton('pr:stop', t('prStop'))) + prChip(card.scheduleStatus === 'paused' ? t('prFollowPaused') : t('prFollowEnded'), card.scheduleStatus === 'paused' ? 'wait' : undefined)
+                ? (manualFollowStop(card) ? prQuietButton('pr:manual-stop', t('prManualStopEntry')) : prQuietButton('pr:stop', t('prStop'))) + prChip(card.scheduleStatus === 'paused' ? t('prFollowPaused') : t('prFollowEnded'), card.scheduleStatus === 'paused' ? 'wait' : undefined)
                 : pr.draft
                   ? (card.readyUncertain ? '' : prCtaButton('pr:ready', t('prMarkReady')))
                   : prPillButton('pr:follow', t('prFollow'));
@@ -3349,6 +3353,9 @@ function renderPrCard(card, settings) {
             card.scheduleId || unverifiedLegacyFollow(card) || card.scheduleError ? 'prFollowUnverified' : 'prFollowEnded'
       )));
       left = prContextLine(card);
+      if (manualFollowStop(card) && !card.pending) {
+        actions = prQuietButton('pr:manual-stop', t('prManualStopEntry'));
+      }
     }
   }
   if (card.note) {
@@ -3366,6 +3373,12 @@ function renderPrCard(card, settings) {
       '<pre style="margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text">' +
       prEsc(card.legacyHookRepair.command) + '</pre></div>';
   }
+  var showManualStopPanel = manualFollowStop(card) && card.manualStopOpen === true &&
+    card.note !== t('prManualStop', { id: card.scheduleId });
+  if (showManualStopPanel) {
+    body += '<div style="padding:10px 16px;border-top:1px solid var(--border-default);font-size:12px;line-height:1.5;color:var(--text-secondary);user-select:text">' +
+      prEsc(t('prManualStop', { id: card.scheduleId })) + '</div>';
+  }
   // Settings remain available after merge/close, including when the host updates an open snapshot.
   if (gear && card.settingsOpen) body += prSettingsPanel(settings);
   // 排到本轮末尾、铺满消息列:宿主把卡放在「已更改 N 个文件」卡之后,与它同宽。
@@ -3381,6 +3394,7 @@ function prCardHeight(card) {
   var h = 120;
   if (card.note) h += 22;
   if (card.stage === 'open' && card.legacyHookRepair) h += 68;
+  if (manualFollowStop(card) && card.manualStopOpen === true && card.note !== t('prManualStop', { id: card.scheduleId })) h += 40;
   if (card.settingsOpen && prHasSettings(card)) h += 160;
   return Math.min(900, h);
 }
@@ -3503,27 +3517,51 @@ function exactFollowHook(row, card, dir) {
   return { repair: legacy ? { schedule_id: row.id, command: cardFollowCommand(dir, url) } : null };
 }
 
-async function cardLegacyNodeSupported() {
+async function legacyHookConfirmedSupported(row) {
+  if (!row || !row.id || typeof row.updatedAt !== 'number') return false;
+  var runs;
   try {
-    var response = await cindy.node.request({ method: 'defaultNodeSupported' });
-    return Boolean(response && response.ok && response.result === true);
+    runs = await prSchedule('schedule_list_runs', { scheduleId: row.id, limit: 2 });
   } catch (_) {
     return false;
   }
+  if (!Array.isArray(runs) || !runs.length) return false;
+  var latest = runs[0];
+  if (!latest || latest.scheduleId !== row.id || typeof latest.firedAt !== 'number') return false;
+  if (typeof row.lastFiredAt === 'number' && latest.firedAt < row.lastFiredAt) return false;
+  // If the newest firing is mid-flight before its pre-run hook finishes,
+  // inspect the immediately preceding completed run for this same schedule.
+  if (latest.status === 'running' && !latest.preRunHookResult) {
+    latest = runs[1];
+    if (!latest || latest.scheduleId !== row.id || typeof latest.firedAt !== 'number') return false;
+  }
+  if (latest.firedAt <= row.updatedAt) return false;
+  var hook = latest.preRunHookResult;
+  if (!hook || hook.checkSucceeded !== true || hook.stdoutTruncated === true ||
+      (hook.status !== 'passed' && hook.status !== 'skipped') ||
+      (hook.exitCode !== 0 && hook.exitCode !== 2) ||
+      typeof hook.stdout !== 'string') return false;
+  var lines = hook.stdout.split(/\r?\n/).filter(function (line) { return line.length > 0; });
+  if (lines.length < 3) return false;
+  if (!/^\[pr-heartbeat-gate\] (?:PASS|SKIP) /.test(lines[0])) return false;
+  if (lines[lines.length - 2] !== 'CINDY_PRECHECK_OK') return false;
+  var match = /^CINDY_PR_NODE=(\d+)$/.exec(lines[lines.length - 1]);
+  return Boolean(match && Number(match[1]) >= 18);
 }
 
-async function resolveLegacyHookRepair(hook) {
+async function resolveLegacyHookRepair(hook, row) {
   if (!hook || !hook.repair) return null;
-  // Direct pr-heartbeat-gate.mjs hooks run fine when the default `node` on
-  // PATH is already Node 18+; only surface manual launcher repair when it is not.
-  return (await cardLegacyNodeSupported()) ? null : hook.repair;
+  // Only hide manual launcher repair when this schedule's latest post-update
+  // hook run actually completed on Node 18+ in the scheduler's own shell and
+  // task working directory (never infer from the plugin worker's temp env).
+  return (await legacyHookConfirmedSupported(row)) ? null : hook.repair;
 }
 
 async function legacyFollowRepair(row, card) {
   if (typeof row.preRunHook.command !== 'string' || row.preRunHook.command.indexOf('/scripts/pr-heartbeat-gate.mjs" ') < 0) return null;
   var dir;
   try { dir = await cardFollowSkillDir(); } catch (_) { return null; }
-  return resolveLegacyHookRepair(exactFollowHook(row, card, dir));
+  return resolveLegacyHookRepair(exactFollowHook(row, card, dir), row);
 }
 
 // Reconcile all ID-less legacy follow fields in one place, using only the
@@ -3570,9 +3608,10 @@ async function reconcileLegacyFollow(card, readError, fromStop) {
   card.followedEver = true;
   card.scheduleId = row ? row.id : null;
   card.manualStop = !!row;
+  if (!row) delete card.manualStopOpen;
   card.following = !!row && row.status === 'active';
   card.scheduleStatus = unverified ? 'unverified' : row && !card.following ? row.status : null;
-  card.legacyHookRepair = card.stage === 'open' && card.following ? await resolveLegacyHookRepair(hook) : null;
+  card.legacyHookRepair = card.stage === 'open' && card.following ? await resolveLegacyHookRepair(hook, row) : null;
   card.scheduleError = error ? t('prScheduleFailed', { detail: error }) : null;
   card.note = card.scheduleError || (showManualStop && row ? t('prManualStop', { id: row.id }) : null);
 }
@@ -3644,9 +3683,10 @@ async function syncCardSchedule(card, settings, start) {
         card.pending = card.scheduleAction = null;
         throw new Error(t('prScheduleHookUnknown'));
       }
-      repair = await resolveLegacyHookRepair(hook);
+      repair = await resolveLegacyHookRepair(hook, saved);
       card.scheduleId = row.id;
       card.manualStop = createdId !== saved.id;
+      if (!card.manualStop) delete card.manualStopOpen;
       card.scheduleStatus = null;
       card.followedEver = true;
     } else {
@@ -3661,6 +3701,7 @@ async function syncCardSchedule(card, settings, start) {
       }
       card.scheduleId = null;
       card.manualStop = false;
+      delete card.manualStopOpen;
       card.scheduleStatus = null;
     }
     card.following = start;
@@ -3809,6 +3850,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
       }
       if (!currentSchedule) {
         card.manualStop = false;
+        delete card.manualStopOpen;
         card.scheduleId = null;
         if (a.following === true) return fail(t('prScheduleFailed', { detail: 'schedule_get' }));
       }
@@ -3818,7 +3860,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
     if (!a.following && unverifiedLegacyFollow(card)) card.scheduleError = null;
     if (!a.following || !unverifiedLegacyFollow(card)) card.following = a.following;
     card.scheduleAction = null;
-    if (!a.following) { card.scheduleId = card.scheduleStatus = null; card.manualStop = false; delete card.pendingStopNotice; }
+    if (!a.following) { card.scheduleId = card.scheduleStatus = null; card.manualStop = false; delete card.manualStopOpen; delete card.pendingStopNotice; }
     if (a.following) card.followedEver = true;
     if (card.pending === 'follow' || card.pending === 'stop') card.pending = null;
   }
@@ -4117,6 +4159,7 @@ async function prCardAction(msg) {
       card.readyUncertain = false;
     }
   }
+  var hadManualStopNote = !!(manualFollowStop(card) && card.note === t('prManualStop', { id: card.scheduleId }));
   card.note = null;
   var handedOff = false;
   var nextUpdateAt = 0;
@@ -4162,6 +4205,8 @@ async function prCardAction(msg) {
   } else if (action === 'pr:ready' && card.stage === 'open' && card.pr.draft && !card.following && !card.pending && !card.readyUncertain && !unverifiedLegacyFollow(card) && !card.scheduleId) {
     await markPrReady(card, settings, msg);
     return;
+  } else if (action === 'pr:manual-stop' && manualFollowStop(card) && !card.pending) {
+    card.manualStopOpen = hadManualStopNote ? false : !card.manualStopOpen;
   } else if (action === 'pr:stop' && card.stage === 'open' && manualFollowStop(card) && !card.pending) {
     card.note = t('prManualStop', { id: card.scheduleId });
   } else if (msg.userActionToken && hasCardScheduler() && (action === 'pr:follow' && card.publishedHere ||
