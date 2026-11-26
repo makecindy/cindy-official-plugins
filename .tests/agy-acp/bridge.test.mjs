@@ -2616,8 +2616,7 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
       ? fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
       : []);
     const execServer = {
-      type: 'http', name: 'cindy_exec', url: 'http://127.0.0.1:4711/mcp/cindy_exec',
-      headers: [{ name: 'Authorization', value: 'Bearer task-secret' }],
+      type: 'http', name: 'cindy_exec', url: 'http://example.test/mcp/cindy_exec', headers: [],
     };
     return { bridge, messages, send, reply, serverMessages, execServer };
   };
@@ -2677,12 +2676,10 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
   });
 
   test('tracks a prompt queued during the opening phase so steering still attaches to it', async (t) => {
-    const { bridge, send, reply } = remoteSteerHarness(t, { mode: 'slow-open' });
+    const { bridge, send, reply, execServer } = remoteSteerHarness(t, { mode: 'slow-open' });
     bridge.child.stdin.write(INITIALIZE);
     await reply(0, 'initialize answer');
-    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [
-      { type: 'http', name: 'cindy_exec', url: 'http://127.0.0.1:4711/mcp/cindy_exec', headers: [] },
-    ] } });
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
     // Send session/prompt immediately while the restricted agent is still answering its own initialize.
     send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-first' }] } });
     await reply(1, 'session/new answer');
