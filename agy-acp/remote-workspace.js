@@ -196,14 +196,24 @@ function remoteToolIdentity({ server, tool }) {
 }
 
 /** Keep the remote restriction on native file and command tools after normalizing MCP calls. */
-function inspectToolCall(toolCall, seen, serverNames = []) {
+function inspectToolCall(toolCall, seen, serverNames = [], seenSafeTools = null) {
   if (!isObject(toolCall)) return { type: 'other' };
   const mcpCall = normalizeMcpToolCall(toolCall, seen, serverNames, {
     allowLegacyEnvelope: true, toolIdentity: remoteToolIdentity,
   });
   if (mcpCall) return { type: 'mcp', toolCall: mcpCall };
+  const id = typeof toolCall.toolCallId === 'string' ? toolCall.toolCallId : null;
   const name = typeof toolCall.name === 'string' ? toolCall.name : '';
-  if (REMOTE_SAFE_NATIVE_TOOLS.has(name)) return { type: 'other' };
+  if (REMOTE_SAFE_NATIVE_TOOLS.has(name)) {
+    if (id && seenSafeTools) {
+      if (seenSafeTools.size >= 2_000 && !seenSafeTools.has(id)) {
+        seenSafeTools.delete(seenSafeTools.values().next().value);
+      }
+      seenSafeTools.add(id);
+    }
+    return { type: 'other' };
+  }
+  if (!name && id && seenSafeTools && seenSafeTools.has(id)) return { type: 'other' };
   const kind = typeof toolCall.kind === 'string' ? toolCall.kind : '';
   if (LOCAL_TOOL_NAMES.has(name) || LOCAL_KINDS.has(kind)) return { type: 'local', tool: name || kind };
   return { type: 'other' };
@@ -265,6 +275,7 @@ function startRemoteWorkspace(agyPath, host) {
   const queued = [];
   const seenCalls = new Map();
   const seenSteps = new Map();
+  const seenSafeTools = new Set();
   let serverNames = [];
 
   const running = (child) => Boolean(child) && child.exitCode === null && child.signalCode === null;
@@ -460,6 +471,14 @@ function startRemoteWorkspace(agyPath, host) {
       return;
     }
     if (isToolUpdate) {
+      const id = typeof update.toolCallId === 'string' ? update.toolCallId : null;
+      const name = typeof update.name === 'string' ? update.name : '';
+      if (id && REMOTE_SAFE_NATIVE_TOOLS.has(name)) {
+        if (seenSafeTools.size >= 2_000 && !seenSafeTools.has(id)) {
+          seenSafeTools.delete(seenSafeTools.values().next().value);
+        }
+        seenSafeTools.add(id);
+      }
       const adapted = adaptAgyNativeToolUpdate(update, {
         elicitationForm: clientSupportsElicitationForm(initRequest?.params),
         seenSteps,
@@ -470,7 +489,7 @@ function startRemoteWorkspace(agyPath, host) {
         return;
       }
     }
-    const verdict = inspectToolCall(isPermission ? params.toolCall : update, seenCalls, serverNames);
+    const verdict = inspectToolCall(isPermission ? params.toolCall : update, seenCalls, serverNames, seenSafeTools);
     if (verdict.type === 'local') {
       if (isPermission) {
         const options = Array.isArray(params.options) ? params.options : [];

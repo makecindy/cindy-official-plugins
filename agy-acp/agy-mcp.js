@@ -45,18 +45,27 @@ function mapAgyStepStatus(status) {
 }
 
 /**
- * Adapts Antigravity's native UI-only tool updates into standard ACP / Cindy conventions:
+ * Adapts Antigravity's native UI-only tool updates into standard ACP / Cindy conventions when
+ * the host negotiated `clientCapabilities.elicitation.form` (Cindy host support for native
+ * question & plan cards; older hosts receive the raw `update_steps` / `ask_question` tool rows
+ * unchanged so existing progress rows do not regress):
  *  - `update_steps` → standard ACP `plan` notification (deduplicated per toolCallId so
- *    the follow-up `completed` update neither duplicates nor renders a raw tool card).
- *  - `ask_question` (when the client advertised `elicitation.form`) → `AskUserQuestion`,
- *    so Cindy's native question card replaces the raw tool row cleanly.
+ *    the follow-up `completed` update neither duplicates nor renders a raw tool card;
+ *    `status: "failed"` updates are always preserved).
+ *  - `ask_question` → `AskUserQuestion`, so Cindy's native question card replaces the raw
+ *    tool row cleanly.
  */
 function adaptAgyNativeToolUpdate(toolCall, { elicitationForm = false, seenSteps } = {}) {
-  if (!isObject(toolCall)) return null;
+  if (!isObject(toolCall) || !elicitationForm) return null;
   const id = typeof toolCall.toolCallId === 'string' ? toolCall.toolCallId : null;
   const name = typeof toolCall.name === 'string' ? toolCall.name : '';
+  const status = typeof toolCall.status === 'string' ? toolCall.status.toLowerCase() : '';
 
   if (name === 'update_steps' || (id && seenSteps && seenSteps.has(id))) {
+    if (status === 'failed' || status === 'error') {
+      if (id && seenSteps) seenSteps.delete(id);
+      return null;
+    }
     const rawSteps = Array.isArray(toolCall.rawInput?.steps)
       ? toolCall.rawInput.steps
       : Array.isArray(toolCall.args?.steps) ? toolCall.args.steps : null;
@@ -76,7 +85,7 @@ function adaptAgyNativeToolUpdate(toolCall, { elicitationForm = false, seenSteps
     return { action: 'replace', update: { sessionUpdate: 'plan', entries } };
   }
 
-  if (elicitationForm && name === 'ask_question') {
+  if (name === 'ask_question') {
     return {
       action: 'replace',
       update: { ...toolCall, name: 'AskUserQuestion', title: 'AskUserQuestion' },
