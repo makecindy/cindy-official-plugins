@@ -1,0 +1,16 @@
+{
+  "name": "Open Artifact",
+  "description": "タスクのサイドバーで Open Artifact の作品を作成、編集し、コメントできます。",
+  "whenToUse": "スライド、デザイン、ホワイトボード、表計算、ダッシュボード、文書、アニメーションの作成や編集に使います。",
+  "tools": {
+    "artifact": {
+      "description": "ローカルの作品を作成、表示、更新、または開きます。quickstart で種類を選択します。"
+    },
+    "artifact_data": {
+      "description": "作品のデータを読み取り、検索、編集します。"
+    },
+    "artifact_comments": {
+      "description": "レビューコメントを読み取り、返信、解決、再開します。新しいコメントを待つこともできます。"
+    }
+  }
+}
