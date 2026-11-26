@@ -2,7 +2,7 @@
 
 # GitHub CI 恢复运行证据 — 2026-11-13
 
-当前发布方案：**1.5.58，未安装**；任何有效 hook 或不支持完整目录持久性的环境均停止恢复。下方 local 1.5.45 实测有版本限制，见末节。
+当前发布方案：**1.5.59，未安装**；任何有效 hook 或不支持完整目录持久性的环境均停止恢复。下方 local 1.5.45 实测有版本限制，见末节。
 
 环境：Cindy 0.1.136 Beta、Windows 10.0.26100、Node v22.22.3。
 仅安装/更新隔离的 `local` GitHub 开发实例，市场版及其偏好保持原样。
@@ -960,7 +960,7 @@ Windows10.0.26100 / Node22.22.3 / Git2.54.0.windows.1 夹具用本地 hash-objec
 最终规定四套加插件：**578 通过 / 38 跳过 / 0 失败（307.70秒）**；38项仍为17个不支持原生目录同步成功路径、19个既有跳过及2个继承POSIX-only命令行用例。Forge全内容核对：**30文件，包254107字节 / 解压716496字节**；新包删除并确认不存在。外部Linux复现见[原审查](https://github.com/makecindy/cindy-official-plugins/pull/332#discussion_r4711100278)。未安装或声称新的runtime验收。
 
 
-## 文件绑定、身份表示范围与额度前 Git 锁 — 2026-11-27 Asia/Shanghai (source1.5.58, not installed)
+## 文件绑定、身份表示范围与额度前 Git 锁 — 2026-11-27 Asia/Shanghai (source1.5.59, not installed)
 
 源码1.5.58集中处理三个边界，不新增回执格式、别名账本、锁owner或重试机制。
 
@@ -981,3 +981,18 @@ Git锁范围通过既有Git只读解析有效index、worktree HEAD、准确commo
 新文件绑定测试在57先12/12失败，修复后完整receipt suite109/109通过（1.08秒），使用真实隔离文件及同步确认建模。一个旧ancestor-swap用例因fd现在保持打开而在Windows实际得到EPERM，验证失败、没有移动目录、原字节不变且句柄关闭，不冒充rename已成功；其它平台保留身份变化验证。锁/身份范围六项先红后6/6通过（7.98秒）。身份测试只约束指南拒绝前提，不是新增CLI alias实现。未声称真实Cindy/GitHub恢复、原生Linux持久性、安装、权限/偏好/真实额度或退役夹具使用；既有runtime验收缺口及清理阻断保留。
 
 最终规定四套加插件：**596 通过 / 38 跳过 / 0 失败（297.52秒）**。跳过仍为17个不支持原生目录同步的成功路径、19个原有跳过及2个继承POSIX-only命令行用例。Forge全内容核对：**30文件，包255596字节 / 解压721646字节**；新58包删除并确认不存在。ID迁移处理是上述强制Agent拒绝范围，不是CLI自动归一；真实alias/拒绝验收仍未完成。
+
+
+## 额度前确认唯一传输目标 — 2026-11-27 Asia/Shanghai（source1.5.59，未安装）
+
+Source1.5.59 将 URL 重写和具名 remote 的读取/推送 URL 差异归为同一资格边界。现有 Agent 流程通过 Git 完整读取有效 url.*.pushInsteadOf/insteadOf，覆盖各 scope、includes/条件 includes、worktree 与命令/环境配置。任何已定义规则（包括空值、不匹配值）都在远端读取、额度 status/reserve、amend 和 push 前停止；只有完整的缺失键结果可确认无规则。不增加最长前缀解析器、配置覆盖或探测 push。
+
+具名 remote 必须只有一个相同的读取/推送 URL，且与独立核验的 PR head 仓库匹配。不同或多个推送 URL、未知映射、具名 remote 与字面 URL 同名歧义都停止。后续读取/推送 argv 绑定核验后的字面 URL；每个边界重读规则与原映射，不修改用户配置。预留后不退款，amend 后停止并留在本地；较早不确定写入须只读核对全部可疑接收方，原 PR/ref 不变不能证明未写其它仓库。
+
+Windows10.0.26100 / Node22.22.3 / Git2.54.0.windows.1 原生反例使用两个共享旧 SHA 的一次性本地 bare 仓库：现有精确 lease/refspec 可成功写入被重写的接收方，而原目标不变。pushInsteadOf/insteadOf 各覆盖 local、global include、command/environment；独立和多个 push URL 覆盖差异与扇出。这些是本地传输反例和 Agent 指引契约，不是实际 Cindy/GitHub 拒绝或恢复验收。未改用户回执、真实额度、远端夹具、凭证、权限或偏好；夹具自行清理，旧的受阻残留不动。
+
+传输 argv、回执 IO、槽位/上限、ID 代际排除、Git 锁/hook/签名/编码/原始消息防护、UI 和四语言 locale 均未改。当前版本运行验收缺口仍在，新增真实指引 URL 规则拒绝也未验收；source59 未安装。行为依据：[Git URL 配置官方文档](https://git-scm.com/docs/git-config#Documentation/git-config.txt-urlbasepushInsteadOf)。
+
+对未改的source58指南，八个原生子例加两个parent共0通过/10失败；source59为10/10通过（32.30秒）。测试用现有读取/推送argv复现风险，再验证指引拒绝边界，不声称有机械恢复执行器。Forge全内容核对：**30文件、包256324字节、解压724007字节**；新59包已删除并确认不存在。
+
+最终规定四套加插件：**606通过 / 38跳过 / 0失败（334.90秒）**。跳过仍为17个不支持原生完整目录同步的成功路径、19个既有跳过及2个未在Windows执行的继承POSIX-only命令行用例。没有新增真实运行验收或安装。

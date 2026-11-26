@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.58, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.59, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1534,3 +1534,18 @@ Git lock scope uses existing Git reads to resolve the effective index, worktree 
 New file-binding tests first fail12/12 on57, then the complete receipt suite passes109/109 (1.08s) with real isolated files and modeled sync acknowledgements. One prior ancestor-swap case now observes Windows EPERM because the receipt descriptor remains open; it checks failure, no moved directory, unchanged bytes and closed handles instead of pretending the rename succeeded. Other platforms retain the identity-change assertion. Lock/scope six cases first fail, then pass6/6 (7.98s). Identity tests enforce the documented refusal prerequisite, not a new CLI alias implementation. No actual Cindy/GitHub recovery, native Linux durability, installation, permissions/preferences, real quota or retired-fixture use is claimed. Existing runtime prerequisites and cleanup blocks remain.
 
 Final mandatory four suites plus plugin: **596 passed / 38 skipped / 0 failed (297.52 s)**. Skips remain 17 unsupported native directory-sync success cases, 19 prior skips and two inherited POSIX-only command-line cases. Forge exact-content: **30 files, 255596 archive bytes, 721646 uncompressed bytes**; generated58package deleted and absence verified. ID-migration handling is the mandatory Agent refusal scope described above, not automatic CLI normalization; real alias/refusal acceptance remains unverified.
+
+
+## One transport destination before quota — 2026-11-27 Asia/Shanghai (source1.5.59, not installed)
+
+Source1.5.59 treats URL rewriting and named-remote push URL divergence as one eligibility boundary. The existing Agent workflow reads every effective url.*.pushInsteadOf/insteadOf entry through Git's scopes and includes, including worktree and command/environment configuration. Any defined rule, including empty or nonmatching values, stops before remote reads, budget status/reservation, amend and push. Only a complete missing-key result establishes absence. No longest-prefix resolver, configuration override or probe push is added.
+
+A named remote must expose exactly one identical read/push URL matching the independently verified PR head repository. Different or multiple push URLs, unknown mappings or a configured remote name colliding with the literal URL stop. Subsequent remote/push arguments bind the literal verified URL; rules and original mappings are rechecked at each boundary. Nothing edits user configuration. After reservation there is no refund; after amend, stop unpushed. An earlier uncertain write requires read-only reconciliation of every suspected receiver: an unchanged original PR/ref does not establish that no other repository was written.
+
+Native Windows10.0.26100 / Node22.22.3 / Git2.54.0.windows.1 counterexamples use two disposable local bare repositories sharing the old SHA. The exact existing lease/refspec can succeed against a rewritten receiver while the original remains unchanged. Both pushInsteadOf/insteadOf are exercised in local, global-include and command/environment scopes; separate and multiple named-remote push URLs cover divergence and fanout. These are local transport counterexamples and Agent-guide contracts, not actual Cindy/GitHub refusal or recovery acceptance. No user receipt, real quota, remote fixture, credential, permission or preference changed. Fixtures clean themselves up; previous blocked cleanup residuals remain untouched.
+
+The transfer argv, receipt I/O, slots/caps, identity-epoch exclusion, lock/hook/signing/encoding/raw-message guards, UI and locales are unchanged. Current-version runtime prerequisites remain, including real guided URL-rule refusal; source59 is not installed. Primary behavior reference: [Git URL configuration](https://git-scm.com/docs/git-config#Documentation/git-config.txt-urlbasepushInsteadOf).
+
+Against the unchanged source58 guide, the eight native cases plus two parents fail (0 pass / 10 fail); source59 passes10/10 (32.30s). These tests execute the existing read/push argv to reproduce the risk, then verify the documented refusal boundary; they are not a mechanical recovery executor. Forge exact-content: **30 files, 256324 archive bytes, 724007 uncompressed bytes**. New59 package deleted and absence verified.
+
+Final mandatory four suites plus plugin: **606 passed / 38 skipped / 0 failed (334.90 s)**. Skips remain 17 unsupported native full-directory-sync success cases, 19 earlier skips and two inherited POSIX-only command-line cases not executed on Windows. No new runtime acceptance or installation.

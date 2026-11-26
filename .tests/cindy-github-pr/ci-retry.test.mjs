@@ -144,7 +144,7 @@ function guideArguments(values) {
   const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
   const source = guide.match(/```js\n(\/\/ Argument lists for the existing task execution tool\.[\s\S]*?)\n```/)?.[1];
   assert.ok(source, 'the recovery guide must define argument lists, not shell command templates');
-  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, encodingConfigArgs: typeof encodingConfigArgs === "undefined" ? undefined : encodingConfigArgs, committerIdentArgs: typeof committerIdentArgs === "undefined" ? undefined : committerIdentArgs, pushSigningConfigArgs: typeof pushSigningConfigArgs === "undefined" ? undefined : pushSigningConfigArgs, hookConfigArgs: typeof hookConfigArgs === "undefined" ? undefined : hookConfigArgs, hookListArgs: typeof hookListArgs === "undefined" ? undefined : hookListArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, shallowStateArgs: typeof shallowStateArgs === "undefined" ? undefined : shallowStateArgs, shallowPathArgs: typeof shallowPathArgs === "undefined" ? undefined : shallowPathArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs, lockPathArgs: typeof lockPathArgs === "undefined" ? undefined : lockPathArgs, refFormatArgs: typeof refFormatArgs === "undefined" ? undefined : refFormatArgs })', values);
+  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, encodingConfigArgs: typeof encodingConfigArgs === "undefined" ? undefined : encodingConfigArgs, committerIdentArgs: typeof committerIdentArgs === "undefined" ? undefined : committerIdentArgs, pushSigningConfigArgs: typeof pushSigningConfigArgs === "undefined" ? undefined : pushSigningConfigArgs, hookConfigArgs: typeof hookConfigArgs === "undefined" ? undefined : hookConfigArgs, hookListArgs: typeof hookListArgs === "undefined" ? undefined : hookListArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, shallowStateArgs: typeof shallowStateArgs === "undefined" ? undefined : shallowStateArgs, shallowPathArgs: typeof shallowPathArgs === "undefined" ? undefined : shallowPathArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs, lockPathArgs: typeof lockPathArgs === "undefined" ? undefined : lockPathArgs, refFormatArgs: typeof refFormatArgs === "undefined" ? undefined : refFormatArgs, urlRewriteConfigArgs: typeof urlRewriteConfigArgs === "undefined" ? undefined : urlRewriteConfigArgs })', values);
 }
 
 test('recovery guide passes dynamic refs, remotes and paths as literal argument data', () => {
@@ -701,6 +701,72 @@ quotaTest('signed Git fixture verifies one-off signing, configured amend and una
   git(['config', 'user.signingkey', path.join(fx.root, 'unavailable-key')]);
   assert.throws(() => git(['commit', '--amend', '--no-edit']));
   assert.equal(git(['rev-parse', 'HEAD']), amended);
+});
+
+test('URL rewriting can redirect an exact leased push despite a successful original read', async t => {
+  for (const key of ['pushInsteadOf', 'insteadOf']) for (const scope of ['local', 'global include', 'command']) await t.test(`${key} / ${scope}`, t => {
+    const fx = fixture(t), work = path.join(fx.root, 'work'), allowed = path.join(fx.root, 'allowed.git'), redirected = path.join(fx.root, 'redirected.git'); fs.mkdirSync(work);
+    const global = path.join(fx.root, 'global'), included = path.join(fx.root, 'included'); fs.writeFileSync(global, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_COUNT: '0' };
+    const git = (cwd, args) => execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    for (const repo of [allowed, redirected]) git(fx.root, ['init', '--bare', '-b', 'main', repo]);
+    git(work, ['init', '-b', 'main']);
+    for (const [name, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false']]) git(work, ['config', name, value]);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'original'); git(work, ['add', 'code.txt']); git(work, ['commit', '-m', 'original']);
+    const original = git(work, ['rev-parse', 'HEAD']), a = pathToFileURL(allowed).href, b = pathToFileURL(redirected).href;
+    for (const repo of [a, b]) git(work, ['push', '--no-follow-tags', '--', repo, original + ':refs/heads/feature']);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'changed'); git(work, ['add', 'code.txt']); git(work, ['commit', '-m', 'verified change']);
+    const next = git(work, ['rev-parse', 'HEAD']), rewrite = 'url.' + b + '.' + key;
+    if (scope === 'command') { env.GIT_CONFIG_COUNT = '1'; env.GIT_CONFIG_KEY_0 = rewrite; env.GIT_CONFIG_VALUE_0 = a; }
+    else if (scope === 'global include') {
+      git(work, ['config', '--file', global, 'include.path', included]); git(work, ['config', '--file', included, rewrite, a]);
+    } else git(work, ['config', rewrite, a]);
+    const plan = guideArguments({ verifiedBranch: 'feature', verifiedRemote: a, originalRemoteSha: original, newSha: next,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    assert.equal(git(work, plan.remoteArgs).split(/\s/)[0], original);
+    // Counterexample only: both fixture remotes share the old SHA, so the lease
+    // succeeds on the wrong target. No real GitHub branch, quota or recovery.
+    git(work, plan.pushArgs);
+    assert.equal(git(allowed, ['rev-parse', 'refs/heads/feature']), original);
+    assert.equal(git(redirected, ['rev-parse', 'refs/heads/feature']), next);
+    assert.equal(fs.existsSync(fx.retryDir), false);
+    const inspect = git(work, plan.urlRewriteConfigArgs ?? ['config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^url[.].*[.](pushinsteadof|insteadof)$']);
+    assert.ok(inspect.toLowerCase().includes(key.toLowerCase()));
+    assert.ok(inspect.includes(scope === 'command' ? 'command' : scope === 'local' ? 'local' : 'global'));
+    const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    assert.ok(/Any effective url\.\*\.pushInsteadOf or url\.\*\.insteadOf entry stops/.test(guide));
+    assert.ok(/including empty or nonmatching values/.test(guide));
+    assert.ok(/before any remote read, budget status\/reservation, amend and push/.test(guide));
+    assert.ok(plan.urlRewriteConfigArgs);
+  });
+});
+
+test('named-remote push URLs must not diverge or fan out from the verified read target', async t => {
+  for (const multiple of [false, true]) await t.test(multiple ? 'multiple push URLs' : 'different push URL', t => {
+    const fx = fixture(t), work = path.join(fx.root, 'work'), allowed = path.join(fx.root, 'allowed.git'), other = path.join(fx.root, 'other.git'); fs.mkdirSync(work);
+    const global = path.join(fx.root, 'global'); fs.writeFileSync(global, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
+    const git = (cwd, args) => execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    for (const repo of [allowed, other]) git(fx.root, ['init', '--bare', '-b', 'main', repo]);
+    git(work, ['init', '-b', 'main']);
+    for (const [name, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false']]) git(work, ['config', name, value]);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'original'); git(work, ['add', 'code.txt']); git(work, ['commit', '-m', 'original']);
+    const original = git(work, ['rev-parse', 'HEAD']);
+    for (const repo of [allowed, other]) git(work, ['push', '--', repo, original + ':refs/heads/feature']);
+    git(work, ['remote', 'add', 'origin', allowed]);
+    if (multiple) git(work, ['config', '--add', 'remote.origin.pushurl', allowed]);
+    git(work, ['config', '--add', 'remote.origin.pushurl', other]);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'changed'); git(work, ['add', 'code.txt']); git(work, ['commit', '-m', 'change']);
+    const next = git(work, ['rev-parse', 'HEAD']);
+    const plan = guideArguments({ verifiedBranch: 'feature', verifiedRemote: 'origin', originalRemoteSha: original, newSha: next,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    assert.equal(git(work, plan.remoteArgs).split(/\s/)[0], original); git(work, plan.pushArgs);
+    assert.equal(git(other, ['rev-parse', 'refs/heads/feature']), next);
+    assert.equal(git(allowed, ['rev-parse', 'refs/heads/feature']), multiple ? next : original);
+    assert.equal(fs.existsSync(fx.retryDir), false);
+    const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    assert.ok(/exactly one identical fetch\/push URL/.test(guide));
+  });
 });
 
 test('recovery push never follows annotated tags, including when the branch lease fails', async t => {

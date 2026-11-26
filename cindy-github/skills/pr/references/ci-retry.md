@@ -53,6 +53,7 @@ const statusArgs = [gatePath, prUrl, '--state-dir', observationStateDir, '--ci-r
 const hooksPathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'hooks'];
 const committerIdentArgs = ['--no-replace-objects', 'var', 'GIT_COMMITTER_IDENT'];
 const pushSigningConfigArgs = ['--no-replace-objects', 'config', '--includes', '--type=bool', '--get', 'push.gpgSign'];
+const urlRewriteConfigArgs = ['--no-replace-objects', 'config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^url[.].*[.](pushinsteadof|insteadof)$'];
 const hookConfigArgs = ['--no-replace-objects', 'config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^hook[.]'];
 const encodingConfigArgs = ['--no-replace-objects', 'config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^i18n[.](commitencoding|logoutputencoding)$'];
 const hookListArgs = ['pre-commit', 'prepare-commit-msg', 'commit-msg', 'post-commit',
@@ -106,6 +107,31 @@ arguments also avoid default destination/ref selection (`push.default` and
 `remote.<name>.push`); require the verified single push URL as below.
 
 This is a bounded Agent workflow, not a sandbox for arbitrary Git extensions.
+Any effective url.*.pushInsteadOf or url.*.insteadOf entry stops this route,
+including empty or nonmatching values. Read `urlRewriteConfigArgs` in the actual
+checkout/environment before any remote read, budget status/reservation, amend and push.
+Inspect complete output from all effective scopes, includes/conditional includes,
+worktree and command/environment configuration. Only exit 1 with empty stdout
+and no error output proves no matching keys; exit 0 means a rule exists, and
+any failed, partial or ambiguous result stops. Do not parse applicability,
+longest-prefix precedence or an apparently already-expanded URL to grant an
+exception. A push-only rule can redirect a literal URL while ls-remote still
+reads the original; insteadOf can redirect both. The exact lease protects a ref
+value at whichever receiver Git actually selects, not receiver identity.
+
+For a named remote, read the complete `remote get-url --all` and
+`remote get-url --push --all` results using separate arguments, and require
+exactly one identical fetch/push URL matching the independently verified PR
+head repository. Divergence, multiple push destinations or unknown mappings
+stop. Bind `verifiedRemote` to that one literal verified URL for subsequent
+remoteArgs/pushArgs, not a remote name with separate fetch/push semantics.
+Reject ambiguity with any configured remote having that exact URL as its name.
+Re-read rules and the original remote mappings at each execution boundary;
+changed/unknown facts stop, without refund after reservation or push after amend.
+Never unset or override URL rules, change remote URLs, invoke a probe push or
+contact a rewritten destination to qualify. This is existing Agent verification,
+not a new URL resolver, transport helper or configuration repair path.
+
 Before budget status/reservation, inspect the effective push configuration. A
 mirrored remote, nonempty `push.pushOption`, custom receive program capable of
 extra writes or unknown behavior stops recovery. Do not change configuration
@@ -699,7 +725,11 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    the exact head ref's open PR consumers; any newly discovered or unreadable
    consumer makes its possible review/queue/auto-merge effects unknown until
    reconciled read-only. Never restore, dismiss or operate on those PRs. The parent
-   result alone cannot settle suspected effects in other repositories.
+   result alone cannot settle suspected effects in other repositories. If any
+   earlier push may have used a URL rewrite or divergent push URL, identify every
+   suspected receiver from the original configuration and reconcile it read-only;
+   an unchanged original PR/ref does not mean no external write. Unknown receivers
+   or effects stay unknown; never replay, repair, delete refs or reset quota.
 
 ## Verify and report
 
