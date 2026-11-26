@@ -14,7 +14,8 @@ function looksFatal(stderrStr) {
     || /authentication required/i.test(stderrStr)
     || /requires authentication/i.test(stderrStr)
     || /rate limit|HTTP 429/i.test(stderrStr)
-    || /bad credentials/i.test(stderrStr);
+    || /bad credentials/i.test(stderrStr)
+    || /gh auth login|populate the GH_TOKEN|not logged into any(?: GitHub)? hosts|no oauth token found/i.test(stderrStr);
 }
 
 async function runOnce(args) {
@@ -54,19 +55,6 @@ function reportRateLimit(error) {
   if (!/rate limit|HTTP 429/i.test(`${error.stderr ?? ''} ${error.message ?? ''}`)) return;
   const retryAt = rateLimitRetryAt(splitHttpResponse(String(error.stdout ?? '')).headers);
   process.stderr.write(`[gh-rate-limit] retryAt=${retryAt ?? 0}\n`);
-}
-
-// Verify local GitHub CLI credentials via `gh auth token` without making a network request.
-// `gh auth status` calls api.github.com (spending REST quota and reporting HTTP 403 rate limits
-// as "token is invalid"); `gh auth token` checks local keyring/config/env only.
-export async function ensureAuth() {
-  try {
-    await exec('gh', ['auth', 'token', '--hostname', 'github.com'], { encoding: 'utf8' });
-  } catch (e) {
-    // Only surface stderr/fallback text; never echo stdout which may carry credentials.
-    process.stderr.write(`[gh] auth token failed: ${(e.stderr || '').trim() || 'no oauth token found for github.com'}\n`);
-    process.exit(1);
-  }
 }
 
 // Run `gh --version` and exit(1) if not installed / not on PATH.
