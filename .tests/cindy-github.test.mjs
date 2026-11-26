@@ -86,7 +86,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.35');
+  assert.equal(manifest.version, '1.5.36');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -109,7 +109,7 @@ test('connection tests never cache an identity that the plugin cannot attribute 
 test('settings show only host availability and fallback-token storage state', () => {
   assert.match(settingsSource, /function renderHostAccount\(available\)/);
   assert.doesNotMatch(settingsSource, /renderHostAccount\(hostAvailable,\s*\w+/);
-  assert.doesNotMatch(settingsSource, /connectedLogin|connectedSource|fetch\(['"]\/kv/);
+  assert.doesNotMatch(settingsSource, /connectedLogin|connectedSource/);
   assert.doesNotMatch(settingsSource, /else void test\(\)/);
   assert.match(settingsSource, /检查当前 GitHub 连接/);
   assert.doesNotMatch(settingsSource, /gh auth token/);
@@ -243,7 +243,8 @@ function createSettings(options = {}) {
   const context = createContext({
     document,
     AbortController,
-    BroadcastChannel: class { postMessage() {} addEventListener() {} removeEventListener() {} },
+    crypto: globalThis.crypto,
+    BroadcastChannel: options.channel ?? class { postMessage() {} addEventListener() {} removeEventListener() {} },
     setTimeout: () => 0,
     clearTimeout() {},
     clearInterval() {},
@@ -259,6 +260,7 @@ function createSettings(options = {}) {
         return { ok: true, json: async () => [{ key: 'github_pat', saved: options.saved ?? false, tail: options.tail,
           hostSource: 'gh-cli', hostAvailable: options.hostAvailable ?? false }] };
       }
+      if (url === '/kv') return { ok: true, json: async () => options.kv ?? {} };
       if (options.secretWrite) return options.secretWrite(url, init);
       return { status: 204 };
     },
@@ -579,7 +581,7 @@ for (const locale of hostLocales) {
     const m = page.messages[locale];
     assert.equal(page.fetchCalls[0].url, '/app-context', 'locale is resolved before any copy is rendered');
     assert.equal(page.document.documentElement.lang, locale);
-    assert.equal(page.copyNodes['data-i18n'].length, 8);
+    assert.equal(page.copyNodes['data-i18n'].length, 10);
     for (const node of page.copyNodes['data-i18n']) {
       const key = node.getAttribute('data-i18n');
       if (key !== 'save') assert.equal(node.textContent, m[key], key);
@@ -1692,6 +1694,54 @@ test('IM follow settings share card preferences and selected remote model withou
   assert.ok(card.reply.result.todo.some((item) => item.includes('42')));
   await runtime.click(card.reply.result.card_id, 'prset:follow');
   assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.auto_follow, false);
+});
+
+test('settings switch saves through the runtime and restores its stored value on failure', async () => {
+  const kv = { prCard: { autoFollow: false }, unrelated: 1 };
+  let failWrite = false;
+  const runtime = createRuntime({ localFetch: async (url, init) => {
+    assert.equal(url, '/kv');
+    if (init?.method === 'PUT' && !failWrite) Object.assign(kv, JSON.parse(init.body));
+    return { ok: init?.method !== 'PUT' || !failWrite, json: async () => structuredClone(kv) };
+  } });
+  class Channel extends EventTarget {
+    constructor() {
+      super();
+      runtime.channel.postMessage = data => this.dispatchEvent(new MessageEvent('message', { data }));
+    }
+    postMessage(data) { runtime.channel.onmessage({ data }); }
+  }
+  const page = createSettings({ channel: Channel, kv });
+  await flushAsync();
+  const control = page.elements.get('follow-after-open');
+  assert.equal(control.disabled, false);
+  assert.equal(control.checked, false);
+  control.checked = true;
+  await control.listeners.change();
+  await flushAsync();
+  assert.equal((await runtime.tool('pr_follow_settings')).result.settings.auto_follow, true);
+  failWrite = true;
+  control.checked = false;
+  await control.listeners.change();
+  await flushAsync();
+  assert.equal(control.checked, true);
+  assert.equal(control.disabled, false);
+  assert.ok(page.elements.get('follow-status').textContent);
+});
+
+test('setting auto-follow is explicit, preserves other preferences and never starts work', async () => {
+  const runtime = createPrRuntime({ kv: { unrelated: 'keep', prCard: { autoArchive: true, futureKey: 1 } } });
+  for (const enabled of [true, true, false]) {
+    const { reply } = await runtime.tool({ auto_follow: enabled }, 'set_pr_follow_settings');
+    assert.equal(reply.result.settings.auto_follow, enabled);
+    assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.auto_follow, enabled);
+  }
+  assert.equal((await runtime.tool({ auto_follow: 'true' }, 'set_pr_follow_settings')).reply.ok, false);
+  assert.equal(runtime.kv.prCard.autoFollow, false);
+  assert.equal(runtime.kv.prCard.futureKey, 1);
+  assert.equal(runtime.kv.prCard.autoArchive, true);
+  assert.equal(runtime.kv.unrelated, 'keep');
+  assert.equal(runtime.agentRuns.length, 0);
 });
 
 test('IM preferences remain available when cards cannot be delivered; missing differs from unreadable', async () => {

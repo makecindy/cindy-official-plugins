@@ -17,6 +17,8 @@
  */
 var MESSAGES = {
   'zh-CN': {
+    followLabel: '发完自动跟进',
+    followHint: '本机任务发布正式 PR 后，自动跟进检查和评审。',
     accountTitle: 'GitHub 账号',
     accountHint: '优先使用本机 GitHub 登录，也可以展开下方的其他连接方式。',
     otherMethods: '其他连接方式',
@@ -50,6 +52,8 @@ var MESSAGES = {
     clearFailed: '清除失败,请重试',
   },
   en: {
+    followLabel: 'Follow after opening a PR',
+    followHint: 'Automatically follow checks and reviews for new non-draft PRs published from this computer.',
     accountTitle: 'GitHub account',
     accountHint: "This computer's GitHub login is used first. You can also expand the other connection methods below.",
     otherMethods: 'Other connection methods',
@@ -83,6 +87,8 @@ var MESSAGES = {
     clearFailed: 'Clear failed. Try again.',
   },
   ja: {
+    followLabel: 'PR 作成後に自動フォロー',
+    followHint: 'この端末から作成したドラフト以外の PR のチェックとレビューを自動でフォローします。',
     accountTitle: 'GitHub アカウント',
     accountHint: 'このコンピュータの GitHub ログインを優先して使います。下のほかの接続方法を開いて使うこともできます。',
     otherMethods: 'ほかの接続方法',
@@ -116,6 +122,8 @@ var MESSAGES = {
     clearFailed: '消去に失敗しました。再試行してください',
   },
   ko: {
+    followLabel: 'PR 생성 후 자동 팔로우',
+    followHint: '이 기기에서 새로 게시한 초안이 아닌 PR의 검사와 리뷰를 자동으로 추적합니다.',
     accountTitle: 'GitHub 계정',
     accountHint: '이 컴퓨터의 GitHub 로그인을 우선 사용합니다. 아래의 다른 연결 방법을 펼쳐 사용할 수도 있습니다.',
     otherMethods: '다른 연결 방법',
@@ -321,6 +329,56 @@ var MESSAGES = {
     }
   }
 
+  var followSwitch = $('follow-after-open');
+  async function loadFollowSetting() {
+    followSwitch.disabled = true;
+    try {
+      var response = await fetch('/kv');
+      if (!response.ok) throw new Error();
+      var kv = await response.json();
+      followSwitch.checked = !!kv && !!kv.prCard && kv.prCard.autoFollow === true;
+      followSwitch.indeterminate = false;
+      followSwitch.disabled = false;
+    } catch (e) {
+      followSwitch.indeterminate = true;
+      $('follow-status').textContent = t('loadFailed');
+    }
+  }
+
+  followSwitch.addEventListener('change', async function () {
+    var enabled = followSwitch.checked;
+    followSwitch.disabled = true;
+    $('follow-status').textContent = '';
+    var reqId = crypto.randomUUID();
+    var sent = false;
+    var ping = function () { bc.postMessage({ type: 'pr-settings-ping', reqId: reqId }); };
+    var timer;
+    var timeout;
+    function finish(ok) {
+      clearInterval(timer);
+      clearTimeout(timeout);
+      bc.removeEventListener('message', onReply);
+      if (!ok) $('follow-status').textContent = t('saveFailed');
+      void loadFollowSetting();
+    }
+    function onReply(event) {
+      var msg = event.data;
+      if (!msg || msg.reqId !== reqId) return;
+      if (msg.type === 'pr-settings-ready' && !sent) {
+        sent = true;
+        clearInterval(timer);
+        bc.postMessage({ type: 'pr-settings-save', reqId: reqId, enabled: enabled });
+      } else if (msg.type === 'pr-settings-saved') {
+        finish(msg.ok === true);
+      }
+    }
+    bc.addEventListener('message', onReply);
+    timer = setInterval(ping, 400);
+    timeout = setTimeout(function () { finish(false); }, 15000);
+    ping();
+    void fetch('/wake').catch(function () { /* timeout reports the failure */ });
+  });
+
   var testSeq = 0;
   async function test() {
     var reqId = 'test-' + Date.now() + '-' + (++testSeq);
@@ -395,6 +453,7 @@ var MESSAGES = {
   // 先定语言再出文案:账号状态与保存提示都要用宿主语言。
   void loadLocale().then(function renderLocalized() {
     applyStaticCopy();
+    void loadFollowSetting();
     void load();
   });
 })();

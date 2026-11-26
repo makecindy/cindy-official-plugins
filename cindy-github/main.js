@@ -2747,6 +2747,16 @@ async function writePrSettings(change) {
   if (!r || r.ok === false) throw new Error('kv write failed');
   return next;
 }
+async function setPrAutoFollow(enabled) {
+  if (typeof enabled !== 'boolean') return fail(t('required', { fields: 'auto_follow (boolean)' }));
+  return enqueuePr(async function () {
+    var kv = await readKv(true);
+    kv.prCard = Object.assign({}, kv.prCard, { autoFollow: enabled });
+    var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
+    if (!response || response.ok === false) throw new Error('kv write failed');
+    return { ok: true, result: { settings: prSettingsForAgent(prSettingsFrom(kv), enabled) } };
+  });
+}
 function togglePrSetting(key) {
   return writePrSettings(function (next) { next[key] = !next[key]; });
 }
@@ -4006,6 +4016,18 @@ var seenTestReqs = {};
 
 bc.onmessage = function (ev) {
   var m = ev && ev.data;
+  if (m && m.type === 'pr-settings-ping') {
+    bc.postMessage({ type: 'pr-settings-ready', reqId: m.reqId });
+    return;
+  }
+  if (m && m.type === 'pr-settings-save') {
+    void setPrAutoFollow(m.enabled).then(function (r) {
+      bc.postMessage({ type: 'pr-settings-saved', reqId: m.reqId, ok: r.ok });
+    }, function () {
+      bc.postMessage({ type: 'pr-settings-saved', reqId: m.reqId, ok: false });
+    });
+    return;
+  }
   if (!m || m.type !== 'test-connection' || !m.reqId) return;
   if (seenTestReqs[m.reqId]) return;
   // 去重表只为吸收 settings 页的重发风暴,超量直接清零重来(常驻期不泄漏)。
@@ -4374,6 +4396,8 @@ cindy.onHostMessage(async function (msg) {
       r = await callTool(msg.args || {}, msg.callId);
     } else if (msg.tool === 'status_watch') {
       r = await watchTool(msg.args || {}, msg.callId);
+    } else if (msg.tool === 'set_pr_follow_settings') {
+      r = await setPrAutoFollow((msg.args || {}).auto_follow);
     } else if (msg.tool === 'pr_follow_settings') {
       var settings = await readPrSettings();
       r = settings.unreadable
