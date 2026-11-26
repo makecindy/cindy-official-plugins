@@ -52,9 +52,13 @@ Follow `references/publish.md` §2 to explain the change, run `pr-preflight.mjs`
 **Mandatory publish exit checklist (never skip before replying):**
 
 1. Read back the published PR body after `gh pr create`.
-2. Call `ghost_call` `cindy-github` / `pr_card` with `repo`, `pr`, and `published: true` (plus `card_id` if one exists; in IM or if card delivery fails, call `pr_follow_settings`).
-3. If `pr_card` returns `follow_state`, the card owns follow-up setup — do not create a second schedule. Only when `follow_state` is absent and follow-up is enabled, follow `references/follow-up-setup.md`. Apply `auto_rename: true` via `cindy_helper` `set_current_session_title` (never rename a group chat).
-4. Report the actual follow-up state alongside the PR link — never end with only "waiting for CI/review".
+2. **Before calling `pr_card` with `published: true`**, check follow-up ownership and opt-out rules first:
+   - **Group chat or unrelated source task:** do not call `pr_card(published: true)` in the source session (it would bind the publish card and schedule there). Read preferences via `pr_follow_settings` first and determine/hand off to the dedicated PR task (`references/follow-up-setup.md`) so the dedicated task owns the publish card and schedule.
+   - **Publish-only or follow-up explicitly stopped:** pass `following: false` on the very first `pr_card(..., published: true)` call so saved `auto_follow: true` does not start a schedule.
+   - **IM or failed card delivery:** call `pr_follow_settings` instead of repeating a failed card call.
+3. Call `ghost_call` `cindy-github` / `pr_card` in the owning PR task with `repo`, `pr`, and `published: true` (plus `card_id` if one exists, and `following: false` when publish-only or stopped).
+4. If `pr_card` returns `follow_state`, the card owns follow-up setup — do not create a second schedule. Only when `follow_state` is absent and follow-up is enabled, follow `references/follow-up-setup.md`. Apply `auto_rename: true` via `cindy_helper` `set_current_session_title` (never rename a group chat).
+5. Report the actual follow-up state alongside the PR link — never end with only "waiting for CI/review".
 
 ## 3. A fix round
 
