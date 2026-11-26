@@ -86,7 +86,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.37');
+  assert.equal(manifest.version, '1.5.38');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -750,6 +750,7 @@ function mergeablePrRuntime(options = {}) {
   const repository = { id: 'REPO_node', viewerPermission: 'WRITE', viewerDefaultMergeMethod: 'SQUASH',
     mergeCommitAllowed: true, squashMergeAllowed: true, rebaseMergeAllowed: false, pullRequest: pr };
   const viewer = { id: 'VIEWER_node' };
+  const rulesets = new Map();
   const writes = [];
   let outcome = 'merged';
   const runtime = createPrRuntime({
@@ -764,13 +765,19 @@ function mergeablePrRuntime(options = {}) {
         pr.merged = true;
         return jsonResponse({ merged: true });
       }
+      const rulesetMatch = /^https:\/\/api\.github\.com\/repos\/octo\/repo\/rulesets\/(\d+)$/.exec(request.url);
+      if (rulesetMatch) {
+        const entry = rulesets.get(Number(rulesetMatch[1]));
+        if (!entry) return jsonResponse({ message: 'Not Found' }, 404);
+        return typeof entry === 'function' ? entry(request) : jsonResponse(entry);
+      }
       assert.equal(request.url, 'https://api.github.com/graphql');
       const { query, variables } = JSON.parse(request.body);
       assert.deepEqual(variables, { owner: 'octo', name: 'repo', number: 42 });
       return jsonResponse({ data: query.includes('viewerDefaultMergeMethod') ? { viewer, repository } : { repository: { pullRequest: pr } } });
     },
   });
-  return { ...runtime, pr, repository, viewer, writes, setOutcome(value) { outcome = value; } };
+  return { ...runtime, pr, repository, viewer, rulesets, writes, setOutcome(value) { outcome = value; } };
 }
 
 test('the PR merge button requires a clean direct merge and write permission on the base branch', async () => {
@@ -778,23 +785,82 @@ test('the PR merge button requires a clean direct merge and write permission on 
   runtime.repository.viewerPermission = 'READ';
   const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
   const button = /data-ghost-action="pr:merge"/;
+  const dormant = /data-ghost-pr-merge-ready="octo\/repo#42"/;
   assert.doesNotMatch(runtime.lastCard(cardId).html, button);
+  assert.doesNotMatch(runtime.lastCard(cardId).html, dormant);
   runtime.repository.viewerPermission = 'WRITE';
   await runtime.tool({ card_id: cardId });
   assert.match(runtime.lastCard(cardId).html, button);
+  assert.match(runtime.lastCard(cardId).html, dormant);
+  // Not yet CLEAN (e.g. CI still running) keeps the active button off, but leaves a dormant
+  // merge-ready slot for newer hosts while keeping older hosts and mobile hidden.
+  runtime.pr.mergeStateStatus = 'BLOCKED';
+  await runtime.tool({ card_id: cardId });
+  assert.doesNotMatch(runtime.lastCard(cardId).html, button);
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-pr-merge-ready="octo\/repo#42" data-ghost-pr-merge-action="pr:merge"/);
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-pr-merge-ready="octo\/repo#42"[^>]*style="display:none;/);
+  runtime.pr.mergeStateStatus = 'CLEAN';
+  // Hard blockers and non-bypassable rules emit neither an active nor a dormant button.
   for (const changes of [
-    { mergeStateStatus: 'BLOCKED' }, { isDraft: true }, { state: 'CLOSED' },
+    { isDraft: true }, { state: 'CLOSED' },
     { mergeQueue: { id: 'queue' } },
     { baseRef: { ...runtime.pr.baseRef, branchProtectionRule: { restrictsPushes: true, lockBranch: false } } },
     { baseRef: { ...runtime.pr.baseRef, rules: { nodes: [{ type: 'UPDATE' }], pageInfo: { hasNextPage: false } } } },
+    { baseRef: { ...runtime.pr.baseRef, rules: { nodes: [{ type: 'LOCK_BRANCH' }], pageInfo: { hasNextPage: false } } } },
   ]) {
     const original = Object.fromEntries(Object.keys(changes).map((key) => [key, runtime.pr[key]]));
     Object.assign(runtime.pr, changes);
     await runtime.tool({ card_id: cardId });
     assert.doesNotMatch(runtime.lastCard(cardId).html, button);
+    assert.doesNotMatch(runtime.lastCard(cardId).html, dormant);
     Object.assign(runtime.pr, original);
   }
   assert.equal(runtime.writes.length, 0);
+});
+
+test('an UPDATE ruleset allows the PR merge button only when the current account can bypass it', async () => {
+  const runtime = mergeablePrRuntime();
+  runtime.pr.baseRef = {
+    name: 'main',
+    branchProtectionRule: null,
+    rules: { nodes: [{ type: 'UPDATE', repositoryRuleset: { databaseId: 26112310 } }], pageInfo: { hasNextPage: false } },
+  };
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  // Ruleset lookup 404 fails closed.
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-pr-merge-ready=/);
+  for (const bypass of ['never', null, 'unknown']) {
+    runtime.rulesets.set(26112310, { id: 26112310, current_user_can_bypass: bypass });
+    await runtime.tool({ card_id: cardId });
+    assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge"/);
+    assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-pr-merge-ready=/);
+  }
+  for (const bypass of ['exempt', 'always', 'pull_requests_only']) {
+    runtime.rulesets.set(26112310, { id: 26112310, current_user_can_bypass: bypass });
+    await runtime.tool({ card_id: cardId });
+    assert.match(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge"/);
+  }
+  assert.equal(runtime.writes.length, 0);
+});
+
+test('clicking a host-revealed dormant PR merge button verifies live status before confirming', async () => {
+  const runtime = mergeablePrRuntime();
+  runtime.pr.mergeStateStatus = 'UNSTABLE';
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge"/);
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-pr-merge-action="pr:merge"/);
+  // Stale host reveal while GitHub is still not CLEAN refuses to confirm.
+  await runtime.click(cardId, 'pr:merge');
+  assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prMergeChanged));
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge-confirm:/);
+  // Once CI finishes on GitHub (CLEAN), clicking the revealed button refreshes and opens confirmation.
+  runtime.pr.mergeStateStatus = 'CLEAN';
+  runtime.pr.headRefOid = 'c'.repeat(40);
+  await runtime.click(cardId, 'pr:merge');
+  const confirmation = runtime.lastCard(cardId).html;
+  assert.match(confirmation, /data-ghost-action="pr:merge-confirm:1" aria-label="确认合并"/);
+  assert.ok(visibleText(confirmation).includes('将提交 cccccccccccc 合并到 main？ · 压缩合并'));
+  await runtime.click(cardId, 'pr:merge-confirm:1');
+  assert.deepEqual(runtime.writes, [{ sha: 'c'.repeat(40), merge_method: 'squash' }]);
 });
 
 test('the PR merge confirmation is unique, checks the expected head and uses an allowed method', async () => {

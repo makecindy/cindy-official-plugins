@@ -2849,12 +2849,31 @@ var PR_MERGE_QUERY =
   'id viewerPermission viewerDefaultMergeMethod mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed ' +
   'pullRequest(number:$number){id state isDraft mergeable mergeStateStatus headRefOid mergeQueue{id} ' +
   'baseRef{name branchProtectionRule{restrictsPushes lockBranch requiresLinearHistory} ' +
-  'rules(first:100){pageInfo{hasNextPage} nodes{type parameters{... on PullRequestParameters{allowedMergeMethods}}}}}}}}';
+  'rules(first:100){pageInfo{hasNextPage} nodes{type repositoryRuleset{databaseId} parameters{... on PullRequestParameters{allowedMergeMethods}}}}}}}}';
 
-async function fetchPrMergeTarget(variables, snapshot, callId) {
+async function canBypassUpdateRulesets(variables, ruleNodes, callId) {
+  var ids = [];
+  for (var i = 0; i < ruleNodes.length; i++) {
+    var rule = ruleNodes[i];
+    if (!rule || rule.type !== 'UPDATE') continue;
+    var id = rule.repositoryRuleset && rule.repositoryRuleset.databaseId;
+    if (!Number.isInteger(id) || id <= 0) return false;
+    if (ids.indexOf(id) < 0) ids.push(id);
+  }
+  for (var j = 0; j < ids.length; j++) {
+    var res = await api({
+      url: API + '/repos/' + encodeURIComponent(variables.owner) + '/' + encodeURIComponent(variables.name) + '/rulesets/' + ids[j],
+      callId: callId,
+    });
+    if (res.err || !res.data || !/^(always|pull_requests_only|exempt)$/.test(res.data.current_user_can_bypass)) return false;
+  }
+  return true;
+}
+
+async function fetchPrMergeInfo(variables, snapshot, callId) {
+  var denied = { eligible: false, target: null };
   if (snapshot.state !== 'OPEN' || snapshot.isDraft !== false || snapshot.merged ||
-      snapshot.mergeable !== 'MERGEABLE' || snapshot.mergeStateStatus !== 'CLEAN' ||
-      !/^[a-f0-9]{40}$/.test(snapshot.headRefOid)) return null;
+      !/^[a-f0-9]{40}$/.test(snapshot.headRefOid)) return denied;
   var result = await gql(PR_MERGE_QUERY, variables, callId);
   var data = result.data;
   var repository = data && data.repository;
@@ -2862,14 +2881,14 @@ async function fetchPrMergeTarget(variables, snapshot, callId) {
   var pr = repository && repository.pullRequest;
   if (result.err || !viewer || !viewer.id || !repository || !repository.id ||
       !/^(WRITE|MAINTAIN|ADMIN)$/.test(repository.viewerPermission) || !pr || !pr.id ||
-      pr.state !== 'OPEN' || pr.isDraft !== false || pr.mergeable !== 'MERGEABLE' || pr.mergeStateStatus !== 'CLEAN' ||
-      pr.headRefOid !== snapshot.headRefOid || pr.mergeQueue !== null ||
-      !pr.baseRef || !pr.baseRef.name || pr.baseRef.name !== snapshot.baseRefName) return null;
+      pr.state !== 'OPEN' || pr.isDraft !== false || pr.mergeQueue !== null ||
+      !pr.baseRef || !pr.baseRef.name || pr.baseRef.name !== snapshot.baseRefName) return denied;
   var protection = pr.baseRef.branchProtectionRule;
   var rules = pr.baseRef.rules;
   if ((protection !== null && (!protection || protection.restrictsPushes !== false || protection.lockBranch !== false)) ||
       !rules || !rules.pageInfo || rules.pageInfo.hasNextPage !== false || !Array.isArray(rules.nodes) ||
-      rules.nodes.some(function (rule) { return !rule || !rule.type || /^(UPDATE|LOCK_BRANCH|MERGE_QUEUE|MERGE_QUEUE_LOCKED_REF)$/.test(rule.type); })) return null;
+      rules.nodes.some(function (rule) { return !rule || !rule.type || /^(LOCK_BRANCH|MERGE_QUEUE|MERGE_QUEUE_LOCKED_REF)$/.test(rule.type); })) return denied;
+  if (!await canBypassUpdateRulesets(variables, rules.nodes, callId)) return denied;
   var methods = [
     repository.mergeCommitAllowed === true && !(protection && protection.requiresLinearHistory) &&
       !rules.nodes.some(function (rule) { return rule.type === 'REQUIRED_LINEAR_HISTORY'; }) ? 'MERGE' : null,
@@ -2882,9 +2901,16 @@ async function fetchPrMergeTarget(variables, snapshot, callId) {
     });
   });
   var method = methods.includes(repository.viewerDefaultMergeMethod) ? repository.viewerDefaultMergeMethod : methods[0];
-  return method ? {
-    id: repository.id + ':' + pr.id, actor: viewer.id, base: pr.baseRef.name, sha: pr.headRefOid, method: method.toLowerCase(),
-  } : null;
+  if (!method) return denied;
+  var clean = snapshot.mergeable === 'MERGEABLE' && snapshot.mergeStateStatus === 'CLEAN' &&
+      /^[a-f0-9]{40}$/.test(snapshot.headRefOid) &&
+      pr.mergeable === 'MERGEABLE' && pr.mergeStateStatus === 'CLEAN' && pr.headRefOid === snapshot.headRefOid;
+  return {
+    eligible: true,
+    target: clean ? {
+      id: repository.id + ':' + pr.id, actor: viewer.id, base: pr.baseRef.name, sha: pr.headRefOid, method: method.toLowerCase(),
+    } : null,
+  };
 }
 
 async function fetchPrStatus(repo, number, callId) {
@@ -2909,7 +2935,7 @@ async function fetchPrStatus(repo, number, callId) {
     page = next.pageInfo;
   }
   if (page && page.hasNextPage) return { err: t('prThreadsTruncated') };
-  var merge = await fetchPrMergeTarget(variables, pr, callId).catch(function () { return null; });
+  var mergeInfo = await fetchPrMergeInfo(variables, pr, callId).catch(function () { return { eligible: false, target: null }; });
   return {
     pr: {
       number: pr.number,
@@ -2923,7 +2949,8 @@ async function fetchPrStatus(repo, number, callId) {
       openThreads: threads.filter(function (n) { return n && n.isResolved === false; }).length,
       mergeState: pr.mergeStateStatus || null,
       review: pr.reviewDecision || null,
-      merge: merge,
+      merge: mergeInfo.target,
+      mergeEligible: mergeInfo.eligible,
     },
   };
 }
@@ -3141,9 +3168,23 @@ function prButton(action, label, style, inner, extraAttrs) {
 }
 
 // data-ghost-primary:手机端把它画成主按钮(电脑端靠这里的样式)。
-function prCtaButton(action, label) {
-  return prButton(action, label, PR_PILL + 'border:1px solid transparent;color:var(--accent-pure-cta-fg,#fff);' +
-    '--bg:var(--accent-cta-bg,#000);--hover:color-mix(in srgb,var(--accent-cta-bg,#000),var(--surface-elevated) 18%)', '', ' data-ghost-primary');
+var PR_CTA_STYLE = 'border:1px solid transparent;color:var(--accent-pure-cta-fg,#fff);' +
+  '--bg:var(--accent-cta-bg,#000);--hover:color-mix(in srgb,var(--accent-cta-bg,#000),var(--surface-elevated) 18%)';
+
+function prCtaButton(action, label, extraAttrs) {
+  return prButton(action, label, PR_PILL + PR_CTA_STYLE, '', ' data-ghost-primary' + (extraAttrs || ''));
+}
+
+/**
+ * 合并按钮:当前快照已可合并时直接露出;账号与分支规则已核实允许、仅在等 CI/评审变 CLEAN 时
+ * 写成 display:none 并用 data-ghost-pr-merge-action 声明动作——新版宿主在同源状态变为 CLEAN
+ * 时露出并激活点击(旧版宿主和旧手机丢掉未知属性,始终隐藏)。
+ */
+function prMergeButton(card, visible) {
+  var slot = ' data-ghost-pr-merge-ready="' + prEsc(card.repo + '#' + card.pr.number) + '"';
+  if (visible) return prCtaButton('pr:merge', t('prMerge'), slot);
+  return '<button' + slot + ' data-ghost-pr-merge-action="pr:merge" data-ghost-primary aria-label="' +
+    prEsc(t('prMerge')) + '" style="' + PR_PILL.replace('display:inline-flex;', 'display:none;') + PR_CTA_STYLE + '"></button>';
 }
 
 function prPillButton(action, label) {
@@ -3344,13 +3385,20 @@ function prMayMerge(card) {
   return card.stage === 'open' && card.pr && !card.pr.draft && card.pr.merge && !card.pending && !card.mergeUncertain;
 }
 
+function prMayMergeWhenClean(card) {
+  return card.stage === 'open' && card.pr && !card.pr.draft && card.pr.mergeEligible === true && !card.pending && !card.mergeUncertain;
+}
+
 function samePrMerge(left, right) {
   return !!left && !!right && JSON.stringify(left) === JSON.stringify(right);
 }
 
 function updatePrMergeStatus(card, status) {
   if (status.pr) card.pr = status.pr;
-  else if (card.pr) card.pr.merge = null;
+  else if (card.pr) {
+    card.pr.merge = null;
+    card.pr.mergeEligible = false;
+  }
   if (card.mergeConfirmation && !samePrMerge(card.mergeConfirmation.target, card.pr.merge)) card.mergeConfirmation = null;
   if (status.pr && status.pr.state !== 'open') card.mergeUncertain = false;
 }
@@ -3365,10 +3413,15 @@ async function prMergeAction(card, settings, msg, action) {
   if (!msg.userActionToken || !card.pr || card.stage !== 'open') return;
   var confirmation = card.mergeConfirmation;
   var attempted = false;
-  if (action === 'pr:merge' && prMayMerge(card) && !confirmation) {
-    card.mergeRevision = (card.mergeRevision || 0) + 1;
-    card.mergeConfirmation = { revision: card.mergeRevision, target: card.pr.merge };
-    card.note = null;
+  if (action === 'pr:merge' && !confirmation && (prMayMerge(card) || prMayMergeWhenClean(card))) {
+    if (!prMayMerge(card)) await readPrMergeStatus(card);
+    if (prMayMerge(card)) {
+      card.mergeRevision = (card.mergeRevision || 0) + 1;
+      card.mergeConfirmation = { revision: card.mergeRevision, target: card.pr.merge };
+      card.note = null;
+    } else if (card.stage === 'open') {
+      card.note = t('prMergeChanged');
+    }
   } else if (confirmation && action === 'pr:merge-cancel:' + confirmation.revision) {
     card.mergeConfirmation = null;
   } else if (confirmation && prMayMerge(card) && action === 'pr:merge-confirm:' + confirmation.revision) {
@@ -3390,11 +3443,13 @@ async function prMergeAction(card, settings, msg, action) {
         if (result.data && result.data.merged === true) {
           card.stage = card.pr.state = 'merged';
           card.pr.merge = null;
+          card.pr.mergeEligible = false;
           card.mergeUncertain = false;
           card.note = null;
         } else if ((result.data && result.data.merged === false) || /^(400|401|403|404|405|409|422|429)$/.test(result.status)) {
           card.mergeUncertain = false;
           card.pr.merge = null;
+          card.pr.mergeEligible = false;
           card.note = t('prMergeRejected');
         } else {
           await readPrMergeStatus(card);
@@ -3470,8 +3525,10 @@ function renderPrCard(card, settings) {
           actions = prPillButton('pr:merge-cancel:' + confirmation.revision, t('prMergeCancel')) +
             prCtaButton('pr:merge-confirm:' + confirmation.revision, t('prMergeConfirm'));
         } else {
-          actions += prCtaButton('pr:merge', t('prMerge'));
+          actions += prMergeButton(card, true);
         }
+      } else if (prMayMergeWhenClean(card)) {
+        actions += prMergeButton(card, false);
       }
     } else {
       tile = card.stage === 'merged' ? prTile('merged', 'merged') : prTile('closed', 'muted');

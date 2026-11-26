@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.37",
-  "releaseNotes": "PR 可以直接合并且当前账号有权限时，卡片显示「合并」。在卡片内确认后复查权限与提交，原有跟进会在合并后完成收尾。",
+  "version": "1.5.38",
+  "releaseNotes": "PR 可以直接合并且当前账号有权限时，卡片显示「合并」（支持识别有豁免权的分支更新规则集，并随实时状态自动显隐）。在卡片内确认后复查权限与提交，原有跟进会在合并后完成收尾。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
