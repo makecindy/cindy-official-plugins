@@ -1231,6 +1231,54 @@ test('empty and whitespace-only raw messages are excluded before quota or amend'
   });
 });
 
+test('NUL-bearing raw messages are excluded before quota rather than discovered after amend', async t => {
+  for (const message of ['\0intent\n', 'foo\0bar\n', 'intent\n\0']) await t.test(JSON.stringify(message), t => {
+    const fx = fixture(t), work = path.join(fx.root, 'nul-head'); fs.mkdirSync(work);
+    const global = path.join(fx.root, 'global'); fs.writeFileSync(global, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1', GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' };
+    const git = (args, input, encoding = 'utf8') => execFileSync('git', args, { cwd: work, env, input, encoding, stdio: ['pipe', 'pipe', 'pipe'] });
+    git(['init', '-b', 'main']);
+    for (const [name, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false']]) git(['config', name, value]);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'base\n'); git(['add', 'code.txt']); git(['commit', '-m', 'base']);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'nonempty change\n'); git(['add', 'code.txt']); git(['commit', '-m', 'intent']);
+    const raw = git(['cat-file', 'commit', 'HEAD'], undefined, 'buffer');
+    const rawMessage = bytes => bytes.subarray(bytes.indexOf(Buffer.from('\n\n')) + 2);
+    const originalBytes = Buffer.concat([raw.subarray(0, raw.indexOf(Buffer.from('\n\n')) + 2), Buffer.from(message)]);
+    const original = git(['hash-object', '--literally', '-t', 'commit', '-w', '--stdin'], originalBytes).trim(); git(['update-ref', 'refs/heads/main', original]);
+    assert.equal(new TextDecoder('utf-8', { fatal: true }).decode(rawMessage(originalBytes)), message, 'UTF-8 validation alone accepts NUL');
+    assert.ok(/\S/u.test(message), 'non-whitespace validation alone accepts NUL');
+    const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    // Counterexample only, not a recovery: no quota, remote, push or message repair.
+    const amend = spawnSync('git', plan.amendArgs, { cwd: work, env: { ...env, GIT_COMMITTER_DATE: '2026-01-01T00:00:01Z' }, encoding: 'utf8' });
+    if (message.startsWith('\0')) {
+      assert.notEqual(amend.status, 0); assert.equal(git(['rev-parse', 'HEAD']).trim(), original);
+    } else {
+      assert.equal(amend.status, 0, amend.stderr);
+      const next = git(['cat-file', 'commit', 'HEAD'], undefined, 'buffer');
+      assert.notDeepEqual(rawMessage(next), Buffer.from(message), 'verbatim/no-edit still truncates at NUL');
+      assert.equal(rawMessage(next).includes(0), false);
+    }
+    assert.deepEqual(git(['cat-file', 'commit', original], undefined, 'buffer'), originalBytes);
+    assert.equal(fs.existsSync(fx.retryDir), false);
+    const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    assert.ok(/reject any NUL \(U\+0000\/0x00\) anywhere in the original raw message/.test(guide));
+    assert.ok(/Never strip, replace or truncate a NUL/.test(guide));
+  });
+});
+
+test('CI-only recovery excludes every other open consumer of the exact head ref', () => {
+  const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  assert.ok(/Only the current PR may be an open consumer of the exact head repository\/ref/.test(guide));
+  const query = guide.match(/```graphql (query HeadConsumers[\s\S]*?) ```/)?.[1];
+  assert.ok(query, 'use the head Ref connection, not current-base PR listings or commit associations');
+  for (const field of ['associatedPullRequests(first: 100, after: $cursor, states: [OPEN])', 'totalCount', 'hasNextPage endCursor', 'id state headRefName headRefOid headRepository { id }']) assert.ok(query.includes(field), field);
+  assert.equal(/baseRefName:|labels:|headRefName:/.test(query), false, 'do not exclude consumers by base or labels');
+  assert.ok(/Another open PR always stops recovery/.test(guide));
+  assert.ok(/Incomplete visibility, GraphQL errors or partial data/.test(guide));
+  assert.ok(/Re-read all consumer pages before budget status\/reservation, amend and push/.test(guide));
+});
+
 test('unsigned heads cannot inherit automatic signing before quota or amend', t => {
   const fx = fixture(t), work = path.join(fx.root, 'unsigned'); fs.mkdirSync(work);
   const key = path.join(fx.root, 'key');

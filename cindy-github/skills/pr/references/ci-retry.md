@@ -215,6 +215,13 @@ pinned date/configuration, inject a nonce or probe an amend to qualify. The late
 new-SHA and raw-payload checks remain mandatory.
 
 Before quota or amend, reject an empty or whitespace-only original raw message.
+Also reject any NUL (U+0000/0x00) anywhere in the original raw message, including
+leading, embedded and trailing NUL. Valid UTF-8 and non-whitespace content alone
+do not establish Git round-trip preservation: amend can truncate at NUL and
+still exit zero. Never strip, replace or truncate a NUL to qualify; keep the
+original head and quota unchanged. Apply this raw-byte condition at the same
+budget status/reservation, amend and push boundaries as the message check below,
+including signed heads and paths that would otherwise add a DCO trailer.
 After the strict UTF-8 validation below, require at least one non-whitespace
 character in the complete original message, even when DCO trailers would be added.
 This applies to roots, single-parent and merge heads, signed or unsigned.
@@ -310,6 +317,46 @@ All conditions must hold:
    write permission for the actual head repository (a fork may differ from the
    base), and that neither task permissions nor branch rules prohibit this push.
    A successful fetch is not evidence of write permission.
+
+   Only the current PR may be an open consumer of the exact head repository/ref.
+   Branch ownership and an exact lease do not limit which PRs a ref update affects.
+   Use the existing `graphql` tool to read the **head repository's Ref**, with
+   structured variables from the verified PR, not a base-repository PR list,
+   commit association, search result or branch-name-only comparison:
+
+   ```graphql
+   query HeadConsumers($headOwner: String!, $headRepo: String!, $headRef: String!, $cursor: String) {
+     repository(owner: $headOwner, name: $headRepo) {
+       id
+       ref(qualifiedName: $headRef) {
+         name prefix target { oid }
+         associatedPullRequests(first: 100, after: $cursor, states: [OPEN]) {
+           totalCount
+           pageInfo { hasNextPage endCursor }
+           nodes { id state headRefName headRefOid headRepository { id } }
+         }
+       }
+     }
+   }
+   ```
+
+   Bind `$headRef` to the complete `refs/heads/<verified-branch>`. On every page,
+   require the verified immutable head repository ID, prefix/name and original
+   remote SHA, and require the original PR still open at that same head. Follow
+   every cursor until `hasNextPage` is false; require a stable totalCount equal
+   to the distinct returned IDs, exactly one result, the verified current PR ID,
+   and matching OPEN state/head repository ID/name/SHA. Do not filter by base,
+   labels or current target repository: other bases and target repositories are
+   consumers too. Another open PR always stops recovery, regardless of its
+   approval/queue/auto-merge state; do not reserve its budget or operate on it.
+   Incomplete visibility, GraphQL errors or partial data, missing/duplicate IDs,
+   repeated/missing cursors, moved heads or unknown/mismatched fields stop too.
+   Zero results do not prove exclusivity when the current PR must be present.
+   Re-read all consumer pages before budget status/reservation, amend and push.
+   A consumer appearing after reservation stops without refund; after amend,
+   leave the local commit unpushed. This is a conservative single-PR scope,
+   not a new cross-PR coordinator or atomic GitHub lock. Do not close/retarget
+   another PR, change permissions or create a fresh branch to gain eligibility.
 6. Preserve completed review/merge work. Read the complete current review list
    using the plugin's existing `graphql` tool and cursor pagination of
    `reviews(first: 100, after: $cursor)` (`nodes { state }` and
@@ -472,7 +519,8 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    the PR commit list and task history for other people's or unknown commits.
    If anything differs, stop and reconcile safely; do not fetch/reset away an
    unknown remote commit. Record the verified remote SHA as the fixed lease.
-3. Read live `pr_follow_settings` again and recheck eligibility 6's complete
+3. Read live `pr_follow_settings` again and recheck eligibility 5's sole open
+   head-ref consumer and eligibility 6's complete
    review/queue/auto-merge state. If still enabled and all conditions
    hold, consume one of the **two total CI-only repush attempts for this PR/computer**,
    requiring that this diagnosed failure has not consumed one already:
@@ -527,7 +575,8 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    attempt only retains its existing consumption. More than two
    older attempts, unreadable receipts or unknown prior identity/outcome stop
    recovery; migration never grants two fresh attempts on top of old history.
-4. Recheck eligibility 6 (no approval, queue or auto-merge; all states known),
+4. Recheck eligibility 5's sole open head-ref consumer and eligibility 6
+   (no approval, queue or auto-merge; all states known),
    the PR is open, the preference is enabled, and local/index/remote
    facts still match, including absence of any effective hook and every history overlay.
    Use `git` with `amendArgs` only after those checks. The shared
@@ -559,7 +608,8 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
 5. Read live `pr_follow_settings` immediately before pushing, and refresh PR
    state, complete reviews, queue entry, auto-merge, head, clean worktree and exact
    remote ref, plus all supported-checkout/transfer-scope assumptions above.
-   Eligibility 6 must still hold immediately before push. If an
+   Eligibility 5's sole open head-ref consumer and eligibility 6 must still hold
+   immediately before push. If an
    approval/queue/auto-merge appears or any read becomes unknown, stop; do not
    push or alter the merge workflow. All must still match the
    original verified state apart from the intended local new SHA. If disabled
@@ -575,7 +625,10 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    Never use bare `--force`, implicit lease expectations, or multiple push URLs.
    A lease failure ends recovery. Do not refresh the expected SHA and push again.
    A network error may mean executed: read back the exact remote ref and original
-   PR before deciding what happened, with no automatic second push. The parent
+   PR before deciding what happened, with no automatic second push. Re-enumerate
+   the exact head ref's open PR consumers; any newly discovered or unreadable
+   consumer makes its possible review/queue/auto-merge effects unknown until
+   reconciled read-only. Never restore, dismiss or operate on those PRs. The parent
    result alone cannot settle suspected effects in other repositories.
 
 ## Verify and report

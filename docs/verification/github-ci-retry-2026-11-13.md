@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.54, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.55, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1457,3 +1457,24 @@ The Agent remains the sole workflow decision owner; the existing receipt owner a
 Windows 10.0.26100, Node 22.22.3 and Git 2.54.0.windows.1 native single-parent fixtures independently reproduce failed amend and unchanged HEAD for zero bytes, blank lines and ASCII whitespace. Ordinary and literal-comment controls produce a new SHA and preserve raw message bytes. Fixtures use nonempty tree changes and no DCO addition, reservation, remote or push. The corrected regression fails against source53's guide (0 pass/6 fail), then passes against source54. This is local Git/policy coverage, not live Cindy/GitHub recovery acceptance. Existing UI/launcher/disable/signed-head/causal-attribution gaps and blocked cleanup residuals remain; this source was not installed.
 
 Validation on the final runtime/guide/test content: mandatory four suites plus the plugin suite **562 passed / 36 skipped / 0 failed (294.90 s)**; 17 skips are native success paths unsupported by this full-directory-sync environment and 19 are existing skips. Forge exact-content comparison: **30 files, 251846 archive bytes, 710244 uncompressed bytes**; the newly generated package was deleted and absence checked. No additional candidate copy or live recovery was created.
+
+
+## Single-PR ref scope and NUL-safe message eligibility — 2026-11-26 (source1.5.55, not installed)
+
+The two preflight invariants are: (1) the exact head repository/ref has only the current PR as an open consumer, and (2) the original raw message is complete, valid UTF-8, nonblank and NUL-free. Both are required before budget status/reservation, amend and push; these are one existing Agent workflow's decisions, not a new coordinator, state store or Git executor. Existing slots, receipt I/O, fixed argv, hook/signing/durability rules and post-amend comparisons are unchanged.
+
+Shared branches are explicitly outside CI-only recovery scope. Use the head repository's Ref.associatedPullRequests connection via the existing GraphQL tool, with variables, OPEN filtering and complete cursor pagination; do not scope to the current base repository, base branch or labels. Require stable immutable repository/ref/SHA/current-PR identity, complete error-free visibility, stable totalCount and distinct IDs, exactly the original PR. Another consumer always stops regardless of its approval/queue/auto-merge; do not inspect it to grant an exception or consume its quota. Missing/partial/unknown reads, missing current PR, pagination/identity changes stop. Recheck all pages at each boundary. If discovered after reservation, no refund; after amend, leave unpushed. An uncertain push requires read-only ref/original-PR/consumer reconciliation, reporting unknown review/queue effects without restoring or operating on other PRs. A concurrent PR can appear between checks: this is not an atomic GitHub lock.
+
+[GitHub's Ref schema](https://docs.github.com/en/graphql/reference/git#ref) documents ref-level head consumers and pagination. The exact newly documented query was read through the actual root plugin for the existing task branch at head40ef3962: the fork repository ID, full ref/prefix, SHA and original PR ID matched; totalCount1, one OPEN PR332, hasNextPage=false. This validates the query schema and current single-consumer read only, not real shared-consumer refusal, pagination races or denied-rerun recovery. No test PR/repository/branch was created, no remote permissions or quota changed.
+
+| Input / event | Before reservation | Later boundary |
+| --- | --- | --- |
+| Exactly original PR, every field/page known | Other existing prerequisites still required | Re-read all consumer pages |
+| Any other open consumer, including different base/target | Stop | No refund after reserve; local amend stays unpushed |
+| Missing current PR, partial/error/visibility/count/cursor/head mismatch | Stop, never infer empty means exclusive | Reconcile unknown push effects read-only |
+| NUL at start/middle/end, even UTF-8/nonblank | Stop without mutation/quota | Never strip/replace/truncate or use DCO/probe to qualify |
+| Supported nonblank NUL-free message | Other prerequisites still required | Keep raw-message/trailer comparisons |
+
+Windows10.0.26100 / Node22.22.3 / Git2.54.0.windows.1 fixtures store raw NUL-bearing single-parent commit objects with local hash-object --literally (the ordinary current Git writer refuses them). Leading NUL makes amend fail; embedded/trailing NUL can exit0 with truncated message. Original bytes remain present. No reservation, remote or push is performed. Corrected native/policy regression5 cases failed against source54's guide, then the new cases plus existing message controls passed11/11 (11.43s). This does not prove live Cindy/GitHub enforcement. Current runtime acceptance gaps, previous cleanup blocks and installation boundaries remain.
+
+Final mandatory four suites plus plugin: **567 passed / 36 skipped / 0 failed (319.49 s)**; 17 native success cases require full directory sync unavailable here, 19 skips already existed. Forge full comparison: **30 files, 252925 archive bytes, 713507 uncompressed bytes**; new package deleted and absence verified. No candidate-validation copy, real CI-only rewrite or live installation. This round completed on 2026-11-26 UTC / 2026-11-27 Asia/Shanghai.
