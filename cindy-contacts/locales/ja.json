@@ -7,7 +7,12 @@
       "description": "名前、別名、メール、電話番号、Feishu/Slack/GitHub/LinkedIn などの ID、または会社・プロジェクト・出来事のキーワードなど、あらゆる手がかりで人を探します。最大 limit 人の概要、ID、グループ、AI へのメモ、最近の出来事を返します。matchType は identity（ID 完全一致、最も確実）/ name（名前または別名の完全一致）/ partial（保存済みの名前が手がかりに含まれる。例：フルネームで検索して名前だけ登録された人が見つかった場合。要確認）/ text（本文に含まれる）。"
     },
     "get": {
-      "description": "id で一人の完全なファイルを読みます：ID と連絡先、紹介、要点、最新の動き、未完了の事、やり取り（新しい順、最大 200 件）、出来事、グループ、関係、統合履歴。"
+      "description": "連絡先のプロフィールを取得。compact:true は人物情報と未完了事項を保ち、往来とイベントを最新5件ずつに制限します。既定 false は従来の履歴件数です。",
+      "parameters": {
+        "/properties/compact": {
+          "description": "Default false; true returns only the 5 most recent interactions and events."
+        }
+      }
     },
     "list": {
       "description": "プロフィールの概要をページ単位で一覧します（ストーリーと出来事の全文は含まない）。グループ・状態・種類で絞り込めます。特定の人を探すときは find を使います。各項目に circle（people / customers / community / contactOnly）、close（よく連絡する相手か）、score（関係の強さ）が付きます。"
@@ -49,7 +54,33 @@
       "description": "最大 100 件のプロフィールを一括で作成・更新します。ルールは save と同じです。顧客リストや表、名刺の取り込みに使います。件ごとに結果を返し、失敗した件は他に影響しません。 save の作成・追加フィールドに対応します。未完了の用件を閉じる、別名や連絡先を削除するときは 1 件ずつ save を使います。"
     },
     "maintenance": {
-      "description": "期間ごとの整理の開始・ソース確認・終了。begin はソースごとの期間、照会方法（チャットはグループと個別チャットを別々に探す）、前回の未読 backlog を返します。end では run_id と各ソースの coverage（complete / partial / none、partial は gaps 付き）を渡し、読み切った、または gaps 付きで一部読んだソースだけがチェックポイントを進め、未読部分は次回最初に補います。"
+      "description": "差分整理：begin は期間、budget と少量の backlog を返し、新着を優先。sources は接続状況、filter は本文取得前に source/account 別の処理済み refs を除外。全記録・プロフィール保存後または無関係と確認後のみ ack。progress はページごとの続き位置を保存、blocked は再試行を延期。end は coverage、partial は正確な gaps/resume が必須。recent/backfill/contact 対応。",
+      "parameters": {
+        "/properties/run_id": {
+          "description": "For end/progress: run_id returned by begin"
+        },
+        "/properties/backlog_done": {
+          "description": "For end: issued backlog ids fully completed; use progress after each page"
+        },
+        "/properties/source": {
+          "description": "For filter/ack: source category"
+        },
+        "/properties/account": {
+          "description": "For filter/ack: stable account/workspace identifier; keep mailboxes separate"
+        },
+        "/properties/refs": {
+          "description": "For filter/ack: item IDs, not thread IDs; add a revision for mutable events. Ack only after all participants’ records and profiles are saved or the item is confirmed irrelevant."
+        },
+        "/properties/backlog_id": {
+          "description": "For progress: id issued in this run’s begin.backlog"
+        },
+        "/properties/status": {
+          "description": "For progress: partial with remaining; blocked without progress; complete when fully finished"
+        },
+        "/properties/remaining": {
+          "description": "Remaining gap inside the original window; preserve account/query, save next cursor. On cursor expiry, use an empty cursor and filter completed items."
+        }
+      }
     }
   }
 }

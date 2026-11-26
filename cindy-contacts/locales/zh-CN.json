@@ -15,10 +15,13 @@
       }
     },
     "get": {
-      "description": "按 id 读取一个人的完整档案：身份与联系方式、介绍（narrative）、要点（facts）、最新动态（latest）、还没完的事（loops）、往来（interactions，新的在前，最多 200 条）、事件、分组、关系和合并记录。id 来自 find 或 list。",
+      "description": "按 id 读取一个人的完整档案：身份与联系方式、介绍（narrative）、要点（facts）、最新动态（latest）、还没完的事（loops）、往来（interactions，新的在前，最多 200 条）、事件、分组、关系和合并记录。id 来自 find 或 list。 整理时传 compact:true 只取最近 5 条往来和事件，保留完整人物资料与待办。",
       "parameters": {
         "/properties/id": {
           "description": "档案 id"
+        },
+        "/properties/compact": {
+          "description": "默认 false；true 只取最近 5 条往来和事件，减少整理上下文"
         }
       }
     },
@@ -222,7 +225,7 @@
       }
     },
     "maintenance": {
-      "description": "按时间段整理通讯录的开始、来源检查与收尾。begin 返回 run_id、时间段、每个来源各自的 from/to 与按时间查询的做法（消息类要群聊和单聊分别找）、上次没读完的 backlog、first_step 与 coverage_rule；scope 为 recent（上次整理到现在，第一次是最近两周）、backfill（所有人往前补）或 contact（只补一个人）。先按 first_step 用 action \"sources\" 报告来源能不能用；查完、记完后调用 end，带 run_id 和每个来源的 coverage（complete / partial / none，partial 带 gaps），读全或部分读到（partial 必须写 gaps）的来源才推进检查点，缺口留到下次先补。",
+      "description": "增量整理：begin 返回 run_id、各来源窗口、budget 和本轮可补 backlog（新内容优先）。sources 报告可用路径；filter 按 source/account 批量排除已 ack 的 refs，读取正文前用；ack 仅在档案与往来都已保存或确认无关后写入完成回执。progress 逐页保存 backlog 续读位置，blocked 延后重试。end 必须带 coverage；partial 带精确 gaps 与 resume，未读不标 complete。scope 支持 recent/backfill/contact。",
       "parameters": {
         "/properties/checkpoint": {
           "description": "旧做法：不传 run_id 时，本次已处理到的时间（ISO 8601）"
@@ -246,7 +249,7 @@
           "description": "backfill / contact 往前补几个月，默认 3"
         },
         "/properties/run_id": {
-          "description": "end 时传：begin 返回的 run_id"
+          "description": "end/progress 时传 begin 返回的 run_id"
         },
         "/properties/sources_status": {
           "description": "sources 时传（end 时也可带）：每个来源能不能用"
@@ -255,7 +258,25 @@
           "description": "end 时必传：每个来源这次读全了没有"
         },
         "/properties/backlog_done": {
-          "description": "end 时传：这次补完的 backlog id"
+          "description": "end 时传：本轮返回且已完全补完的 backlog id；逐页续读用 progress"
+        },
+        "/properties/source": {
+          "description": "filter/ack 的来源"
+        },
+        "/properties/account": {
+          "description": "filter/ack 的稳定账号或工作区标识；不同邮箱不可共用"
+        },
+        "/properties/refs": {
+          "description": "filter/ack 批量来源 ID；邮件用 message id，不用 thread id；可变日程加 revision。仅全部参与人的记录与档案处理完成或确认无关后 ack，失败或未读不得 ack。"
+        },
+        "/properties/backlog_id": {
+          "description": "progress 的缺口 id，来自本轮 begin.backlog"
+        },
+        "/properties/status": {
+          "description": "progress：partial 已前进并给 remaining；blocked 没有前进需延后；complete 完全补完"
+        },
+        "/properties/remaining": {
+          "description": "progress partial 的剩余缺口；时间范围只缩不扩。分页保留 account/query，cursor 填下一页；失效则空 cursor 并用 filter 去重"
         }
       }
     }

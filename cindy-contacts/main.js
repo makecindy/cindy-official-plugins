@@ -1514,7 +1514,7 @@ async function setSettings(patch) {
  * 按 CHANNEL_RULE 的顺序逐个试；本机加密的应用数据不去解。
  */
 const CHANNEL_RULE =
-  '每个来源用这个任务里一切能用的办法读，按顺序试，前一个读全了就不用后一个：' +
+  '每个来源复用一条可用路径，失败才按顺序找替代，不重复扫描同一来源：' +
   '① 已安装的插件（ghost_info 查 tools）；② Cindy 自带工具；③ 本机命令行工具（gh、gog、lark-cli 等，先 which）；④ 本机能直接读的应用数据（只读，如 sqlite3 -readonly）。' +
   '微信、Telegram、飞书桌面版等应用的本地库是加密的，不要尝试解密或读取进程内存。' +
   '读不到时把原因写进 note：系统隐私保护拦住（authorization denied / Operation not permitted）写「需要给 Cindy 开完全磁盘访问」；' +
@@ -1522,7 +1522,7 @@ const CHANNEL_RULE =
 
 const SOURCE_GUIDE = {
   mail:
-    '邮件：Gmail 插件（先 gmail_accounts，再 gmail_run 的 messages search）或 gog CLI（gog gmail search）。按时间段查，query 写 `after:<from 的 Unix 秒> before:<to 的 Unix 秒> -category:promotions -category:social`，真人来信再读整串，只取要点。' +
+    '邮件：Gmail 插件（先 gmail_accounts，再 gmail_run 的 messages search）或 gog CLI（gog gmail search）。按时间段查，query 写 `after:<from 的 Unix 秒> before:<to 的 Unix 秒> -category:promotions -category:social`，先只取 id、时间、发件人、收件人、主题和短摘要，批量 filter 后只读未处理的真人邮件正文；不要默认展开整串或附件。' +
     '其它邮箱用对应插件；Apple 邮件可只读 ~/Library/Mail/V*/MailData/Envelope Index（sqlite），需要完全磁盘访问。ref 填邮件 message id。',
   calendar:
     '日历：日历插件（如 google_calendar 的 list_events）或 gog CLI（gog calendar events），time_min / time_max 用本时间段。参会人和会议主题记成往来，ref 填 event id。50 人以上的大会只记组织者。',
@@ -1562,9 +1562,9 @@ function automationPrompt(profile) {
   return [
     '整理我的通讯录（cindy-contacts 插件）。先读整理手册：ghost_manual({ ghost_id: "cindy-contacts", path: "tidy" })，照它做。',
     '1. 调用 ghost_call({ ghost_id: "cindy-contacts", tool: "maintenance", args: { action: "begin" } })，先按 first_step 检查并报告来源，再按时间段（segments）和来源说明（sources）逐段查找。',
-    '2. 每个来源只拉这段时间里的新内容；与我真实往来的人，用 record 记下每条往来（ref 填来源 id，重复的会自动跳过）。',
-    '3. 有新往来的人：先 get，再用 save 更新 summary、narrative、latest（一句话说这次的新动静）、facts，并用 open_loops / close_loops 维护还没完的事。值得记的真人没有档案就新建；明显是同一个人的两份档案直接 merge 并写 reason。',
-    `4. 本次最多改 ${p.maxChanges} 个人，其余留到下次。`,
+    '2. 先处理各来源的新时间段；历史 backlog 只在周一且有剩余 budget 时补一项。先读轻量索引，用 maintenance filter 批量排除已处理的 ref，必要时才读正文。完整处理或确认无关后 ack；补读每页用 progress 保存续读位置。',
+    '3. 新往来批量 record；按人合并后 get(compact:true)，只 save 有实质变化的字段和待办。值得记的真人没有档案才新建；重复记录不重写档案。',
+    `4. 本次最多改 ${p.maxChanges} 人，扫描与正文读取遵守 begin.budget；到预算即保存缺口并收尾，不为清空历史继续加页。`,
     '5. 最后调用 maintenance，action 为 "end"，带上 begin 返回的 run_id、扫描与新增更新的数量，以及 coverage（每个来源读全了没有、哪里没读完）。',
   ].join('\n');
 }
@@ -1575,15 +1575,80 @@ async function requestAutomation() {
   if (!cindy.agent || typeof cindy.agent.requestSchedule !== 'function') {
     throw fail('UNSUPPORTED', '当前 Cindy 版本不支持由插件请求新建自动化');
   }
+  let preRunCheck = false;
+  if (cindy.checks && cindy.request) {
+    try {
+      const [checks, points] = await Promise.all([cindy.checks.list(), cindy.request({ kind: 'control-points' })]);
+      preRunCheck = checks?.ok === true && points?.points?.some(point => point.id === 'will-schedule-run' && point.active === true) === true;
+    } catch (_) { /* Older or unapproved hosts retain the existing creation flow. */ }
+  }
   const r = await cindy.agent.requestSchedule({
     name: (await taskNames()).schedule,
     prompt: automationPrompt(settings.profile),
     intervalMs: p.intervalHours * 3600 * 1000,
+    ...(preRunCheck ? { preRunCheck: true } : {}),
   });
   if (!r || r.ok === false) throw fail((r && r.errorCode) || 'SCHEDULE_FAILED', (r && r.message) || '没有打开自动化面板');
   const requested = { at: nowIso(), profile: settings.profile };
   await batch([setMetaStmt('automation_requested', requested)]);
   return requested;
+}
+
+async function availableChangeChecks() {
+  if (!cindy.checks) return [];
+  try {
+    const result = await cindy.checks.list();
+    return result?.ok && Array.isArray(result.providers) ? result.providers : [];
+  } catch (_) { return []; }
+}
+
+/** Outside the model: only complete, explicitly bound sources can certify an empty window. */
+async function checkBeforeTidy(deadline) {
+  if (!cindy.checks) return 'allow';
+  await ensureReady();
+  if (pendingImport) await pendingImport;
+  const before = await serial(async () => ({ settings: await getSettings(),
+    meta: (await getMeta('maintenance')) || { runs: [] }, status: await getMeta('sources_status') }));
+  const enabled = SOURCES.filter(source => before.settings.sources[source]);
+  const now = Date.now(), to = isoOf(now), checks = [], bySource = new Map();
+  for (const source of enabled) {
+    const item = before.status?.items?.find(item => item.source === source);
+    const checkpoint = before.meta.sources?.[source]?.checkpoint;
+    // First scan, another account path, missing grant or stale history needs the existing Agent path.
+    if (item?.status !== 'ok' || !Array.isArray(item.check_providers) || !item.check_providers.length ||
+        !checkpoint || !(Date.parse(checkpoint) < now) || now - Date.parse(checkpoint) > 30 * DAY) continue;
+    // Keep the same one-hour safety overlap as the Agent scan: delayed indexing
+    // must remain discoverable after an earlier empty check.
+    const group = item.check_providers.map(providerId => ({ providerId, source, from: isoOf(Date.parse(checkpoint) - 3600000), to }));
+    bySource.set(source, group);
+    checks.push(...group);
+  }
+  let result;
+  if (checks.length) {
+    try { result = await cindy.checks.probe(checks); } catch (_) { return 'allow'; }
+  }
+  const empty = [];
+  if (result?.ok && Array.isArray(result.results)) {
+    for (const [source, group] of bySource) {
+      if (group.every(check => result.results.some(value => value.providerId === check.providerId && value.source === source &&
+          value.from === check.from && value.to === check.to && value.state === 'unchanged'))) empty.push(source);
+    }
+  }
+  return serial(async () => {
+    if (typeof deadline === 'number' && Date.now() >= deadline - 200) return 'allow';
+    // A concurrent settings change, scan or source rebind invalidates the entire observation.
+    const settings = await getSettings(), status = await getMeta('sources_status');
+    const meta = (await getMeta('maintenance')) || { runs: [] };
+    if (JSON.stringify(settings) !== JSON.stringify(before.settings) || JSON.stringify(status) !== JSON.stringify(before.status) ||
+        JSON.stringify(meta.sources) !== JSON.stringify(before.meta.sources)) return 'allow';
+    const sources = { ...(meta.sources || {}) };
+    for (const source of empty) sources[source] = { ...sources[source], checkpoint: to, coverage: 'complete', at: to };
+    const proof = { to, empty, settings: JSON.stringify(settings), status: JSON.stringify(status), sources: JSON.stringify(sources) };
+    await batch([setMetaStmt('maintenance', { ...meta, sources }), setMetaStmt('change_check', proof)]);
+    const dueBackfill = new Date(now).getDay() === 1 && (meta.backlog || []).some(gap =>
+      enabled.includes(gap.source) && (!gap.retryAfter || Date.parse(gap.retryAfter) <= now));
+    return !dueBackfill && enabled.every(source => empty.includes(source)) ? 'skip' : 'allow';
+  });
 }
 
 /**
@@ -1604,12 +1669,17 @@ async function maintenanceBegin(input) {
   let from;
   let to;
   let contact = null;
-  const enabled = SOURCES.filter((k) => settings.sources[k]);
+  const proof = scope === 'recent' ? await getMeta('change_check') : null;
+  const status = await getMeta('sources_status');
+  const freshProof = proof && now - Date.parse(proof.to) >= 0 && now - Date.parse(proof.to) < 60000 &&
+    proof.settings === JSON.stringify(settings) && proof.status === JSON.stringify(status) && proof.sources === JSON.stringify(meta.sources);
+  const checkedEmpty = freshProof ? proof.empty : [];
+  const enabled = SOURCES.filter((k) => settings.sources[k] && !checkedEmpty.includes(k));
   // 每个来源各自从上次读完的地方接着读（往前多看 1 小时防漏）；最多往前 30 天，更早的交给回补。
   const sourceFrom = {};
   const skipped = [];
   if (scope === 'recent') {
-    to = now;
+    to = freshProof ? Date.parse(proof.to) : now;
     for (const k of enabled) {
       const cp = (meta.sources && meta.sources[k] && meta.sources[k].checkpoint) || meta.checkpoint || '';
       let f = cp ? Date.parse(cp) - 3600000 : initialFrom;
@@ -1639,6 +1709,7 @@ async function maintenanceBegin(input) {
     contactName: contact ? contact.name : '',
     firstRun: scope === 'recent' && !meta.checkpoint,
     sources: enabled,
+    sourceFrom: Object.fromEntries(enabled.map((k) => [k, isoOf(sourceFrom[k] ?? from)])),
     startedAt: nowIso(),
   };
   const metaWrites = [setMetaStmt(`run:${run.runId}`, run)];
@@ -1648,10 +1719,16 @@ async function maintenanceBegin(input) {
       .filter((g) => !known.some((b) => b.source === g.source && b.where === g.where && b.from === g.from))
       .map((g) => ({ id: uuid(), ...g, addedAt: nowIso() }));
     if (added.length) {
-      meta.backlog = [...known, ...added].slice(-200);
+      meta.backlog = [...known, ...added];
       metaWrites.push(setMetaStmt('maintenance', meta));
     }
   }
+  const allBacklog = scope === 'recent' ? (meta.backlog || []).filter((g) => settings.sources[g.source]) : [];
+  const due = allBacklog.filter((g) => !g.retryAfter || Date.parse(g.retryAfter) <= now);
+  const backlog = due.slice(0, 1);
+  run.backlogIds = backlog.map((g) => g.id);
+  // Rebuild after adding the issued ids; setMetaStmt serializes immediately.
+  metaWrites[0] = setMetaStmt(`run:${run.runId}`, run);
   await batch(metaWrites);
   const sources = enabled.map((k) => ({
     source: k,
@@ -1659,7 +1736,6 @@ async function maintenanceBegin(input) {
     to: isoOf(to),
     how: SOURCE_GUIDE[k],
   }));
-  const backlog = scope === 'recent' ? (meta.backlog || []).filter((g) => enabled.includes(g.source)).slice(0, 20) : [];
   return {
     run_id: run.runId,
     scope,
@@ -1668,23 +1744,107 @@ async function maintenanceBegin(input) {
     first_run: run.firstRun,
     segments: splitWindow(from, to, scope === 'recent' ? 7 : 14),
     sources,
+    checked_empty: checkedEmpty,
+    available_checks: await availableChangeChecks(),
     backlog,
+    backlog_pending: allBacklog.length,
+    backlog_deferred: allBacklog.length - backlog.length,
+    budget: { max_index_items: 200, max_body_reads: 30, max_source_calls: 40, max_backlog_items: 1, max_backlog_index_items: 50 },
+    previous_sources: await getMeta('sources_status'),
     contact,
     max_changes: scope === 'contact' ? 1 : p.maxChanges,
     guidance:
       (scope === 'contact'
         ? `只查与「${contact.name}」有关的往来：用上面的身份（邮箱、平台账号）和名字去各来源搜索这段时间。`
-        : p.guidance) + ' 每条往来用 record 记下（ref 填来源 id）；有新往来的人再用 save 改写 summary、narrative、latest、facts 和还没完的事。',
+        : p.guidance) + ' 新往来批量 record，按人聚合后 get(compact:true)，只 save 有实质变化的字段与待办；旧事不覆盖较新的 latest。',
     stats: await stats(),
     coverage_rule:
       '收尾 end 必须带 coverage：每个来源写 complete（这段时间读全了）/ partial（读了一部分，gaps 写清哪个会话或哪类、哪段时间没读到、为什么）/ none（没读到）。' +
-      '读完的来源才推进检查点；partial 的缺口和 none 的整段会留到下次先补。backlog 里是上次没读完的，先补，补完的 id 放进 backlog_done。',
+      '先读本轮新内容，预算有余才补返回的 backlog；其他欠账保留，不自行展开。partial 缺口带准确账号、时间和 resume（原查询与分页位置）；补读每页用 progress 续接，阻塞用 blocked 延后重试。已处理的索引用 filter/ack 去重，未处理的不得 ack 或标 complete。',
     first_step:
-      '先逐个确认 sources 里的来源能不能用、用哪个办法读（按 channel_rule 的顺序试：插件是否已安装并连接、命令行工具是否在、本机数据能否打开；Cindy 对话看 cindy_helper 历史工具是否可用），' +
+      'available_checks 列出无需模型的来源检查。实际查询覆盖某来源的全部账号/路径后，在 sources_status 对应项的 check_providers 填覆盖全部路径的 providerId 数组；不能覆盖则填 []，不得用一个 Gmail 检查代替其它邮箱或聊天。checked_empty 已由程序检查且推进进度，不重复查询。' +
+      '优先复用 previous_sources 中的可用读取路径；实际查询成功即完成来源检查，不另外探测同源的所有工具。路径失败再按 channel_rule 找替代；上轮权限或环境未变化时报告仍不可用，不逐轮重复探测所有入口。' +
       '再调用 maintenance，action 为 "sources"，sources_status 写每个来源的 status：ok / missing（没装）/ unauthorized（没连接或没授权）/ unavailable（这个任务里用不了）/ error，note 写一句用的办法或读不到的原因。',
     channel_rule: CHANNEL_RULE,
     manual: 'ghost_manual({ ghost_id: "cindy-contacts", path: "tidy" })',
   };
+}
+
+function normalizeResume(value) {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || Array.isArray(value)) throw fail('INVALID_PARAMS', 'resume 需要 account/query/cursor 对象。');
+  const resume = {};
+  for (const [key, limit] of [['account', 200], ['query', 2000], ['cursor', 4000]]) {
+    if (typeof value[key] !== 'string' || value[key].length > limit || (key === 'account' && !value[key].trim())) throw fail('INVALID_PARAMS', `resume.${key} 需要有效字符串（最多 ${limit} 字符），不能截断分页位置。`);
+    resume[key] = value[key];
+  }
+  return { resume };
+}
+
+function appendGaps(previous, gaps, now) {
+  const out = [...previous];
+  const key = (g) => JSON.stringify([g.source, g.where, g.from, g.to, g.resume?.account || '', g.resume?.query || '']);
+  const known = new Set(out.map(key));
+  for (const g of gaps) {
+    if (known.has(key(g))) continue;
+    known.add(key(g));
+    out.push({ id: uuid(), ...g, addedAt: now });
+  }
+  return out;
+}
+
+/** Receipts live beside local maintenance state, never contain mail bodies or credentials.
+ * filter is read-only: only ack, after BOTH recording and updating a person, can skip future reads.
+ * Account + source + immutable item/revision id is the key; sender/thread ids are not safe keys.
+ */
+async function maintenanceRefs(input) {
+  const source = str(input.source);
+  const account = str(input.account);
+  if (!SOURCES.includes(source) || !account || account.length > 200 || !Array.isArray(input.refs) || !input.refs.length || input.refs.length > 100 || input.refs.some((r) => typeof r !== 'string' || !r.trim() || r.length > 500)) {
+    throw fail('INVALID_PARAMS', 'filter/ack 需要 source、稳定的 account 标识和 1–100 个非空 ref（每个最多 500 字符）。');
+  }
+  const refs = [...new Set(input.refs)];
+  const keys = refs.map((ref) => `scan:${JSON.stringify([source, account, ref])}`);
+  if (input.action === 'filter') {
+    const rows = await q(`SELECT key FROM plugin_meta WHERE key IN (${keys.map(() => '?').join(',')})`, keys);
+    const seen = new Set(rows.map((r) => r.key));
+    return { unseen: refs.filter((_, i) => !seen.has(keys[i])), skipped: seen.size };
+  }
+  const now = nowIso();
+  await batch(keys.map((key) => setMetaStmt(key, { at: now })));
+  return { acknowledged: keys.length };
+}
+
+/** Save a page immediately. A blocked gap retains its cursor and backs off instead of
+ * rereading the same old mailbox every day. Unattempted gaps are never counted as failures.
+ */
+async function maintenanceProgress(input) {
+  const run = await getMeta(`run:${str(input.runId)}`);
+  const id = str(input.backlogId);
+  if (!run || !run.backlogIds?.includes(id)) throw fail('INVALID_PARAMS', 'progress 需要本轮 begin 返回的 run_id 和 backlog_id。');
+  if (!['partial', 'blocked', 'complete'].includes(input.status)) throw fail('INVALID_PARAMS', 'progress.status 需要 partial / blocked / complete。');
+  const meta = (await getMeta('maintenance')) || { runs: [] };
+  const backlog = [...(meta.backlog || [])];
+  const index = backlog.findIndex((g) => g.id === id);
+  if (index < 0) return { recorded: true, complete: true };
+  const prev = backlog[index];
+  if (input.status === 'complete') backlog.splice(index, 1);
+  else if (input.status === 'blocked') {
+    const attempts = Math.min(10, (Number(prev.attempts) || 0) + 1);
+    backlog[index] = { ...prev, attempts, retryAfter: isoOf(Date.now() + Math.min(7, 2 ** (attempts - 1)) * DAY), lastAttemptAt: nowIso(), reason: str(input.note).slice(0, 160) || prev.reason };
+  } else {
+    const remaining = normalizeCoverage([{ source: prev.source, coverage: 'partial', gaps: [input.remaining] }])[0]?.gaps[0];
+    if (!remaining || !remaining.from || !remaining.to || Date.parse(remaining.from) >= Date.parse(remaining.to) || (prev.from && Date.parse(remaining.from) < Date.parse(prev.from)) || (prev.to && Date.parse(remaining.to) > Date.parse(prev.to))) {
+      throw fail('INVALID_PARAMS', 'partial 需要 remaining：原缺口范围内的未读时间段、位置和原因；分页时保留原查询与下一页 cursor。');
+    }
+    if (prev.resume && (!remaining.resume || remaining.resume.account !== prev.resume.account || remaining.resume.query !== prev.resume.query)) {
+      throw fail('INVALID_PARAMS', '分页续接必须保留原 account 和 query；cursor 失效时保留原查询并传空 cursor，借助 filter 排除已处理条目。');
+    }
+    backlog[index] = { ...prev, ...remaining, attempts: 0, retryAfter: '', lastAttemptAt: nowIso() };
+  }
+  await batch([setMetaStmt('maintenance', { ...meta, backlog })]);
+  const current = backlog.find((g) => g.id === id);
+  return { recorded: true, complete: !current, ...(current ? { remaining: current } : {}) };
 }
 
 function normalizeCoverage(list) {
@@ -1699,7 +1859,7 @@ function normalizeCoverage(list) {
       const from = str(g && g.from);
       const to = str(g && g.to);
       if (!where && !from) continue;
-      gaps.push({ where, from: Number.isNaN(Date.parse(from)) ? '' : from, to: Number.isNaN(Date.parse(to)) ? '' : to, reason: str(g && g.reason).slice(0, 160) });
+      gaps.push({ where, from: Number.isNaN(Date.parse(from)) ? '' : from, to: Number.isNaN(Date.parse(to)) ? '' : to, reason: str(g && g.reason).slice(0, 160), ...normalizeResume(g && g.resume) });
     }
     // 说读了一部分却没写缺口在哪：推进检查点会把没读的部分永久跳过，按没读到处理。
     if (coverage === 'partial' && !gaps.length) coverage = 'none';
@@ -1749,20 +1909,19 @@ async function maintenanceEnd(input) {
       if (c.coverage === 'none') gaps.push({ source: c.source, where, from: run.from, to: run.to, reason: c.note || '回补时没读到' });
       for (const g of c.gaps) gaps.push({ source: c.source, ...g, where: g.where || where });
     }
-    if (gaps.length) next.backlog = [...(meta.backlog || []), ...gaps.map((g) => ({ id: uuid(), ...g, addedAt: now }))].slice(-200);
+    if (gaps.length) next.backlog = appendGaps(meta.backlog || [], gaps, now);
   }
   if (run && run.scope === 'recent' && Array.isArray(run.sources)) {
     // 只有读全或读了一部分（缺口记成待补）的来源才推进；没读到的来源保持原位。
     const sources = { ...(meta.sources || {}) };
-    let backlog = (meta.backlog || []).filter((g) => !(Array.isArray(input.backlogDone) && input.backlogDone.includes(g.id)));
+    let backlog = (meta.backlog || []).filter((g) => !(Array.isArray(input.backlogDone) && input.backlogDone.includes(g.id) && (!run.backlogIds || run.backlogIds.includes(g.id))));
     for (const c of covs) {
       if (!run.sources.includes(c.source)) continue;
-      if (c.coverage === 'complete' || c.coverage === 'partial') sources[c.source] = { checkpoint: run.to, coverage: c.coverage, at: now };
+      if (c.coverage === 'complete' || c.coverage === 'partial') sources[c.source] = { checkpoint: Date.parse(sources[c.source]?.checkpoint) > Date.parse(run.to) ? sources[c.source].checkpoint : run.to, coverage: c.coverage, at: now };
       else sources[c.source] = { ...(sources[c.source] || {}), coverage: 'none', at: now };
-      for (const g of c.gaps) backlog.push({ id: uuid(), source: c.source, ...g, addedAt: now });
+      backlog = appendGaps(backlog, c.gaps.map((g) => ({ source: c.source, ...g, from: g.from || run.sourceFrom?.[c.source] || run.from, to: g.to || run.to })), now);
     }
-    // 缺口补完前一直留着（检查点已越过它们）；只设上限防止无限增长。
-    backlog = backlog.slice(-200);
+    // 缺口补完前一直留着；展示/处理有预算，但不能靠截断队列丢掉未读内容。
     next.sources = sources;
     next.backlog = backlog;
     const cps = run.sources.map((k) => (sources[k] && sources[k].checkpoint) || '').filter(Boolean).sort();
@@ -1803,13 +1962,24 @@ const SOURCE_STATES = new Set(['ok', 'missing', 'unauthorized', 'unavailable', '
 /** 整理开始时 AI 先逐个确认来源能不能用，报回来给页面显示（插件自己看不到装了哪些插件）。 */
 async function reportSources(list) {
   const items = [];
+  const prev = (await getMeta('sources_status')) || { items: [] };
+  const providers = (Array.isArray(list) && list.some(item => item?.check_providers?.length)) ? await availableChangeChecks() : [];
   for (const x of Array.isArray(list) ? list.slice(0, 10) : []) {
     const source = str(x && x.source);
     if (!SOURCES.includes(source)) continue;
-    items.push({ source, status: SOURCE_STATES.has(str(x.status)) ? str(x.status) : 'error', note: str(x.note).slice(0, 160) });
+    const item = { source, status: SOURCE_STATES.has(str(x.status)) ? str(x.status) : 'error', note: str(x.note).slice(0, 160) };
+    if (x.check_providers !== undefined) {
+      if (!Array.isArray(x.check_providers) || x.check_providers.length > 16 ||
+          x.check_providers.some(id => typeof id !== 'string' || !providers.some(provider => provider.providerId === id && provider.sources.includes(source))))
+        throw fail('INVALID_PARAMS', 'check_providers must name available checks for the entire source');
+      item.check_providers = item.status === 'ok' ? [...new Set(x.check_providers)] : [];
+    } else {
+      const old = prev.items.find(value => value.source === source);
+      item.check_providers = item.status === 'ok' && old?.status === 'ok' && old.note === item.note ? old.check_providers || [] : [];
+    }
+    items.push(item);
   }
   if (!items.length) throw fail('INVALID_PARAMS', 'sources_status is required');
-  const prev = (await getMeta('sources_status')) || { items: [] };
   const merged = [...items, ...prev.items.filter((p) => !items.some((i) => i.source === p.source))];
   await batch([setMetaStmt('sources_status', { at: nowIso(), items: merged })]);
   const usable = items.filter((i) => i.status === 'ok').map((i) => i.source);
@@ -1817,12 +1987,14 @@ async function reportSources(list) {
     recorded: items.length,
     usable,
     next: usable.length
-      ? '按 segments 逐段读这些可用的来源。'
+      ? '先按各来源的 from/to 读新内容；遵守 budget，剩余预算才续读本轮返回的 backlog。'
       : '没有可用的来源：不要继续查找，直接调用 maintenance end（带 run_id），note 里写清每个来源为什么不能用。',
   };
 }
 
 async function maintenance(input) {
+  if (input.action === 'filter' || input.action === 'ack') return maintenanceRefs(input);
+  if (input.action === 'progress') return maintenanceProgress(input);
   if (input.action === 'sources') return reportSources(input.sourcesStatus);
   if (input.action === 'begin') {
     maybeAutoSyncMac();
@@ -2725,7 +2897,7 @@ async function tidy(input) {
       `先读整理手册：ghost_manual({ ghost_id: "${CHANNEL}", path: "tidy" })，照它做。`,
       `1. 调用 ghost_call({ ghost_id: "${CHANNEL}", tool: "maintenance", args: { action: "begin", scope: "contact", contact_id: "${c.id}", months: ${months} } })。`,
       '2. 按返回的时间段和来源说明，只用这个人的身份和名字去查；查到的往来用 record 记下（contact_id 用上面的 id）。',
-      '3. 用 save 重写这个人的 summary、narrative、facts、latest，并整理还没完的事。',
+      '3. 先 get(compact:true)，只 save 有实质变化的字段与待办；旧事不覆盖较新的 latest。遵守 begin.budget，未读部分留缺口。',
       '4. 调用 maintenance，action 为 "end"，带上 run_id 和 coverage（每个来源读全了没有、哪里没读完）。最终回复一句话说补到了哪天、多了几条往来。',
     ].join('\n');
     return sendToTask(`c:${c.id}`, `${(await taskNames()).app} · ${c.display_name}`, text, { purpose: 'backfill', contactId: c.id, question: `往前补 ${months} 个月` });
@@ -2734,8 +2906,8 @@ async function tidy(input) {
     scope === 'recent' ? '整理我的通讯录：把最近的往来整理进去。' : `回补我的通讯录：往前补 ${months} 个月的往来。`,
     `先读整理手册：ghost_manual({ ghost_id: "${CHANNEL}", path: "tidy" })，照它做；这个任务专门用来维护我的通讯录，我在这里追问时按手册「用户在这个任务里追问时」一节回答。`,
     `1. 调用 ghost_call({ ghost_id: "${CHANNEL}", tool: "maintenance", args: { action: "begin", scope: "${scope}"${scope === 'backfill' ? `, months: ${months}` : ''} } })，先按返回的 first_step 检查并报告来源。`,
-    '2. 按返回的时间段（segments，新的在前）和来源说明逐段查找；与我真实往来的人，用 record 记下每条往来。',
-    '3. 有新往来的人：get 之后用 save 更新 summary、narrative、latest、facts 和还没完的事；值得记的真人没有档案就新建，明显重复的直接 merge 并写 reason。先写来往最多的人。',
+    '2. 先处理新内容，遵守 begin.budget，有余量再补返回的 backlog。轻量索引先 filter，必要时才读正文；处理完后 ack，补读每页 progress 保存位置。真人往来批量 record。',
+    '3. 每人本轮只 get(compact:true) 一次，只 save 有实质变化的字段与待办；值得记的真人没有档案才新建，明显重复的直接 merge 并写 reason。',
     '4. 最后调用 maintenance，action 为 "end"，带上 run_id、数量和 coverage（每个来源读全了没有、哪里没读完）。',
     '最终回复只写两行：第一行「整理了 N 个人」（或为什么没整理成）；第二行写哪些来源没读到、为什么，都读到了就不写。',
   ].join('\n');
@@ -2874,7 +3046,7 @@ const arr = (v) => (Array.isArray(v) ? v : v === undefined || v === null || v ==
 
 const TOOLS = {
   find: (a) => findContacts(a.query, a.limit).then((results) => ({ results })),
-  get: (a) => getContact(a.id),
+  get: (a) => getContact(a.id, a.compact ? { eventLimit: 5, interactionLimit: 5 } : undefined),
   list: async (a) => {
     let rows = await listContacts();
     if (str(a.group)) rows = rows.filter((r) => r.groups.includes(str(a.group)));
@@ -2963,6 +3135,12 @@ const TOOLS = {
       sourcesStatus: a.sources_status,
       coverage: a.coverage,
       backlogDone: a.backlog_done,
+      source: a.source,
+      account: a.account,
+      refs: a.refs,
+      backlogId: a.backlog_id,
+      status: a.status,
+      remaining: a.remaining,
       checkpoint: a.checkpoint,
       scanned: a.scanned,
       created: a.created,
@@ -2978,6 +3156,12 @@ let pendingImport = null;
 const HOST_ERROR_CODES = new Set(['GHOST_NOT_FOUND', 'GHOST_ASLEEP', 'GHOST_DISABLED_IN_WORKDIR', 'TOOL_NOT_FOUND', 'GHOST_CRASHED', 'TIMEOUT', 'ATTACHMENT_INVALID', 'DIR_INVALID', 'INTERNAL']);
 
 cindy.onHostMessage(async (msg) => {
+  if (msg?.type === 'event' && msg.name === 'will-schedule-run') {
+    let action = 'allow';
+    try { action = await checkBeforeTidy(msg.deadline); } catch (_) { /* preserve the existing scan on an unknown result */ }
+    await cindy.send({ type: 'event-verdict', hookId: msg.hookId, action });
+    return;
+  }
   if (!msg || msg.type !== 'tool-call') return;
   const handler = TOOLS[msg.tool];
   try {

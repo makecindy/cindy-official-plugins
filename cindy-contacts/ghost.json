@@ -5,8 +5,8 @@
   "name": "通讯录",
   "description": "AI 帮你记住打过交道的每个人：整理邮件、日历和聊天里的往来，记录人物档案、最新动态和待办。支持导入 macOS 通讯录与旧版智能通讯录。资料保存在本机；在支持插件同步的 Cindy 中，可开启同账号电脑间的加密同步，两台电脑同时在线时合并修改和删除。",
   "whenToUse": "遇到陌生邮箱、手机号或飞书/Slack/GitHub/LinkedIn 账号想知道是谁；要联系、发消息、写邮件或 @ 某人；准备会议、回邮件需要人物背景或「上次聊到哪」；对话里提到同事、朋友、客户的新情况（换工作、新联系方式、约定）；要整理、回补、去重或导入通讯录时。",
-  "version": "1.3.2",
-  "releaseNotes": "修复联系人搜索框用中文输入法选词时会打断输入的问题。现在可以直接输入拼音查找中文姓名和别名，例如输入 tao 就能找到「陶小林」。",
+  "version": "1.3.4",
+  "releaseNotes": "整理改为先增量、后限量补读：批量过滤已处理的来源 ID，只读必要正文；按账号隔离去重记录，处理完成才确认。历史欠账支持保存原查询和分页位置，阻塞时延后重试，相同缺口不重复入队，未完成缺口不再因队列上限丢失。提供精简档案读取，减少每次更新的历史上下文。每日整理设索引、正文和补读预算，达到预算保存进度后收尾。 在支持来源检查的 Cindy 中，自动化可先用程序检查：已确认无新增的来源不重复扫描，全部来源无变化时跳过模型。检查不完整或权限失效时保留增量读取。",
   "author": "Cindy",
   "entry": "main.js",
   "launch": "resident",
@@ -32,7 +32,8 @@
   },
   "agent": {
     "tasks": true,
-    "schedule": true
+    "schedule": true,
+    "checks": true
   },
   "node": {
     "entry": "node/worker.cjs",
@@ -80,13 +81,17 @@
     },
     {
       "name": "get",
-      "description": "按 id 读取一个人的完整档案：身份与联系方式、介绍（narrative）、要点（facts）、最新动态（latest）、还没完的事（loops）、往来（interactions，新的在前，最多 200 条）、事件、分组、关系和合并记录。id 来自 find 或 list。",
+      "description": "按 id 读取一个人的完整档案：身份与联系方式、介绍（narrative）、要点（facts）、最新动态（latest）、还没完的事（loops）、往来（interactions，新的在前，最多 200 条）、事件、分组、关系和合并记录。id 来自 find 或 list。 整理时传 compact:true 只取最近 5 条往来和事件，保留完整人物资料与待办。",
       "parameters": {
         "type": "object",
         "properties": {
           "id": {
             "type": "string",
             "description": "档案 id"
+          },
+          "compact": {
+            "type": "boolean",
+            "description": "默认 false；true 只取最近 5 条往来和事件，减少整理上下文"
           }
         },
         "required": [
@@ -759,7 +764,7 @@
     },
     {
       "name": "maintenance",
-      "description": "按时间段整理通讯录的开始、来源检查与收尾。begin 返回 run_id、时间段、每个来源各自的 from/to 与按时间查询的做法（消息类要群聊和单聊分别找）、上次没读完的 backlog、first_step 与 coverage_rule；scope 为 recent（上次整理到现在，第一次是最近两周）、backfill（所有人往前补）或 contact（只补一个人）。先按 first_step 用 action \"sources\" 报告来源能不能用；查完、记完后调用 end，带 run_id 和每个来源的 coverage（complete / partial / none，partial 带 gaps），读全或部分读到（partial 必须写 gaps）的来源才推进检查点，缺口留到下次先补。",
+      "description": "增量整理：begin 返回 run_id、各来源窗口、budget 和本轮可补 backlog（新内容优先）。sources 报告可用路径；filter 按 source/account 批量排除已 ack 的 refs，读取正文前用；ack 仅在档案与往来都已保存或确认无关后写入完成回执。progress 逐页保存 backlog 续读位置，blocked 延后重试。end 必须带 coverage；partial 带精确 gaps 与 resume，未读不标 complete。scope 支持 recent/backfill/contact。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -768,7 +773,10 @@
             "enum": [
               "begin",
               "sources",
-              "end"
+              "end",
+              "filter",
+              "ack",
+              "progress"
             ]
           },
           "checkpoint": {
@@ -818,7 +826,7 @@
           },
           "run_id": {
             "type": "string",
-            "description": "end 时传：begin 返回的 run_id"
+            "description": "end/progress 时传 begin 返回的 run_id"
           },
           "sources_status": {
             "type": "array",
@@ -850,6 +858,15 @@
                 "note": {
                   "type": "string",
                   "description": "一句话原因，如「没装 Gmail 插件」"
+                },
+                "check_providers": {
+                  "type": "array",
+                  "maxItems": 16,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "description": "覆盖整个来源所有账号/路径的 available_checks providerId；不完整或不支持时填 []。用于无需模型的日常检查。"
                 }
               },
               "required": [
@@ -904,6 +921,30 @@
                       "reason": {
                         "type": "string",
                         "description": "如「超过 200 条上限」「搜索没有权限」"
+                      },
+                      "resume": {
+                        "type": "object",
+                        "properties": {
+                          "account": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "query": {
+                            "type": "string",
+                            "maxLength": 2000
+                          },
+                          "cursor": {
+                            "type": "string",
+                            "maxLength": 4000
+                          }
+                        },
+                        "required": [
+                          "account",
+                          "query",
+                          "cursor"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "additionalProperties": false
@@ -925,7 +966,95 @@
             "items": {
               "type": "string"
             },
-            "description": "end 时传：这次补完的 backlog id"
+            "description": "end 时传：本轮返回且已完全补完的 backlog id；逐页续读用 progress"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "mail",
+              "calendar",
+              "im",
+              "cindy",
+              "github"
+            ],
+            "description": "filter/ack 的来源"
+          },
+          "account": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "filter/ack 的稳定账号或工作区标识；不同邮箱不可共用"
+          },
+          "refs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "description": "filter/ack 批量来源 ID；邮件用 message id，不用 thread id；可变日程加 revision。仅全部参与人的记录与档案处理完成或确认无关后 ack，失败或未读不得 ack。"
+          },
+          "backlog_id": {
+            "type": "string",
+            "description": "progress 的缺口 id，来自本轮 begin.backlog"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "partial",
+              "blocked",
+              "complete"
+            ],
+            "description": "progress：partial 已前进并给 remaining；blocked 没有前进需延后；complete 完全补完"
+          },
+          "remaining": {
+            "type": "object",
+            "properties": {
+              "where": {
+                "type": "string",
+                "description": "如「Cindy 群 oc_xxx」「全部单聊」"
+              },
+              "from": {
+                "type": "string",
+                "description": "ISO 8601"
+              },
+              "to": {
+                "type": "string",
+                "description": "ISO 8601"
+              },
+              "reason": {
+                "type": "string",
+                "description": "如「超过 200 条上限」「搜索没有权限」"
+              },
+              "resume": {
+                "type": "object",
+                "properties": {
+                  "account": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "query": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "cursor": {
+                    "type": "string",
+                    "maxLength": 4000
+                  }
+                },
+                "required": [
+                  "account",
+                  "query",
+                  "cursor"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false,
+            "description": "progress partial 的剩余缺口；时间范围只缩不扩。分页保留 account/query，cursor 填下一页；失效则空 cursor 并用 filter 去重"
           }
         },
         "required": [
@@ -935,5 +1064,10 @@
       }
     }
   ],
-  "deviceSync": true
+  "deviceSync": true,
+  "subscribe": {
+    "hooks": [
+      "will-schedule-run"
+    ]
+  }
 }
