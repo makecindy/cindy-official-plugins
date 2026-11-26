@@ -439,6 +439,57 @@ test('a new follower reports green checks even when the old owner was waiting on
   assert.equal((await fx.run()).code, 2, 'confirmed result is deduplicated again');
 });
 
+test('new follower retains actual CI registration history and the same-head deadline', async t => {
+  for (const mode of ['same-head', 'new-head', 'previously-reminded', 'unacknowledged', 'unavailable', 'registered', 'never-had-checks']) {
+    const fx = createFixture(t);
+    const green = snap();
+    const missing = snap({ latestCommitOid: 'bbb2222', verdict: 'NOT_READY', blockers: ['pending_checks'],
+      checks: [], checksSummary: { total: 0, pending: 0, failed: 0, unavailable: false, truncated: false } });
+    fx.setSnapshot(mode === 'never-had-checks' ? { ...missing, latestCommitOid: green.latestCommitOid } : green);
+    await fx.run();
+    await fx.run(['--resume', 'old owner observed']);
+    fx.advance(5);
+    fx.setSnapshot(missing);
+    assert.equal((await fx.run()).code, 2);
+    const started = fx.readState().watch.checksAwaitedSince;
+    if (mode !== 'never-had-checks') assert.ok(started);
+    if (mode === 'previously-reminded' || mode === 'unacknowledged') {
+      fx.advance(15);
+      assert.match((await fx.run()).stdout, /no-checks/);
+      if (mode === 'previously-reminded') await fx.run(['--resume', 'old owner reported absent checks']);
+    }
+    if (mode === 'new-head') fx.setSnapshot({ ...missing, latestCommitOid: 'ccc3333' });
+    if (mode === 'unavailable') fx.setSnapshot({ ...missing, checksSummary: { unavailable: true } });
+    if (mode === 'registered') fx.setSnapshot({ ...missing, checks: [check('build', 'pending')] });
+    fx.setTrigger({ firstScheduleId: 'new-follower' });
+    fx.advance(15);
+    const first = await fx.run();
+    if (['same-head', 'unacknowledged'].includes(mode)) {
+      assert.equal(first.code, 0, mode + ': ' + first.stdout);
+      assert.match(first.stdout, /no-checks/);
+      await fx.run(['--resume', 'new owner reported absent checks']);
+    } else {
+      assert.equal(first.code, 2, mode + ': ' + first.stdout);
+      if (mode === 'unavailable') {
+        assert.equal(fx.readState().watch.checksAwaitedSince, started);
+        fx.setSnapshot(missing);
+        fx.advance(5);
+        assert.match((await fx.run()).stdout, /no-checks/);
+        await fx.run(['--resume', 'new owner reported absent checks']);
+      } else if (mode === 'registered') {
+        assert.equal(fx.readState().watch.checksAwaitedSince, null);
+      } else if (mode !== 'never-had-checks') {
+        assert.equal(fx.readState().watch.checksAwaitedSince, iso(fx.now()), mode);
+        fx.advance(15);
+        assert.match((await fx.run()).stdout, /no-checks/);
+        await fx.run(['--resume', 'new owner reported absent checks']);
+      }
+    }
+    fx.advance(20);
+    assert.equal((await fx.run()).code, 2, mode + ': no repeated reminder');
+  }
+});
+
 test('first hook reads the actual scheduler stdin and re-observes a stopped follower\'s red check', async (t) => {
   const fx = createFixture(t);
   const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],

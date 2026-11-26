@@ -1028,6 +1028,11 @@ export function decide({
   const legacy = !previous?.watch && Boolean(previous?.fingerprint || previous?.pendingFingerprint);
   let baseline = previous?.watch
     ?? (legacy ? watchFromSnapshot(snap, now, lastKnownConflicting) : freshWatch(snap, now));
+  // A takeover may retain only CI registration facts, not an acknowledged
+  // watch. Fill the missing baseline fields using the current snapshot.
+  if (previous?.watch && !previous.watch.remarksThrough) {
+    baseline = { ...freshWatch(snap, now), ...previous.watch };
+  }
   // 规则故障提醒还没被确认就恢复了:待确认的那份记着「欠一次复核」,不能因为已确认的 watch
   // 没有这个标记而丢掉。
   if (pendingWatch?.inventoryRecoveryOwed === true && !baseline.inventoryRecoveryOwed
@@ -1585,8 +1590,20 @@ async function gateMain(argv, ctx) {
       'snapshotFailureSummary', 'snapshotFailureBackoffUntil', 'snapshotWatchRetryAt'];
     // The 1.5.35 cache stored the failure reason only in lastResult.
     if (previous?.lastResult?.reason === 'snapshot-failed') facts.push('lastResult');
+    // CI having existed is a PR fact, not an acknowledgement. Prefer the
+    // last observed (possibly unacknowledged) head. When its missing-CI
+    // notice still awaits acknowledgement, its original timer is in watch.
+    const observed = previous?.pendingWatch ?? previous?.watch;
+    const everHadChecks = Boolean(observed?.everHadChecks || previous?.watch?.everHadChecks);
+    const awaited = observed?.checksAwaitedSince ??
+      (observed?.noChecksReminded && observed.headSha === previous?.watch?.headSha
+        ? previous.watch.checksAwaitedSince : null);
     previous = { ...Object.fromEntries(Object.entries(previous ?? {}).filter(([key]) => facts.includes(key))),
-      followStartId: trigger.firstScheduleId };
+      followStartId: trigger.firstScheduleId,
+      // Keep the clock only for its original head. If the old notice was
+      // confirmed (clock consumed), the new owner can start a fresh clock.
+      ...(everHadChecks ? { watch: { everHadChecks, headSha: awaited ? observed.headSha : null,
+        checksAwaitedSince: awaited ?? null } } : {}) };
     persist(file, previous);
   }
   const backoffUntil = Number(previous?.snapshotFailureBackoffUntil) || 0;
