@@ -2524,7 +2524,6 @@ describe('Antigravity remote-workspace steering', () => {
   const remoteSteerHarness = (t, { version = '1.5.14', args = ['--cindy-remote-workspace'], mode = 'steer' } = {}) => {
     const fixture = makeFixture(t);
     const logFile = path.join(fixture.dir, 'remote-steer.log');
-    const attemptFile = path.join(fixture.dir, 'remote-steer-attempts');
     const script = `'use strict';
 const fs = require('node:fs');
 const args = process.argv.slice(2);
@@ -2533,12 +2532,7 @@ if (args.length === 1 && args[0] === '--version') {
   process.exit(0);
 }
 const restricted = args.includes('--agent');
-let restrictedAttempt = 0;
-if (restricted) {
-  restrictedAttempt = (fs.existsSync(${JSON.stringify(attemptFile)}) ? Number(fs.readFileSync(${JSON.stringify(attemptFile)}, 'utf8')) : 0) + 1;
-  fs.writeFileSync(${JSON.stringify(attemptFile)}, String(restrictedAttempt), 'utf8');
-  fs.writeFileSync(${JSON.stringify(fixture.pidFile)}, String(process.pid), 'utf8');
-}
+if (restricted) fs.writeFileSync(${JSON.stringify(fixture.pidFile)}, String(process.pid), 'utf8');
 const send = (message) => process.stdout.write(JSON.stringify(Object.assign({ jsonrpc: '2.0' }, message)) + '\\n');
 let lines = '';
 let promptCount = 0;
@@ -2566,11 +2560,11 @@ process.stdin.on('data', (chunk) => {
           authMethods: [],
         },
       });
-      if (restricted && ${JSON.stringify(mode)} === 'fail-open-exit-then-reopen' && restrictedAttempt === 1) {
-        fs.writeSync(1, JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: 'restricted init failed and exited' } }) + '\\n');
-        process.exit(1);
-      } else if (restricted && ${JSON.stringify(mode)} === 'fail-open') {
-        setTimeout(() => send({ id: message.id, error: { code: -32000, message: 'restricted init failed' } }), 80);
+      if (restricted && ${JSON.stringify(mode)} === 'fail-open') {
+        setTimeout(() => {
+          fs.writeSync(1, JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: 'restricted init failed' } }) + '\\n');
+          process.exit(1);
+        }, 80);
       } else if (restricted && ${JSON.stringify(mode)} === 'slow-open') {
         setTimeout(answer, 80);
       } else {
@@ -2578,6 +2572,20 @@ process.stdin.on('data', (chunk) => {
       }
     } else if (message.method === 'session/new' || message.method === 'session/resume' || message.method === 'session/load') {
       if (restricted && ${JSON.stringify(mode)} === 'fail-session-open') {
+        send({
+          id: 'perm-stale',
+          method: 'session/request_permission',
+          params: {
+            sessionId: 'sess-known',
+            toolCall: {
+              sessionUpdate: 'tool_call', status: 'pending', toolCallId: 'mcp-stale-1',
+              name: 'call_mcp_tool', kind: 'execute', title: 'MCP Tool Bash',
+              rawInput: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+              args: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+            },
+            options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+          },
+        });
         setTimeout(() => send({ id: message.id, error: { code: -32004, message: 'session not found' } }), 80);
       } else if (restricted && ${JSON.stringify(mode)} === 'load-with-callback') {
         pendingLoadId = message.id;
@@ -2614,7 +2622,7 @@ process.stdin.on('data', (chunk) => {
           return;
         }
         send({ id: firstPromptId, result: { stopReason: 'end_turn' } });
-        if (${JSON.stringify(mode)} === 'slow-open' || ${JSON.stringify(mode)} === 'fail-open-exit-then-reopen' || ${JSON.stringify(mode)} === 'load-with-callback') {
+        if (${JSON.stringify(mode)} === 'slow-open' || ${JSON.stringify(mode)} === 'load-with-callback') {
           send({ id: steer1Id, result: { stopReason: 'end_turn', usage: { outputTokens: 11 } } });
           return;
         }
@@ -2730,7 +2738,7 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
     assert.equal((await bridge.closed).code, 0);
   });
 
-  test('ends the failed open and settles queued prompt and steering requests when restricted initialize fails', async (t) => {
+  test('ends the failed open terminally and settles queued requests when restricted initialize fails and exits', async (t) => {
     const { fixture, bridge, send, reply, serverMessages, execServer } = remoteSteerHarness(t, { mode: 'fail-open' });
     bridge.child.stdin.write(INITIALIZE);
     await reply(0, 'initialize answer');
@@ -2749,13 +2757,16 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
 
     const restrictedPid = readPid(fixture.pidFile);
     assert.ok(restrictedPid, 'the restricted process had started');
-    await waitFor(() => !isAlive(restrictedPid), 4_000, 'failed restricted agy to stop');
+    await waitFor(() => !isAlive(restrictedPid), 4_000, 'failed restricted agy to exit');
 
-    // Subsequent prompt and steering calls after failed open must also be refused, never forwarded or injected.
-    send({ jsonrpc: '2.0', id: 4, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'after-fail' }] } });
-    send({ jsonrpc: '2.0', id: 5, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'after-fail-steer' }] } });
-    assert.equal((await reply(4, 'post-failure prompt refusal')).error.code, -32600);
-    const postSteer = await reply(5, 'post-failure steering refusal');
+    // After a failed open (even when the child exited immediately), the connection stays terminal until closed:
+    // subsequent prompts, steering, and reopen attempts are all refused without spawning a second child.
+    send({ jsonrpc: '2.0', id: 4, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    send({ jsonrpc: '2.0', id: 5, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'after-fail' }] } });
+    send({ jsonrpc: '2.0', id: 6, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'after-fail-steer' }] } });
+    assert.equal((await reply(4, 'post-failure reopen refusal')).error.code, -32600);
+    assert.equal((await reply(5, 'post-failure prompt refusal')).error.code, -32600);
+    const postSteer = await reply(6, 'post-failure steering refusal');
     assert.equal(postSteer.error.code, -32600);
     assert.equal(postSteer.result, undefined);
 
@@ -2764,8 +2775,8 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
     assert.deepEqual(serverMessages().map((m) => m.method), ['initialize']);
   });
 
-  test('waits for session open success before replaying queued prompt and steering requests', async (t) => {
-    const { fixture, bridge, send, reply, serverMessages, execServer } = remoteSteerHarness(t, { mode: 'fail-session-open' });
+  test('settles queued requests and drops late permission replies when session open is rejected', async (t) => {
+    const { fixture, bridge, messages, send, reply, serverMessages, execServer } = remoteSteerHarness(t, { mode: 'fail-session-open' });
     bridge.child.stdin.write(INITIALIZE);
     await reply(0, 'initialize answer');
     send({ jsonrpc: '2.0', id: 1, method: 'session/resume', params: { sessionId: 'sess-known', cwd: '/shadow/p', mcpServers: [execServer] } });
@@ -2773,6 +2784,7 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
     send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-known', prompt: [{ type: 'text', text: 'queued-first' }] } });
     send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-known', prompt: [{ type: 'text', text: 'queued-steer' }] } });
 
+    await waitFor(() => messages().some((m) => m.method === 'session/request_permission' && m.id === 'perm-stale'), 8_000, 'opening permission request');
     const openErr = await reply(1, 'rejected session/resume answer');
     assert.deepEqual(openErr.error, { code: -32004, message: 'session not found' });
     const queuedPromptErr = await reply(2, 'settled queued prompt');
@@ -2785,41 +2797,15 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
     assert.ok(restrictedPid, 'the restricted process had started');
     await waitFor(() => !isAlive(restrictedPid), 4_000, 'failed restricted agy to stop');
 
+    // A late permission reply from the failed open is dropped silently, and reopen on the failed connection is refused.
+    send({ jsonrpc: '2.0', id: 'perm-stale', result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
+    send({ jsonrpc: '2.0', id: 4, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    assert.equal((await reply(4, 'post-failure reopen refusal')).error.code, -32600);
+    assert.equal(messages().some((m) => m.id === 'perm-stale' && !m.method), false, 'late reply gets no bogus error');
+
     bridge.child.stdin.end();
     assert.equal((await bridge.closed).code, 0);
     assert.deepEqual(serverMessages().map((m) => m.method), ['initialize', 'session/resume']);
-  });
-
-  test('ignores delayed exit and close callbacks from an immediately exiting failed open so the client can reopen', async (t) => {
-    const { fixture, bridge, messages, send, reply, execServer } = remoteSteerHarness(t, { mode: 'fail-open-exit-then-reopen' });
-    bridge.child.stdin.write(INITIALIZE);
-    await reply(0, 'initialize answer');
-    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
-    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-first' }] } });
-    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-steer' }] } });
-
-    const openErr = await reply(1, 'first failed session/new answer');
-    assert.deepEqual(openErr.error, { code: -32000, message: 'restricted init failed and exited' });
-    assert.equal((await reply(2, 'settled queued prompt')).error.code, -32600);
-    const queuedSteerErr = await reply(3, 'settled queued steering');
-    assert.equal(queuedSteerErr.error.code, -32600);
-    assert.equal(queuedSteerErr.result, undefined);
-
-    const firstPid = readPid(fixture.pidFile);
-    assert.ok(firstPid, 'first restricted process had started');
-    await waitFor(() => !isAlive(firstPid), 4_000, 'first restricted agy to exit');
-
-    // Reopen a session after the failed process exited immediately; delayed exit/close handlers must not kill the bridge.
-    send({ jsonrpc: '2.0', id: 4, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
-    assert.deepEqual((await reply(4, 'reopened session/new answer')).result, { sessionId: 'sess-r', configOptions: [] });
-    send({ jsonrpc: '2.0', id: 5, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'reopened-first' }] } });
-    await waitFor(() => messages().some((m) => m.method === 'session/update'), 8_000, 'reopened first turn update');
-    send({ jsonrpc: '2.0', id: 6, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'reopened-steer' }] } });
-    assert.deepEqual((await reply(6, 'reopened steer ack')).result, { outcome: 'injected' });
-    assert.deepEqual((await reply(5, 'reopened merged prompt reply')).result, { stopReason: 'end_turn', usage: { outputTokens: 11 } });
-
-    bridge.child.stdin.end();
-    assert.equal((await bridge.closed).code, 0);
   });
 
   test('forwards bidirectional replies during session open before replaying queued prompt and steering requests', async (t) => {

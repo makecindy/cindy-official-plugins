@@ -240,7 +240,7 @@ function startRemoteWorkspace(agyPath, host) {
     return;
   }
 
-  /** `handshake` → `ready` (initialize answered) → `opening` (session process initializing) → `opening-session` (session open in flight) → `session`. */
+  /** `handshake` → `ready` → `opening` (child init) → `opening-session` (session open) → `session` (or terminal `failed`). */
   let phase = 'handshake';
   let initRequest = null;
   let probe = null;
@@ -253,7 +253,6 @@ function startRemoteWorkspace(agyPath, host) {
   let agentCloseTimer = null;
   let stdinEnded = false;
   const queued = [];
-  const children = new Set();
   const seenCalls = new Map();
   let serverNames = [];
   const steering = createSteeringRelay();
@@ -322,7 +321,7 @@ function startRemoteWorkspace(agyPath, host) {
   };
 
   const terminate = () => {
-    for (const child of children) {
+    for (const child of [probe, agent]) {
       if (!running(child)) continue;
       if (process.platform === 'win32') {
         killTree(child);
@@ -362,8 +361,6 @@ function startRemoteWorkspace(agyPath, host) {
 
   const launch = (args) => {
     const child = spawnAgy(agyPath, args, { stdio: ['pipe', 'pipe', 'pipe'], cwd: dir });
-    children.add(child);
-    child.once('exit', () => children.delete(child));
     child.stderr.pipe(process.stderr, { end: false });
     child.stdin.on('error', () => {
       // EPIPE after agy exited; its exit handler takes care of shutting down.
@@ -436,7 +433,7 @@ function startRemoteWorkspace(agyPath, host) {
     sessionRequest = { ...request, params: { ...request.params, mcpServers: servers } };
     const current = agent;
     current.on('error', (error) => {
-      if (current !== agent) return;
+      if (phase === 'failed') return;
       if (current.pid === undefined) {
         agentExited = true;
         finished = true;
@@ -446,30 +443,27 @@ function startRemoteWorkspace(agyPath, host) {
       process.stderr.write(`[agy-acp] Antigravity process error: ${describe(error)}\n`);
     });
     current.on('exit', (code, signal) => {
-      if (current !== agent) return;
+      if (phase === 'failed') return;
       agentExited = true;
       const status = stopCode !== null ? stopCode : exitCodeFor(code, signal);
-      const endIfCurrent = () => {
-        clearTimeout(closeTimer);
-        if (current !== agent) return;
-        if (agentCloseTimer === closeTimer) agentCloseTimer = null;
+      const endIfActive = () => {
+        clearTimeout(agentCloseTimer);
+        agentCloseTimer = null;
+        if (phase === 'failed') return;
         finish(status);
       };
-      const closeTimer = setTimeout(endIfCurrent, timings.flush);
-      agentCloseTimer = closeTimer;
-      current.once('close', endIfCurrent);
+      agentCloseTimer = setTimeout(endIfActive, timings.flush);
+      current.once('close', endIfActive);
     });
-    current.stdout.on('data', lineSplitter((line) => onAgentLine(current, line)));
+    current.stdout.on('data', lineSplitter(onAgentLine));
     // The session process has not seen Cindy's `initialize` yet; its answer stays here.
     toAgent(initRequest);
     if (stdinEnded) endAgentInput();
   };
 
-  const failOpen = (current, error) => {
+  const failOpen = (error) => {
     const failedId = sessionRequest.id;
-    phase = 'ready';
-    agent = null;
-    agentExited = false;
+    phase = 'failed';
     sessionRequest = null;
     serverNames = [];
     seenCalls.clear();
@@ -481,23 +475,23 @@ function startRemoteWorkspace(agyPath, host) {
     for (const pending of queued.splice(0)) {
       const pendingMessage = parseLine(pending);
       if (pendingMessage && typeof pendingMessage.method === 'string' && pendingMessage.id !== undefined) {
-        refuse(pendingMessage.id, -32600, 'Open a session first');
+        refuse(pendingMessage.id, -32600, 'Session failed to open; start a new connection');
       }
     }
-    stopChild(current);
+    stopChild(agent);
     if (stdinEnded) finish(0);
   };
 
-  const onAgentLine = (current, line) => {
-    if (current !== agent) return;
+  const onAgentLine = (line) => {
+    if (phase === 'failed') return;
     const message = parseLine(line);
     if (!message) {
-      toClientLine(line, current.stdout);
+      toClientLine(line, agent.stdout);
       return;
     }
     if (phase === 'opening' && message.id === initRequest.id && message.method === undefined) {
       if (message.error) {
-        failOpen(current, message.error);
+        failOpen(message.error);
         return;
       }
       toAgent(sessionRequest);
@@ -506,10 +500,10 @@ function startRemoteWorkspace(agyPath, host) {
     }
     if (phase === 'opening-session' && message.id === sessionRequest.id && message.method === undefined) {
       if (message.error) {
-        failOpen(current, message.error);
+        failOpen(message.error);
         return;
       }
-      toClientLine(line, current.stdout);
+      toClientLine(line, agent.stdout);
       sessionRequest = null;
       phase = 'session';
       for (const pending of queued.splice(0)) forwardClientLine(pending);
@@ -519,10 +513,10 @@ function startRemoteWorkspace(agyPath, host) {
       const handled = steering.handleAgentResponse(message);
       if (handled.action === 'drop') return;
       if (handled.action === 'reply') {
-        toClient(handled.message, current.stdout);
+        toClient(handled.message, agent.stdout);
         return;
       }
-      toClientLine(line, current.stdout);
+      toClientLine(line, agent.stdout);
       return;
     }
     const params = isObject(message.params) ? message.params : null;
@@ -530,7 +524,7 @@ function startRemoteWorkspace(agyPath, host) {
     const update = message.method === 'session/update' && params && isObject(params.update) ? params.update : null;
     const isToolUpdate = Boolean(update) && (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update');
     if (!params || (!isPermission && !isToolUpdate)) {
-      toClientLine(line, current.stdout);
+      toClientLine(line, agent.stdout);
       return;
     }
     const verdict = inspectToolCall(isPermission ? params.toolCall : update, seenCalls, serverNames);
@@ -547,10 +541,10 @@ function startRemoteWorkspace(agyPath, host) {
       return;
     }
     if (verdict.type === 'mcp') {
-      toClient({ ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }, current.stdout);
+      toClient({ ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }, agent.stdout);
       return;
     }
-    toClientLine(line, current.stdout);
+    toClientLine(line, agent.stdout);
   };
 
   /* ── Cindy's side ────────────────────────────────────────────────────── */
@@ -580,7 +574,7 @@ function startRemoteWorkspace(agyPath, host) {
     } else if (isSessionOpen(message.method) && message.id !== undefined && phase === 'ready') {
       openSession(message);
     } else if (message.id !== undefined) {
-      refuse(message.id, -32600, 'Open a session first');
+      refuse(message.id, -32600, phase === 'failed' ? 'Session failed to open; start a new connection' : 'Open a session first');
     }
   };
 
@@ -598,11 +592,11 @@ function startRemoteWorkspace(agyPath, host) {
   process.stdin.on('data', lineSplitter(onClientLine));
   process.stdin.on('end', () => {
     stdinEnded = true;
-    if (agent) {
+    if (agent && phase !== 'failed') {
       endAgentInput();
       return;
     }
-    // Cindy went away before a session existed.
+    // Cindy went away before a session existed or after opening failed.
     terminate();
     finish(0);
   });
@@ -622,7 +616,7 @@ function startRemoteWorkspace(agyPath, host) {
   });
   // Last line of defence for any exit path: never leave agy running, never leave the directory.
   process.on('exit', () => {
-    for (const child of children) if (running(child)) killTree(child, 'SIGKILL');
+    for (const child of [probe, agent]) if (running(child)) killTree(child, 'SIGKILL');
     removeLaunchDir(dir);
   });
 }
