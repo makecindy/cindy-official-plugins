@@ -1344,6 +1344,11 @@ export function probeAllowsSkip(previous, probe, now, maxSilenceMs = DEFAULT_MAX
   if (!(now - (Number(previous.lastFullReadAt) || 0) < FULL_REREAD_MS)) return false;
   const awaited = previous.watch.checksAwaitedSince ? Date.parse(previous.watch.checksAwaitedSince) : NaN;
   if (Number.isFinite(awaited) && now - awaited >= NO_CHECKS_MS) return false;
+  // Mirror decide(): when silence-guard is suppressed (active non-due wait/defer or human-only wait),
+  // do not discard a matching probe and force a full snapshot on every tick.
+  if (previous.wait || (Number(previous.nextAllowAt) || 0) > now || previous.humanOnlyPending === true || waitingOnHumans(previous)) {
+    return true;
+  }
   const silenceAnchor = silenceAnchorOf(previous);
   return !(silenceAnchor > 0 && now - silenceAnchor >= maxSilenceMs);
 }
@@ -1365,7 +1370,7 @@ function emit(args, payload, out = (text) => process.stdout.write(text)) {
   );
 }
 
-// gh auth status prints recovery suggestions even when it cannot reach GitHub.
+// gh CLI auth failures may print recovery suggestions even when it cannot reach GitHub.
 function snapshotDiagnosis(stderr) {
   const explicitRateLimit = /\[gh-rate-limit\]|HTTP 429\b/i.test(stderr);
   const dns = /\blookup ([\w.-]+)(?::\d+)?[^\n]*(?:no such host|server misbehaving|i\/o timeout|context deadline exceeded)|\b(?:ENOTFOUND|EAI_AGAIN) ([\w.-]+)/i.exec(stderr);
@@ -1379,7 +1384,7 @@ function snapshotDiagnosis(stderr) {
   if (/i\/o timeout|timed? ?out|context deadline exceeded/i.test(stderr)) {
     return { kind: 'timeout', summary: 'Connection to GitHub timed out' };
   }
-  if (/HTTP 401\b|bad credentials|token[^\n]* is invalid|not logged into any GitHub hosts|authentication required/i.test(stderr)) {
+  if (/HTTP 401\b|bad credentials|token[^\n]* is invalid|not logged into any(?: GitHub)? hosts|no oauth token found|authentication required/i.test(stderr)) {
     return { kind: 'auth', summary: 'GitHub sign-in required' };
   }
   const lines = stderr.trim().split(/\r?\n/).map(line => line.trim())

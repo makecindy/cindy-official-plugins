@@ -434,3 +434,52 @@ test('two policies for the same absent name produce one wait target',t=>{
  const s=run({timelineItems:{nodes:[]}},'ahead',{rules});
  assert.equal(s.checks.filter(c=>c.name==='late').length,1);
 });
+
+nodeTest('ensureAuth uses local `gh auth token` without calling `gh auth status` or leaking the token', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim / symlink' : false }, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-ensure-auth-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const logFile = path.join(dir, 'argv.log');
+  const secretToken = 'gho_synthetic_never_print_this_token_value';
+  fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+fs.appendFileSync(process.env.GH_ARGV_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');
+if (process.argv[2] === 'auth' && process.argv[3] === 'status') {
+  process.stderr.write('unexpected network auth status call\\n');
+  process.exit(9);
+}
+if (process.argv[2] === 'auth' && process.argv[3] === 'token') {
+  if (process.env.FAKE_GH_UNAUTH === '1') {
+    process.stdout.write(${JSON.stringify(secretToken)});
+    process.stderr.write('no oauth token found for github.com\\n');
+    process.exit(1);
+  }
+  process.stdout.write(${JSON.stringify(secretToken)} + '\\n');
+  process.exit(0);
+}
+process.exit(2);
+`, { mode: 0o755 });
+  const moduleUrl = new URL('../../cindy-github/skills/pr/scripts/lib/gh.mjs', import.meta.url).href;
+  const env = { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, GH_ARGV_LOG: logFile };
+
+  const ok = spawnSync(process.execPath, ['--input-type=module', '-e',
+    `import { ensureAuth } from ${JSON.stringify(moduleUrl)}; await ensureAuth();`], { encoding: 'utf8', env });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(ok.stdout.includes(secretToken), false, 'token must never be written to stdout');
+  assert.equal(ok.stderr.includes(secretToken), false, 'token must never be written to stderr');
+
+  const unauth = spawnSync(process.execPath, ['--input-type=module', '-e',
+    `import { ensureAuth } from ${JSON.stringify(moduleUrl)}; await ensureAuth();`], {
+    encoding: 'utf8',
+    env: { ...env, FAKE_GH_UNAUTH: '1' },
+  });
+  assert.equal(unauth.status, 1);
+  assert.match(unauth.stderr, /no oauth token found for github\.com/);
+  assert.equal(unauth.stdout.includes(secretToken), false);
+  assert.equal(unauth.stderr.includes(secretToken), false);
+
+  const calls = fs.readFileSync(logFile, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.deepEqual(calls, [
+    ['auth', 'token', '--hostname', 'github.com'],
+    ['auth', 'token', '--hostname', 'github.com'],
+  ]);
+});

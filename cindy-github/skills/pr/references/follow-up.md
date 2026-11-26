@@ -17,10 +17,10 @@ Before any GitHub call the check asks whether a look is due, from what its last 
 | Stage | Looks |
 |---|---|
 | Fast: an unacknowledged update, a due model wait or defer or no-checks deadline, an open settle window | every firing |
-| Explicit model wait | every 5 minutes to detect new work; this does not call the model |
+| Explicit technical wait (`checks`, `baseline`, `retry`) | every 5 minutes to detect new work; this does not call the model |
 | Active: checks running, a failure, a conflict or merge-queue problem, a new commit or an agent round in the last hour | every firing of the 5-minute schedule |
 | Idle | about every 10 minutes |
-| Waiting: only a human approval or the merge is left (`READY`, `BLOCKED_HUMAN`) | about every 30 minutes |
+| Waiting: only a human approval or the merge is left (`READY`, `BLOCKED_HUMAN`, or an explicit `human` wait after recent activity cools down) | about every 30 minutes |
 | Quiet: a draft, or nothing changed for 6 hours | about every hour |
 
 **Cindy fires it early.** When the title-bar PR status (refreshed about every 90 seconds while someone looks at Cindy) shows a change for this PR, Cindy runs the schedule at once and tells the check through the hook's stdin (`trigger: { kind: 'watch', … }`). Such a run skips both the pace and the probe and reads the PR in full. For ordinary checks, `--triggered` simulates a change and `--no-pacing` disables stage pacing.
@@ -45,7 +45,7 @@ While a round settles the watch does not advance, so the held items and anything
 
 ## Cost: a small question first
 
-Every check first runs `pr-snapshot.mjs --probe`: one small GraphQL query for the PR's state, head, mergeability, check counts by state, the newest comment and review, and the base branch's commit (used only while a check is failing). When it matches the last full read, the check stops there (`unchanged`). It reads the PR in full (three or four API calls) only when the probe differs or when one of these holds: an update was released but not yet acknowledged, checks were still running or mergeability was unknown at the last full read, the PR is merged or closed, 30 minutes have passed since the last full read (the probe cannot see edits inside review threads), a new commit's check deadline or a defer is due, or the silence guard is due. A failed probe also falls back to a full read. While an explicit wait names checks or threads, each due poll reads in full instead of probing: equal counts can hide a rerun or an inline resolution. Such changes must not wait for the 30-minute fallback. Waits without named targets still use the small probe. Host triggers accelerate observation, never bypass the wait filter.
+Every check first runs `pr-snapshot.mjs --probe`: one small GraphQL query for the PR's state, head, mergeability, check counts by state, the newest comment and review, and the base branch's commit (used only while a check is failing). When it matches the last full read, the check stops there (`unchanged`). It reads the PR in full (three or four API calls) only when the probe differs or when one of these holds: an update was released but not yet acknowledged, checks were still running or mergeability was unknown at the last full read, the PR is merged or closed, 30 minutes have passed since the last full read (the probe cannot see edits inside review threads), a new commit's check deadline or a defer/wait is due, or the silence guard is due (when not suppressed by an active wait, defer, or human-only wait). A failed probe also falls back to a full read. While an explicit wait names checks or threads, each due poll reads in full instead of probing: equal counts can hide a rerun or an inline resolution. Such changes must not wait for the 30-minute fallback. Waits without named targets still use the small probe. Host triggers accelerate observation, never bypass the wait filter.
 
 ## When the agent is woken
 
@@ -165,11 +165,12 @@ Safety and resumption:
 - Missing/truncated data is never evidence of continued waiting. It requests investigation without
   advancing past potentially unseen events. Existing network failures and rate-limit backoff still apply.
 
-Latency: with Cindy running and GitHub available, an explicit wait is inspected on each five-minute
-poll; a host status trigger can inspect sooner. Model start still depends on the task being available.
-Only post-push bot/check feedback retains the existing maximum 20-minute batching window. This is not
-a real-time delivery guarantee. Without an explicit wait, existing stage pacing and the 30-minute
-full-read fallback remain unchanged.
+Latency: with Cindy running and GitHub available, an explicit technical wait (`checks`, `baseline`,
+`retry`) is inspected on each five-minute poll, while a `human` wait cools down to the 30-minute
+`waiting` pace after recent activity passes; a host status trigger can inspect sooner. Model start
+still depends on the task being available. Only post-push bot/check feedback retains the existing
+maximum 20-minute batching window. This is not a real-time delivery guarantee. Without an explicit
+wait, existing stage pacing and the 30-minute full-read fallback remain unchanged.
 
 ## Reliability rules
 

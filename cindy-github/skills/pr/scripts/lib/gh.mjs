@@ -56,12 +56,15 @@ function reportRateLimit(error) {
   process.stderr.write(`[gh-rate-limit] retryAt=${retryAt ?? 0}\n`);
 }
 
-// Run `gh auth status` and exit(1) on failure. Call once at startup.
+// Verify local GitHub CLI credentials via `gh auth token` without making a network request.
+// `gh auth status` calls api.github.com (spending REST quota and reporting HTTP 403 rate limits
+// as "token is invalid"); `gh auth token` checks local keyring/config/env only.
 export async function ensureAuth() {
   try {
-    await exec('gh', ['auth', 'status'], { encoding: 'utf8' });
+    await exec('gh', ['auth', 'token', '--hostname', 'github.com'], { encoding: 'utf8' });
   } catch (e) {
-    process.stderr.write(`[gh] auth status failed: ${e.stderr || e.message}\n`);
+    // Only surface stderr/fallback text; never echo stdout which may carry credentials.
+    process.stderr.write(`[gh] auth token failed: ${(e.stderr || '').trim() || 'no oauth token found for github.com'}\n`);
     process.exit(1);
   }
 }
