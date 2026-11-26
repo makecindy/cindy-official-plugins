@@ -14,7 +14,8 @@ function looksFatal(stderrStr) {
     || /authentication required/i.test(stderrStr)
     || /requires authentication/i.test(stderrStr)
     || /rate limit|HTTP 429/i.test(stderrStr)
-    || /bad credentials/i.test(stderrStr);
+    || /bad credentials/i.test(stderrStr)
+    || /gh auth login|populate the GH_TOKEN|not logged into any(?: GitHub)? hosts|no oauth token found/i.test(stderrStr);
 }
 
 async function runOnce(args) {
@@ -54,16 +55,6 @@ function reportRateLimit(error) {
   if (!/rate limit|HTTP 429/i.test(`${error.stderr ?? ''} ${error.message ?? ''}`)) return;
   const retryAt = rateLimitRetryAt(splitHttpResponse(String(error.stdout ?? '')).headers);
   process.stderr.write(`[gh-rate-limit] retryAt=${retryAt ?? 0}\n`);
-}
-
-// Run `gh auth status` and exit(1) on failure. Call once at startup.
-export async function ensureAuth() {
-  try {
-    await exec('gh', ['auth', 'status'], { encoding: 'utf8' });
-  } catch (e) {
-    process.stderr.write(`[gh] auth status failed: ${e.stderr || e.message}\n`);
-    process.exit(1);
-  }
 }
 
 // Run `gh --version` and exit(1) if not installed / not on PATH.
