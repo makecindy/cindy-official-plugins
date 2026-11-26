@@ -480,7 +480,7 @@ function startRemoteWorkspace(agyPath, host) {
     toClient({ jsonrpc: '2.0', id: failedId, error });
     for (const pending of queued.splice(0)) {
       const pendingMessage = parseLine(pending);
-      if (pendingMessage && pendingMessage.id !== undefined) {
+      if (pendingMessage && typeof pendingMessage.method === 'string' && pendingMessage.id !== undefined) {
         refuse(pendingMessage.id, -32600, 'Open a session first');
       }
     }
@@ -567,6 +567,10 @@ function startRemoteWorkspace(agyPath, host) {
       return;
     }
     if (phase === 'opening' || phase === 'opening-session') {
+      if (message && message.method === undefined && message.id !== undefined) {
+        toAgentLine(line);
+        return;
+      }
       queued.push(line);
       return;
     }

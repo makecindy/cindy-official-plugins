@@ -2542,6 +2542,7 @@ if (restricted) {
 const send = (message) => process.stdout.write(JSON.stringify(Object.assign({ jsonrpc: '2.0' }, message)) + '\\n');
 let lines = '';
 let promptCount = 0;
+let pendingLoadId = null;
 let firstPromptId = null;
 let steer1Id = null;
 let steer2Id = null;
@@ -2578,9 +2579,29 @@ process.stdin.on('data', (chunk) => {
     } else if (message.method === 'session/new' || message.method === 'session/resume' || message.method === 'session/load') {
       if (restricted && ${JSON.stringify(mode)} === 'fail-session-open') {
         setTimeout(() => send({ id: message.id, error: { code: -32004, message: 'session not found' } }), 80);
+      } else if (restricted && ${JSON.stringify(mode)} === 'load-with-callback') {
+        pendingLoadId = message.id;
+        send({
+          id: 'perm-load',
+          method: 'session/request_permission',
+          params: {
+            sessionId: 'sess-r',
+            toolCall: {
+              sessionUpdate: 'tool_call', status: 'pending', toolCallId: 'mcp-load-1',
+              name: 'call_mcp_tool', kind: 'execute', title: 'MCP Tool Bash',
+              rawInput: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+              args: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+            },
+            options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+          },
+        });
       } else {
         send({ id: message.id, result: { sessionId: 'sess-r', configOptions: [] } });
       }
+    } else if (message.method === undefined && message.id === 'perm-load' && pendingLoadId !== null) {
+      const loadId = pendingLoadId;
+      pendingLoadId = null;
+      send({ id: loadId, result: { configOptions: [] } });
     } else if (message.method === 'session/prompt') {
       promptCount += 1;
       if (promptCount === 1) {
@@ -2593,7 +2614,7 @@ process.stdin.on('data', (chunk) => {
           return;
         }
         send({ id: firstPromptId, result: { stopReason: 'end_turn' } });
-        if (${JSON.stringify(mode)} === 'slow-open' || ${JSON.stringify(mode)} === 'fail-open-exit-then-reopen') {
+        if (${JSON.stringify(mode)} === 'slow-open' || ${JSON.stringify(mode)} === 'fail-open-exit-then-reopen' || ${JSON.stringify(mode)} === 'load-with-callback') {
           send({ id: steer1Id, result: { stopReason: 'end_turn', usage: { outputTokens: 11 } } });
           return;
         }
@@ -2799,6 +2820,35 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
 
     bridge.child.stdin.end();
     assert.equal((await bridge.closed).code, 0);
+  });
+
+  test('forwards bidirectional replies during session open before replaying queued prompt and steering requests', async (t) => {
+    const { bridge, messages, send, reply, serverMessages, execServer } = remoteSteerHarness(t, { mode: 'load-with-callback' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/load', params: { sessionId: 'sess-r', cwd: '/shadow/p', mcpServers: [execServer] } });
+    // Queue prompt and steering while session/load is waiting on a bidirectional permission callback.
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-first' }] } });
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-steer' }] } });
+
+    await waitFor(() => messages().some((m) => m.method === 'session/request_permission' && m.id === 'perm-load'), 8_000, 'opening permission request');
+    const perm = messages().find((m) => m.method === 'session/request_permission' && m.id === 'perm-load');
+    assert.deepEqual({ title: perm.params.toolCall.title, kind: perm.params.toolCall.kind, rawInput: perm.params.toolCall.rawInput },
+      { title: 'Bash', kind: 'execute', rawInput: { command: 'pwd' } });
+    assert.equal(messages().some((m) => (m.id === 1 || m.id === 3) && !m.method), false, 'queued requests wait for session/load to succeed');
+
+    // Reply to the child's callback while still in opening-session; it must pass straight through.
+    send({ jsonrpc: '2.0', id: 'perm-load', result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
+    assert.deepEqual((await reply(1, 'session/load answer')).result, { configOptions: [] });
+    assert.deepEqual((await reply(3, 'replayed steer ack')).result, { outcome: 'injected' });
+    assert.deepEqual((await reply(2, 'replayed merged prompt reply')).result, { stopReason: 'end_turn', usage: { outputTokens: 11 } });
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.deepEqual(
+      serverMessages().map((m) => m.method ?? `reply:${m.id}`),
+      ['initialize', 'session/load', 'reply:perm-load', 'session/prompt', 'session/prompt'],
+    );
   });
 
   test('still abandons the remote-workspace task if agy invokes a local tool during a steered prompt', async (t) => {
