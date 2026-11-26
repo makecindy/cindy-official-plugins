@@ -408,6 +408,37 @@ test('a new schedule observes an existing failure even if a stopped follower had
   assert.equal((await fx.run()).code, 2);
 });
 
+test('a new follower reports green checks even when the old owner was waiting only for approval', async t => {
+  const fx = createFixture(t);
+  const approval = snap({
+    verdict: 'NEEDS_WORK', blockers: ['unresolved_review_threads', 'branch_protection_blocked'],
+    reviewThreads: { totalCount: 1, unresolvedCount: 1, activeUnresolvedCount: 1, truncated: false,
+      nodes: [{ id: 'approval', isResolved: false, isOutdated: false,
+        comments: [comment('A1', 'lead', '2026-10-20T09:00:00Z', 'This needs explicit approval from a designated maintainer.')] }] },
+  });
+  fx.setSnapshot(approval);
+  assert.equal((await fx.run()).code, 0);
+  assert.equal((await fx.run(['--resume', 'Old owner reported the approval blocker.'])).code, 0);
+  const old = fx.readState();
+  assert.equal(old.humanOnlyPending, true);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2, 'same owner remains quiet');
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  fx.advance(5);
+  const first = await fx.run(['--pacing']);
+  assert.equal(first.code, 0, first.stdout);
+  assert.match(first.stdout, /events=\[checks-passed\]/);
+  const next = fx.readState();
+  assert.equal(next.headOid, old.headOid);
+  assert.equal(next.roundCount, old.roundCount);
+  assert.equal(next.lastAckAt, undefined, 'old confirmation must not constitute new owner acknowledgement');
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /retry-unacked/);
+  assert.equal((await fx.run(['--resume', 'New owner reported the approval blocker.'])).code, 0);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2, 'confirmed result is deduplicated again');
+});
+
 test('first hook reads the actual scheduler stdin and re-observes a stopped follower\'s red check', async (t) => {
   const fx = createFixture(t);
   const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],

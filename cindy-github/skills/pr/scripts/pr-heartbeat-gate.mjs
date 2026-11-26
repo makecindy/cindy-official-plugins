@@ -1575,10 +1575,18 @@ async function gateMain(argv, ctx) {
   // use the ordinary pending-watch protocol instead of resetting on every attempt.
   const newFollow = Boolean(trigger?.firstScheduleId && previous?.followStartId !== trigger.firstScheduleId);
   if (newFollow) {
-    previous = { ...previous, followStartId: trigger.firstScheduleId };
-    for (const key of ['watch', 'wait', 'fingerprint', 'pendingFingerprint', 'pendingWatch',
-      'pendingKey', 'pendingPassCount', 'retryBackoffUntil', 'nextAllowAt', 'probe',
-      'lastPassAt', 'lastFullReadAt', 'lastCheckedAt', 'silenceSince', 'snapshotFailureReports', 'inventoryNoticeAt']) delete previous[key];
+    // Retain only PR-level facts and actual API retry evidence, not the old
+    // owner's deliveries, acknowledgements, pacing or suppression markers.
+    // New notification fields must not silently inherit an old owner's state.
+    const facts = ['headOid', 'roundCount', 'reviewersSeen', 'deferredHeadOid',
+      'initialAdditions', 'headSeenAt', 'reviewerBots', 'lastKnownConflicting',
+      'currentFingerprint', 'fingerprintFields', 'lastChangeAt', 'inventoryFailures',
+      'consecutiveSnapshotFailures', 'lastSnapshotFailureAt', 'snapshotFailureFingerprint',
+      'snapshotFailureSummary', 'snapshotFailureBackoffUntil', 'snapshotWatchRetryAt'];
+    // The 1.5.35 cache stored the failure reason only in lastResult.
+    if (previous?.lastResult?.reason === 'snapshot-failed') facts.push('lastResult');
+    previous = { ...Object.fromEntries(Object.entries(previous ?? {}).filter(([key]) => facts.includes(key))),
+      followStartId: trigger.firstScheduleId };
     persist(file, previous);
   }
   const backoffUntil = Number(previous?.snapshotFailureBackoffUntil) || 0;
