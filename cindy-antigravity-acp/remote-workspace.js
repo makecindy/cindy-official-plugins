@@ -21,6 +21,9 @@
  *    `--agent` after the definition has been written.
  *  - agy does not declare HTTP MCP support although it has it; the `initialize` answer is
  *    completed so Cindy hands its tools over.
+ *  - agy gives the session's MCP servers five seconds to connect, and a server late for that is
+ *    not declared to the model. Every handshake request here crosses the device link, so the
+ *    handshakes are done before `session/new` reaches agy (mcp-warmup.js).
  *  - agy reports an MCP call in its own way: through a generic caller (`MCP Tool Bash`, arguments
  *    nested) in a new session, as a tool named `mcp_<server>_<tool>` in a resumed one. Both are
  *    passed to Cindy as the tool they are, so Cindy shows and checks its own Bash, Read, Write….
@@ -38,6 +41,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { completeInitializeResult, isObject, isSessionOpen, normalizeMcpToolCall } = require('./agy-mcp.js');
+const { warmMcpServers } = require('./mcp-warmup.js');
 
 const REMOTE_WORKSPACE_ARG = '--cindy-remote-workspace';
 const GUEST_WORKSPACE_ARG = '--cindy-guest-workspace';
@@ -239,13 +243,17 @@ function startRemoteWorkspace(agyPath, host) {
     return;
   }
 
-  /** `handshake` → `ready` (initialize answered) → `opening` (session process starting) → `session`. */
+  /**
+   * `handshake` → `ready` (initialize answered) → `opening` (session process starting) →
+   * `warming` (MCP handshakes finishing) → `session`.
+   */
   let phase = 'handshake';
   let initRequest = null;
   let probe = null;
   let agent = null;
   let agentExited = false;
   let sessionRequest = null;
+  let warmup = null;
   let finished = false;
   let stopCode = null;
   let forceTimer = null;
@@ -389,6 +397,8 @@ function startRemoteWorkspace(agyPath, host) {
     }
     try {
       writeAgentDefinition(dir, servers.map((server) => server.name));
+      // Warms while agy starts; session/new waits for it (see onAgentLine).
+      warmup = warmMcpServers(servers, { log: (text) => process.stderr.write(`[agy-acp] ${text}\n`) });
       agent = launch([...acpArgs, '--agent', AGENT_NAME]);
     } catch (error) {
       refuse(request.id, -32603, `Antigravity could not be started for a task on another computer (${describe(error)}).`);
@@ -429,13 +439,19 @@ function startRemoteWorkspace(agyPath, host) {
       return;
     }
     if (phase === 'opening' && message.id === initRequest.id && message.method === undefined) {
+      const startSession = (mcpServers) => {
+        if (finished || stopCode !== null) return;
+        if (message.error) toClient({ jsonrpc: '2.0', id: sessionRequest.id, error: message.error }, agent.stdout);
+        else toAgent({ ...sessionRequest, params: { ...sessionRequest.params, mcpServers } });
+        phase = 'session';
+        for (const pending of queued.splice(0)) toAgentLine(pending);
+      };
       if (message.error) {
-        toClient({ jsonrpc: '2.0', id: sessionRequest.id, error: message.error }, agent.stdout);
-      } else {
-        toAgent(sessionRequest);
+        startSession(sessionRequest.params.mcpServers);
+        return;
       }
-      phase = 'session';
-      for (const pending of queued.splice(0)) toAgentLine(pending);
+      phase = 'warming';
+      warmup.ready.then(startSession, () => startSession(sessionRequest.params.mcpServers));
       return;
     }
     const params = isObject(message.params) ? message.params : null;
@@ -479,7 +495,7 @@ function startRemoteWorkspace(agyPath, host) {
       toAgentLine(line);
       return;
     }
-    if (phase === 'opening') {
+    if (phase === 'opening' || phase === 'warming') {
       queued.push(line);
       return;
     }
@@ -531,6 +547,7 @@ function startRemoteWorkspace(agyPath, host) {
   });
   // Last line of defence for any exit path: never leave agy running, never leave the directory.
   process.on('exit', () => {
+    warmup?.close();
     for (const child of [probe, agent]) if (running(child)) killTree(child, 'SIGKILL');
     removeLaunchDir(dir);
   });

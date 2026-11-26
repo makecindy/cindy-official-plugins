@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -468,6 +469,47 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     const updates = messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
     assert.deepEqual(updates.map((update) => [update.sessionUpdate, update.title, update.kind]),
       [['tool_call', 'Bash', 'execute'], ['tool_call_update', 'Bash', 'execute']]);
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  // Why: agy leaves out MCP servers that are not connected within five seconds, and here every handshake
+  // crosses the device link. session/new must reach agy only after the warm-up, naming the local relay
+  // for a server that was warmed (mcp-warmup.test.mjs covers the relay itself).
+  if (official) test('remote-workspace mode hands agy its MCP servers only after their handshake is done', async (t) => {
+    const sessions = new Set();
+    const mcp = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => setTimeout(() => {
+        const message = body ? JSON.parse(body) : {};
+        const sid = req.headers['mcp-session-id'];
+        if (req.method === 'GET') return res.writeHead(405).end();
+        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+        if (!sid) {
+          const id = `s${sessions.size}`;
+          sessions.add(id);
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
+          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }));
+        }
+        if (message.id === undefined) return res.writeHead(202).end();
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [] } }));
+      }, 300));
+    });
+    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
+    t.after(() => mcp.close());
+    const { launchFile, bridge, send, reply, server } = remoteSession(t);
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    const exec = { ...server('cindy_exec'), url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec` };
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec, server('cindy')] } });
+    await reply(1, 'session/new answer');
+    const { session } = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
+    assert.equal(sessions.size, 1, 'the server was warmed before agy got session/new');
+    assert.match(session.mcpServers[0].url, /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{32}\/0$/);
+    assert.deepEqual(session.mcpServers[0].headers, exec.headers);
+    assert.deepEqual(session.mcpServers[1], server('cindy'), 'a server that could not be warmed keeps its own address');
     bridge.child.stdin.end();
     assert.equal((await bridge.closed).code, 0);
   });
