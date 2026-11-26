@@ -341,8 +341,9 @@ test('delivers >550 same-timestamp notes with backpressure, <=40 publishes per c
     const id = 620 - idx;
     return { id, body: `c-${id}`, system: false, created_at: '2026-01-02T00:01:00Z', author: { username: 'alice' } };
   });
+  const projectSub = { events: ['merge_request.comment'], filters: [{ field: 'project', operator: 'equals', value: 'group/app' }] };
   const h = harness({
-    subscriptions: watchMr,
+    subscriptions: [projectSub],
     publishReply: (event) => {
       if (!allowPublish) return { ok: false, message: 'busy' };
       cycleSent += 1;
@@ -351,6 +352,8 @@ test('delivers >550 same-timestamp notes with backpressure, <=40 publishes per c
     },
     routes: {
       '/api/v4/user': { id: 1, username: 'me' },
+      '/projects/group%2Fapp/events': [{ id: 1 }],
+      '/projects/group%2Fapp/merge_requests?': [mr({ head_pipeline: null })],
       '/projects/group%2Fapp/merge_requests/7': mr({ head_pipeline: null }),
       '/merge_requests/7/notes': (url) => {
         const page = Number((/[?&]page=([0-9]+)/.exec(url) || [])[1] || 1);
@@ -359,10 +362,15 @@ test('delivers >550 same-timestamp notes with backpressure, <=40 publishes per c
     },
   });
   await h.cycle();
-  h.state.routes['/projects/group%2Fapp/merge_requests/7'] = mr({ updated_at: '2026-01-02T00:01:00Z', head_pipeline: null });
+  const updatedMr = mr({ updated_at: '2026-01-02T00:01:00Z', head_pipeline: null });
+  h.state.routes['/projects/group%2Fapp/events'] = [{ id: 2 }];
+  h.state.routes['/projects/group%2Fapp/merge_requests?'] = [updatedMr];
+  h.state.routes['/projects/group%2Fapp/merge_requests/7'] = updatedMr;
   allowPublish = false;
   await h.cycle();
   assert.deepEqual(h.statuses(), ['listening', 'error']);
+  // Adding an overlapping single-MR subscription mid-backlog must not clobber the project cursor's notesIncomplete watermark.
+  h.push([projectSub, ...watchMr]);
   allowPublish = true;
   for (let i = 0; i < 20 && accepted.length < 620; i += 1) {
     cycleSent = 0;
