@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { botKey, botsAnswered, breaksSettle, expectedBots, pacingDue, settleState, updateRepoBots } from '../../cindy-github/skills/pr/scripts/lib/follow-pacing.mjs';
+import { botKey, botsAnswered, breaksSettle, expectedBots, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from '../../cindy-github/skills/pr/scripts/lib/follow-pacing.mjs';
 
 const T0 = Date.parse('2026-11-06T00:00:00Z');
 const MIN = 60_000;
@@ -130,4 +130,53 @@ test('a queued bot rerun without a start time keeps the earlier success from cou
   }
   assert.deepEqual(answered([c, { ...c, name: 'Other', status: 'QUEUED', conclusion: null, startedAt: null, completedAt: null }]), [], 'another queued check of the same app also blocks');
   assert.deepEqual(answered([c, { ...c, status: 'COMPLETED', conclusion: 'CANCELLED', startedAt: null, completedAt: null }]), ['review-bot'], 'a finished run that never started is not pending');
+});
+
+test('approval-only and auto-merge bots are not recorded as expected reviewer bots', () => {
+  const at = new Date(T0 - 10 * MIN).toISOString();
+  const autoMergeSnap = {
+    reviews: [
+      { author: 'cindy-auto-merge-bot', authorIsBot: true, state: 'APPROVED', body: 'Catalog checks verified.', submittedAt: at },
+      { author: 'stale-approver', authorIsBot: true, state: 'DISMISSED', body: '', submittedAt: at },
+      { author: 'draft-bot', authorIsBot: true, state: 'PENDING', body: '', submittedAt: at },
+      { author: 'github-actions', authorIsBot: true, state: 'APPROVED', body: 'Auto-approved', submittedAt: at },
+    ],
+    reviewerChecks: [
+      { name: 'CI', appSlug: 'github-actions', appId: 15368, headSha: 'h1', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: at, completedAt: at },
+    ],
+  };
+  assert.deepEqual([...reviewerBotsOf(autoMergeSnap)], []);
+  assert.deepEqual(updateRepoBots({}, autoMergeSnap, T0), {});
+  // Legacy repo cache entry is not renewed by uncorroborated APPROVED reviews.
+  const oldAt = T0 - 13 * 24 * 60 * MIN;
+  assert.deepEqual(updateRepoBots({ 'cindy-auto-merge-bot': oldAt }, autoMergeSnap, T0), { 'cindy-auto-merge-bot': oldAt });
+
+  // Corroborated reviewer bots submitting APPROVED still count:
+  // 1) dedicated reviewer GitHub App check run (e.g. Greptile approving a clean PR)
+  const cleanGreptile = {
+    reviews: [{ author: 'greptile-apps', authorIsBot: true, state: 'APPROVED', body: 'LGTM', submittedAt: at }],
+    reviewerChecks: [{ name: 'Greptile Review', appSlug: 'greptile-apps', appId: 99, headSha: 'h1', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: at, completedAt: at }],
+  };
+  assert.deepEqual([...reviewerBotsOf(cleanGreptile)], ['greptile-apps']);
+  assert.deepEqual(updateRepoBots({}, cleanGreptile, T0), { 'greptile-apps': T0 - 10 * MIN });
+
+  // 2) inline review thread comment alongside APPROVED
+  const inlineApprover = {
+    reviews: [{ author: 'code-bot', authorIsBot: true, state: 'APPROVED', body: 'Minor nit', submittedAt: at }],
+    reviewThreads: { nodes: [{ comments: [{ author: 'code-bot', authorIsBot: true, body: 'nit' }] }] },
+  };
+  assert.deepEqual([...reviewerBotsOf(inlineApprover)], ['code-bot']);
+  assert.deepEqual(updateRepoBots({}, inlineApprover, T0), { 'code-bot': T0 - 10 * MIN });
+
+  // 3) COMMENTED / CHANGES_REQUESTED reviews count directly; botsAnswered still accepts APPROVED for expected bots.
+  const activeReviewers = {
+    latestCommitOid: 'h2',
+    reviews: [
+      { author: 'reviewer-a', authorIsBot: true, state: 'COMMENTED', submittedAt: at },
+      { author: 'reviewer-b', authorIsBot: true, state: 'CHANGES_REQUESTED', submittedAt: at },
+      { author: 'greptile-apps', authorIsBot: true, state: 'APPROVED', commitOid: 'h2', submittedAt: new Date(T0 + MIN).toISOString() },
+    ],
+  };
+  assert.deepEqual([...reviewerBotsOf(activeReviewers)].sort(), ['reviewer-a', 'reviewer-b']);
+  assert.deepEqual(botsAnswered(activeReviewers, ['greptile-apps'], 'h2', T0), ['greptile-apps']);
 });

@@ -52,15 +52,60 @@ const timeOf = (value) => {
   return Number.isFinite(at) ? at : null;
 };
 
+const NON_REVIEW_STATES = new Set(['APPROVED', 'DISMISSED', 'PENDING']);
+
 /**
- * Bots that review this PR or this repository: authors of reviews marked as bots, and bot accounts
- * that react on the PR (Codex answers a push with only a 👍 when it has no suggestions). Plain comment
- * bots (deploy previews, CI summaries) neither review nor react, and are never waited for.
+ * Bots with concrete code-review activity on this snapshot (commented/requested-changes review,
+ * inline thread comment, bot reaction, or a dedicated reviewer App check run). Used to decide
+ * whether an APPROVED or DISMISSED review comes from a real reviewer bot rather than an
+ * approval-only auto-merge gate bot (which never reviews ordinary PRs and must not hold settling).
+ */
+function corroboratedReviewerBots(snap) {
+  const bots = new Set();
+  for (const review of snap?.reviews ?? []) {
+    if (!review?.authorIsBot || !review.author) continue;
+    const state = String(review.state ?? '').toUpperCase();
+    if (!NON_REVIEW_STATES.has(state)) bots.add(botKey(review.author));
+  }
+  for (const thread of snap?.reviewThreads?.nodes ?? []) {
+    for (const comment of thread?.comments ?? []) {
+      if (comment?.authorIsBot && comment.author) bots.add(botKey(comment.author));
+    }
+  }
+  for (const reaction of snap?.reactions ?? []) {
+    if (/\[bot\]$/i.test(String(reaction?.author ?? ''))) bots.add(botKey(reaction.author));
+  }
+  // A dedicated reviewer GitHub App (e.g. Greptile, CodeQL) runs its own check suite on the PR;
+  // github-actions runs arbitrary workflows (including auto-approve actions) and does not corroborate.
+  for (const check of snap?.reviewerChecks ?? []) {
+    const slug = botKey(check?.appSlug);
+    if (slug && slug !== 'github-actions' && Number.isInteger(check.appId) && check.appId > 0) {
+      bots.add(slug);
+    }
+  }
+  bots.delete('');
+  return bots;
+}
+
+function isReviewerBotReview(review, corroborated) {
+  if (!review?.authorIsBot || !review.author) return false;
+  const state = String(review.state ?? '').toUpperCase();
+  if (state === 'PENDING') return false;
+  if (state === 'APPROVED' || state === 'DISMISSED') return corroborated.has(botKey(review.author));
+  return true;
+}
+
+/**
+ * Bots that review this PR or this repository: bot authors of code reviews (not approval-only
+ * auto-merge bots), and bot accounts that react on the PR (Codex answers a push with only a 👍
+ * when it has no suggestions). Plain comment bots (deploy previews, CI summaries) neither review
+ * nor react, and are never waited for.
  */
 export function reviewerBotsOf(snap) {
   const bots = new Set();
+  const corroborated = corroboratedReviewerBots(snap);
   for (const review of snap?.reviews ?? []) {
-    if (review?.authorIsBot && review.author) bots.add(botKey(review.author));
+    if (isReviewerBotReview(review, corroborated)) bots.add(botKey(review.author));
   }
   for (const reaction of snap?.reactions ?? []) {
     if (/\[bot\]$/i.test(String(reaction?.author ?? ''))) bots.add(botKey(reaction.author));
@@ -71,6 +116,7 @@ export function reviewerBotsOf(snap) {
 /** When each reviewer bot last reviewed or reacted on this PR (ms); bots with no usable time are left out. */
 function reviewerBotActivity(snap) {
   const last = new Map();
+  const corroborated = corroboratedReviewerBots(snap);
   const note = (login, value) => {
     const at = timeOf(value);
     if (at === null) return;
@@ -78,7 +124,7 @@ function reviewerBotActivity(snap) {
     if (key && at > (last.get(key) ?? 0)) last.set(key, at);
   };
   for (const review of snap?.reviews ?? []) {
-    if (review?.authorIsBot && review.author) note(review.author, review.submittedAt);
+    if (isReviewerBotReview(review, corroborated)) note(review.author, review.submittedAt);
   }
   for (const reaction of snap?.reactions ?? []) {
     if (/\[bot\]$/i.test(String(reaction?.author ?? ''))) note(reaction.author, reaction.at);

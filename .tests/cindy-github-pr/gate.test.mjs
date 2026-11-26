@@ -1119,6 +1119,48 @@ test('仓库里常见的 bot reviewer 也要等;没有见过任何 bot 的仓库
   assert.deepEqual(Object.keys(plain.readRepoState().reviewerBots), []);
 });
 
+test('只提交 APPROVED 的自动合并 bot 不写入仓库评审名单,也不拖住后续 PR 的收齐窗口', async (t) => {
+  const fx = createFixture(t);
+  // 先遇到一条由自动合并 bot 批准过的 PR(例如模型目录自动晋升 PR),同时有普通 CI 和 Greptile 评审。
+  const autoMergeReview = {
+    id: 'R-auto',
+    author: 'cindy-auto-merge-bot',
+    authorIsBot: true,
+    state: 'APPROVED',
+    body: 'Catalog 范围与必需检查已由自动发布门禁核对。',
+    submittedAt: iso(T0 - 5 * MIN),
+    url: 'https://gh/R-auto',
+    commitOid: 'aaa1111',
+  };
+  const first = snap({
+    reviews: [autoMergeReview, botReview('R-grep', 'greptile-apps', 'aaa1111', iso(T0 - 4 * MIN))],
+    reviewerChecks: [
+      { name: 'CI', appSlug: 'github-actions', appId: 15368, headSha: 'aaa1111', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: iso(T0 - 6 * MIN), completedAt: iso(T0 - 5 * MIN) },
+    ],
+  });
+  fx.setSnapshot(first);
+  await fx.run();
+  assert.equal((await fx.run(['--ack'])).code, 0);
+  assert.deepEqual(Object.keys(fx.readRepoState().reviewerBots), ['greptile-apps']);
+  assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
+
+  // 推新提交且 CI 失败:只要 Greptile 答复就立刻放行,不再死等 cindy-auto-merge-bot 满 20 分钟。
+  fx.advance(2);
+  const red = { latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], verdict: 'NEEDS_WORK' };
+  fx.setSnapshot(snap({ ...first, ...red }));
+  let r = await fx.run(['--json']);
+  assert.equal(r.code, 2, r.stdout);
+  assert.equal(r.json().reason, 'settling');
+  assert.match(r.json().detail, /held until greptile-apps answer/);
+
+  fx.advance(3);
+  const greptileNext = botReview('R-grep-2', 'greptile-apps', 'bbb2222', iso(fx.now()));
+  fx.setSnapshot(snap({ ...first, ...red, reviews: [...first.reviews, greptileNext] }));
+  r = await fx.run(['--json']);
+  assert.equal(r.code, 0, r.stdout);
+  assert.match(r.json().detail, /events=\[checks-failed,remarks\]/);
+});
+
 test('按阶段节奏:只等人审时 30 分钟才看一次,不到时间不调用 GitHub;宿主触发立刻看', async (t) => {
   const fx = createFixture(t);
   const probe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0 0' };
