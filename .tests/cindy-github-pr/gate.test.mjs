@@ -1161,6 +1161,57 @@ test('只提交 APPROVED 的自动合并 bot 不写入仓库评审名单,也不�
   assert.match(r.json().detail, /events=\[checks-failed,remarks\]/);
 });
 
+test('升级路径:旧状态里遗留的自动合并 bot 在完整快照上被清掉,有真实评审证据的 bot 保留', async (t) => {
+  const fx = createFixture(t);
+  const autoMergeReview = {
+    id: 'R-auto',
+    author: 'cindy-auto-merge-bot',
+    authorIsBot: true,
+    state: 'APPROVED',
+    body: 'Catalog 范围与必需检查已由自动发布门禁核对。',
+    submittedAt: iso(T0 - 20 * 24 * 60 * MIN),
+    url: 'https://gh/R-auto',
+    commitOid: 'aaa1111',
+  };
+  const oldGreptile = botReview('R-grep', 'greptile-apps', 'aaa1111', iso(T0 - 20 * 24 * 60 * MIN));
+  const first = snap({ reviews: [autoMergeReview, oldGreptile] });
+  fx.setSnapshot(first);
+  await fx.run();
+  assert.equal((await fx.run(['--ack'])).code, 0);
+
+  // 模拟旧版 v1.5.35 留下的单 PR 状态(无 reviewerBotsVersion)且仓库 14 天缓存已过期。
+  fx.writeRepoState({ reviewerBots: {} });
+  fx.writeState({ reviewerBots: ['cindy-auto-merge-bot', 'greptile-apps'], reviewerBotsVersion: undefined });
+
+  // 新提交 CI 失败:旧自动合并 bot 被清掉,只等有真实评审证据的 greptile-apps。
+  fx.advance(2);
+  const red = { latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], verdict: 'NEEDS_WORK' };
+  fx.setSnapshot(snap({ ...first, ...red }));
+  let r = await fx.run(['--json']);
+  assert.equal(r.code, 2, r.stdout);
+  assert.equal(r.json().reason, 'settling');
+  assert.match(r.json().detail, /held until greptile-apps answer/);
+  assert.doesNotMatch(r.json().detail, /cindy-auto-merge-bot/);
+  assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
+  assert.equal(fx.readState().reviewerBotsVersion, 2);
+
+  // 仅剩旧版自动合并 bot(无真实评审 bot)且仓库缓存已过期:升级后直接放行,不再卡 20 分钟。
+  const autoOnly = createFixture(t);
+  const onlyAutoSnap = snap({ reviews: [autoMergeReview] });
+  autoOnly.setSnapshot(onlyAutoSnap);
+  await autoOnly.run();
+  assert.equal((await autoOnly.run(['--ack'])).code, 0);
+  autoOnly.writeRepoState({ reviewerBots: {} });
+  autoOnly.writeState({ reviewerBots: ['cindy-auto-merge-bot'], reviewerBotsVersion: undefined });
+  autoOnly.advance(2);
+  autoOnly.setSnapshot(snap({ ...onlyAutoSnap, ...red }));
+  r = await autoOnly.run(['--json']);
+  assert.equal(r.code, 0, r.stdout);
+  assert.match(r.json().detail, /events=\[checks-failed\]/);
+  assert.deepEqual(autoOnly.readState().reviewerBots, []);
+  assert.equal(autoOnly.readState().reviewerBotsVersion, 2);
+});
+
 test('按阶段节奏:只等人审时 30 分钟才看一次,不到时间不调用 GitHub;宿主触发立刻看', async (t) => {
   const fx = createFixture(t);
   const probe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0 0' };

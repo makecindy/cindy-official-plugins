@@ -148,10 +148,44 @@ export function updateRepoBots(record, snap, now) {
   return next;
 }
 
+export const REVIEWER_BOTS_VERSION = 2;
+
+const REVIEW_WINDOW_LIMIT = 50;
+const REACTION_WINDOW_LIMIT = 30;
+
+function hasCompleteBotHistory(snap) {
+  if (!Array.isArray(snap?.reviews)) return false;
+  if (snap.reviews.length >= REVIEW_WINDOW_LIMIT) return false;
+  if ((snap.reactions ?? []).length >= REACTION_WINDOW_LIMIT) return false;
+  if (snap.checksSummary?.unavailable || snap.checksSummary?.truncated) return false;
+  if (snap.reviewThreads?.truncated || snap.gate?.truncated) return false;
+  return true;
+}
+
+/**
+ * Carry forward this PR's known reviewer bots onto `snap`.
+ * - v2 state (`previous.reviewerBotsVersion === REVIEWER_BOTS_VERSION`) already contains only vetted
+ *   reviewer bots, so they stay even before a new commit's checks register.
+ * - Legacy state (pre-v2) may contain approval-only auto-merge bots recorded before filtering: when
+ *   `snap` carries the PR's complete review, reaction and check history, rebuild from
+ *   `reviewerBotsOf(snap)` and mark migrated; when `snap` is incomplete/partial, keep legacy entries
+ *   and leave migration pending for the next complete snapshot.
+ */
+export function resolvePrReviewerBots(previous, snap) {
+  const current = reviewerBotsOf(snap);
+  const prevList = Array.isArray(previous?.reviewerBots) ? previous.reviewerBots.map(botKey).filter(Boolean) : [];
+  if (previous?.reviewerBotsVersion === REVIEWER_BOTS_VERSION || prevList.length === 0) {
+    return { bots: [...new Set([...prevList, ...current])].sort(), version: REVIEWER_BOTS_VERSION };
+  }
+  if (hasCompleteBotHistory(snap)) {
+    return { bots: [...current].sort(), version: REVIEWER_BOTS_VERSION };
+  }
+  return { bots: [...new Set([...prevList, ...current])].sort(), version: previous?.reviewerBotsVersion ?? 1 };
+}
+
 /** Bots to wait for on a new commit: this PR's reviewer bots plus the repository's recent ones. */
 export function expectedBots({ snap, previous, repoBots, viewer }) {
-  const bots = new Set(reviewerBotsOf(snap));
-  for (const bot of Array.isArray(previous?.reviewerBots) ? previous.reviewerBots : []) bots.add(botKey(bot));
+  const bots = new Set(resolvePrReviewerBots(previous, snap).bots);
   for (const bot of Object.keys(repoBots ?? {})) bots.add(botKey(bot));
   if (viewer) bots.delete(botKey(viewer));
   bots.delete('');
