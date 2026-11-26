@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 3,
+  "id": "agy-acp",
+  "name": "Antigravity",
+  "description": "Run Cindy tasks with the Google Antigravity CLI (agy) installed on this computer.",
+  "version": "0.4.4",
+  "releaseNotes": "Install Antigravity from the official Cindy plugin marketplace.",
+  "minCindyVersion": "0.1.143",
+  "icon": "icon.png",
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "entry": "main.js",
+  "launch": "resident",
+  "settingsHtml": "settings.html",
+  "node": {
+    "entry": "worker.js",
+    "protocol": "json-rpc-stdio",
+    "lifecycle": "on-demand",
+    "idleTimeoutSeconds": 30,
+    "entries": [
+      "agy-acp.js"
+    ]
+  },
+  "harnesses": [
+    {
+      "id": "agy",
+      "name": "Antigravity",
+      "description": "Runs tasks with the agy command-line agent installed on this computer, signed in with your Google account.",
+      "protocol": "acp",
+      "entry": "agy-acp.js",
+      "locales": {
+        "zh-CN": {
+          "name": "Antigravity",
+          "description": "使用本机安装、已用 Google 账号登录的 agy 命令行 Agent 运行任务。"
+        }
+      }
+    }
+  ],
+  "author": "MagicLizi, arnaudbrzh",
+  "whenToUse": "Use when running Cindy tasks with Antigravity through the local agy CLI."
+}

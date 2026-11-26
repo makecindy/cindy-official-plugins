@@ -213,6 +213,45 @@ test('the Global publisher supports main pushes and full manual republish', () =
   }
 });
 
+test('Global submits the official Antigravity package and leaves the personal ID alone', (t) => {
+  const fixture = mkdtempSync(path.join(os.tmpdir(), 'cindy-antigravity-publish-'));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd: fixture, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  const commit = () => {
+    git('add', '.');
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.test', '-c', 'commit.gpgsign=false',
+      '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'fixture');
+    return git('rev-parse', 'HEAD');
+  };
+  const addPlugin = (id) => {
+    mkdirSync(path.join(fixture, id));
+    writeFileSync(path.join(fixture, id, 'ghost.json'), JSON.stringify({ id }));
+  };
+  addPlugin('agy-acp');
+  addPlugin('another-plugin');
+  const base = commit();
+  addPlugin('cindy-antigravity-acp');
+  const added = commit();
+  writeFileSync(path.join(fixture, 'agy-acp/main.js'), '// historical source');
+  const oldChanged = commit();
+  writeFileSync(path.join(fixture, 'LICENSE'), 'fixture');
+  const sharedChanged = commit();
+  const script = globalWorkflow.split('      - name: Build plugin matrix')[1]
+    .split('          script: |\n')[1].split('\n  package:')[0];
+  const detect = (event, before, after) => JSON.parse(execFileSync(process.execPath, [
+    '-e', `const core = { info() {}, warning() {} }; console.log(JSON.stringify((() => {
+${script}
+})()));`,
+  ], { cwd: fixture, encoding: 'utf8', env: { ...process.env, EVENT_NAME: event, BEFORE_SHA: before, AFTER_SHA: after } }))
+    .map(({ directory }) => directory);
+  assert.deepEqual(detect('push', base, added), ['cindy-antigravity-acp']);
+  assert.deepEqual(detect('push', added, oldChanged), []);
+  const active = ['another-plugin', 'cindy-antigravity-acp'];
+  assert.deepEqual(detect('push', oldChanged, sharedChanged), active);
+  assert.deepEqual(detect('workflow_dispatch', base, sharedChanged), active);
+});
+
 test('the retained Global publisher pins actions in the OIDC publishing chain', () => {
   const checkoutRef = '3d3c42e5aac5ba805825da76410c181273ba90b1';
   const githubScriptRef = '3a2844b7e9c422d3c10d287c895573f7108da1b3';

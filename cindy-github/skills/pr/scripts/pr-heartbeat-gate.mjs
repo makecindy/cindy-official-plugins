@@ -964,6 +964,9 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
   let passed = headMoved ? false : Boolean(watch.passed);
   let passedChecks = headMoved ? [] : watch.passedChecks ?? [];
   let owedChecks = headMoved ? [] : watch.owedChecks ?? [];
+  const priorChecks = watch.waitFacts?.complete ? watch.waitFacts.checks ?? [] : [];
+  let failureCompletionOwed = !headMoved && (watch.failureCompletionOwed ??
+    (priorChecks.some((c) => c.outcome === 'failed') && priorChecks.some((c) => c.outcome === 'pending')));
   const checksUnavailable = Boolean(snap?.checksSummary?.unavailable);
   const checks = checksUnavailable ? [] : (snap?.checks ?? []).filter((c) => c?.name);
   if (checks.length > 0) {
@@ -974,6 +977,16 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
     const newlyFailed = failed.filter((c) => !failedChecks.includes(failedKey(c)) && !failedChecks.includes(c.name));
     if (newlyFailed.length > 0) events.push({ kind: 'checks-failed', failed: newlyFailed });
     failedChecks = failed.map(failedKey);
+    // Report the end of the batch once if a failure was seen before all checks finished.
+    // Keep the obligation through partial or unavailable reads and on the acknowledged watch.
+    if (!snap.gate?.truncated && !snap.checksSummary?.truncated) {
+      const pending = checks.some((c) => checkOutcome(c) === 'pending');
+      if (newlyFailed.length && pending) failureCompletionOwed = true;
+      if (!pending && failureCompletionOwed) {
+        if (failed.length) events.push({ kind: 'checks-finished', count: checks.length, failed });
+        failureCompletionOwed = false;
+      }
+    }
 
     const required = checks.filter((c) => c.required === true);
     const gate = required.length > 0 ? required : checks;
@@ -1069,7 +1082,7 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
     events,
     exhausted: commentsOnly && wakes >= COMMENT_WAKE_LIMIT,
     next: {
-      headSha, failedChecks, passed, passedChecks, owedChecks, remarksThrough, remarkIds,
+      headSha, failedChecks, passed, passedChecks, owedChecks, failureCompletionOwed, remarksThrough, remarkIds,
       conflicting, isDraft, queueProblems, wakes, checksAwaitedSince, noChecksReminded, everHadChecks, baseSha,
       waitFacts: waitFacts(snap), inventoryRecoveryOwed,
     },
@@ -1107,6 +1120,9 @@ export function eventReport(events, snap, exhausted = false) {
         const outcome = String(c.conclusion ?? c.status ?? '').toLowerCase();
         return `  - ${c.name}${outcome && outcome !== 'failure' ? ` (${outcome})` : ''}${c.detailsUrl ? ` ${c.detailsUrl}` : ''}`;
       }));
+    } else if (e.kind === 'checks-finished') {
+      lines.push(`- All ${e.count} checks finished${commit}; ${e.failed.length} still failed:`,
+        ...listed(e.failed, (c) => `  - ${c.workflowName ? c.workflowName + ' / ' : ''}${c.name}${c.detailsUrl ? ' ' + c.detailsUrl : ''}`));
     } else if (e.kind === 'rules-recovered') {
       lines.push('- Required-check rules are readable again. Reassess the previously withheld ready-to-merge result.');
     } else if (e.kind === 'checks-passed') {
@@ -1199,6 +1215,11 @@ export function decide({
   const legacy = !previous?.watch && Boolean(previous?.fingerprint || previous?.pendingFingerprint);
   let baseline = previous?.watch
     ?? (legacy ? watchFromSnapshot(snap, now, lastKnownConflicting) : freshWatch(snap, now));
+  // A takeover may retain only CI registration facts, not an acknowledged
+  // watch. Fill the missing baseline fields using the current snapshot.
+  if (previous?.watch && !previous.watch.remarksThrough) {
+    baseline = { ...freshWatch(snap, now), ...previous.watch };
+  }
   // 规则故障提醒还没被确认就恢复了:待确认的那份记着「欠一次复核」,不能因为已确认的 watch
   // 没有这个标记而丢掉。
   if (pendingWatch?.inventoryRecoveryOwed === true && !baseline.inventoryRecoveryOwed
@@ -1331,13 +1352,17 @@ export function decide({
   if (result.events.length > 0) {
     const kinds = [...new Set(result.events.map((e) => e.kind))];
     const reason = result.exhausted ? 'comment-limit' : kinds.length === 1 && kinds[0].startsWith('draft-') ? kinds[0] : 'changed';
-    return passPending(
+    const delivery = passPending(
       reason,
       `events=[${kinds.join(',')}]; verdict=${snap.verdict}`,
       eventReport(result.events, snap, result.exhausted),
       eventKey(result.events),
       result.next,
     );
+    if (delivery.exitCode === EXIT_PASS && kinds.some((kind) => kind === 'checks-failed' || kind === 'checks-finished')) {
+      delivery.detail += '; handle the check results and notify the user (schedule_notify_current_run): report the outcome or exact blocker, even if waiting for CI or an external fix';
+    }
+    return delivery;
   }
 
   // 没有新事件:推送、检查在跑、自己的评论这类变化直接并入基线,不唤起 agent。
@@ -1659,7 +1684,12 @@ async function gateMain(args, ctx) {
     return EXIT_PASS;
   }
 
-  adoptLegacyStateFile(args.stateDir, args.repo, args.number, file);
+  const trigger = await ctx.readTrigger();
+  // Host previews leave follow-up observations and trace unchanged. Explicit
+  // quota-only CLI commands above retain their separate early-return path.
+  const diagnostic = trigger?.kind === 'diagnostic';
+  if (!diagnostic) adoptLegacyStateFile(args.stateDir, args.repo, args.number, file);
+  const persist = diagnostic ? () => {} : writeState;
   // --last-result:只读最近一轮普通 gate 的实际结果。preRunHook 本身只负责 run/skip；
   // 被 run 唤起的 AI 再结合这份 reason/detail/report 与 fresh snapshot 自主决定是否通知。
   if (args.lastResult) {
@@ -1709,6 +1739,7 @@ async function gateMain(args, ctx) {
 
   // Finish commands are local: validate before acknowledging or changing any wait.
   if (args.ack || args.deferMinutes !== undefined || args.waitFile || args.resumeReason) {
+    if (diagnostic) throw new Error('A diagnostic hook cannot acknowledge or replace a real follow-up wait.');
     const previous = readState(file) ?? {};
     const facts = previous.pendingWatch?.waitFacts ?? previous.watch?.waitFacts;
     if (!args.waitFile && !args.resumeReason) {
@@ -1753,7 +1784,7 @@ async function gateMain(args, ctx) {
     } else if (notice === 'reminder') {
       detail += `; still waiting for human action after ${formatDuration(now - wait.since)}: state progress and the blocker; if the user must decide, ask for that specific decision again with a recommendation (in a background round also schedule_notify_current_run)`;
     }
-    writeState(file, next);
+    persist(file, next);
     emit(args, {
       exitCode: EXIT_PASS,
       repo: args.repo,
@@ -1771,20 +1802,64 @@ async function gateMain(args, ctx) {
     throw new Error(`snapshot script not found: ${args.snapshot}`);
   }
 
-  const previous = readState(file);
+  let previous = readState(file);
+  // The first hook of a newly created schedule must not inherit the old follower's
+  // acknowledged failures or waits after the user stopped and started following again.
+  // A deferred first run can execute the hook several times; keep the ID so retries
+  // use the ordinary pending-watch protocol instead of resetting on every attempt.
+  const newFollow = Boolean(trigger?.firstScheduleId && previous?.followStartId !== trigger.firstScheduleId);
+  if (newFollow) {
+    // Retain only PR-level facts and actual API retry evidence, not the old
+    // owner's deliveries, acknowledgements, pacing or suppression markers.
+    // New notification fields must not silently inherit an old owner's state.
+    const facts = ['headOid', 'roundCount', 'reviewersSeen', 'deferredHeadOid',
+      'initialAdditions', 'headSeenAt', 'reviewerBots', 'lastKnownConflicting',
+      'currentFingerprint', 'fingerprintFields', 'lastChangeAt', 'inventoryFailures',
+      'consecutiveSnapshotFailures', 'lastSnapshotFailureAt', 'snapshotFailureFingerprint',
+      'snapshotFailureSummary', 'snapshotFailureBackoffUntil', 'snapshotWatchRetryAt'];
+    // The 1.5.35 cache stored the failure reason only in lastResult.
+    if (previous?.lastResult?.reason === 'snapshot-failed') facts.push('lastResult');
+    // CI having existed is a PR fact, not an acknowledgement. Prefer the
+    // last observed (possibly unacknowledged) head. When its missing-CI
+    // notice still awaits acknowledgement, its original timer is in watch.
+    const observed = previous?.pendingWatch ?? previous?.watch;
+    const everHadChecks = Boolean(observed?.everHadChecks || previous?.watch?.everHadChecks);
+    const awaited = observed?.checksAwaitedSince ??
+      (observed?.noChecksReminded && observed.headSha === previous?.watch?.headSha
+        ? previous.watch.checksAwaitedSince : null);
+    previous = { ...Object.fromEntries(Object.entries(previous ?? {}).filter(([key]) => facts.includes(key))),
+      followStartId: trigger.firstScheduleId,
+      // Keep the clock only for its original head. If the old notice was
+      // confirmed (clock consumed), the new owner can start a fresh clock.
+      ...(everHadChecks ? { watch: { everHadChecks, headSha: awaited ? observed.headSha : null,
+        checksAwaitedSince: awaited ?? null } } : {}) };
+    persist(file, previous);
+  }
   const backoffUntil = Number(previous?.snapshotFailureBackoffUntil) || 0;
   const backingOff = backoffUntil > now;
+  if (newFollow && backingOff) {
+    // Notify the new owner of the previous failure without touching GitHub
+    // before the actual retry deadline. The same outage is deduplicated again.
+    const inheritedReason = previous.snapshotFailureSummary ||
+      (previous.lastResult?.reason === 'snapshot-failed' && previous.lastResult.detail) || 'Previous PR snapshot failed';
+    const detail = `${inheritedReason}; retry at ${new Date(backoffUntil).toISOString()}`;
+    const lastResult = { decision: 'block', exitCode: EXIT_BLOCK, reason: 'snapshot-failed', detail, checkedAt: now };
+    const reports = previous.snapshotFailureFingerprint ? { [previous.snapshotFailureFingerprint]: now } : {};
+    persist(file, { ...previous, snapshotFailureReports: reports, lastDecision: 'block',
+      lastDecisionReason: lastResult.reason, lastResult });
+    throw new Error(detail);
+  }
   const watchRetryDue = Number.isFinite(previous?.snapshotWatchRetryAt) && previous.snapshotWatchRetryAt <= now;
-  const hookTrigger = backingOff && !watchRetryDue ? null : await ctx.readTrigger();
+  const hookTrigger = backingOff && !watchRetryDue ? null : trigger;
   if (backingOff && hookTrigger?.source !== 'pr-status') {
     const detail = `nextProbeAt=${new Date(backoffUntil).toISOString()}`;
     const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'snapshot-failure-backoff', detail, checkedAt: now };
-    writeState(file, { ...previous, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
+    persist(file, { ...previous, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
     emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
     return EXIT_SKIP;
   }
   // 宿主看到这个 PR 的状态变了而提前触发的一轮:不看节奏,也不做探测(宿主已经知道有变化)。
-  const triggered = args.triggered || (hookTrigger?.kind === 'watch');
+  const triggered = args.triggered || (hookTrigger?.kind === 'watch') || newFollow || diagnostic;
   // Neither an idle tick nor an unchanged summary proves that a failed snapshot recovered.
   const recovering = previous?.consecutiveSnapshotFailures > 0;
   // 按阶段决定这一轮要不要看:不到时间就直接跳过,不调用 GitHub,也不改状态。
@@ -1810,7 +1885,7 @@ async function gateMain(args, ctx) {
   const probe = triggered || targetedWait || recovering ? null : parseProbe(await ctx.runProbe(args.snapshot, args.repo, args.number));
   if (!triggered && probeAllowsSkip(previous, probe, now, args.maxSilenceMs)) {
     const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'unchanged', detail: 'probe matches the last full read', checkedAt: now };
-    writeState(file, { ...previous, lastProbeAt: now, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
+    persist(file, { ...previous, lastProbeAt: now, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
     emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
     if (!args.json) out('CINDY_PRECHECK_OK\n');
     return EXIT_SKIP;
@@ -1833,11 +1908,12 @@ async function gateMain(args, ctx) {
     const { failures } = plan;
     const { summary, ...cause } = plan.diagnosis;
     const detail = `${summary}; snapshotExit=${run.code} failures=${failures}/${args.maxSnapshotFailures}`;
-    writeState(file, {
+    persist(file, {
       ...(previous ?? {}),
       consecutiveSnapshotFailures: failures,
       lastSnapshotFailureAt: now,
       snapshotFailureFingerprint: plan.fingerprint,
+      snapshotFailureSummary: summary,
       snapshotFailureBackoffUntil: plan.until,
       snapshotWatchRetryAt: plan.watchRetryAt,
       snapshotFailureReports: plan.reports,
@@ -1896,7 +1972,7 @@ async function gateMain(args, ctx) {
     decision.nextPendingWatch = { ...decision.nextPendingWatch, inventoryRecoveryOwed: true };
   }
   if (passed && snap.gate?.requiredChecksUnavailable) decision.detail += '; rules unknown: observed check results are not proof the PR is ready to merge';
-  writeState(repoFile, { ...repoState, reviewerBots: repoBots });
+  persist(repoFile, { ...repoState, reviewerBots: repoBots });
   // 回合状态:per-head 持久化,供「回合制与收敛止损」的机判使用(references/review-convergence.md)。
   // 这些信息理论上能从即时快照推导,但快照的 reviews 窗口只有 50 条、defer 痕迹又只活
   // 一轮,推导出的判据在边界上会失效 —— 所以由 gate 用确定性代码跨轮累积:
@@ -1947,9 +2023,10 @@ async function gateMain(args, ctx) {
       : null;
   // 上次读到检查在跑或合并态还没算出:下一轮不靠探测跳过,直接完整读取。
   const inFlight = !mergeSignalKnown(snap) || (snap.checks ?? []).some((c) => checkOutcome(c) === 'pending');
-  writeState(file, {
+  persist(file, {
     // watch 只由 --ack / --defer 或「没有新事件」推进,放行时不推进
     watch: decision.nextWatch,
+    ...(previous?.followStartId ? { followStartId: previous.followStartId } : {}),
     ...(decision.nextWait ? { wait: decision.nextWait } : {}),
     ...(decision.nextPendingWatch
       ? {
@@ -2029,7 +2106,7 @@ async function gateMain(args, ctx) {
     repo: args.repo,
     number: args.number,
     reason: decision.reason,
-    detail: decision.detail,
+    detail: diagnostic ? `${decision.detail}; diagnostic only, follow-up state unchanged` : decision.detail,
     report: decision.report,
     verdict: snap.verdict ?? null,
     ...(passed ? { finish: FINISH_HINT } : {}),
@@ -2085,7 +2162,16 @@ export async function readHookTrigger(stdin = process.stdin, timeoutMs = 500) {
   });
   try {
     const payload = JSON.parse(text);
-    return payload && typeof payload.trigger === 'object' ? payload.trigger : null;
+    const trigger = payload && typeof payload.trigger === 'object' ? payload.trigger : null;
+    if (payload?.event === 'schedule-pre-run' &&
+      (payload.scheduleId === 'test' || payload.scheduleId === 'self-test') && payload.runId === payload.scheduleId) {
+      return { kind: 'diagnostic' };
+    }
+    if (payload?.event === 'schedule-pre-run' && typeof payload.scheduleId === 'string'
+      && payload.scheduleId && payload.lastFinishedAt == null) {
+      return { ...trigger, firstScheduleId: payload.scheduleId };
+    }
+    return trigger;
   } catch {
     return null;
   }
@@ -2138,6 +2224,11 @@ export async function runGate(argv, {
       runProbe: async (...a) => { const value = await probeRunner(...a); if (record) { try { record.probe = value.code === 0 ? JSON.parse(value.stdout) : null; } catch { record.probe = null; } } return value; },
       readTrigger: async () => {
         const event = await readTrigger();
+        if (event?.kind === 'diagnostic') {
+          // Do not append a diagnostic observation to the replayable production trace.
+          record = null;
+          return { kind: 'diagnostic' };
+        }
         const url = `https://github.com/${args.repo}/pull/${args.number}`;
         let trigger = null;
         if (event?.kind === 'watch') {
@@ -2146,6 +2237,9 @@ export async function runGate(argv, {
           if (event.source === 'pr-status' && typeof event.detail === 'string' && event.detail.toLowerCase() === url.toLowerCase()) {
             trigger = { kind: 'watch', source: 'pr-status', detail: url };
           }
+        }
+        if (typeof event?.firstScheduleId === 'string' && event.firstScheduleId) {
+          trigger = { ...trigger, firstScheduleId: event.firstScheduleId };
         }
         if (record) record.trigger = trigger;
         return trigger;
@@ -2164,7 +2258,7 @@ export async function runGate(argv, {
     // Never retain the human/model explanation passed to resume.
     if (record.argv.includes('--resume')) record.argv[record.argv.indexOf('--resume')+1] = 'recorded resume';
     // Pacing-only firings contain no new evidence. Do not duplicate the old state each tick.
-    if (record.snapshot || Object.hasOwn(record,'probe') || ['wait','resume','ack','defer'].includes(record.decision) || record.replayable === false) {
+    if (record.trigger?.firstScheduleId || record.snapshot || Object.hasOwn(record,'probe') || ['wait','resume','ack','defer'].includes(record.decision) || record.replayable === false) {
       // 连续编号放在状态文件旁的小文件里(不动状态本身),写入失败也照常前进:
       // 下一条成功记录的编号会跳号,回放据此标出缺口。
       try {

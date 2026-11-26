@@ -476,6 +476,11 @@ function validateIdMigrations(entries) {
   return entries;
 }
 
+function isUnpublishedMisakanetCopy(pluginDir, lastChange) {
+  // #356: only the official submission from #312 was rejected.
+  return pluginDir === 'misakanet' && lastChange === 'bfadffb3de352576d431a3279409cca82ad20dbc';
+}
+
 function validateReleaseDiff({ cwd = root, base = process.env.BASE_SHA, head = process.env.HEAD_SHA } = {}) {
   const gitAt = (args) => git(args, cwd);
   if (!base && !head) return;
@@ -502,7 +507,12 @@ function validateReleaseDiff({ cwd = root, base = process.env.BASE_SHA, head = p
   ]).trim().length > 0;
   for (const pluginDir of baseRoots) {
     const afterDir = renamedRoots.get(pluginDir) ?? pluginDir;
-    assert.ok(targetRoots.has(afterDir), `${pluginDir}: deleting or renaming an official plugin requires an explicit Server migration`);
+    if (!targetRoots.has(afterDir)) {
+      const lastChange = gitAt(['log', '-1', '--format=%H', base, '--', pluginDir]).trim();
+      assert.ok(isUnpublishedMisakanetCopy(pluginDir, lastChange),
+        `${pluginDir}: deleting or renaming an official plugin requires an explicit Server migration`);
+      continue;
+    }
     const before = JSON.parse(gitAt(['show', `${base}:${pluginDir}/ghost.json`]));
     const after = readJson(path.join(cwd, afterDir, 'ghost.json'), MAX_MANIFEST_BYTES);
     if (renamedRoots.has(pluginDir)) {
@@ -584,6 +594,12 @@ test('release diff permits a previously registered paired rename and subsequent 
   }
 });
 
+test('only the unpublished MisakaNet submission may be removed without migration', () => {
+  const rejectedSubmission = 'bfadffb3de352576d431a3279409cca82ad20dbc';
+  assert.equal(isUnpublishedMisakanetCopy('misakanet', rejectedSubmission), true);
+  assert.equal(isUnpublishedMisakanetCopy('other-plugin', rejectedSubmission), false);
+});
+
 test('release diff rejects unregistered or incomplete migrations and retains package gates', async (t) => {
   const before = { 'old-plugin': {} };
   const after = { 'new-plugin': { version: '1.0.1' } };
@@ -591,6 +607,7 @@ test('release diff rejects unregistered or incomplete migrations and retains pac
     ['unregistered rename', { baseMigrations: [] }, /explicit Server migration/],
     ['registration only in the rename PR', { baseMigrations: null, headMigrations: [fixtureMigration] }, /explicit Server migration/],
     ['deletion without replacement', { after: {} }, /explicit Server migration/],
+    ['same MisakaNet ID introduced in a different commit', { before: { misakanet: {} }, after: {} }, /misakanet: deleting or renaming/],
     ['replacement without deletion', { after: { ...before, ...after } }, /paired deletion and addition/],
     ['target already existed', { before: { ...before, 'new-plugin': {} } }, /paired deletion and addition/],
     ['different target', { after: { 'other-plugin': { version: '1.0.1' } } }, /explicit Server migration/],

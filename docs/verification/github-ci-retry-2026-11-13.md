@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.52, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.53, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1381,3 +1381,62 @@ new 1.5.52 package was deleted and read back absent. Seven task files match the
 validated source, version exceeds fetched main 1.5.35; preflight has no blockers.
 Normal upstream movement and unrelated old artifacts were retained. No new
 runtime acceptance is inferred from these checks.
+
+
+## Upstream conflict synchronization — 2026-11-26 (source 1.5.53, not installed)
+
+Merged fetched upstream main 8be8a237 into the same feature branch after GitHub
+reported a genuine conflict. Resolved nine files by retaining upstream Node 18+
+launcher selection, manual legacy-hook repair disclosure/UI, initial-round and
+read-only diagnostic-preview behavior together with this PR's live preference,
+strict hook/signing/committer, fixed quota and full-directory durability guards.
+Source52 receipt I/O and the complete CI-retry guide remain byte-identical.
+Quota-only CLI commands still return before reading observation-hook metadata;
+normal/diagnostic rounds share upstream's single conditional state writer.
+No existing task schedule/hook/timeout/model was migrated. The original checked-in
+source hook stays active. The publisher and unrelated plugin changes come from
+main; they are not new features authored by this PR.
+
+The root/default and four-language pr_card descriptions now include both the
+upstream legacy_hook_repair instructions and this PR's strict retry contract.
+A contract check first caught combined descriptions over the inherited 1024
+limit; compact English/Japanese/Korean wording retains both requirements.
+Focused contract/reference-height group: **4 passed (1.12 s)** after correction.
+Height includes repair content only on the full card, preserving the reference
+and unknown-settings rules. Existing contract and behavior tests cover these
+merged paths; no new allocator, persistence, lock, executor or retry was added.
+
+Source53 was not installed by this task. Only root identity was available this
+round; the historical local45 trial is the last tested development runtime, not
+a claim that local is still installed. Live local preference cannot be read, so
+rewrite consent is unknown/disabled; root is not substituted. Inherited launcher,
+repair UI and diagnostic paths have not been exercised in live Cindy here; prior
+current UI/read-order, recovery-disable, signed-head and causal-attribution gaps
+remain. No real quota/CI-only recovery, installation, credential/permission or
+preference change, retired fixture recreation, blocked-cleanup retry or merge/
+queue/main push occurred. Simulation/local suites do not close those gaps.
+
+Mandatory four suites plus plugin were run: **553 passed, 36 skipped, 3 failed
+(340.53 s)** initially; those three contract cases saw the pre-compaction overlong
+English description. Corrected language contracts/reference height passed the
+focused group. The remaining pre-commit contract check enumerates plugins from
+HEAD, which still listed upstream-deleted misakanet during this uncommitted merge.
+It was therefore rerun unchanged with localization in an isolated validation copy
+of the staged candidate: both Git trees were exactly
+5d5da05e520ac345a2d044e4b71e3caf0649793d, including export-ignored tracked blobs.
+Final affected suites: **52 passed, 0 failed (40.27 s)**; other mandatory suites
+and plugin runtime/script tests passed in the full run and were unchanged after
+those runs apart from the described locale text. No test predicate or production
+workaround was added. Its fixture commit is not part of the PR. Final evidence-
+only additions do not change validated package/runtime content. Cleanup of the
+validation copy was rejected by automatic approval (blocked by policy); it was
+read back still present and no alternate deletion channel was attempted.
+
+Forge package and exact-source comparison passed: **30 files, 251548 archive
+bytes / 709235 uncompressed bytes**; temporary source53 package removed/read back
+absent. Manifest capabilities/credential declarations match source52 exactly
+apart from version/release notes/tool descriptions. Recovery receipt owner/guide
+remain byte-identical. All 187 inherited non-feature paths matched fetched main;
+prior README feature pointers and both languages were retained. Preflight has no
+blockers; pending-merge/main-ahead and task/old-artifact warnings were accounted
+for without including unrelated untracked work. No installation or live recovery.

@@ -1,0 +1,16 @@
+{
+  "name": "Open Artifact",
+  "description": "Create, edit, and comment on Open Artifact work in the task sidebar.",
+  "whenToUse": "Create or edit a deck, design, whiteboard, spreadsheet, dashboard, document, or animation as a live artifact.",
+  "tools": {
+    "artifact": {
+      "description": "Create, inspect, update, or open a local Open Artifact. Start with quickstart to select a type and read its instructions. Use its open-artifact:// link for subsequent edits. Open shows the editable page in the Cindy task sidebar. See the bundled /artifacts skill for file-editing, sharing and export guidance."
+    },
+    "artifact_data": {
+      "description": "Read and write the document store of an artifact whose type keeps one (its instructions say so). get, list and query read documents with their sha256; set, update, delete, str_replace and batch write them. update merges fields, and {\"__delete__\": true} removes one; str_replace changes one passage of a long text field. Replacing or deleting an existing document needs if_match: the sha256 you read, or \"*\". Your writes show live on open pages."
+    },
+    "artifact_comments": {
+      "description": "Comments the person leaves on their artifact's page, kept in the artifact's own folder on this computer (no outside service). read lists the threads; reply answers one (thread_id is after \";thread=\" in the message), with resolve: true when it is done; resolve and reopen change a thread's state. A thread sent to you is the person asking for your answer in it, so replying there is what they asked for. Answer only threads sent to you, in one or two lines. wait blocks until the next message for this session: use it only when nothing else can wake you."
+    }
+  }
+}
