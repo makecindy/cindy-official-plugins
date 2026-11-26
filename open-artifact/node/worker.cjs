@@ -237,17 +237,17 @@ async function run({ method, params, id }) {
       fail(-32602, 'The artifact or file is unavailable in the task workspace.');
       return;
     }
-    if (sessions.get(caller.session) !== caller.workspace) {
-      sessions.set(caller.session, caller.workspace);
-      try {
-        const { inbox } = await harness.attach(caller);
-        for (const item of inbox) {
-          if (typeof item?.text === 'string') messages.push(item.text);
-        }
-      } catch (error) {
-        sessions.delete(caller.session);
-        throw error;
+    // Attach also drains messages the harness retained after reconnecting an existing session.
+    const attaching = sessions.get(caller.session) !== caller.workspace;
+    sessions.set(caller.session, caller.workspace);
+    try {
+      const { inbox } = await harness.attach(caller);
+      for (const item of inbox) {
+        if (typeof item?.text === 'string') messages.push(item.text);
       }
+    } catch (error) {
+      if (attaching && sessions.get(caller.session) === caller.workspace) sessions.delete(caller.session);
+      throw error;
     }
     const waitingForComments = params.tool === 'ArtifactComments' && args.action === 'wait';
     if (waitingForComments && messages.length) {

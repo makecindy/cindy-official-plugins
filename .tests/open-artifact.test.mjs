@@ -259,10 +259,12 @@ test('the worker returns pending comments immediately and waits only when none a
   await writeFile(join(fixture, 'vendor', 'runtime-integrity.json'), '{}');
   await writeFile(join(fixture, 'vendor', 'adapter.mjs'), `
     export function createHarness() {
+      let reconnectInbox = [];
       return {
         async call(tool, args, caller) {
           if (tool === 'Artifact') {
             const artifact = { url: 'open-artifact://artifact/art_test', root: caller.workspace };
+            if (caller.session === 'reconnect') reconnectInbox = [{ text: 'Comment parked on reattach' }];
             if (caller.session !== 'lookup') return { artifacts: [artifact] };
             return args.cursor
               ? { artifacts: [artifact], messages: ['Second page comment'] }
@@ -273,6 +275,11 @@ test('the worker returns pending comments immediately and waits only when none a
             : { messages: [], timedOut: true };
         },
         async attach({ session }) {
+          if (session === 'reconnect') {
+            const inbox = reconnectInbox;
+            reconnectInbox = [];
+            return { inbox };
+          }
           return { inbox: ['lookup', 'attach'].includes(session) ? [{ text: 'Attached comment' }] : [] };
         },
         close() {},
@@ -291,9 +298,9 @@ test('the worker returns pending comments immediately and waits only when none a
   });
   const replies = lines[Symbol.asyncIterator]();
   let requestId = 0;
-  async function wait(session, url) {
+  async function request(session, tool, args) {
     const id = ++requestId;
-    const params = { scope, session, workspace: fixture, tool: 'ArtifactComments', args: { action: 'wait', url } };
+    const params = { scope, session, workspace: fixture, tool, args };
     worker.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method: 'artifact/call', params }) + '\n');
     const reply = await replies.next();
     assert.equal(reply.done, false);
@@ -302,11 +309,16 @@ test('the worker returns pending comments immediately and waits only when none a
     assert.equal(frame.error, undefined);
     return frame.result;
   }
+  const wait = (session, url) => request(session, 'ArtifactComments', { action: 'wait', url });
   const url = 'open-artifact://artifact/art_test';
   assert.deepEqual(await wait('lookup', url), { messages: ['First page comment', 'Second page comment', 'Attached comment'] });
   assert.deepEqual(await wait('attach'), { messages: ['Attached comment'] });
   assert.deepEqual(await wait('empty', url), { messages: [], timedOut: true });
   assert.deepEqual(await wait('later'), { messages: ['New comment'] });
+  await request('reconnect', 'Artifact', { action: 'list' });
+  assert.deepEqual(await wait('another-task'), { messages: [], timedOut: true });
+  assert.deepEqual(await wait('reconnect'), { messages: ['Comment parked on reattach'] });
+  assert.deepEqual(await wait('reconnect'), { messages: [], timedOut: true });
 });
 
 test('workspace paths resolve to authorized local files, including through symlinks', async () => {
