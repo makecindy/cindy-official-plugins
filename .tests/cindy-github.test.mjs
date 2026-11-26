@@ -2421,24 +2421,90 @@ test('a bound card whose Stop failed on a custom hook clears scheduleError once 
   }
 });
 
-test('a failed creation error survives passive refresh without claiming followedEver and clears on explicit stop', async () => {
+test('a failed creation error survives passive and transient-read refreshes without claiming followedEver and clears on explicit stop', async () => {
   const fault = { reject: true };
   const { hostApi } = followScheduler(fault);
   const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
   const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
   assert.equal(opened.reply.result.follow_state, 'failed');
+  assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleErrorSource, 'create');
+
   const refreshed = await rt.tool({ card_id: opened.callId });
   const cardAfterRefresh = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
   assert.equal(refreshed.reply.result.follow_state, 'failed');
   assert.equal(cardAfterRefresh.followedEver, false);
+  assert.equal(cardAfterRefresh.scheduleErrorSource, 'create');
   assert.match(cardAfterRefresh.scheduleError, /scheduler unavailable/);
   assert.equal(cardAfterRefresh.scheduleStatus, null);
 
+  // A transient schedule_list failure followed by recovery must not overwrite or drop the creation error.
+  fault.failList = true;
+  const readFailed = await rt.tool({ card_id: opened.callId, claim_follow: true });
+  assert.equal(readFailed.reply.result.follow_state, 'failed');
+  assert.equal(readFailed.reply.result.follow_claimed, false);
+  assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleErrorSource, 'create');
+  assert.match(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleError, /scheduler unavailable/);
+
+  fault.failList = false;
+  const afterRecovery = await rt.tool({ card_id: opened.callId });
+  assert.equal(afterRecovery.reply.result.follow_state, 'failed');
+  assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleErrorSource, 'create');
+  assert.match(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleError, /scheduler unavailable/);
+
   const stopped = await rt.tool({ card_id: opened.callId, following: false });
   const cardAfterStop = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+  assert.equal(stopped.reply.result.follow_state, 'stopped');
   assert.equal(cardAfterStop.scheduleError, null);
+  assert.equal(cardAfterStop.scheduleErrorSource, null);
   assert.equal(cardAfterStop.note, null);
   assert.equal(stopped.reply.result.note, undefined);
+});
+
+test('a card blocked by another task recovers after a transient schedule_list error and allows claim_follow again', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  for (const claimOnRecovery of [false, true]) {
+    const fault = {};
+    const { hostApi, calls, rows } = followScheduler(fault);
+    rows.set('foreign', { id: 'foreign', prompt: 'Follow ' + url, targetSessionId: 'other', status: 'active' });
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+
+    // Creation fails due to a blocking schedule in another task; followedEver remains false.
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_state, 'failed');
+    let card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(card.followedEver, false);
+    assert.equal(card.scheduleErrorSource, 'verify');
+    assert.match(card.scheduleError, /无法确认 PR 卡片所属任务/);
+
+    // Subsequent ordinary refresh hits a transient schedule_list failure, replacing scheduleError with a read error.
+    fault.failList = true;
+    const readFailed = await rt.tool({ card_id: opened.callId, claim_follow: true });
+    assert.equal(readFailed.reply.result.follow_state, 'failed');
+    assert.equal(readFailed.reply.result.follow_claimed, false);
+    card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(card.followedEver, false);
+    assert.equal(card.scheduleErrorSource, 'read');
+    assert.match(card.scheduleError, /cannot list schedules/);
+
+    // Once the foreign schedule is deleted and schedule_list recovers, the empty list clears the read error
+    // so the card settles to stopped and allows claim_follow again.
+    rows.delete('foreign');
+    fault.failList = false;
+    const recovered = await rt.tool({ card_id: opened.callId, ...(claimOnRecovery ? { claim_follow: true } : {}) });
+    card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(card.scheduleError, null);
+    assert.equal(card.scheduleErrorSource, null);
+    assert.equal(card.note, null);
+    assert.equal(recovered.reply.result.follow_state, 'stopped');
+    assert.equal(recovered.reply.result.note, undefined);
+    if (claimOnRecovery) {
+      assert.equal(recovered.reply.result.follow_claimed, true);
+    } else {
+      const claimed = await rt.tool({ card_id: opened.callId, claim_follow: true });
+      assert.equal(claimed.reply.result.follow_claimed, true);
+    }
+    assert.equal(calls.some(c => ['schedule_create', 'schedule_update', 'schedule_delete'].includes(c)), false);
+  }
 });
 
 test('viewing an existing red PR does not start following; explicitly clicking hands its current failures to the owner', async () => {
