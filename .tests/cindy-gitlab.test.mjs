@@ -336,3 +336,47 @@ test('card pruning preserves the current anchor of an active MR and drops its su
   await r.click(visible.anchor, 'pr:stop');
   assert.equal(r.schedules.size, 0);
 });
+
+test('plugin-engine (acp) follow models survive card validation and reach auto-follow scheduling', async () => {
+  const route = {
+    agentKind: 'acp',
+    providerId: 'acp-plugin:antigravity:agy',
+    model: 'gemini-4-neon',
+    effort: 'high',
+    fastMode: false,
+  };
+  const r = runtime(true, { route, label: 'Gemini 4 Neon · Antigravity' });
+  const view = await r.show({ mr: url, published: true });
+  await r.click(view.card_id, 'pr:ready');
+  assert.equal(r.mr.draft, false);
+  assert.equal(r.schedules.get('schedule')?.modelAgentKind, 'acp');
+  assert.equal(r.schedules.get('schedule')?.providerId, 'acp-plugin:antigravity:agy');
+  assert.equal(r.schedules.get('schedule')?.model, 'gemini-4-neon');
+  assert.equal(r.schedules.get('schedule')?.effort, 'high');
+  assert.equal(r.schedules.get('schedule')?.fastMode, false);
+  assert.equal(r.schedules.get('schedule')?.targetSessionId, 's1');
+});
+
+test('plugin-engine (acp) follow models are preserved in agent handoff when native scheduler is absent', async () => {
+  const route = {
+    agentKind: 'acp',
+    providerId: 'acp-plugin:antigravity:agy',
+    model: 'gemini-4-neon',
+    effort: 'high',
+    fastMode: false,
+    agentDeviceId: 'mac-mini',
+  };
+  const r = runtime(false, { route, label: 'Gemini 4 Neon · Antigravity' }, false);
+  const view = await r.show({ mr: url });
+  await r.click(view.anchor, 'pr:follow');
+  assert.equal(r.handoffs.length, 1);
+  assert.deepEqual({ ...r.handoffs[0].event.follow_model }, {
+    model_agent_kind: 'acp',
+    provider_id: 'acp-plugin:antigravity:agy',
+    model: 'gemini-4-neon',
+    effort: 'high',
+    fast_mode: false,
+    label: 'Gemini 4 Neon · Antigravity',
+    agent_device_id: 'mac-mini',
+  });
+});
