@@ -2443,6 +2443,52 @@ test('a persisted pre-upgrade Stop settles from a bound read without deleting th
   }
 });
 
+test('an ID-less pre-upgrade Stop is reconciled by ordinary refresh without touching the scheduler', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  for (const status of ['active', 'paused', 'absent', 'legacy-active']) {
+    // Exercise the old-host button handoff to persist the actual old format.
+    const old = createPrRuntime({ github: prGraphql() });
+    const opened = await old.tool({ repo: 'octo/repo', pr: 42, following: true });
+    await old.click(opened.callId, 'pr:stop');
+    const key = `pr-cards/${opened.callId}.json`;
+    const saved = JSON.parse(old.files.get(key));
+    assert.equal(saved.pending, 'stop');
+    assert.equal(saved.scheduleId || null, null);
+    assert.equal(saved.scheduleAction || null, null);
+    assert.equal(old.agentRuns.length, 1);
+
+    const fault = { failList: true };
+    const { hostApi, rows, calls } = followScheduler(fault);
+    const hook = oldFollowHook(url, 123456);
+    if (status !== 'legacy-active') hook.command = hook.command.replace('pr-heartbeat-gate.mjs"', 'pr-node.cjs" pr-heartbeat-gate.mjs');
+    const row = { id: 'old', status: status === 'paused' ? 'paused' : 'active', targetSessionId: 's1',
+      recurring: true, intervalMs: 600000, preRunHook: hook, runHistory: [{ id: 'previous-run', status: 'success' }] };
+    if (status !== 'absent') rows.set(row.id, structuredClone(row));
+    const before = structuredClone([...rows.values()]);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, files: old.files, kv: { prCard: { autoFollow: true } } });
+    const unreadable = await rt.tool({ card_id: opened.callId });
+    assert.equal(unreadable.reply.result.follow_state, 'unverified', status);
+    assert.equal((await rt.tool({ card_id: opened.callId, claim_follow: true })).reply.result.follow_claimed, false, status);
+    fault.failList = false;
+    const result = await rt.tool({ card_id: opened.callId });
+    assert.equal(result.reply.result.follow_state, status === 'legacy-active' ? 'unverified' : status === 'absent' ? 'stopped' : status, status);
+    const refreshed = JSON.parse(rt.files.get(key));
+    assert.equal(refreshed.pending, null, status);
+    assert.equal(refreshed.scheduleId || null, status === 'absent' ? null : 'old', status);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /正在停止/, status);
+    if (status === 'absent') {
+      assert.match(rt.lastCard(opened.callId).html, /data-ghost-action="pr:follow"/);
+    } else {
+      assert.match(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止（ID：old）/);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/);
+      if (status === 'legacy-active') assert.equal(result.reply.result.legacy_hook_repair.schedule_id, 'old');
+    }
+    assert.deepEqual([...rows.values()], before, status);
+    assert.equal(calls.every(c => ['schedule_list', 'schedule_get'].includes(c)), true, status);
+    assert.equal(rt.agentRuns.length, 0, status);
+  }
+});
+
 test('terminal PR shows the actual final schedule state, not an ended label while still present', async () => {
   for (const status of ['active', 'paused']) {
     const { hostApi, rows, calls } = followScheduler();

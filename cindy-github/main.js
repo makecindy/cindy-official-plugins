@@ -3535,6 +3535,10 @@ async function reconcileLegacyFollow(card, readError) {
     unverified = true;
     error = String(err && err.message || err).slice(0, 160);
   }
+  // The old agent handoff could persist Stop without a schedule ID. Its
+  // intent is settled by this same read; an unavailable read still reserves
+  // the follow-up through the unverified status, not a perpetual Stop spinner.
+  if (card.pending === 'stop') card.pending = null;
   card.managedFollow = true;
   card.followedEver = true;
   card.scheduleId = row ? row.id : null;
@@ -3723,9 +3727,10 @@ async function prCardTool(args, callId) {
   if (typeof a.renamed === 'boolean') {
     card.renamed = a.renamed;
   }
-  // Before native card-managed schedules, following=true was the whole saved
-  // follow record. Only an existing, settled claim can authorize discovery.
-  var legacyFollow = updating && (card.following === true || unverifiedLegacyFollow(card)) && !card.scheduleId && !card.scheduleAction && !card.pending;
+  // Before native card-managed schedules, following=true or a persisted Stop
+  // intent was the whole saved follow record. Both permit read-only discovery.
+  var legacyFollow = updating && !card.scheduleId && !card.scheduleAction &&
+    (card.pending === 'stop' || (!card.pending && (card.following === true || unverifiedLegacyFollow(card))));
   var number = ref ? ref.number : card.pr ? card.pr.number : null;
   if (number) {
     var status;
@@ -3793,7 +3798,7 @@ async function prCardTool(args, callId) {
   // A blocked old Node cannot start the agent that would inspect its hook.
   // The owning task's card can identify the exact old command and report the
   // manual repair, but never rewrite a user configuration without a guard.
-  if (hasCardScheduler() && status && card.pending !== 'stop' && (a.following !== false || legacyFollow)) {
+  if (hasCardScheduler() && status && (legacyFollow || (card.pending !== 'stop' && a.following !== false))) {
     try {
       if (card.stage === 'open' && !status.err && currentSchedule && currentSchedule.status === 'active') {
         card.legacyHookRepair = await legacyFollowRepair(currentSchedule, card);
