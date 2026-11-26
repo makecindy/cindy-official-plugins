@@ -5,7 +5,7 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.35",
+  "version": "1.5.36",
   "releaseNotes": "PR 跟进遇到域名解析失败或连接超时时，会说明原因。同一个 PR 有新动态时会提前复查，成功读完后自动清除告警。GitHub 限流时仍按规定时间重试。",
   "locales": {
     "en": "locales/en.json",
@@ -171,7 +171,7 @@
           },
           "claim_follow": {
             "type": "boolean",
-            "description": "开始跟进前先传 true 申请在当前任务跟进。只有成功且 follow_claimed=true 才能创建定时任务；existing_task 表示其它任务正在跟进。following 仅报告已完成的开启或停止。"
+            "description": "开始跟进前先传 true 申请在当前任务跟进。只有成功且 follow_claimed=true 才能创建定时任务；认领不等于已开启，建好并确认定时任务后须用 following=true 回报，否则 10 分钟后查不到定时任务时认领自动释放。existing_task 表示其它任务正在跟进。following 仅报告已完成的开启或停止。"
           },
           "published": {
             "type": "boolean",

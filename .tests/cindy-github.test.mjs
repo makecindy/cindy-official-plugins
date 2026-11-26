@@ -86,7 +86,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.35');
+  assert.equal(manifest.version, '1.5.36');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -712,8 +712,11 @@ function createPrRuntime(options = {}) {
       if (init.method === 'PUT') { kv = JSON.parse(init.body); return { ok: true, status: 204 }; }
       return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(kv)) };
     },
-    setTimeout(fn, delay) { return delay >= 300_000 ? 0 : setTimeout(fn, delay); },
-    clearTimeout,
+    setTimeout(fn, delay) {
+      if (options.onTimer) return options.onTimer(fn, delay);
+      return delay >= 300_000 ? 0 : setTimeout(fn, delay);
+    },
+    clearTimeout(id) { if (!options.onTimer) clearTimeout(id); },
     URL,
     encodeURIComponent,
   });
@@ -2428,4 +2431,158 @@ test('status_watch descriptions define the status format and every problem value
     assert.match(text, /attempt|시도|回数|第几次/, `${locale} status_watch description omits the attempt segment`);
     assert.match(text, /remove/, `${locale} status_watch description omits the recovery action`);
   }
+});
+
+/* ── Unconfirmed follow claims ── */
+
+const CLAIM_TTL = 10 * 60 * 1000;
+
+function ageClaim(runtime, cardId, ms = CLAIM_TTL + 1000) {
+  const path = `pr-cards/${cardId}.json`;
+  const card = JSON.parse(runtime.files.get(path));
+  card.claimedAt -= ms;
+  runtime.files.set(path, JSON.stringify(card));
+  return card;
+}
+
+const actionsOf = (html) => [...html.matchAll(/data-ghost-action="([^"]+)"/g)].map((m) => m[1]);
+
+test('a follow claim says it is not running yet and keeps the card starting until confirmed', async () => {
+  const runtime = createPrRuntime({ github: prGraphql(), kv: { prCard: { autoFollow: true } } });
+  const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  const result = claimed.reply.result;
+  assert.equal(result.follow_claimed, true);
+  assert.equal(result.follow_state, undefined);
+  assert.equal(result.next, fill(zhCopy.prNextClaimed, { minutes: 10 }));
+  const card = runtime.lastCard(claimed.callId);
+  assert.equal(card.state, 'working');
+  assert.match(card.html, new RegExp(zhCopy.prFollowStarting));
+  const saved = JSON.parse(runtime.files.get(`pr-cards/${claimed.callId}.json`));
+  assert.ok(Math.abs(saved.claimedAt - Date.now()) < 5000);
+  // A plain refresh before the deadline keeps waiting and repeats what is still missing.
+  const refreshed = await runtime.tool({ card_id: claimed.callId });
+  assert.equal(refreshed.reply.result.next, fill(zhCopy.prNextClaimed, { minutes: 10 }));
+  assert.equal(runtime.lastCard(claimed.callId).state, 'working');
+  // Reporting the verified schedule ends the wait.
+  const following = await runtime.tool({ card_id: claimed.callId, following: true });
+  assert.equal(following.reply.result.next, zhCopy.prNextUpdated);
+  assert.equal(runtime.lastCard(claimed.callId).state, 'done');
+});
+
+test('an abandoned claim is released on the next refresh and the follow button comes back', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  ageClaim(runtime, claimed.callId);
+  const refreshed = await runtime.tool({ card_id: claimed.callId });
+  const expired = fill(zhCopy.prClaimExpired, { minutes: 10 });
+  assert.equal(refreshed.reply.result.note, expired);
+  assert.equal(refreshed.reply.result.next, zhCopy.prNextUpdated);
+  const card = runtime.lastCard(claimed.callId);
+  assert.equal(card.state, 'done');
+  assert.doesNotMatch(card.html, new RegExp(zhCopy.prFollowStarting));
+  assert.match(card.html, new RegExp(expired));
+  assert.ok(actionsOf(card.html).includes('pr:follow'));
+  const saved = JSON.parse(runtime.files.get(`pr-cards/${claimed.callId}.json`));
+  assert.equal(saved.pending, null);
+  assert.equal(saved.claimedAt, undefined);
+  // A fresh claim starts over instead of being reported as expired.
+  const again = await runtime.tool({ card_id: claimed.callId, claim_follow: true });
+  assert.equal(again.reply.result.follow_claimed, true);
+  assert.equal(again.reply.result.note, undefined);
+});
+
+test('an abandoned claim from another task no longer blocks this task', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const first = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  const blocked = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(blocked.reply.result.disposition, 'existing_task');
+  ageClaim(runtime, first.callId);
+  const taken = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(taken.reply.result.follow_claimed, true);
+  assert.equal(taken.reply.result.disposition, undefined);
+  // The released card is redrawn for its own task.
+  const firstCard = runtime.lastCard(first.callId);
+  assert.equal(firstCard.state, 'done');
+  assert.match(firstCard.html, new RegExp(fill(zhCopy.prClaimExpired, { minutes: 10 })));
+});
+
+test('an expired claim whose schedule is running becomes following instead of being released', async () => {
+  const { hostApi, rows, calls } = followScheduler();
+  const url = 'https://github.com/octo/repo/pull/42';
+  const runtime = createPrRuntime({ github: prGraphql(), hostApi });
+  const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  rows.set('agent-made', {
+    id: 'agent-made', prompt: 'Follow ' + url, targetSessionId: 's1', recurring: true, status: 'active',
+    prTrigger: { url, change: 'any' },
+    preRunHook: { command: 'node "/skills/pr/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 },
+  });
+  ageClaim(runtime, claimed.callId);
+  const refreshed = await runtime.tool({ card_id: claimed.callId });
+  assert.equal(refreshed.reply.result.note, undefined);
+  const saved = JSON.parse(runtime.files.get(`pr-cards/${claimed.callId}.json`));
+  assert.equal(saved.following, true);
+  assert.equal(saved.pending, null);
+  assert.ok(actionsOf(runtime.lastCard(claimed.callId).html).includes('pr:stop'));
+  assert.equal(calls.includes('schedule_create'), false);
+});
+
+test('an expired claim is kept while the scheduler cannot be read or a paused schedule exists', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  for (const setup of ['unreadable', 'paused']) {
+    const { hostApi, rows } = followScheduler();
+    const call = hostApi.host.call;
+    if (setup === 'unreadable') hostApi.host.call = async () => { throw new Error('scheduler down'); };
+    const runtime = createPrRuntime({ github: prGraphql(), hostApi });
+    const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+    if (setup === 'paused') rows.set('paused', { id: 'paused', prompt: 'Follow ' + url, targetSessionId: 's1', status: 'paused' });
+    ageClaim(runtime, claimed.callId);
+    await runtime.tool({ card_id: claimed.callId });
+    const saved = JSON.parse(runtime.files.get(`pr-cards/${claimed.callId}.json`));
+    assert.equal(saved.pending, 'follow', setup);
+    hostApi.host.call = call;
+  }
+});
+
+test('the claim clock redraws the card by itself after ten minutes, also after a restart', async () => {
+  const timers = [];
+  const onTimer = (fn, delay) => {
+    if (delay < 60_000) return setTimeout(fn, delay);
+    timers.push({ fn, delay });
+    return timers.length;
+  };
+  const runtime = createPrRuntime({ github: prGraphql(), onTimer });
+  const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  const clock = timers.find((t) => t.delay > CLAIM_TTL - 5000 && t.delay <= CLAIM_TTL);
+  assert.ok(clock, 'claim timer armed');
+  ageClaim(runtime, claimed.callId);
+  clock.fn();
+  await flushAsync();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const card = runtime.lastCard(claimed.callId);
+  assert.equal(card.sourceCallId, undefined);
+  assert.equal(card.state, 'done');
+  assert.ok(actionsOf(card.html).includes('pr:follow'));
+
+  // A worker that wakes with a waiting claim (including one saved before claims were timed) restarts its clock.
+  const files = new Map(runtime.files);
+  const legacy = JSON.parse(files.get(`pr-cards/${claimed.callId}.json`));
+  legacy.pending = 'follow';
+  delete legacy.claimedAt;
+  files.set(`pr-cards/${claimed.callId}.json`, JSON.stringify(legacy));
+  const woken = [];
+  const restarted = createPrRuntime({ github: prGraphql(), files, onTimer: (fn, delay) => {
+    if (delay < 60_000 && delay > 0) return setTimeout(fn, delay);
+    woken.push({ fn, delay });
+    return woken.length;
+  } });
+  await flushAsync();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const stamp = woken.find((t) => t.delay === 0);
+  assert.ok(stamp, 'legacy claim checked on wake');
+  stamp.fn();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const stamped = JSON.parse(restarted.files.get(`pr-cards/${claimed.callId}.json`));
+  assert.equal(stamped.pending, 'follow');
+  assert.equal(typeof stamped.claimedAt, 'number');
+  assert.ok(woken.some((t) => t.delay > CLAIM_TTL - 5000 && t.delay <= CLAIM_TTL));
 });
