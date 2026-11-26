@@ -5,6 +5,46 @@ import path from 'node:path';
 import test from 'node:test';
 import { createCiRetryReceiptIO } from '../../cindy-github/skills/pr/scripts/lib/ci-retry-receipts.mjs';
 
+test('receipt paths still name the opened file after the full directory barrier', async t => {
+  for (const operation of ['read', 'write', 'collision', 'copy', 'copy collision']) for (const change of ['unlink', 'replace']) await t.test(`${operation} / ${change}`, t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-receipt-file-binding-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const file = path.join(root, 'receipt'), source = path.join(root, 'source'), moved = path.join(root, 'old');
+    fs.writeFileSync(source, 'legacy');
+    if (['read', 'collision', 'copy collision'].includes(operation)) fs.writeFileSync(file, 'consumed');
+    const handles = new Map(); let fileSynced = false, changed = false;
+    const io = createCiRetryReceiptIO({ ...fs,
+      openSync(name, ...args) { const fd = fs.openSync(name, ...args); handles.set(fd, path.resolve(name)); return fd; },
+      closeSync(fd) { fs.closeSync(fd); handles.delete(fd); },
+      fsyncSync(fd) {
+        if (handles.get(fd) === file) fileSynced = true;
+        if (!fileSynced || changed || handles.get(fd) !== path.parse(root).root) return;
+        changed = true;
+        if (change === 'unlink') fs.unlinkSync(file);
+        else { fs.renameSync(file, moved); fs.writeFileSync(file, 'replacement'); }
+      }, // successful-sync model, never a native durability claim
+    });
+    const perform = () => operation === 'read' ? io.read(file)
+      : operation === 'write' || operation === 'collision' ? io.writeExclusive(file, 'new')
+        : io.copyExclusive(source, file);
+    assert.throws(perform, /durability could not be confirmed/);
+    assert.equal(changed, true);
+    assert.equal(handles.size, 0);
+    assert.equal(fs.readFileSync(source, 'utf8'), 'legacy');
+    if (change === 'replace') assert.equal(fs.readFileSync(file, 'utf8'), 'replacement');
+    else assert.equal(fs.existsSync(file), false, 'do not recreate lost evidence');
+  });
+});
+
+test('a receipt appearing during absent-file confirmation is not reported unused', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-receipt-appeared-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'receipt'); let created = false;
+  const io = createCiRetryReceiptIO({ ...fs, fsyncSync() { if (!created) { created = true; fs.writeFileSync(file, 'consumed'); } } });
+  assert.throws(() => io.read(file), /durability could not be confirmed/);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'consumed');
+});
+
 function fixture(t, failAt = Infinity, failureCode = 'EIO') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-receipt-io-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -217,20 +257,31 @@ test('replacement during ancestor flush is rejected before a receipt read succee
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const dir = path.join(root, 'store'), moved = path.join(root, 'moved'); fs.mkdirSync(dir);
   const file = path.join(dir, 'one.slot'); fs.writeFileSync(file, 'consumed one');
-  const handles = new Map(); let armed = false, swapped = false;
+  const handles = new Map(); let armed = false, swapped = false, blocked = false;
   const io = createCiRetryReceiptIO({ ...fs,
     openSync(file, ...args) { const fd = fs.openSync(file, ...args); handles.set(fd, path.resolve(file)); return fd; },
     closeSync(fd) { fs.closeSync(fd); handles.delete(fd); },
     fsyncSync(fd) {
       if (armed && handles.get(fd) === path.parse(dir).root) {
-        armed = false; swapped = true; fs.renameSync(dir, moved); fs.mkdirSync(dir);
+        armed = false; swapped = true;
+        try { fs.renameSync(dir, moved); }
+        catch (error) {
+          if (process.platform === 'win32' && error.code === 'EPERM') blocked = true;
+          throw error;
+        }
+        fs.mkdirSync(dir);
       }
     },
   });
   io.confirmParent(dir); armed = true;
-  assert.throws(() => io.read(file), /directory identity changed/);
+  assert.throws(() => io.read(file), /directory identity changed|EPERM/);
   assert.equal(swapped, true);
-  assert.deepEqual(fs.readdirSync(dir), []);
-  assert.equal(fs.readFileSync(path.join(moved, 'one.slot'), 'utf8'), 'consumed one');
+  if (blocked) {
+    assert.equal(fs.existsSync(moved), false, 'open file descriptor prevents the Windows ancestor rename');
+    assert.equal(fs.readFileSync(file, 'utf8'), 'consumed one');
+  } else {
+    assert.deepEqual(fs.readdirSync(dir), []);
+    assert.equal(fs.readFileSync(path.join(moved, 'one.slot'), 'utf8'), 'consumed one');
+  }
   assert.equal(handles.size, 0);
 });

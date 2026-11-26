@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.57, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.58, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1511,3 +1511,26 @@ The slot reader remains the sole semantic owner; raw preservation and strict rec
 The eight-cell CLI regression first fails on source56 (0 pass/9 fail including parent), then passes9/9 (4.77s). Each isolated case reserves two diagnoses, removes only fixture slot1, and checks status/reserve × new/surviving diagnosis × absent/present stale legacy evidence, with another fresh invocation and changed empty cache. Slot2, raw legacy bytes and ordinary observation state stay unchanged; slot1 remains absent. Real isolated files/CLI are used with fsync acknowledgements modeled on Windows/Node22; this is not native Linux/Cindy recovery or durable receipt acceptance. The reviewer separately reported native Linux6.18/Node24.15 reproduction in the original review comment; it is external evidence, not this task's new native runtime observation. No real user receipts, remote resources, quota, installation or blocked cleanup were touched.
 
 Final mandatory four suites plus plugin: **578 passed / 38 skipped / 0 failed (307.70 s)**; the 38 skips remain 17 unsupported native directory-sync success cases, 19 earlier skips and two inherited POSIX-only command-line cases. Forge exact-content: **30 files, 254107 archive bytes, 716496 uncompressed bytes**; new package deleted and absence verified. External Linux reproduction: [original review](https://github.com/makecindy/cindy-official-plugins/pull/332#discussion_r4711100278). No installation or new runtime acceptance claimed.
+
+
+## File binding, identity-epoch scope and pre-reservation Git locks — 2026-11-27 Asia/Shanghai (source1.5.58, not installed)
+
+Source1.5.58 groups three boundaries without a new receipt format, alias registry, lock owner or retry mechanism.
+
+| Boundary / event | Required result |
+| --- | --- |
+| Receipt removed/replaced while its parent chain is flushing | Stop before returning bytes, exclusive success or collision/copy confirmation |
+| Receipt appears while absence is confirmed | Stop instead of reporting unused |
+| Same PR database identity resolves from a different stored node-ID input | Identity epoch is outside CI-only recovery: stop before any budget command, retain raw files |
+| Incomplete inventory, unresolved identity or partial API result | Stop; do not infer unrelated PRs from different opaque encodings |
+| Effective index/ref/HEAD/packed-ref lock occupied/unreadable, or ref backend unknown/non-files | Stop before budget/amend/push; never delete/replace/wait out the lock |
+
+The existing I/O owner holds the receipt descriptor through file sync, full directory sync and final fd/path device/inode comparison, requiring regular-file lossless BigInt identities. read/write use the same check; exclusive collisions and raw copies already reuse read. An absent open is rechecked after directory confirmation, without retry or creation. This is a final observation, not atomic protection against later erasure or hardware power-loss evidence. Prefix/hole validation and raw preservation remain.
+
+ID migration is deliberately excluded, rather than adding an alias ledger or automatically moving counts. Before every budget boundary the Agent inventories all existing slot/legacy identities and uses the existing GraphQL tool to compare server-resolved PullRequest fullDatabaseId strings with the independently read current PR. A same-PR different serialized input, unknown/partial/malformed history or changed inventory stops. The standalone receipt CLI still counts exact verified keys; it does not discover aliases, and a quota result cannot prove identity. IDs stay opaque; no decoding, storage-key substitution, receipt rename/merge, new scope/credential or budget change. See [GitHub migration documentation](https://docs.github.com/en/graphql/guides/migrating-graphql-global-node-ids). The exact guide query was exercised through the root plugin with currentId=storedId for PR332: id PR_kwDOThLbE88AAAABO48Eog, fullDatabaseId string5294195874 and heade2 matched. This proves current query shape only, not a real old/new alias pair or live recovery refusal. No historical user quota was read or changed for this check.
+
+Git lock scope uses existing Git reads to resolve the effective index, worktree HEAD, exact common branch ref and packed-refs; append .lock as path data and require absence. Only a confirmed files backend is supported. Same condition is rechecked at budget/amend/push; after reservation no refund, after amend leave unpushed. No probe amend or lock/environment/configuration repair. Native Windows Git2.54 fixtures (ordinary and linked worktrees, including relocated GIT_INDEX_FILE) show clean status can succeed while index/ref locks make amend fail with unchanged head and lock bytes.
+
+New file-binding tests first fail12/12 on57, then the complete receipt suite passes109/109 (1.08s) with real isolated files and modeled sync acknowledgements. One prior ancestor-swap case now observes Windows EPERM because the receipt descriptor remains open; it checks failure, no moved directory, unchanged bytes and closed handles instead of pretending the rename succeeded. Other platforms retain the identity-change assertion. Lock/scope six cases first fail, then pass6/6 (7.98s). Identity tests enforce the documented refusal prerequisite, not a new CLI alias implementation. No actual Cindy/GitHub recovery, native Linux durability, installation, permissions/preferences, real quota or retired-fixture use is claimed. Existing runtime prerequisites and cleanup blocks remain.
+
+Final mandatory four suites plus plugin: **596 passed / 38 skipped / 0 failed (297.52 s)**. Skips remain 17 unsupported native directory-sync success cases, 19 prior skips and two inherited POSIX-only command-line cases. Forge exact-content: **30 files, 255596 archive bytes, 721646 uncompressed bytes**; generated58package deleted and absence verified. ID-migration handling is the mandatory Agent refusal scope described above, not automatic CLI normalization; real alias/refusal acceptance remains unverified.

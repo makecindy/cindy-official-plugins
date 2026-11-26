@@ -62,6 +62,9 @@ const graftPathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absol
 const replaceRefsArgs = ['--no-replace-objects', 'for-each-ref', '--format=%(refname)', 'refs/replace/'];
 const shallowStateArgs = ['--no-replace-objects', 'rev-parse', '--is-shallow-repository'];
 const shallowPathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'shallow'];
+const refFormatArgs = ['--no-replace-objects', 'rev-parse', '--show-ref-format'];
+const lockPathArgs = ['index', 'HEAD', exactRef, 'packed-refs']
+  .map(name => ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', name]);
 const originalObjectArgs = ['--no-replace-objects', 'cat-file', 'commit', originalRemoteSha];
 const replacementObjectArgs = ['--no-replace-objects', 'cat-file', 'commit', newSha];
 const amendArgs = ['--no-replace-objects', 'commit', '--amend', '--no-edit', '--cleanup=verbatim'];
@@ -120,6 +123,20 @@ configuration, pass `--no-signed`, sign a probe or query/execute a new transport
 to gain eligibility; an ordinary authorized contribution uses its own workflow.
 
 ### Supported checkout: no effective hooks or history overlays
+
+Any occupied or unreadable Git lock path stops before budget status/reservation,
+amend and push. First require `refFormatArgs` to succeed with exactly `files`;
+other/unknown ref backends are outside this route. Resolve every `lockPathArgs`
+path in the actual amend environment and append `.lock` as literal path data.
+This covers the effective index (including GIT_INDEX_FILE), worktree HEAD,
+the exact branch ref in its common directory, and packed refs. Require complete
+absolute paths and confirmed absence of every lock with read-only file inspection;
+any file, directory, symlink, failed/unknown inspection stops. Do not assume `.git`
+is a directory or use the main worktree's index for a linked checkout.
+Never delete, replace or wait out a lock, change environment/configuration or use
+a probe amend to qualify. Recheck all paths at every boundary; after reservation
+stop without refund, after amend leave unpushed. Absence now does not prevent a
+concurrent process acquiring a lock later; this adds no lock owner or retry.
 
 The same eligibility boundary applies before **any Git status/object work or
 budget operation**, immediately before amend, and immediately before push.
@@ -289,10 +306,11 @@ All conditions must hold:
    checkout. Missing, false, failed or ambiguous-device reads forbid rewriting.
    Auto-follow alone, an old card event and a saved schedule prompt are not this
    authorization. Never enable the preference on the user's behalf.
-2. Refresh the exact PR. Read its immutable `node_id` from `get_pull_request`
+2. Refresh the exact PR. Read its current opaque `node_id` from `get_pull_request`
    (use `call_tool` with `raw: true`); retain that verified ID for all budget
    operations. Never derive or invent it from owner/repo, URL or PR number.
-   Renaming or transferring the repository does not change this PR identity.
+   Complete the historical-ID checks below before using that serialized ID as
+   a budget key; a different encoding must never be treated as a fresh PR.
    It must still be open, with the same known head
    repository, branch and SHA. Read the failing job logs and identify a confirmed
    transient installation/runner/network/infrastructure failure unrelated to this
@@ -371,6 +389,50 @@ All conditions must hold:
    reservation/amend, even if stale-approval dismissal might be disabled.
    The preference does not authorize dismissing approvals, leaving a queue,
    disabling auto-merge or requesting these changes to make recovery eligible.
+
+### Identity scope: no serialized-ID migration
+
+Inventory every existing durable slot and legacy receipt in the selected data
+root and effective observation cache, using the existing task's read-only file
+tools. Require a complete, unchanged inventory with readable raw identities;
+missing/unknown identity (including URL-only evidence), malformed/unreadable
+records or an uncertain earlier root stops before any budget command. Keep the
+raw files and cache; do not infer a different PR from different opaque strings.
+
+Use the existing GraphQL tool and structured variables to resolve each distinct
+stored input ID against the freshly verified current PR ID. This fixed query
+keeps each historical input associated with its response without decoding IDs:
+
+```graphql
+query VerifyHistoricalPr($currentId: ID!, $storedId: ID!) {
+  current: node(id: $currentId) {
+    __typename
+    ... on PullRequest { id fullDatabaseId headRefOid }
+  }
+  historical: node(id: $storedId) {
+    __typename
+    ... on PullRequest { id fullDatabaseId }
+  }
+}
+```
+
+Require complete error-free results, PullRequest types and nonempty decimal
+`fullDatabaseId` strings, compared losslessly (never via Number), with the current
+node matching this PR's independently read database ID and pinned head. A stored
+ID resolving to the same fullDatabaseId but a different opaque ID (stored input
+versus currentId) means an ID representation change: stop before any budget command. Any null, unresolved,
+partial or conflicting result also stops; only verified different database
+identities may be excluded as other PRs. Both old and new formats remain opaque;
+only an unchanged, verified identity epoch is supported for this recovery route.
+Re-read the current identity and complete receipt inventory before budget
+status/reservation, amend and push; changed/unknown facts stop without refund or
+repair. The receipt CLI does not discover aliases and its successful status is
+not identity proof. Do not decode IDs, create an alias registry, rename/merge receipts,
+switch keys or migrate counts to qualify. This conservative scope excludes node-ID
+migration; no new database identity is substituted as a storage key. Use ordinary
+authorized work or maintainer rerun while identity history needs reconciliation.
+[GitHub's migration guide](https://docs.github.com/en/graphql/guides/migrating-graphql-global-node-ids)
+explains why legacy and new node ID strings can represent the same object.
 
 If any condition fails, report the specific blocker and record a concrete wait
 using the existing follow-up gate. Enabling this option never authorizes merge,
@@ -462,7 +524,7 @@ This includes the earliest `*.json.ci-retry` URL receipts, which have neither
 an immutable PR ID nor a diagnosis. They stop budget operations even for a
 different URL: names cannot prove identity after renames/transfers. Preserve
 their raw bytes; do not invent an ID or diagnosis to make them usable.
-GitHub node IDs are opaque: use the exact verified value, including legacy
+GitHub node IDs are opaque: after the identity-scope checks, use the exact verified value, including legacy
 base64 IDs; a `PR_` prefix is not required. Do not substitute a URL or number.
 Earlier evidence already deleted before migration cannot be reconstructed;
 an uncertain prior outcome still stops recovery.
@@ -547,7 +609,7 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    it only writes when adopting earlier receipts into the fixed durable slots.
    The budget survives cache cleanup, changed SHAs, gate acknowledgements,
    follow-up restarts, repository renames/transfers and interrupted operations.
-   Two exclusive, append-only slot files are keyed by the immutable PR node ID;
+   Two exclusive, append-only slot files are keyed by the verified PR ID serialization;
    each records the stable diagnosis, never a mutable URL or run ID as identity.
    Concurrent callers cannot allocate a third slot or reserve the same fault twice.
    A denied, corrupt or uncertain

@@ -2,7 +2,7 @@
 
 # GitHub CI 恢复运行证据 — 2026-11-13
 
-当前发布方案：**1.5.57，未安装**；任何有效 hook 或不支持完整目录持久性的环境均停止恢复。下方 local 1.5.45 实测有版本限制，见末节。
+当前发布方案：**1.5.58，未安装**；任何有效 hook 或不支持完整目录持久性的环境均停止恢复。下方 local 1.5.45 实测有版本限制，见末节。
 
 环境：Cindy 0.1.136 Beta、Windows 10.0.26100、Node v22.22.3。
 仅安装/更新隔离的 `local` GitHub 开发实例，市场版及其偏好保持原样。
@@ -958,3 +958,26 @@ Windows10.0.26100 / Node22.22.3 / Git2.54.0.windows.1 夹具用本地 hash-objec
 八格CLI回归在源码56先失败（含parent共0pass/9fail），修复后9/9通过（4.77秒）。每个隔离用例先预留两种诊断，仅删除夹具slot1，交叉覆盖状态/预留 × 新/存续诊断 × 无/有过期旧证据，并再以新进程和空的新观察缓存复查。slot2、raw旧证据及普通观察状态不变，slot1仍缺失。Windows/Node22使用真实隔离文件/CLI，只有fsync确认被建模，不是原生Linux/Cindy恢复或持久性验收。reviewer在原评论另有Linux6.18/Node24.15原生复现，属于外部证据，不是本任务新观察。未触碰真实用户回执、远端资源、额度、安装或已阻断清理。
 
 最终规定四套加插件：**578 通过 / 38 跳过 / 0 失败（307.70秒）**；38项仍为17个不支持原生目录同步成功路径、19个既有跳过及2个继承POSIX-only命令行用例。Forge全内容核对：**30文件，包254107字节 / 解压716496字节**；新包删除并确认不存在。外部Linux复现见[原审查](https://github.com/makecindy/cindy-official-plugins/pull/332#discussion_r4711100278)。未安装或声称新的runtime验收。
+
+
+## 文件绑定、身份表示范围与额度前 Git 锁 — 2026-11-27 Asia/Shanghai (source1.5.58, not installed)
+
+源码1.5.58集中处理三个边界，不新增回执格式、别名账本、锁owner或重试机制。
+
+| 边界/事件 | 要求 |
+| --- | --- |
+| 父目录链同步期间回执被删除/替换 | 返回字节、排他成功或碰撞/复制确认前停止 |
+| 缺失确认期间回执出现 | 停止，不报告未用额度 |
+| 同一PR数据库身份对应另一历史node-ID输入 | 排除该身份表示迁移，任何budget命令前停止并保留raw文件 |
+| 历史清单不完整、身份无法解析或API部分结果 | 停止，不用不同opaque编码推断不同PR |
+| 有效index/ref/HEAD/packed-ref锁占用/不可读，或后端未知/非files | budget/amend/push前停止，不删除/替换/等待锁 |
+
+既有I/O owner将回执fd保持打开，完成文件同步、完整目录链同步及最终fd/path dev/ino比较，要求regular-file和无损BigInt身份。read/write复用同一检查，排他碰撞/raw复制本就经read；缺失open在目录确认后重查，不重试或创建。这是末次观察，不是对随后外部擦除的原子保护或硬件断电证明。前缀/空洞校验及原始证据保留不变。
+
+身份迁移选择排除范围，不加别名ledger或自动搬次数。Agent每个budget边界先完整盘点既有slot/旧回执身份，通过现有GraphQL工具把服务端解析的PullRequest fullDatabaseId字符串与独立读取的当前PR核对。同PR但历史输入ID不同、历史未知/部分/损坏或清单改变即停止。独立回执CLI仍只按已验证的精确键计数，不自行发现alias，额度结果不证明身份。ID保持opaque，不解码、不换storage key、不改名/合并回执、不增加scope/凭证或次数。见[GitHub迁移说明](https://docs.github.com/en/graphql/guides/migrating-graphql-global-node-ids)。实际root插件运行了指南原查询，currentId=storedId的PR332返回id PR_kwDOThLbE88AAAABO48Eog、fullDatabaseId字符串5294195874及heade2均一致；只证明当前查询形状，不是真实旧/新alias对或恢复拒绝实测。此检查未读取/改变真实历史额度。
+
+Git锁范围通过既有Git只读解析有效index、worktree HEAD、准确common branch ref和packed-refs，再以路径数据追加.lock并确认缺失；只支持已确认files后端。budget/amend/push各边界重查，预留后不退款、amend后不推送，不用探针或修复锁/环境/配置取得资格。Windows Git2.54原生普通/linked worktree夹具（含GIT_INDEX_FILE重定位）复现clean status成功，但index/ref锁导致amend失败，HEAD及锁字节不变。
+
+新文件绑定测试在57先12/12失败，修复后完整receipt suite109/109通过（1.08秒），使用真实隔离文件及同步确认建模。一个旧ancestor-swap用例因fd现在保持打开而在Windows实际得到EPERM，验证失败、没有移动目录、原字节不变且句柄关闭，不冒充rename已成功；其它平台保留身份变化验证。锁/身份范围六项先红后6/6通过（7.98秒）。身份测试只约束指南拒绝前提，不是新增CLI alias实现。未声称真实Cindy/GitHub恢复、原生Linux持久性、安装、权限/偏好/真实额度或退役夹具使用；既有runtime验收缺口及清理阻断保留。
+
+最终规定四套加插件：**596 通过 / 38 跳过 / 0 失败（297.52秒）**。跳过仍为17个不支持原生目录同步的成功路径、19个原有跳过及2个继承POSIX-only命令行用例。Forge全内容核对：**30文件，包255596字节 / 解压721646字节**；新58包删除并确认不存在。ID迁移处理是上述强制Agent拒绝范围，不是CLI自动归一；真实alias/拒绝验收仍未完成。

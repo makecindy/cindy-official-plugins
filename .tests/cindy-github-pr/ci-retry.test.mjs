@@ -144,7 +144,7 @@ function guideArguments(values) {
   const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
   const source = guide.match(/```js\n(\/\/ Argument lists for the existing task execution tool\.[\s\S]*?)\n```/)?.[1];
   assert.ok(source, 'the recovery guide must define argument lists, not shell command templates');
-  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, encodingConfigArgs: typeof encodingConfigArgs === "undefined" ? undefined : encodingConfigArgs, committerIdentArgs: typeof committerIdentArgs === "undefined" ? undefined : committerIdentArgs, pushSigningConfigArgs: typeof pushSigningConfigArgs === "undefined" ? undefined : pushSigningConfigArgs, hookConfigArgs: typeof hookConfigArgs === "undefined" ? undefined : hookConfigArgs, hookListArgs: typeof hookListArgs === "undefined" ? undefined : hookListArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, shallowStateArgs: typeof shallowStateArgs === "undefined" ? undefined : shallowStateArgs, shallowPathArgs: typeof shallowPathArgs === "undefined" ? undefined : shallowPathArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs })', values);
+  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, encodingConfigArgs: typeof encodingConfigArgs === "undefined" ? undefined : encodingConfigArgs, committerIdentArgs: typeof committerIdentArgs === "undefined" ? undefined : committerIdentArgs, pushSigningConfigArgs: typeof pushSigningConfigArgs === "undefined" ? undefined : pushSigningConfigArgs, hookConfigArgs: typeof hookConfigArgs === "undefined" ? undefined : hookConfigArgs, hookListArgs: typeof hookListArgs === "undefined" ? undefined : hookListArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, shallowStateArgs: typeof shallowStateArgs === "undefined" ? undefined : shallowStateArgs, shallowPathArgs: typeof shallowPathArgs === "undefined" ? undefined : shallowPathArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs, lockPathArgs: typeof lockPathArgs === "undefined" ? undefined : lockPathArgs, refFormatArgs: typeof refFormatArgs === "undefined" ? undefined : refFormatArgs })', values);
 }
 
 test('recovery guide passes dynamic refs, remotes and paths as literal argument data', () => {
@@ -557,6 +557,8 @@ quotaTest('legacy evidence survives rejected budget arguments before cache clean
   }
 });
 
+// Distinct fixture PR identities, not two node-ID aliases of the same PR.
+// The CLI operates on exact keys; alias exclusion is an Agent preflight.
 quotaTest('opaque legacy GitHub PR IDs work in CLI, old evidence adoption and durable slots', async t => {
   const fx = fixture(t);
   const legacy = 'MDExOlB1bGxSZXF1ZXN0MQ==';
@@ -1163,6 +1165,54 @@ test('inherited signed-push requirements are rejected before quota and amend', t
   assert.equal(git(work, ['config', '--get', 'push.gpgSign']), 'if-asked', 'no bypass or configuration rewrite by recovery');
 });
 
+
+test('occupied index and branch locks stop recovery before reservation in ordinary and linked checkouts', async t => {
+  for (const linked of [false, true]) for (const locked of ['index', 'ref']) await t.test(`${linked ? 'linked' : 'ordinary'} / ${locked}`, t => {
+    const fx = fixture(t), source = path.join(fx.root, 'repo'); fs.mkdirSync(source);
+    const global = path.join(fx.root, 'global'); fs.writeFileSync(global, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
+    const git = (cwd, args) => execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    git(source, ['init', '-b', 'main']);
+    for (const [key, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false']]) git(source, ['config', key, value]);
+    for (const content of ['base', 'nonempty change']) {
+      fs.writeFileSync(path.join(source, 'code.txt'), content); git(source, ['add', 'code.txt']); git(source, ['commit', '-m', content]);
+    }
+    if (!linked && locked === 'index') {
+      const originalIndex = git(source, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
+      env.GIT_INDEX_FILE = path.join(fx.root, 'alternate-index'); fs.copyFileSync(originalIndex, env.GIT_INDEX_FILE);
+    }
+    const work = linked ? path.join(fx.root, 'work') : source, branch = linked ? 'recovery' : 'main';
+    if (linked) git(source, ['worktree', 'add', '-b', branch, work]);
+    const original = git(work, ['rev-parse', 'HEAD']);
+    const plan = guideArguments({ verifiedBranch: branch, verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    const paths = plan.lockPathArgs ?? ['index', 'HEAD', 'refs/heads/' + branch, 'packed-refs'].map(name => ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', name]);
+    const lock = git(work, paths[locked === 'index' ? 0 : 2]) + '.lock';
+    fs.writeFileSync(lock, 'fixture-held');
+    assert.equal(git(work, ['status', '--porcelain=v1']), '', 'clean status is not lock readiness');
+    const amend = spawnSync('git', plan.amendArgs, { cwd: work, env, encoding: 'utf8' });
+    assert.notEqual(amend.status, 0); assert.match(amend.stderr, /lock|File exists/i);
+    assert.equal(git(work, ['rev-parse', 'HEAD']), original);
+    assert.equal(fs.readFileSync(lock, 'utf8'), 'fixture-held');
+    assert.equal(fs.existsSync(fx.retryDir), false);
+    const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    assert.ok(/Any occupied or unreadable Git lock path stops before budget status\/reservation/.test(guide));
+    assert.ok(/Never delete, replace or wait out a lock/.test(guide));
+    assert.ok(plan.lockPathArgs, 'resolve Git paths instead of assuming a .git directory');
+    assert.deepEqual(Array.from(plan.refFormatArgs), ['--no-replace-objects', 'rev-parse', '--show-ref-format']);
+    assert.ok(/other\/unknown ref backends are outside this route/.test(guide));
+  });
+});
+
+test('node-ID migration is excluded before quota instead of treating an alias as a fresh PR', () => {
+  const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  assert.ok(/Inventory every existing durable slot and legacy receipt/.test(guide));
+  assert.ok(/historical: node\(id: \$storedId\)/.test(guide));
+  assert.ok(/fullDatabaseId/.test(guide));
+  assert.ok(/same fullDatabaseId but a different opaque ID.*stop before any budget command/.test(guide));
+  assert.ok(/The receipt CLI does not discover aliases/.test(guide));
+  assert.ok(/Do not decode IDs, create an alias registry, rename\/merge receipts/.test(guide));
+});
 
 test('empty root and single-parent heads are excluded before quota or amend', async t => {
   for (const kind of ['root', 'single-parent']) await t.test(kind, t => {

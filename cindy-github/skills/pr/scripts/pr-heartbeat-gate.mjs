@@ -707,6 +707,8 @@ function legacyCiRetryEvidence(dir, prNodeId) {
     const value = JSON.parse(ciRetryReceiptIO.read(file));
     if (!validCiRetryId(value?.prNodeId)) throw new Error('invalid legacy CI retry identity');
     if (file !== ciRetryFilePath(dir, value.prNodeId, value.failure)) throw new Error('invalid legacy CI retry identity');
+    // The Agent must exclude same-PR ID representation changes before invoking
+    // this exact-key CLI; it cannot discover GitHub aliases from opaque bytes.
     if (value?.prNodeId !== prNodeId) return [];
     if (!value.failure) throw new Error('Legacy CI retry evidence has no diagnosis; reconcile its previous outcome before any further CI rewrite, do not delete it');
     validateCiRetryReservation(value, prNodeId);
@@ -1669,8 +1671,8 @@ async function gateMain(args, ctx) {
     // Keep status read-only and report whether returned receipt evidence was
     // actually flushed; the reservation itself must flush before any Git write.
     ciRetryReceiptIO.confirmParent(args.ciRetryDir);
-    // A PR node_id survives repository renames/transfers and URL aliases.
-    // The agent obtains it from the live PR, not from the mutable repository name.
+    // The Agent verifies this serialization and its historical identity scope
+    // against GitHub before invoking the CLI; ID migration is not a new budget.
     // Preserve previous outcomes even when this invocation's diagnosis is invalid.
     adoptCiRetryEvidence(args.ciRetryDir, args.ciRetryId);
     const failure = readCiRetryFailure(args.ciRetryFailure);

@@ -7,6 +7,18 @@ import path from 'node:path';
 export function createCiRetryReceiptIO(io = fs) {
   // Invocation-local observations, never a cached receipt or durable marker.
   const confirmedDirectories = new Map();
+  function fileIdentity(stat) {
+    if (!stat.isFile() || typeof stat.dev !== 'bigint' || typeof stat.ino !== 'bigint' || stat.ino === 0n) {
+      throw new Error('receipt file identity is unknown');
+    }
+    return { dev: stat.dev, ino: stat.ino };
+  }
+  function confirmFile(file, fd, identity) {
+    for (const stat of [io.fstatSync(fd, { bigint: true }), io.statSync(file, { bigint: true })]) {
+      const current = fileIdentity(stat);
+      if (current.dev !== identity.dev || current.ino !== identity.ino) throw new Error('receipt file identity changed');
+    }
+  }
   function observeDirectory(dir, stat) {
     // Node may expose high-bit filesystem IDs as signed BigInts; compare them
     // losslessly as opaque values rather than imposing a positive-number range.
@@ -75,14 +87,18 @@ export function createCiRetryReceiptIO(io = fs) {
     catch (error) {
       if (error.code !== 'ENOENT') throw error;
       confirmParent(path.dirname(file));
-      return null;
+      try { io.statSync(file, { bigint: true }); }
+      catch (check) { if (check.code === 'ENOENT') return null; throw check; }
+      throw new Error('receipt appeared during absence confirmation');
     }
-    let raw;
-    try { raw = io.readFileSync(fd, 'utf8'); io.fsyncSync(fd); }
-    finally { io.closeSync(fd); }
-    // An ENOENT here is not an absent receipt and must not become fresh quota.
-    syncDirectories(path.dirname(file));
-    return raw;
+    try {
+      const identity = fileIdentity(io.fstatSync(fd, { bigint: true }));
+      const raw = io.readFileSync(fd, 'utf8'); io.fsyncSync(fd);
+      // Keep the descriptor open through the full barrier and path recheck.
+      syncDirectories(path.dirname(file));
+      confirmFile(file, fd, identity);
+      return raw;
+    } finally { io.closeSync(fd); }
   }
 
   function writeExclusive(file, raw) {
@@ -94,10 +110,13 @@ export function createCiRetryReceiptIO(io = fs) {
       if (read(file) === null) throw new Error('CI retry receipt disappeared after exclusive collision');
       return false;
     }
-    try { io.writeFileSync(fd, raw); io.fsyncSync(fd); }
-    finally { io.closeSync(fd); }
-    syncDirectories(path.dirname(file));
-    return true;
+    try {
+      const identity = fileIdentity(io.fstatSync(fd, { bigint: true }));
+      io.writeFileSync(fd, raw); io.fsyncSync(fd);
+      syncDirectories(path.dirname(file));
+      confirmFile(file, fd, identity);
+      return true;
+    } finally { io.closeSync(fd); }
   }
 
   function copyExclusive(source, target) {
