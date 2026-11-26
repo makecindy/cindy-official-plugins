@@ -256,14 +256,23 @@ async function openTarget(args) {
 }
 
 const CRON_BY_PRESET = { '30m': '*/30 * * * *', '1h': '0 * * * *', '2h': '0 */2 * * *', '4h': '0 */4 * * *' };
-const LEGACY_PRESET = { '30m': 'interval', '1h': 'interval', '2h': 'interval', '4h': 'interval', daily: 'daily', weekly: 'weekly' };
+const LEGACY_PRESET = {
+  '30m': { mode: 'interval', every: 30, unit: 'minutes' },
+  '1h': { mode: 'interval', every: 1, unit: 'hours' },
+  '2h': { mode: 'interval', every: 2, unit: 'hours' },
+  '4h': { mode: 'interval', every: 4, unit: 'hours' },
+  daily: { mode: 'daily' },
+  weekly: { mode: 'weekly' },
+};
 
 function cronFrom(args) {
-  const mode = args.mode ?? LEGACY_PRESET[args.preset] ?? args.preset;
+  const legacy = LEGACY_PRESET[args.preset];
+  const mode = args.mode ?? legacy?.mode ?? args.preset;
   if (mode === 'interval') {
-    const legacyEvery = args.preset === '1h' ? 1 : args.preset === '2h' ? 2 : args.preset === '4h' ? 4 : args.preset === '30m' ? 30 : 0;
-    const every = Math.max(1, Number(args.every) || legacyEvery || 1);
-    const unitMs = args.unit === 'minutes' ? 60000 : args.unit === 'hours' ? 3600000 : (legacyEvery >= 60 ? 3600000 : 60000);
+    const every = Math.max(1, Number(args.every) || legacy?.every || 1);
+    const unit = args.unit ?? legacy?.unit ?? null;
+    if (unit !== 'minutes' && unit !== 'hours') return null;   // 单位不猜：缺单位直接失败
+    const unitMs = unit === 'minutes' ? 60000 : 3600000;
     return { intervalMs: every * unitMs, cronExpr: '0 * * * *' };
   }
   if (CRON_BY_PRESET[mode]) return { cronExpr: CRON_BY_PRESET[mode] };
@@ -280,13 +289,24 @@ function cronFrom(args) {
   return null;
 }
 
-async function scheduleFind() {
+async function scheduleList() {
   const r = await cindy.host.call('cindy_scheduler', 'schedule_list', { query: '看板巡检' });
   const text = (r.content ?? []).filter(b => b.type === 'text').map(b => b.text).join('\n');
   const parsed = JSON.parse(text);
   const list = parsed.schedules ?? parsed.data ?? parsed;
-  const arr = Array.isArray(list) ? list : [];
-  return arr.find(s => s.name === '看板巡检') ?? null;
+  return Array.isArray(list) ? list : [];
+}
+
+async function scheduleFind() {
+  const arr = await scheduleList();
+  const kv = await kvGet();
+  const boundId = typeof kv.patrolScheduleId === 'string' ? kv.patrolScheduleId : null;
+  if (boundId) {
+    const bound = arr.find(x => x.id === boundId);
+    if (bound) return bound;
+  }
+  // 没有绑定记录时，只认名字精确、且提示词确实在驱动这个看板的自动化。
+  return arr.find(x => x.name === '看板巡检' && /board_state|看板巡检/.test(String(x.prompt ?? ''))) ?? null;
 }
 
 async function scheduleGet() {
@@ -305,7 +325,7 @@ async function scheduleApply(args) {
     const s = await scheduleFind();
     if (!s) return { ok: false, errorCode: 'NOT_FOUND', message: '没有找到「看板巡检」自动化，请先在「自动机制」里创建' };
     const cron = cronFrom(args);
-    if (!cron) return { ok: false, errorCode: 'INVALID_PARAMS', message: 'mode 必须是 interval/daily/weekly（兼容 preset 30m/1h/2h/4h）' };
+    if (!cron) return { ok: false, errorCode: 'INVALID_PARAMS', message: 'mode 必须是 interval/daily/weekly；interval 必须带 every 与 unit（minutes 或 hours）' };
     const patch = { id: s.id, cronExpr: cron.cronExpr };
     if (cron.intervalMs) patch.intervalMs = cron.intervalMs;
     else patch.intervalMs = null;

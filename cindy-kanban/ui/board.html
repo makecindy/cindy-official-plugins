@@ -918,7 +918,8 @@ async function openPaneModal(paneId, title) {
         toast(t('sendFailedKeepDraft', { e: sent.message ?? sent.errorCode ?? '' }), true);
         return;
       }
-      line.value = '';
+      // 发送期间用户可能又改了草稿：只在内容没变时清空。
+      if (line.value === text) line.value = '';
       echo.textContent = `› ${text}`;
       const entered = await call('board_pane_action', { paneId, action: 'keys', keys: ['enter'] });
       if (!entered.ok) toast(t('enterFailedCheck', { e: entered.message ?? entered.errorCode ?? '' }), true);
