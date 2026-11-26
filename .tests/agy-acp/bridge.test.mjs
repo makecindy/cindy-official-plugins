@@ -2532,6 +2532,7 @@ if (args.length === 1 && args[0] === '--version') {
   process.exit(0);
 }
 const restricted = args.includes('--agent');
+if (restricted) fs.writeFileSync(${JSON.stringify(fixture.pidFile)}, String(process.pid), 'utf8');
 const send = (message) => process.stdout.write(JSON.stringify(Object.assign({ jsonrpc: '2.0' }, message)) + '\\n');
 let lines = '';
 let promptCount = 0;
@@ -2558,8 +2559,13 @@ process.stdin.on('data', (chunk) => {
           authMethods: [],
         },
       });
-      if (restricted && ${JSON.stringify(mode)} === 'slow-open') setTimeout(answer, 80);
-      else answer();
+      if (restricted && ${JSON.stringify(mode)} === 'fail-open') {
+        setTimeout(() => send({ id: message.id, error: { code: -32000, message: 'restricted init failed' } }), 80);
+      } else if (restricted && ${JSON.stringify(mode)} === 'slow-open') {
+        setTimeout(answer, 80);
+      } else {
+        answer();
+      }
     } else if (message.method === 'session/new') {
       send({ id: message.id, result: { sessionId: 'sess-r', configOptions: [] } });
     } else if (message.method === 'session/prompt') {
@@ -2618,7 +2624,7 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
     const execServer = {
       type: 'http', name: 'cindy_exec', url: 'http://example.test/mcp/cindy_exec', headers: [],
     };
-    return { bridge, messages, send, reply, serverMessages, execServer };
+    return { fixture, bridge, messages, send, reply, serverMessages, execServer };
   };
 
   test('advertises steering and merges concurrent prompts while normalizing MCP tools in remote and guest workspaces', async (t) => {
@@ -2688,6 +2694,40 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
     assert.deepEqual((await reply(2, 'merged prompt reply')).result, { stopReason: 'end_turn', usage: { outputTokens: 11 } });
     bridge.child.stdin.end();
     assert.equal((await bridge.closed).code, 0);
+  });
+
+  test('ends the failed open and settles queued prompt and steering requests when restricted initialize fails', async (t) => {
+    const { fixture, bridge, send, reply, serverMessages, execServer } = remoteSteerHarness(t, { mode: 'fail-open' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    // Queue both a prompt and a steering request while the restricted agent is still answering initialize.
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-first' }] } });
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-steer' }] } });
+
+    const openErr = await reply(1, 'failed session/new answer');
+    assert.deepEqual(openErr.error, { code: -32000, message: 'restricted init failed' });
+    const queuedPromptErr = await reply(2, 'settled queued prompt');
+    assert.equal(queuedPromptErr.error.code, -32600);
+    const queuedSteerErr = await reply(3, 'settled queued steering');
+    assert.equal(queuedSteerErr.error.code, -32600);
+    assert.equal(queuedSteerErr.result, undefined);
+
+    const restrictedPid = readPid(fixture.pidFile);
+    assert.ok(restrictedPid, 'the restricted process had started');
+    await waitFor(() => !isAlive(restrictedPid), 4_000, 'failed restricted agy to stop');
+
+    // Subsequent prompt and steering calls after failed open must also be refused, never forwarded or injected.
+    send({ jsonrpc: '2.0', id: 4, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'after-fail' }] } });
+    send({ jsonrpc: '2.0', id: 5, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'after-fail-steer' }] } });
+    assert.equal((await reply(4, 'post-failure prompt refusal')).error.code, -32600);
+    const postSteer = await reply(5, 'post-failure steering refusal');
+    assert.equal(postSteer.error.code, -32600);
+    assert.equal(postSteer.result, undefined);
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.deepEqual(serverMessages().map((m) => m.method), ['initialize']);
   });
 
   test('still abandons the remote-workspace task if agy invokes a local tool during a steered prompt', async (t) => {

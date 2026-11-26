@@ -252,11 +252,28 @@ function startRemoteWorkspace(agyPath, host) {
   let forceTimer = null;
   let stdinEnded = false;
   const queued = [];
+  const children = new Set();
   const seenCalls = new Map();
   let serverNames = [];
   const steering = createSteeringRelay();
 
   const running = (child) => Boolean(child) && child.exitCode === null && child.signalCode === null;
+
+  const stopChild = (child) => {
+    if (!child) return;
+    try {
+      child.stdin.end();
+    } catch {
+      // already closed
+    }
+    if (!running(child)) return;
+    if (process.platform === 'win32') {
+      killTree(child);
+      return;
+    }
+    killTree(child, 'SIGTERM');
+    setTimeout(() => killTree(child, 'SIGKILL'), timings.signalGrace).unref();
+  };
 
   /** Writes with back-pressure: the source pauses until the destination has drained. */
   const pipeWrite = (destination, data, source) => {
@@ -303,7 +320,7 @@ function startRemoteWorkspace(agyPath, host) {
   };
 
   const terminate = () => {
-    for (const child of [probe, agent]) {
+    for (const child of children) {
       if (!running(child)) continue;
       if (process.platform === 'win32') {
         killTree(child);
@@ -343,6 +360,8 @@ function startRemoteWorkspace(agyPath, host) {
 
   const launch = (args) => {
     const child = spawnAgy(agyPath, args, { stdio: ['pipe', 'pipe', 'pipe'], cwd: dir });
+    children.add(child);
+    child.once('exit', () => children.delete(child));
     child.stderr.pipe(process.stderr, { end: false });
     child.stdin.on('error', () => {
       // EPIPE after agy exited; its exit handler takes care of shutting down.
@@ -415,6 +434,7 @@ function startRemoteWorkspace(agyPath, host) {
     sessionRequest = { ...request, params: { ...request.params, mcpServers: servers } };
     const current = agent;
     current.on('error', (error) => {
+      if (current !== agent) return;
       if (current.pid === undefined) {
         agentExited = true;
         finished = true;
@@ -424,6 +444,7 @@ function startRemoteWorkspace(agyPath, host) {
       process.stderr.write(`[agy-acp] Antigravity process error: ${describe(error)}\n`);
     });
     current.on('exit', (code, signal) => {
+      if (current !== agent) return;
       agentExited = true;
       const status = stopCode !== null ? stopCode : exitCodeFor(code, signal);
       const closeTimer = setTimeout(() => finish(status), timings.flush);
@@ -432,24 +453,41 @@ function startRemoteWorkspace(agyPath, host) {
         finish(status);
       });
     });
-    current.stdout.on('data', lineSplitter(onAgentLine));
+    current.stdout.on('data', lineSplitter((line) => onAgentLine(current, line)));
     // The session process has not seen Cindy's `initialize` yet; its answer stays here.
     toAgent(initRequest);
     if (stdinEnded) endAgentInput();
   };
 
-  const onAgentLine = (line) => {
+  const onAgentLine = (current, line) => {
+    if (current !== agent) return;
     const message = parseLine(line);
     if (!message) {
-      toClientLine(line, agent.stdout);
+      toClientLine(line, current.stdout);
       return;
     }
     if (phase === 'opening' && message.id === initRequest.id && message.method === undefined) {
       if (message.error) {
-        toClient({ jsonrpc: '2.0', id: sessionRequest.id, error: message.error }, agent.stdout);
-      } else {
-        toAgent(sessionRequest);
+        const failedId = sessionRequest.id;
+        phase = 'ready';
+        agent = null;
+        agentExited = false;
+        sessionRequest = null;
+        serverNames = [];
+        clearTimeout(forceTimer);
+        forceTimer = null;
+        toClient({ jsonrpc: '2.0', id: failedId, error: message.error });
+        for (const pending of queued.splice(0)) {
+          const pendingMessage = parseLine(pending);
+          if (pendingMessage && pendingMessage.id !== undefined) {
+            refuse(pendingMessage.id, -32600, 'Open a session first');
+          }
+        }
+        stopChild(current);
+        if (stdinEnded) finish(0);
+        return;
       }
+      toAgent(sessionRequest);
       phase = 'session';
       for (const pending of queued.splice(0)) forwardClientLine(pending);
       return;
@@ -458,10 +496,10 @@ function startRemoteWorkspace(agyPath, host) {
       const handled = steering.handleAgentResponse(message);
       if (handled.action === 'drop') return;
       if (handled.action === 'reply') {
-        toClient(handled.message, agent.stdout);
+        toClient(handled.message, current.stdout);
         return;
       }
-      toClientLine(line, agent.stdout);
+      toClientLine(line, current.stdout);
       return;
     }
     const params = isObject(message.params) ? message.params : null;
@@ -469,7 +507,7 @@ function startRemoteWorkspace(agyPath, host) {
     const update = message.method === 'session/update' && params && isObject(params.update) ? params.update : null;
     const isToolUpdate = Boolean(update) && (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update');
     if (!params || (!isPermission && !isToolUpdate)) {
-      toClientLine(line, agent.stdout);
+      toClientLine(line, current.stdout);
       return;
     }
     const verdict = inspectToolCall(isPermission ? params.toolCall : update, seenCalls, serverNames);
@@ -486,10 +524,10 @@ function startRemoteWorkspace(agyPath, host) {
       return;
     }
     if (verdict.type === 'mcp') {
-      toClient({ ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }, agent.stdout);
+      toClient({ ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }, current.stdout);
       return;
     }
-    toClientLine(line, agent.stdout);
+    toClientLine(line, current.stdout);
   };
 
   /* ── Cindy's side ────────────────────────────────────────────────────── */
@@ -557,7 +595,7 @@ function startRemoteWorkspace(agyPath, host) {
   });
   // Last line of defence for any exit path: never leave agy running, never leave the directory.
   process.on('exit', () => {
-    for (const child of [probe, agent]) if (running(child)) killTree(child, 'SIGKILL');
+    for (const child of children) if (running(child)) killTree(child, 'SIGKILL');
     removeLaunchDir(dir);
   });
 }
