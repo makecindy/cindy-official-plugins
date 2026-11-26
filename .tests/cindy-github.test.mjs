@@ -1722,11 +1722,17 @@ test('pruning fails closed for aliases pointing to unreadable records or truncat
   }
 });
 
-test('hard ceiling evicts finished, then ask, then idle open cards while never evicting active followers', async () => {
+test('hard ceiling evicts finished, then ask, then idle open cards while never evicting active or in-flight cards', async () => {
   const runtime = createPrRuntime({ github: prGraphql() });
   const active = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
   const activeMove = await runtime.tool({ card_id: active.callId, pr: 42, to_latest: true });
-  // Fill past PR_CARD_MAX (1000): 40 finished + 500 ask + 500 idle open = 1042 files.
+  const publishing = await runtime.tool({ repo: 'octo/repo', head: 'feat/publishing', session_context: { session_id: 's-pub' } });
+  const publishingMove = await runtime.tool({ card_id: publishing.callId, commits: 1, to_latest: true, session_context: { session_id: 's-pub' } });
+  await runtime.click(publishingMove.callId, 'pr:publish', { sessionId: 's-pub' });
+  assert.equal(JSON.parse(runtime.files.get(`pr-cards/${publishing.callId}.json`)).stage, 'publishing');
+  runtime.files.set('pr-cards/unreconciled-sched.json', JSON.stringify({ id: 'unreconciled-sched', repo: 'o/r', stage: 'open', scheduleAction: 'start', pr: { number: 7001, draft: false } }));
+  runtime.files.set('pr-cards/uncertain-ready.json', JSON.stringify({ id: 'uncertain-ready', repo: 'o/r', stage: 'open', readyUncertain: true, pr: { number: 7002, draft: true } }));
+  // Fill past PR_CARD_MAX (1000): 40 finished + 500 ask + 500 idle open + protected cards.
   for (let i = 0; i < 40; i++) {
     runtime.files.set(`pr-cards/fin-${i}.json`, JSON.stringify({ id: `fin-${i}`, repo: 'o/r', stage: 'merged' }));
   }
@@ -1739,15 +1745,19 @@ test('hard ceiling evicts finished, then ask, then idle open cards while never e
 
   await runtime.tool({ repo: 'other/repo', head: 'overflow', session_context: { session_id: 's2' } });
   assert.ok(runtime.files.size <= 1000);
-  // Active card and its live alias survive.
+  // Active and in-flight cards (including publishing + its live alias) survive.
   assert.ok(runtime.files.has(`pr-cards/${active.callId}.json`));
   assert.ok(runtime.files.has(`pr-cards/${activeMove.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${publishing.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${publishingMove.callId}.json`));
+  assert.ok(runtime.files.has('pr-cards/unreconciled-sched.json'));
+  assert.ok(runtime.files.has('pr-cards/uncertain-ready.json'));
   // All 40 finished cards and the oldest ask cards were evicted before touching any open draft card.
   for (let i = 0; i < 40; i++) assert.equal(runtime.files.has(`pr-cards/fin-${i}.json`), false);
   assert.equal(runtime.files.has('pr-cards/ask-0.json'), false);
   assert.ok(runtime.files.has('pr-cards/open-0.json'));
 
-  // Even when idle open cards alone exceed PR_CARD_MAX, oldest idle open cards are trimmed while active survives.
+  // Even when idle open cards alone exceed PR_CARD_MAX, oldest idle open cards are trimmed while active and in-flight cards survive.
   for (let i = 500; i < 1100; i++) {
     runtime.files.set(`pr-cards/open-${i}.json`, JSON.stringify({ id: `open-${i}`, repo: 'o/r', stage: 'open', pr: { number: i + 1, draft: true } }));
   }
@@ -1755,6 +1765,10 @@ test('hard ceiling evicts finished, then ask, then idle open cards while never e
   assert.ok(runtime.files.size <= 1000);
   assert.ok(runtime.files.has(`pr-cards/${active.callId}.json`));
   assert.ok(runtime.files.has(`pr-cards/${activeMove.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${publishing.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${publishingMove.callId}.json`));
+  assert.ok(runtime.files.has('pr-cards/unreconciled-sched.json'));
+  assert.ok(runtime.files.has('pr-cards/uncertain-ready.json'));
   assert.equal(runtime.files.has('pr-cards/open-0.json'), false);
   assert.ok(runtime.files.has('pr-cards/open-1099.json'));
 });

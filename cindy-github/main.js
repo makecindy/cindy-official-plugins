@@ -2721,6 +2721,10 @@ function prFollowActive(card) {
   return unverifiedLegacyFollow(card) || card.following === true || !!card.scheduleId || card.pending === 'follow' || card.pending === 'stop';
 }
 
+function prCardProtected(card) {
+  return prFollowActive(card) || card.stage === 'publishing' || !!card.pending || !!card.scheduleAction || card.readyUncertain === true;
+}
+
 async function findPrCardOwner(repo, number, head, explicitId, sessionId, localOnly) {
   var listing = await cindy.send({ type: 'fs-request', root: 'data', op: 'list', path: PR_CARD_DIR });
   if (listing && !listing.ok && listing.errorCode === 'NOT_FOUND') return null;
@@ -2841,8 +2845,8 @@ async function prunePrCards() {
   var openIdle = [];
   for (var k = 0; k < cardList.length; k++) {
     var item = cardList[k];
-    // Active ownership and in-flight operations (and their live anchor aliases) must never be pruned.
-    if (prFollowActive(item.record) || item.record.pending) continue;
+    // Active ownership, in-flight publish/ready/schedule operations, and unconfirmed ready writes (plus their live anchor aliases) must never be pruned.
+    if (prCardProtected(item.record)) continue;
     item.effectiveMtime = item.liveAlias ? Math.max(item.mtime, item.liveAlias.mtime) : item.mtime;
     if (item.record.stage === 'merged' || item.record.stage === 'closed') finished.push(item);
     else if (item.record.stage === 'ask') asks.push(item);
