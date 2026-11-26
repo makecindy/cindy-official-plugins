@@ -100,7 +100,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.37');
+  assert.equal(manifest.version, '1.5.38');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -680,7 +680,7 @@ function createPrRuntime(options = {}) {
   const cindy = {
     ...options.hostApi,
     ...(options.pickModel ? { pickModel: options.pickModel } : {}),
-    async request() { return { ok: true, context: { locale: 'zh-CN' } }; },
+    async request() { return { ok: true, context: { locale: options.locale ?? 'zh-CN' } }; },
     onHostMessage(fn) { handler = fn; },
     async send(message) {
       sent.push(message);
@@ -690,13 +690,16 @@ function createPrRuntime(options = {}) {
       if (message.op === 'write' && (typeof options.failWrites === 'function' ? options.failWrites() : options.failWrites)) return { ok: false, errorCode: 'IO_ERROR', message: 'disk full' };
       if (message.op === 'write') { files.set(message.path, message.content); return { ok: true, op: 'write', path: message.path }; }
       if (message.op === 'read') {
+        if (typeof options.failReads === 'function' ? options.failReads(message.path) : options.failReads) {
+          return { ok: false, errorCode: 'IO_ERROR', message: 'read error' };
+        }
         return files.has(message.path)
           ? { ok: true, op: 'read', path: message.path, content: files.get(message.path) }
           : { ok: false, errorCode: 'NOT_FOUND', message: 'missing' };
       }
       if (message.op === 'list') {
         const entries = [...files.keys()].filter((p) => p.startsWith(`${message.path}/`)).map((p, mtime) => ({ path: p, bytes: 1, mtime }));
-        return { ok: true, op: 'list', entries };
+        return { ok: true, op: 'list', entries, ...(options.listTruncated ? { truncated: true } : {}) };
       }
       if (message.op === 'delete') return { ok: true, op: 'delete', path: message.path, existed: files.delete(message.path) };
       throw new Error(`unexpected fs op ${message.op}`);
@@ -737,7 +740,9 @@ function createPrRuntime(options = {}) {
   return {
     files,
     agentRuns,
+    sent,
     get kv() { return kv; },
+    notices: () => sent.filter((m) => m.type === 'notify'),
     cards,
     lastCard: (callId) => cards(callId).at(-1),
     setGithub(github) { options.github = github; },
@@ -1571,6 +1576,232 @@ test('active follow reservations are not pruned when card history exceeds retent
   assert.ok(runtime.files.has(`pr-cards/${first.callId}.json`));
   const other = await runtime.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's2' } });
   assert.equal(other.reply.result.disposition, 'existing_task');
+});
+
+test('draft and open PR cards survive heavy merged/closed card and dead-alias churn and remain clickable', async () => {
+  let isDraft = true;
+  const runtime = createPrRuntime({
+    github: (request) => {
+      const { query, variables } = JSON.parse(request.body);
+      if (query.includes('markPullRequestReadyForReview')) {
+        isDraft = false;
+        return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } });
+      }
+      if (query.includes('{id}}}')) {
+        return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_kwDO_draft' } } } });
+      }
+      if (variables?.name === 'other') {
+        return prGraphql({ repo: 'other', number: 99, draft: false })(request);
+      }
+      return prGraphql({ number: 12453, draft: isDraft })(request);
+    },
+  });
+  const draft = await runtime.tool({ repo: 'octo/repo', pr: 12453, published: true });
+  const openIdle = await runtime.tool({ repo: 'octo/other', pr: 99, session_context: { session_id: 's2' } });
+  const ask = await runtime.tool({ repo: 'octo/other', head: 'feat/pending', session_context: { session_id: 's3' } });
+  assert.equal(draft.reply.ok, true);
+  assert.equal(openIdle.reply.ok, true);
+  assert.equal(ask.reply.ok, true);
+
+  // Populate dead aliases and 210 newer merged/closed cards (including moved merged cards with live aliases).
+  for (let i = 0; i < 30; i++) {
+    runtime.files.set(`pr-cards/dangling-${i}.json`, JSON.stringify({ id: `dangling-${i}`, alias: `gone-${i}` }));
+  }
+  for (let i = 0; i < 210; i++) {
+    const id = `ended-${i}`;
+    const anchor = `ended-anchor-${i}`;
+    runtime.files.set(`pr-cards/${id}.json`, JSON.stringify({ id, repo: 'other/repo', stage: i % 2 ? 'merged' : 'closed', anchor }));
+    runtime.files.set(`pr-cards/${anchor}.json`, JSON.stringify({ id: anchor, alias: id }));
+  }
+
+  await runtime.tool({ repo: 'other/repo', head: 'trigger-prune', session_context: { session_id: 's4' } });
+
+  // All dangling aliases are cleaned up; old draft/open/ask cards survive; finished cards and their live aliases were evicted atomically.
+  for (let i = 0; i < 30; i++) assert.equal(runtime.files.has(`pr-cards/dangling-${i}.json`), false);
+  assert.ok(runtime.files.has(`pr-cards/${draft.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${openIdle.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${ask.callId}.json`));
+  assert.ok(runtime.files.size <= 200);
+  // Every evicted finished card also deleted its live alias (zero dangling aliases left behind).
+  for (let i = 0; i < 210; i++) {
+    assert.equal(runtime.files.has(`pr-cards/ended-${i}.json`), runtime.files.has(`pr-cards/ended-anchor-${i}.json`));
+  }
+
+  // Clicking "Mark ready for review" on the surviving draft PR card works normally.
+  await runtime.click(draft.callId, 'pr:ready');
+  assert.equal(isDraft, false);
+  assert.equal(JSON.parse(runtime.files.get(`pr-cards/${draft.callId}.json`)).pr.draft, false);
+  assert.equal(runtime.notices().length, 0);
+});
+
+test('repeated to_latest moves remove superseded aliases and roll back the new alias on save failure', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const first = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const cardId = first.callId;
+  const move1 = await runtime.tool({ card_id: cardId, pr: 42, to_latest: true });
+  assert.ok(runtime.files.has(`pr-cards/${cardId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${move1.callId}.json`));
+
+  // Moving a second time deletes move1's now-superseded alias while keeping cardId and move2.
+  const move2 = await runtime.tool({ card_id: cardId, pr: 42, to_latest: true });
+  assert.ok(runtime.files.has(`pr-cards/${cardId}.json`));
+  assert.equal(runtime.files.has(`pr-cards/${move1.callId}.json`), false);
+  assert.ok(runtime.files.has(`pr-cards/${move2.callId}.json`));
+  assert.equal(runtime.files.size, 2);
+
+  // If savePrCard fails after writing the new alias, roll back the new alias and preserve move2.
+  let writes = 0;
+  const rollbackRuntime = createPrRuntime({
+    github: prGraphql(),
+    files: new Map(runtime.files),
+    failWrites: () => ++writes === 2,
+  });
+  const failedMove = await rollbackRuntime.tool({ card_id: cardId, pr: 42, to_latest: true });
+  assert.equal(failedMove.reply.ok, false);
+  assert.ok(rollbackRuntime.files.has(`pr-cards/${cardId}.json`));
+  assert.ok(rollbackRuntime.files.has(`pr-cards/${move2.callId}.json`));
+  assert.equal(rollbackRuntime.files.has(`pr-cards/${failedMove.callId}.json`), false);
+});
+
+test('pruning preserves live anchor aliases of active and open cards and cleans superseded aliases', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const active = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const activeMove = await runtime.tool({ card_id: active.callId, pr: 42, to_latest: true });
+  // Plant an older superseded alias from a pre-fix version pointing at active.
+  runtime.files.set('pr-cards/old-superseded.json', JSON.stringify({ id: 'old-superseded', alias: active.callId }));
+  for (let i = 0; i < 205; i++) {
+    runtime.files.set(`pr-cards/closed-${i}.json`, JSON.stringify({ id: `closed-${i}`, repo: 'other/repo', stage: 'closed' }));
+  }
+
+  await runtime.tool({ repo: 'other/repo', head: 'fresh', session_context: { session_id: 's2' } });
+  assert.equal(runtime.files.has('pr-cards/old-superseded.json'), false);
+  assert.ok(runtime.files.has(`pr-cards/${active.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${activeMove.callId}.json`), 'live anchor alias must never be pruned while owner survives');
+
+  await runtime.click(activeMove.callId, 'pr:stop');
+  assert.equal(runtime.agentRuns.at(-1).event.card_id, active.callId);
+});
+
+test('clicking a moved card whose anchor alias was previously pruned self-heals by anchor lookup', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const active = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const moved = await runtime.tool({ card_id: active.callId, pr: 42, to_latest: true });
+  // Simulate an older version's pruning having deleted the live anchor alias file.
+  runtime.files.delete(`pr-cards/${moved.callId}.json`);
+  assert.equal(runtime.files.has(`pr-cards/${moved.callId}.json`), false);
+
+  // A cross-session click must stay rejected without repairing or mutating disk state.
+  await runtime.click(moved.callId, 'pr:stop', { sessionId: 'other-session' });
+  assert.equal(runtime.files.has(`pr-cards/${moved.callId}.json`), false);
+  assert.equal(runtime.notices().length, 0);
+  assert.equal(runtime.agentRuns.length, 0);
+
+  await runtime.click(moved.callId, 'pr:stop');
+  assert.equal(runtime.agentRuns.at(-1).event.card_id, active.callId);
+  assert.equal(runtime.notices().length, 0);
+  // The missing alias file was restored for O(1) subsequent clicks.
+  assert.deepEqual(JSON.parse(runtime.files.get(`pr-cards/${moved.callId}.json`)), { id: moved.callId, alias: active.callId });
+});
+
+test('pruning fails closed for aliases pointing to unreadable records or truncated listings', async () => {
+  for (const mode of ['unreadable', 'truncated']) {
+    const runtime = createPrRuntime({
+      github: prGraphql(),
+      failReads: mode === 'unreadable' ? (path) => path === 'pr-cards/unreadable-owner.json' : false,
+      listTruncated: mode === 'truncated',
+    });
+    if (mode === 'unreadable') {
+      runtime.files.set('pr-cards/unreadable-owner.json', JSON.stringify({ id: 'unreadable-owner', repo: 'o/r', stage: 'open', anchor: 'alias-keep' }));
+    }
+    runtime.files.set('pr-cards/alias-keep.json', JSON.stringify({ id: 'alias-keep', alias: 'unreadable-owner' }));
+    for (let i = 0; i < 205; i++) {
+      runtime.files.set(`pr-cards/closed-${i}.json`, JSON.stringify({ id: `closed-${i}`, repo: 'other/repo', stage: 'closed' }));
+    }
+    await runtime.tool({ repo: 'other/repo', head: 'trigger', session_context: { session_id: 's2' } });
+    assert.ok(runtime.files.has('pr-cards/alias-keep.json'), `${mode}: alias to unverified target must not be deleted`);
+  }
+});
+
+test('hard ceiling evicts finished, then ask, then idle open cards while never evicting active followers', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const active = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const activeMove = await runtime.tool({ card_id: active.callId, pr: 42, to_latest: true });
+  // Fill past PR_CARD_MAX (1000): 40 finished + 500 ask + 500 idle open = 1042 files.
+  for (let i = 0; i < 40; i++) {
+    runtime.files.set(`pr-cards/fin-${i}.json`, JSON.stringify({ id: `fin-${i}`, repo: 'o/r', stage: 'merged' }));
+  }
+  for (let i = 0; i < 500; i++) {
+    runtime.files.set(`pr-cards/ask-${i}.json`, JSON.stringify({ id: `ask-${i}`, repo: 'o/r', stage: 'ask' }));
+  }
+  for (let i = 0; i < 500; i++) {
+    runtime.files.set(`pr-cards/open-${i}.json`, JSON.stringify({ id: `open-${i}`, repo: 'o/r', stage: 'open', pr: { number: i + 1, draft: true } }));
+  }
+
+  await runtime.tool({ repo: 'other/repo', head: 'overflow', session_context: { session_id: 's2' } });
+  assert.ok(runtime.files.size <= 1000);
+  // Active card and its live alias survive.
+  assert.ok(runtime.files.has(`pr-cards/${active.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${activeMove.callId}.json`));
+  // All 40 finished cards and the oldest ask cards were evicted before touching any open draft card.
+  for (let i = 0; i < 40; i++) assert.equal(runtime.files.has(`pr-cards/fin-${i}.json`), false);
+  assert.equal(runtime.files.has('pr-cards/ask-0.json'), false);
+  assert.ok(runtime.files.has('pr-cards/open-0.json'));
+
+  // Even when idle open cards alone exceed PR_CARD_MAX, oldest idle open cards are trimmed while active survives.
+  for (let i = 500; i < 1100; i++) {
+    runtime.files.set(`pr-cards/open-${i}.json`, JSON.stringify({ id: `open-${i}`, repo: 'o/r', stage: 'open', pr: { number: i + 1, draft: true } }));
+  }
+  await runtime.tool({ repo: 'other/repo', head: 'overflow-2', session_context: { session_id: 's3' } });
+  assert.ok(runtime.files.size <= 1000);
+  assert.ok(runtime.files.has(`pr-cards/${active.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${activeMove.callId}.json`));
+  assert.equal(runtime.files.has('pr-cards/open-0.json'), false);
+  assert.ok(runtime.files.has('pr-cards/open-1099.json'));
+});
+
+test('recent merged cards stay available for settings clicks while under the hard ceiling', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  for (let i = 0; i < 210; i++) {
+    runtime.files.set(`pr-cards/open-${i}.json`, JSON.stringify({ id: `open-${i}`, repo: 'o/r', stage: 'open', pr: { number: i + 1, draft: true } }));
+  }
+  for (let i = 0; i < 5; i++) {
+    runtime.files.set(`pr-cards/recent-merged-${i}.json`, JSON.stringify({ id: `recent-merged-${i}`, repo: 'o/r', stage: 'merged', sessionId: 's1', pr: { number: 900 + i, url: `https://github.com/o/r/pull/${900 + i}` } }));
+  }
+  await runtime.tool({ repo: 'other/repo', head: 'new-branch', session_context: { session_id: 's2' } });
+  for (let i = 0; i < 5; i++) {
+    assert.ok(runtime.files.has(`pr-cards/recent-merged-${i}.json`));
+  }
+});
+
+test('clicking an expired or unreadable PR card notifies the user without overwriting card HTML', async () => {
+  const mobilePageId = '12345678-1234-1234-1234-123456789abc';
+  for (const locale of hostLocales) {
+    const runtime = createPrRuntime({ locale });
+    const missingId = 'a2ac04c1-139e-449b-befa-40463de1d251';
+    await runtime.click(missingId, 'pr:ready', { mobilePageId });
+    assert.equal(runtime.cards(missingId).length, 0, 'must not destroy original card HTML');
+    assert.equal(runtime.notices().length, 1);
+    assert.equal(runtime.notices()[0].tone, 'warning');
+    assert.equal(runtime.notices()[0].mobilePageId, mobilePageId);
+    assert.ok(runtime.notices()[0].text.length > 0 && runtime.notices()[0].text.length <= 200);
+    if (locale === 'ko') assert.doesNotMatch(runtime.notices()[0].text, hanRe);
+
+    const errRuntime = createPrRuntime({ locale, failReads: true });
+    await errRuntime.click(missingId, 'pr:ready');
+    assert.equal(errRuntime.cards(missingId).length, 0);
+    assert.equal(errRuntime.notices().length, 1);
+    assert.equal(errRuntime.notices()[0].tone, 'error');
+    assert.equal(errRuntime.notices()[0].mobilePageId, undefined);
+    assert.ok(errRuntime.notices()[0].text.length > 0 && errRuntime.notices()[0].text.length <= 200);
+    if (locale === 'ko') assert.doesNotMatch(errRuntime.notices()[0].text, hanRe);
+  }
+
+  // Cross-session click on an existing card stays silently rejected without notifying.
+  const cross = createPrRuntime({ github: prGraphql() });
+  const owned = await cross.tool({ repo: 'octo/repo', pr: 42 });
+  await cross.click(owned.callId, 'pr:follow', { sessionId: 'other-session' });
+  assert.equal(cross.notices().length, 0);
+  assert.equal(cross.agentRuns.length, 0);
 });
 
 test('other-task refresh reuses its local card and reads status without changing the follower', async () => {

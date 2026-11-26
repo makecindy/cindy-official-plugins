@@ -218,6 +218,8 @@ var MESSAGES = {
     prBadPr: 'pr 需要是 GitHub PR 链接或编号',
     prBadCardId: 'card_id 无效',
     prCardNotFound: '找不到 card_id 对应的卡片，已新建一张',
+    prCardExpired: '这张 PR 卡片的本地状态已过期，请让 Agent 刷新卡片，或直接在 GitHub 操作',
+    prCardReadFailed: '暂时读不到这张 PR 卡片的状态，请稍后再试',
     prMovedBelow: '最新状态在下方',
     prFetchFailed: '读取 PR 信息失败({detail})，卡片按已知信息显示',
     prNextAsk: '卡片已显示。等用户点击或在对话里明确说要发，不要再用文字重复询问；点击会以本插件代发的消息送达。创建 PR 后用 card_id 和 pr 再调用 pr_card，renamed / following 只填已经完成的动作。',
@@ -371,6 +373,8 @@ var MESSAGES = {
     prBadPr: 'pr must be a GitHub pull request URL or number',
     prBadCardId: 'Invalid card_id',
     prCardNotFound: 'No card matches card_id, so a new one was created',
+    prCardExpired: 'This PR card’s saved state has expired. Ask the agent to refresh the card, or use GitHub directly.',
+    prCardReadFailed: 'Could not read this PR card’s state right now. Try again in a moment.',
     prMovedBelow: 'Latest status is below',
     prFetchFailed: 'Could not read the pull request ({detail}); the card shows what is known',
     prNextAsk: 'The card is shown. Wait for the user to click or explicitly ask to open it, and do not ask again in text; clicks arrive as messages sent by this plugin. After creating the PR, call pr_card again with card_id and pr; set renamed / following only for actions already done.',
@@ -524,6 +528,8 @@ var MESSAGES = {
     prBadPr: 'pr には GitHub の PR URL か番号を指定してください',
     prBadCardId: 'card_id が無効です',
     prCardNotFound: 'card_id に対応するカードがないため、新しく作成しました',
+    prCardExpired: 'この PR カードの保存状態は期限切れです。エージェントにカードの更新を依頼するか、GitHub で直接操作してください',
+    prCardReadFailed: 'この PR カードの状態を読み込めませんでした。しばらくしてからもう一度お試しください',
     prMovedBelow: '最新の状態は下にあります',
     prFetchFailed: 'PR 情報を取得できませんでした({detail})。分かっている情報でカードを表示します',
     prNextAsk: 'カードを表示しました。ユーザーのクリックか会話での明確な依頼を待ち、テキストで重ねて確認しないでください。クリックはこのプラグインが送るメッセージとして届きます。PR を作成したら card_id と pr を付けて pr_card を再度呼び、renamed / following には完了済みの操作だけを指定してください。',
@@ -677,6 +683,8 @@ var MESSAGES = {
     prBadPr: 'pr은 GitHub PR URL이나 번호여야 합니다',
     prBadCardId: 'card_id가 올바르지 않습니다',
     prCardNotFound: 'card_id에 해당하는 카드가 없어 새로 만들었습니다',
+    prCardExpired: '이 PR 카드의 저장 상태가 만료되었습니다. 에이전트에게 카드 새로 고침을 요청하거나 GitHub에서 직접 작업하세요',
+    prCardReadFailed: '지금 이 PR 카드의 상태를 읽을 수 없습니다. 잠시 후 다시 시도하세요',
     prMovedBelow: '최신 상태는 아래에 있습니다',
     prFetchFailed: 'PR 정보를 읽지 못했습니다({detail}). 알고 있는 정보로 카드를 표시합니다',
     prNextAsk: '카드를 표시했습니다. 사용자가 클릭하거나 대화에서 분명히 요청할 때까지 기다리고, 텍스트로 다시 묻지 마세요. 클릭은 이 플러그인이 보낸 메시지로 도착합니다. PR을 만든 뒤 card_id와 pr로 pr_card를 다시 호출하고, renamed / following에는 이미 완료한 작업만 넣으세요.',
@@ -2554,8 +2562,15 @@ async function callTool(args, callId) {
  * ──────────────────────────────────────────────────────────────────── */
 
 var PR_CARD_DIR = 'pr-cards';
-/** 私有目录最多保留多少张卡片的状态;超出删最旧的(被删的旧卡片点击后不再响应)。 */
+/**
+ * 私有目录保留策略:
+ * - 超出 PR_CARD_KEEP 时先清理失效/过期别名与较早的已结束(merged / closed)卡片(同时保留最近 PR_CARD_ENDED_MIN 张便于改设置);
+ * - 仍开放(含草稿)与待确认(ask)的卡片不会被已结束卡片挤掉,仅在总数超出 PR_CARD_MAX(低于宿主 2000 文件配额)时按 ask → open 兜底淘汰;
+ * - 活跃跟进或进行中操作对应的卡片及其当前锚点别名永不淘汰。
+ */
 var PR_CARD_KEEP = 200;
+var PR_CARD_ENDED_MIN = 50;
+var PR_CARD_MAX = 1000;
 var PR_CARD_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 var PR_REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 var PR_FILES_KEPT = 50;
@@ -2583,19 +2598,90 @@ function prCardPath(id) {
   return PR_CARD_DIR + '/' + id + '.json';
 }
 
-async function readPrCard(id, viaAlias) {
-  var r = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: prCardPath(id) });
-  if (!r || !r.ok) return null;
+async function deletePrCardFile(path) {
+  try {
+    var r = await cindy.send({ type: 'fs-request', root: 'data', op: 'delete', path: path });
+    return Boolean(r && r.ok && r.existed !== false);
+  } catch (e) {
+    return false;
+  }
+}
+
+async function repairPrCardAlias(anchorId, cardId) {
+  try {
+    await cindy.send({
+      type: 'fs-request', root: 'data', op: 'write',
+      path: prCardPath(anchorId), content: JSON.stringify({ id: anchorId, alias: cardId }),
+    });
+  } catch (e) {}
+}
+
+async function findPrCardByAnchor(anchorId) {
+  var listing;
+  try {
+    listing = await cindy.send({ type: 'fs-request', root: 'data', op: 'list', path: PR_CARD_DIR });
+  } catch (e) {
+    return { card: null, status: 'error' };
+  }
+  if (listing && !listing.ok && listing.errorCode === 'NOT_FOUND') return { card: null, status: 'missing' };
+  if (!listing || !listing.ok || !Array.isArray(listing.entries)) return { card: null, status: 'error' };
+  var readFailed = false;
+  for (var i = 0; i < listing.entries.length; i++) {
+    var path = listing.entries[i].path;
+    var match = /^pr-cards\/([A-Za-z0-9_-]{1,64})\.json$/.exec(path);
+    if (!match) continue;
+    var saved;
+    try {
+      saved = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: path });
+    } catch (e) {
+      readFailed = true;
+      continue;
+    }
+    if (!saved || !saved.ok) {
+      if (!saved || saved.errorCode !== 'NOT_FOUND') readFailed = true;
+      continue;
+    }
+    var record;
+    try { record = JSON.parse(saved.content); } catch (e) { continue; }
+    if (!record || record.alias || record.id !== match[1]) continue;
+    if (record.anchor === anchorId) {
+      return { card: record, status: 'ok', missingAlias: true };
+    }
+  }
+  return { card: null, status: readFailed || listing.truncated ? 'error' : 'missing' };
+}
+
+async function lookupPrCard(id, viaAlias) {
+  var r;
+  try {
+    r = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: prCardPath(id) });
+  } catch (e) {
+    return { card: null, status: 'error' };
+  }
+  if (!r || !r.ok) {
+    if (r && r.errorCode === 'NOT_FOUND') {
+      return viaAlias ? { card: null, status: 'missing' } : findPrCardByAnchor(id);
+    }
+    return { card: null, status: 'error' };
+  }
   var card;
   try {
     card = JSON.parse(r.content);
   } catch (e) {
-    return null;
+    return { card: null, status: 'error' };
   }
-  if (!card || card.id !== id) return null;
+  if (!card || card.id !== id) return { card: null, status: 'error' };
   // 挪过位置的卡片:新位置的点击带的是别名,只跟一层。
-  if (card.alias) return !viaAlias && PR_CARD_ID_RE.test(card.alias) ? readPrCard(card.alias, true) : null;
-  return card;
+  if (card.alias) {
+    return !viaAlias && PR_CARD_ID_RE.test(card.alias)
+      ? lookupPrCard(card.alias, true)
+      : { card: null, status: 'error' };
+  }
+  return { card: card, status: 'ok' };
+}
+
+async function readPrCard(id, viaAlias) {
+  return (await lookupPrCard(id, viaAlias)).card;
 }
 
 /** 卡片现在显示在哪次调用上:挪过位置的是 anchor,否则是 card_id 本身。 */
@@ -2675,9 +2761,16 @@ async function prOtherTask(owner, callId, sessionId, localCard, toLatest, stateO
   }
   // The read-only card moves like any other card; its local card_id stays.
   var movedFrom = updating && toLatest && prAnchor(local) !== callId ? await movePrCard(local, callId) : null;
-  if (!(await savePrCard(local))) return fail(t('prSaveFailed'));
-  if (movedFrom) await sendPrMovedStub(local, movedFrom, callId);
+  if (!(await savePrCard(local))) {
+    if (movedFrom) await deletePrCardFile(prCardPath(callId));
+    return fail(t('prSaveFailed'));
+  }
+  if (movedFrom) {
+    if (movedFrom !== local.id) await deletePrCardFile(prCardPath(movedFrom));
+    await sendPrMovedStub(local, movedFrom, callId);
+  }
   var shown = await sendPrCard(local, await readPrSettings(), updating && !movedFrom ? callId : null);
+  if (!updating || movedFrom === local.id) await prunePrCards();
   // A claim or stop report still needs the answer when no card can be shown (IM).
   if (!shown && !stateOp) return fail(t('prCardNotDelivered'));
   var other = {
@@ -2691,18 +2784,88 @@ async function prOtherTask(owner, callId, sessionId, localCard, toLatest, stateO
 async function prunePrCards() {
   var r = await cindy.send({ type: 'fs-request', root: 'data', op: 'list', path: PR_CARD_DIR });
   if (!r || !r.ok || !Array.isArray(r.entries) || r.entries.length <= PR_CARD_KEEP) return;
-  var stale = r.entries
-    .slice()
-    .sort(function (a, b) { return a.mtime - b.mtime; })
-    .slice(0, r.entries.length - PR_CARD_KEEP);
-  for (var i = 0; i < stale.length; i++) {
-    var saved = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: stale[i].path });
-    if (!saved || !saved.ok) continue;
+  var cards = Object.create(null);
+  var cardList = [];
+  var aliases = [];
+  var unreadIds = Object.create(null);
+  for (var i = 0; i < r.entries.length; i++) {
+    var entry = r.entries[i];
+    var match = /^pr-cards\/([A-Za-z0-9_-]{1,64})\.json$/.exec(entry.path);
+    if (!match) continue;
+    var entryId = match[1];
+    var mtime = typeof entry.mtime === 'number' ? entry.mtime : 0;
+    var saved = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: entry.path });
+    if (!saved || !saved.ok) {
+      if (!saved || saved.errorCode !== 'NOT_FOUND') unreadIds[entryId] = true;
+      continue;
+    }
     var record;
-    try { record = JSON.parse(saved.content); } catch (e) { continue; }
-    // Active ownership must not disappear merely because other cards were created.
-    if (prFollowActive(record)) continue;
-    await cindy.send({ type: 'fs-request', root: 'data', op: 'delete', path: stale[i].path });
+    try { record = JSON.parse(saved.content); } catch (e) { unreadIds[entryId] = true; continue; }
+    if (!record || record.id !== entryId) { unreadIds[entryId] = true; continue; }
+    if (record.alias) {
+      aliases.push({ id: entryId, path: entry.path, mtime: mtime, targetId: String(record.alias) });
+    } else {
+      var unit = { id: entryId, path: entry.path, mtime: mtime, record: record, liveAlias: null };
+      cards[entryId] = unit;
+      cardList.push(unit);
+    }
+  }
+  var deadAliases = [];
+  for (var j = 0; j < aliases.length; j++) {
+    var alias = aliases[j];
+    var owner = cards[alias.targetId];
+    if (owner) {
+      if (owner.record.anchor === alias.id) owner.liveAlias = alias;
+      else deadAliases.push(alias);
+    } else if (!r.truncated && !unreadIds[alias.targetId]) {
+      deadAliases.push(alias);
+    }
+  }
+  var remaining = r.entries.length;
+  async function deleteEntry(path) {
+    if (!(await deletePrCardFile(path))) return false;
+    remaining--;
+    return true;
+  }
+  async function evictUnit(unit) {
+    if (!(await deleteEntry(unit.path))) return;
+    if (unit.liveAlias) await deleteEntry(unit.liveAlias.path);
+  }
+  deadAliases.sort(function (a, b) { return a.mtime - b.mtime; });
+  for (var d = 0; d < deadAliases.length; d++) {
+    await deleteEntry(deadAliases[d].path);
+  }
+  if (remaining <= PR_CARD_KEEP) return;
+  var finished = [];
+  var asks = [];
+  var openIdle = [];
+  for (var k = 0; k < cardList.length; k++) {
+    var item = cardList[k];
+    // Active ownership and in-flight operations (and their live anchor aliases) must never be pruned.
+    if (prFollowActive(item.record) || item.record.pending) continue;
+    item.effectiveMtime = item.liveAlias ? Math.max(item.mtime, item.liveAlias.mtime) : item.mtime;
+    if (item.record.stage === 'merged' || item.record.stage === 'closed') finished.push(item);
+    else if (item.record.stage === 'ask') asks.push(item);
+    else openIdle.push(item);
+  }
+  var byMtime = function (a, b) { return a.effectiveMtime - b.effectiveMtime; };
+  finished.sort(byMtime);
+  while (remaining > PR_CARD_KEEP && finished.length > PR_CARD_ENDED_MIN) {
+    await evictUnit(finished.shift());
+  }
+  if (remaining <= PR_CARD_MAX) return;
+  while (remaining > PR_CARD_MAX && finished.length) {
+    await evictUnit(finished.shift());
+  }
+  if (remaining <= PR_CARD_MAX) return;
+  asks.sort(byMtime);
+  while (remaining > PR_CARD_MAX && asks.length) {
+    await evictUnit(asks.shift());
+  }
+  if (remaining <= PR_CARD_MAX) return;
+  openIdle.sort(byMtime);
+  while (remaining > PR_CARD_MAX && openIdle.length) {
+    await evictUnit(openIdle.shift());
   }
 }
 
@@ -3851,10 +4014,16 @@ async function prCardTool(args, callId) {
   if (manualFollowStop(card)) notes.push(t('prManualStop', { id: card.scheduleId }));
   var movedFrom = updating && a.to_latest === true && prAnchor(card) !== callId ? await movePrCard(card, callId) : null;
   // 状态没存上时按钮点了找不到记录:不显示卡片,让 Agent 稍后重试。
-  if (!(await savePrCard(card))) return fail(t('prSaveFailed'));
-  if (movedFrom) await sendPrMovedStub(card, movedFrom, callId);
+  if (!(await savePrCard(card))) {
+    if (movedFrom) await deletePrCardFile(prCardPath(callId));
+    return fail(t('prSaveFailed'));
+  }
+  if (movedFrom) {
+    if (movedFrom !== card.id) await deletePrCardFile(prCardPath(movedFrom));
+    await sendPrMovedStub(card, movedFrom, callId);
+  }
   var delivered = await sendPrCard(card, settings, updating && !movedFrom ? callId : null);
-  if (!updating) await prunePrCards();
+  if (!updating || movedFrom === card.id) await prunePrCards();
   // A follow claim or a start/stop report is a state operation: its answer matters even where no card can be shown (IM).
   var stateOp = a.claim_follow === true || typeof a.following === 'boolean';
   // The state is saved but the card did not reach the conversation: do not report a card the user cannot see.
@@ -4048,12 +4217,29 @@ async function markPrReadyInner(card, settings, msg, progress) {
   await sendPrCard(card, settings, null);
 }
 
+async function notifyPrCardUnavailable(msg, status) {
+  var text = status === 'error' ? t('prCardReadFailed') : t('prCardExpired');
+  var payload = {
+    type: 'notify',
+    text: text.slice(0, 200),
+    tone: status === 'error' ? 'error' : 'warning',
+  };
+  if (typeof msg.mobilePageId === 'string' && msg.mobilePageId) payload.mobilePageId = msg.mobilePageId;
+  try { await cindy.send(payload); } catch (e) {}
+}
+
 async function prCardAction(msg) {
   var id = String(msg.callId || '');
   if (!PR_CARD_ID_RE.test(id)) return;
-  var card = await readPrCard(id);
-  if (!card) return;
+  var lookup = await lookupPrCard(id);
+  var card = lookup.card;
+  if (!card) {
+    await notifyPrCardUnavailable(msg, lookup.status);
+    return;
+  }
   if (card.sessionId && card.sessionId !== msg.sessionId) return;
+  // 旧版淘汰可能误删过活跃卡的锚点别名:校验归属后再补回,避免跨会话点击写盘。
+  if (lookup.missingAlias) await repairPrCardAlias(id, card.id);
   var action = String(msg.actionId || '');
   var settings = await readPrSettings();
   var active = await findPrCardOwner(card.repo, card.pr && card.pr.number, card.head, card.id, card.sessionId);
@@ -4193,10 +4379,13 @@ async function prCardAction(msg) {
       return;
     }
     // 没存上就不显示新状态(按钮会和记录对不上):重画已保存的那一版并提示。
-    var saved = await readPrCard(id);
-    if (!saved) return;
-    saved.note = t('prSaveFailed');
-    await sendPrCard(saved, settings, null);
+    var savedLookup = await lookupPrCard(id);
+    if (!savedLookup.card) {
+      await notifyPrCardUnavailable(msg, savedLookup.status);
+      return;
+    }
+    savedLookup.card.note = t('prSaveFailed');
+    await sendPrCard(savedLookup.card, settings, null);
     return;
   }
   // 原地更新被点的卡片:交给 Agent 的动作报 working 直到它用 pr_card 回写结果,其余点击报 done 立即结束。
