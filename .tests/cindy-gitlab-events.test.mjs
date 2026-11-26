@@ -28,10 +28,10 @@ function mr(overrides = {}) {
   };
 }
 
-function harness({ subscriptions = [], routes = {}, subscriptionsReply } = {}) {
+function harness({ subscriptions = [], routes = {}, subscriptionsReply, publishReply } = {}) {
   const sent = [];
   const requests = [];
-  const state = { routes, handler: null };
+  const state = { routes, handler: null, publishReply };
   const cindy = {
     onHostMessage(fn) { state.handler = fn; },
     async fetch(req) {
@@ -47,6 +47,9 @@ function harness({ subscriptions = [], routes = {}, subscriptionsReply } = {}) {
       sent.push(m);
       if (m.type === 'routine-request' && m.action === 'subscriptions') {
         return subscriptionsReply ?? { ok: true, subscriptions };
+      }
+      if (m.type === 'routine-request' && m.action === 'publish' && state.publishReply) {
+        return state.publishReply(m.event);
       }
       return { ok: true, accepted: 1, duplicate: false };
     },
@@ -389,4 +392,90 @@ test('retains finished pipelines on MR lookup errors or lookup cap until all are
     h.published().map((e) => e.data.iid),
     Array.from({ length: 12 }, (_, i) => i + 1),
   );
+});
+
+test('never evicts unpublished events past 500 pending items and preserves baselineAt across multi-cycle drains', async () => {
+  // 1) 501 comments on one MR (even sharing timestamps) + a transient publish outage must deliver all 501 in order.
+  let allowPublish = true;
+  const accepted = [];
+  const allNotes = Array.from({ length: 501 }, (_, idx) => {
+    const id = 501 - idx; // descending IDs 501..1
+    return {
+      id,
+      body: `comment-${id}`,
+      system: false,
+      created_at: '2026-01-02T00:01:00Z',
+      author: { username: 'alice' },
+    };
+  });
+  const h = harness({
+    subscriptions: watchMr,
+    publishReply: (event) => {
+      if (!allowPublish) return { ok: false, message: 'busy' };
+      accepted.push(event);
+      return { ok: true, accepted: 1, duplicate: false };
+    },
+    routes: {
+      '/api/v4/user': { id: 1, username: 'me' },
+      '/projects/group%2Fapp/merge_requests/7': mr({ head_pipeline: null }),
+      '/merge_requests/7/notes': (url) => {
+        const m = /[?&]page=([0-9]+)/.exec(url);
+        const page = m ? Number(m[1]) : 1;
+        return json(allNotes.slice((page - 1) * 100, page * 100));
+      },
+    },
+  });
+  await h.cycle();
+  h.state.routes['/projects/group%2Fapp/merge_requests/7'] = mr({ updated_at: '2026-01-02T00:01:00Z', head_pipeline: null });
+  allowPublish = false;
+  await h.cycle(); // queues 1..500, publish fails → reports error, retains all 500 + note #501 unread
+  assert.deepEqual(h.statuses(), ['listening', 'error']);
+  assert.equal(accepted.length, 0);
+
+  allowPublish = true;
+  for (let i = 0; i < 15 && accepted.length < 501; i += 1) await h.cycle();
+  assert.deepEqual(
+    accepted.map((e) => e.data.noteId),
+    Array.from({ length: 501 }, (_, i) => i + 1),
+    'every one of the 501 comments is delivered in chronological order without dropping #1',
+  );
+
+  // 2) Multi-cycle >20 drain keeps baselineAt separate from resumeAt AND partial target failures still report error.
+  let failSecondProject = true;
+  const multi = harness({
+    subscriptions: [
+      { events: ['merge_request.opened', 'merge_request.comment'], filters: [{ field: 'project', operator: 'equals', value: 'group/app' }] },
+      { events: ['merge_request.opened'], filters: [{ field: 'project', operator: 'equals', value: 'group/broken' }] },
+    ],
+    routes: {
+      '/api/v4/user': { id: 1, username: 'me' },
+      '/projects/group%2Fapp/events': [{ id: 1 }],
+      '/projects/group%2Fapp/merge_requests?': [],
+      '/projects/group%2Fbroken/events': () => (failSecondProject ? json({}, 502) : json([{ id: 1 }])),
+      '/projects/group%2Fbroken/merge_requests?': [],
+    },
+  });
+  await multi.cycle();
+  assert.deepEqual(multi.statuses(), ['error'], 'one failing project alongside a healthy project must still report error');
+
+  failSecondProject = false;
+  const tBase = Date.now() + 1000;
+  const first20 = Array.from({ length: 20 }, (_, i) => {
+    const ts = new Date(tBase + 20_000 + i * 10).toISOString();
+    return mr({ id: 2000 + i, iid: 201 + i, created_at: ts, updated_at: ts, references: { full: `group/app!${201 + i}` } });
+  });
+  const earlyCreatedAt = new Date(tBase + 5_000).toISOString();
+  const lateEditedAt = new Date(tBase + 30_000).toISOString();
+  const item21 = mr({ id: 2099, iid: 299, created_at: earlyCreatedAt, updated_at: lateEditedAt, references: { full: 'group/app!299' } });
+  multi.state.routes['/projects/group%2Fapp/events'] = [{ id: 2 }];
+  multi.state.routes['/projects/group%2Fapp/merge_requests?'] = [...first20, item21];
+  multi.state.routes['/merge_requests/299/notes'] = [
+    { id: 700, body: 'created before resumeAt', system: false, created_at: earlyCreatedAt, author: { username: 'bob' } },
+  ];
+  multi.state.routes['/notes'] = [];
+
+  await multi.cycle(); // drains first 20 (resumeAt moves to tBase+20s, baselineAt stays < earlyCreatedAt)
+  await multi.cycle(); // drains item21 without losing its tBase+5s opened/comment events
+  const item21Events = multi.published().filter((e) => e.data.iid === 299).map((e) => e.type).sort();
+  assert.deepEqual(item21Events, ['merge_request.comment', 'merge_request.opened']);
 });
