@@ -174,7 +174,14 @@ async function blockedPaneDigest(paneId, title) {
 async function boardState() {
   const data = await snapshot();
   const kv = await kvGet();
-  const col = c => data.companions.filter(x => c.includes(x.status)).map(x => ({ id: x.id, title: x.name }));
+  const companionEntries = data.companions.map(c => ({ id: c.id, title: c.name, status: c.status, kind: 'companion', device: c.deviceName }));
+  const projectEntries = (data.projects ?? []).flatMap(p => p.tasks.map(t => ({
+    id: t.id, title: t.title, status: t.status, kind: 'task', project: p.label,
+  })));
+  const all = [...companionEntries, ...projectEntries];
+  const col = status => all.filter(x => status.includes(x.status)).map(x => ({
+    id: x.id, title: x.title, kind: x.kind, status: x.status, project: x.project ?? null,
+  }));
   const reports = Array.isArray(kv.reports) ? kv.reports : [];
   const blockedPanes = [];
   for (const a of (data.herdrAgents ?? []).filter(x => x.status === 'blocked').slice(0, 3)) {
@@ -189,10 +196,14 @@ async function boardState() {
     blockedPanes,
     reports: reports.slice(-10),
     columns: {
-      running: col('running'.split()),
-      blocked: data.companions.filter(x => x.status === 'awaiting' || x.status === 'error').map(x => ({ id: x.id, title: x.name })),
-      queued: data.companions.flatMap(x => x.interactions.map(i => ({ id: x.id, title: i.title }))),
-      idle: data.companions.filter(x => ['idle', 'done', 'unread'].includes(x.status) || !x.online).map(x => ({ id: x.id, title: x.name })),
+      running: col(['running']),
+      blocked: col(['awaiting', 'error']),
+      queued: data.companions.flatMap(x => x.interactions.map(i => ({
+        id: x.id, title: i.title, kind: 'interaction', status: 'queued', project: null,
+      }))),
+      idle: all.filter(x => ['idle', 'done', 'unread'].includes(x.status) || x.status === 'offline').map(x => ({
+        id: x.id, title: x.title, kind: x.kind, status: x.status, project: x.project ?? null,
+      })),
     },
     projects: (data.projects ?? []).map(p => ({ label: p.label, tasks: p.tasks })),
     agents: aggregate(data),
@@ -245,11 +256,14 @@ async function openTarget(args) {
 }
 
 const CRON_BY_PRESET = { '30m': '*/30 * * * *', '1h': '0 * * * *', '2h': '0 */2 * * *', '4h': '0 */4 * * *' };
+const LEGACY_PRESET = { '30m': 'interval', '1h': 'interval', '2h': 'interval', '4h': 'interval', daily: 'daily', weekly: 'weekly' };
+
 function cronFrom(args) {
-  const mode = args.mode ?? args.preset;
+  const mode = args.mode ?? LEGACY_PRESET[args.preset] ?? args.preset;
   if (mode === 'interval') {
-    const every = Math.max(1, Number(args.every) || 1);
-    const unitMs = args.unit === 'minutes' ? 60000 : 3600000;
+    const legacyEvery = args.preset === '1h' ? 1 : args.preset === '2h' ? 2 : args.preset === '4h' ? 4 : args.preset === '30m' ? 30 : 0;
+    const every = Math.max(1, Number(args.every) || legacyEvery || 1);
+    const unitMs = args.unit === 'minutes' ? 60000 : args.unit === 'hours' ? 3600000 : (legacyEvery >= 60 ? 3600000 : 60000);
     return { intervalMs: every * unitMs, cronExpr: '0 * * * *' };
   }
   if (CRON_BY_PRESET[mode]) return { cronExpr: CRON_BY_PRESET[mode] };
@@ -258,7 +272,8 @@ function cronFrom(args) {
   const hh = Number.isFinite(h) ? h : 9;
   if (mode === 'daily') return { cronExpr: `${mm} ${hh} * * *` };
   if (mode === 'weekly') {
-    const days = Array.isArray(args.weekdays) && args.weekdays.length ? args.weekdays : [1];
+    const legacy = Number.isFinite(Number(args.weekday)) ? [Number(args.weekday)] : [];
+    const days = Array.isArray(args.weekdays) && args.weekdays.length ? args.weekdays : legacy.length ? legacy : [1];
     const clean = [...new Set(days.map(d => Math.min(Math.max(Number(d) || 0, 0), 6)))].sort();
     return { cronExpr: `${mm} ${hh} * * ${clean.join(',')}` };
   }
@@ -300,7 +315,14 @@ async function scheduleApply(args) {
     const target = args.enabled === false ? 'schedule_pause' : 'schedule_resume';
     const r = await cindy.host.call('cindy_scheduler', target, { id: s.id });
     const t = (r.content ?? []).filter(b => b.type === 'text').map(b => b.text).join('\n');
-    if (r.isError) return { ok: false, errorCode: 'TOGGLE_FAILED', message: t };
+    if (r.isError) {
+      return {
+        ok: false,
+        errorCode: 'TOGGLE_FAILED',
+        partial: true,
+        message: `频率已更新（${cron.cronExpr}），但启停操作失败，请到 Cindy 自动化页确认当前状态：${t}`,
+      };
+    }
     return { ok: true, id: s.id, cronExpr: cron.cronExpr, intervalMs: cron.intervalMs ?? null, enabled: args.enabled !== false };
   } catch (e) { return { ok: false, errorCode: e?.code ?? 'SCHEDULER_ERROR', message: String(e?.message ?? e) }; }
 }

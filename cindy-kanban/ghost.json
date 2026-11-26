@@ -4,7 +4,7 @@
   "name": "Agent 看板",
   "description": "侧栏看板：四列展示 Cindy 伙伴与 Herdr agent，点卡片跳转对话或 pane，支持策略、启发分析和自动机制。",
   "whenToUse": "用户想一眼看清各个 agent 和任务谁在跑、谁卡住、谁排队、谁空闲，要制定调度策略、分析现状或设置自动机制时使用。",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "minCindyVersion": "0.1.144",
   "entry": "main.js",
   "icon": "assets/icon.png",
@@ -292,10 +292,6 @@
             "type": "string",
             "description": "daily/weekly 的时间点 HH:MM"
           },
-          "weekday": {
-            "type": "number",
-            "description": "0-6，weekly 时使用"
-          },
           "enabled": {
             "type": "boolean"
           },
@@ -306,7 +302,7 @@
               "daily",
               "weekly"
             ],
-            "description": "重复方式"
+            "description": "重复方式：interval 按间隔，daily 每天，weekly 每周"
           },
           "every": {
             "type": "number",
@@ -329,6 +325,7 @@
           }
         },
         "required": [
+          "mode",
           "enabled"
         ],
         "additionalProperties": false
@@ -472,6 +469,6 @@
     "ja": "locales/ja.json",
     "ko": "locales/ko.json"
   },
-  "releaseNotes": "修复评审提出的问题：任务回复改按 outputMessageId 读取、KV 写入串行化并按最新数据合并、Herdr 写入超时标记为结果未知、巡检自动化改精确同名匹配、终端草稿改为纯本地编辑且发送失败不再回车、补齐 board_state 的项目任务与 board_policy 的模型可见性、清单补齐 author 与策略/巡检参数。",
+  "releaseNotes": "修复第二轮评审：board_state 按页面同规则纳入项目任务、巡检计划参数与实现对齐并兼容旧入参、启停失败时报告部分完成、刷新不再覆盖未保存的策略草稿与伙伴选择、关闭终端不再残留轮询、补齐 ANSI 256 色灰阶、每小时巡检表达式可正确回填。",
   "author": "joei4cm"
 }

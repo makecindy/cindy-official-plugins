@@ -638,6 +638,10 @@ const ANSI_BRIGHT = ['#666666','#ff6b6b','#5ce6a2','#fdfd6b','#6db1ff','#e58be5'
 function ansi256(i) {
   if (i < 8) return ANSI_BASE[i];
   if (i < 16) return ANSI_BRIGHT[i - 8];
+  if (i >= 232) {
+    const grey = 8 + (i - 232) * 10;
+    return `rgb(${grey},${grey},${grey})`;
+  }
   const n = i - 16;
   const levels = [0, 95, 135, 175, 215, 255];
   return `rgb(${levels[Math.floor(n / 36)]},${levels[Math.floor(n / 6) % 6]},${levels[n % 6]})`;
@@ -1010,7 +1014,8 @@ async function openPaneModal(paneId, title) {
   line.focus();
   void debugLog('modal-open', { paneId });
   await load();
-  termTimer = setInterval(load, 2000);
+  // 读取期间弹窗可能已被关闭：此时不再启动轮询。
+  if (document.body.contains(modal)) termTimer = setInterval(load, 2000);
 }
 function closePaneModal() {
   if (termTimer) { clearInterval(termTimer); termTimer = null; }
@@ -1266,11 +1271,17 @@ function selectedWeekdays() {
   return [...wdBox.querySelectorAll('button.on')].map(b => Number(b.dataset.d));
 }
 
+const dirty = { policy: false, patrol: false };
+for (const id of ['#policy-text', '#patrol-text']) {
+  const el = document.querySelector(id);
+  el.addEventListener('input', () => { dirty[id === '#policy-text' ? 'policy' : 'patrol'] = true; });
+}
+
 async function loadPolicy(d) {
   try {
     const r = await call('board_policy', { op: 'get' });
-    document.querySelector('#policy-text').value = r.policy ?? '';
-    document.querySelector('#patrol-text').value = r.patrol ?? '';
+    if (!dirty.policy) document.querySelector('#policy-text').value = r.policy ?? '';
+    if (!dirty.patrol) document.querySelector('#patrol-text').value = r.patrol ?? '';
     const box = document.querySelector('#reports');
     box.textContent = '';
     const reports = r.reports ?? [];
@@ -1284,11 +1295,13 @@ async function loadPolicy(d) {
     }
   } catch { /* ignore */ }
   const sel = document.querySelector('#auto-companion');
+  const chosen = sel.value;
   sel.textContent = '';
   const first = document.createElement('option'); first.value = ''; first.textContent = t('companionPick'); sel.append(first);
   for (const c of d.companions ?? []) {
     const o = document.createElement('option'); o.value = c.name; o.textContent = c.name; sel.append(o);
   }
+  if (chosen && [...sel.options].some(o => o.value === chosen)) sel.value = chosen;
 }
 
 async function loadSchedule() {
@@ -1301,6 +1314,12 @@ async function loadSchedule() {
       document.querySelector('#sched-mode').value = 'interval';
       if (r.intervalMs % 3600000 === 0) { document.querySelector('#sched-every').value = r.intervalMs / 3600000; document.querySelector('#sched-unit').value = 'hours'; }
       else { document.querySelector('#sched-every').value = Math.max(1, Math.round(r.intervalMs / 60000)); document.querySelector('#sched-unit').value = 'minutes'; }
+    } else if (r.cronExpr && /^\d+ \*(\/\d+)? \* \* \*$/.test(r.cronExpr)) {
+      const parts = r.cronExpr.split(' ');
+      const step = parts[1].startsWith('*/') ? Number(parts[1].slice(2)) : 1;
+      document.querySelector('#sched-mode').value = 'interval';
+      document.querySelector('#sched-every').value = step;
+      document.querySelector('#sched-unit').value = 'hours';
     } else if (r.cronExpr) {
       const parts = r.cronExpr.split(' ');
       if (parts.length === 5 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1])) {
@@ -1381,6 +1400,7 @@ document.querySelector('#policy-save').onclick = async () => {
   const btn = document.querySelector('#policy-save'); btn.disabled = true;
   try {
     const r = await call('board_policy', { op: 'set', policy: text });
+    if (r.ok) dirty.policy = false;
     status.textContent = r.ok ? t('savedPolicy') : t('saveFailed', { e: r.message ?? '' });
   } catch (e) { status.textContent = t('saveFailed', { e: e?.message ?? e }); }
   btn.disabled = false;
@@ -1390,6 +1410,7 @@ document.querySelector('#patrol-save').onclick = async () => {
   const text = document.querySelector('#patrol-text').value.trim();
   try {
     const r = await call('board_policy', { op: 'set', patrol: text });
+    if (r.ok) dirty.patrol = false;
     status.textContent = r.ok ? t('savedPolicy') : t('saveFailed', { e: r.message ?? '' });
   } catch (e) { status.textContent = t('saveFailed', { e: e?.message ?? e }); }
 };
