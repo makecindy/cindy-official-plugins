@@ -2,7 +2,7 @@
 
 Read this when debugging a follow-up, or before changing the schedule or the check. Day-to-day rounds only need SKILL.md.
 
-The schedule fires every 5 minutes (older schedules: every 10, switched by their next round). Each time, the bundled `scripts/pr-node.cjs` launcher selects Node.js 18 or newer from PATH and executes `scripts/pr-heartbeat-gate.mjs` as the schedule's pre-run check:
+The schedule fires every 5 minutes (older schedules may retain their saved interval). Each time, the bundled `scripts/pr-node.cjs` launcher selects Node.js 18 or newer from PATH and executes `scripts/pr-heartbeat-gate.mjs` as the schedule's pre-run check:
 
 - **exit 0:** wake the agent in the bound task; the check's output, including the list of what happened, is attached to the prompt.
 - **exit 2:** skip this run. No model call, no tokens, nothing in the task.

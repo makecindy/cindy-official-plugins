@@ -1771,14 +1771,6 @@ function followScheduler(options = {}) {
         data = rows.get(args.id) ?? null;
       } else if (tool === 'schedule_list') {
         data = [...rows.values()];
-      } else if (tool === 'schedule_update') {
-        if (options.rejectUpdate) throw new Error('cannot migrate hook');
-        const row = rows.get(args.id);
-        assert.ok(row, 'never update a missing schedule');
-        assert.deepEqual(Object.keys(args).sort(), ['device', 'id', 'preRunHook']);
-        data = { ...row, preRunHook: args.preRunHook };
-        rows.set(args.id, data);
-        if (options.loseUpdateReceipt) throw new Error('lost update receipt');
       } else if (tool === 'schedule_delete') {
         data = { deleted: args.id };
         rows.delete(args.id);
@@ -1827,8 +1819,8 @@ const oldFollowHook = (url, timeoutMs = 180000) => ({
   timeoutMs,
 });
 
-test('reuse migrates the verified legacy schedule in place and verifies a lost write receipt', async () => {
-  const { hostApi, calls, rows } = followScheduler({ loseUpdateReceipt: true });
+test('reuse identifies the exact old generated hook, preserves it and gives the manual repair command', async () => {
+  const { hostApi, calls, rows } = followScheduler();
   const url = 'https://github.com/octo/repo/pull/42';
   const old = { id: 'old', targetSessionId: 's1', status: 'active', recurring: true,
     prompt: 'Follow ' + url, intervalMs: 600000, cronExpr: '*/10 * * * *',
@@ -1836,37 +1828,51 @@ test('reuse migrates the verified legacy schedule in place and verifies a lost w
   rows.set('old', old);
   const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
   const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
-  assert.equal(opened.reply.result.follow_state, 'active');
-  assert.equal(calls.includes('schedule_create'), false);
-  assert.equal(calls.filter(c => c === 'schedule_update').length, 1);
-  assert.equal(rows.size, 1);
-  assert.match(rows.get('old').preRunHook.command, /pr-node\.cjs" pr-heartbeat-gate\.mjs https:\/\/github\.com\/octo\/repo\/pull\/42$/);
-  assert.equal(rows.get('old').preRunHook.timeoutMs, 123456);
-  assert.deepEqual({ ...rows.get('old'), preRunHook: old.preRunHook }, old);
-  await rt.tool({ card_id: opened.callId });
-  assert.equal(calls.filter(c => c === 'schedule_update').length, 1, 'migration is idempotent');
+  assert.equal(opened.reply.result.follow_state, 'unverified');
+  const repair = opened.reply.result.legacy_hook_repair;
+  assert.equal(repair.schedule_id, old.id);
+  assert.match(repair.command, /pr-node\.cjs" pr-heartbeat-gate\.mjs https:\/\/github\.com\/octo\/repo\/pull\/42$/);
+  assert.deepEqual(rows.get(old.id), old);
+  assert.equal(calls.some(c => ['schedule_create', 'schedule_update'].includes(c)), false);
+  // The user explicitly changes the command in Automation settings.
+  rows.set(old.id, { ...old, preRunHook: { ...old.preRunHook, command: repair.command } });
+  const refreshed = await rt.tool({ card_id: opened.callId });
+  assert.equal(refreshed.reply.result.follow_state, 'active');
+  assert.equal(refreshed.reply.result.legacy_hook_repair, undefined);
+  assert.equal(rows.get(old.id).preRunHook.timeoutMs, 123456);
   await rt.click(opened.callId, 'pr:stop');
   assert.equal(rows.size, 0);
 });
 
-test('failed migration retains the single owner and can reconcile without creating a duplicate', async () => {
-  const fault = { rejectUpdate: true };
-  const { hostApi, calls, rows } = followScheduler(fault);
+test('a concurrent user command or timeout save during GitHub refresh is never overwritten', async () => {
   const url = 'https://github.com/octo/repo/pull/42';
-  rows.set('old', { id: 'old', targetSessionId: 's1', status: 'active', recurring: true,
-    prompt: 'Follow ' + url, preRunHook: oldFollowHook(url) });
-  const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
-  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
-  assert.equal(opened.reply.result.follow_state, 'unverified');
-  assert.equal(rows.size, 1);
-  const peer = await rt.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
-  assert.equal(peer.reply.result.disposition, 'existing_task');
-  fault.rejectUpdate = false;
-  assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'active');
-  assert.equal(calls.includes('schedule_create'), false);
+  for (const change of [
+    { command: 'node "/project/scripts/custom.mjs" ' + url, timeoutMs: 98765 },
+    { ...oldFollowHook(url), timeoutMs: 98765 },
+  ]) {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    const before = { ...rows.get('sch-1'), preRunHook: oldFollowHook(url) };
+    rows.set('sch-1', before);
+    let saved = false;
+    rt.setGithub(request => {
+      // GitHub was requested after the plugin's first schedule_get.
+      assert.equal(calls.at(-1), 'schedule_get');
+      rows.set('sch-1', { ...before, preRunHook: change });
+      saved = true;
+      return prGraphql()(request);
+    });
+    const refreshed = await rt.tool({ card_id: opened.callId });
+    assert.equal(refreshed.reply.ok, true);
+    assert.equal(saved, true);
+    assert.deepEqual(rows.get('sch-1').preRunHook, change);
+    assert.equal(calls.includes('schedule_update'), false);
+    assert.equal(refreshed.reply.result.legacy_hook_repair !== undefined, change.command === before.preRunHook.command);
+  }
 });
 
-test('owning card refresh migrates an existing active legacy hook without running it, but stop and paused/foreign schedules stay untouched', async () => {
+test('owning card reports an active old hook only, never rewrites it or touches paused/foreign schedules', async () => {
   const { hostApi, calls, rows } = followScheduler();
   const url = 'https://github.com/octo/repo/pull/42';
   const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
@@ -1874,35 +1880,91 @@ test('owning card refresh migrates an existing active legacy hook without runnin
   rows.get('sch-1').preRunHook = oldFollowHook(url);
   const peer = await rt.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's2' } });
   assert.equal(peer.reply.result.disposition, 'existing_task');
-  assert.equal(calls.includes('schedule_update'), false);
   rows.get('sch-1').status = 'paused';
   assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'paused');
-  assert.equal(calls.includes('schedule_update'), false);
   rows.get('sch-1').status = 'active';
-  assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'active');
-  assert.equal(calls.filter(c => c === 'schedule_update').length, 1);
-  assert.match(rows.get('sch-1').preRunHook.command, /pr-node\.cjs/);
-  // Even if a previously created hook is still old, Stop must not migrate it.
-  rows.get('sch-1').preRunHook = oldFollowHook(url);
+  const refreshed = await rt.tool({ card_id: opened.callId });
+  assert.equal(refreshed.reply.result.follow_state, 'unverified');
+  assert.equal(refreshed.reply.result.legacy_hook_repair.schedule_id, 'sch-1');
+  assert.deepEqual(rows.get('sch-1').preRunHook, oldFollowHook(url));
+  assert.equal(calls.includes('schedule_update'), false);
   await rt.click(opened.callId, 'pr:stop');
   assert.equal(rows.size, 0);
-  assert.equal(calls.filter(c => c === 'schedule_update').length, 1);
 });
 
-test('refresh does not rewrite a custom legacy shell command or a terminal PR hook', async () => {
+test('same-name project script, custom shell command and terminal PR remain untouched', async () => {
   const { hostApi, calls, rows } = followScheduler();
   const url = 'https://github.com/octo/repo/pull/42';
   const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
   const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
-  const custom = oldFollowHook(url);
-  custom.command = 'PATH="/modern/bin" ' + custom.command;
-  rows.get('sch-1').preRunHook = custom;
-  assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'active');
-  assert.deepEqual(rows.get('sch-1').preRunHook, custom);
+  for (const command of [
+    'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url,
+    'PATH="/modern/bin" ' + oldFollowHook(url).command,
+  ]) {
+    const custom = { command, timeoutMs: 1000 };
+    rows.get('sch-1').preRunHook = custom;
+    const result = await rt.tool({ card_id: opened.callId });
+    assert.equal(result.reply.result.follow_state, 'active');
+    assert.equal(result.reply.result.legacy_hook_repair, undefined);
+    assert.deepEqual(rows.get('sch-1').preRunHook, custom);
+  }
   rows.get('sch-1').preRunHook = oldFollowHook(url);
   rt.setGithub(prGraphql({ merged: true }));
-  assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.stage, 'merged');
+  const result = await rt.tool({ card_id: opened.callId });
+  assert.equal(result.reply.result.stage, 'merged');
+  assert.equal(result.reply.result.legacy_hook_repair, undefined);
   assert.equal(calls.includes('schedule_update'), false);
+});
+
+test('refresh of a pre-native following card discovers its sole active legacy hook and reports a manual repair', async () => {
+  const { hostApi, calls, rows } = followScheduler();
+  const url = 'https://github.com/octo/repo/pull/42';
+  const rt = createPrRuntime({ github: prGraphql(), hostApi });
+  const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const path = `pr-cards/${opened.callId}.json`;
+  assert.equal(JSON.parse(rt.files.get(path)).following, true);
+  assert.ok(!JSON.parse(rt.files.get(path)).scheduleId);
+  const old = { id: 'old', targetSessionId: 's1', status: 'active', recurring: true,
+    intervalMs: 600000, nextFireAt: 12345, preRunHook: oldFollowHook(url, 123456) };
+  rows.set(old.id, old);
+  const peer = await rt.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's2' } });
+  assert.equal(peer.reply.result.disposition, 'existing_task');
+  assert.equal(calls.includes('schedule_update'), false);
+  const refreshed = await rt.tool({ card_id: opened.callId });
+  assert.equal(refreshed.reply.result.follow_state, 'unverified');
+  assert.equal(refreshed.reply.result.legacy_hook_repair.schedule_id, old.id);
+  assert.equal(JSON.parse(rt.files.get(path)).scheduleId, old.id);
+  assert.deepEqual(rows.get(old.id), old);
+  assert.equal(calls.some(c => ['schedule_create', 'schedule_update'].includes(c)), false);
+  rows.set(old.id, { ...old, preRunHook: { ...old.preRunHook, command: refreshed.reply.result.legacy_hook_repair.command } });
+  assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'active');
+  await rt.click(opened.callId, 'pr:stop');
+  assert.equal(rows.size, 0, 'stop deletes the same verified schedule');
+});
+
+test('pre-native discovery never creates a schedule or changes an ambiguous, paused, foreign or custom hook', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  const old = { id: 'old', targetSessionId: 's1', status: 'active', recurring: true,
+    preRunHook: oldFollowHook(url) };
+  for (const [label, candidates, refresh] of [
+    ['absent', [], {}],
+    ['ambiguous', [old, { ...old, id: 'other' }], {}],
+    ['paused', [{ ...old, status: 'paused' }], {}],
+    ['foreign', [{ ...old, targetSessionId: 's2' }], {}],
+    ['custom', [{ ...old, preRunHook: { ...old.preRunHook, command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url } }], {}],
+    ['stopping', [old], { following: false }],
+  ]) {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+    for (const row of candidates) rows.set(row.id, row);
+    const result = await rt.tool({ card_id: opened.callId, ...refresh });
+    assert.equal(result.reply.ok, true, label);
+    assert.equal(result.reply.result.legacy_hook_repair, undefined, label);
+    assert.ok(!JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleId, label);
+    assert.deepEqual([...rows.values()], candidates, label);
+    assert.equal(calls.some(c => ['schedule_create', 'schedule_update', 'schedule_delete'].includes(c)), false, label);
+  }
 });
 
 test('viewing an existing red PR does not start following; explicitly clicking hands its current failures to the owner', async () => {
