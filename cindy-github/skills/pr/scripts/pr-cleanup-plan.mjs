@@ -9,7 +9,7 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { buildCleanupCommands, buildPrimarySyncCommands, githubRepoNamesOfRemotes, isLongLivedBranch, isPrWorktree, planLocalCleanup, remoteNameForRepo } from './lib/cleanup-plan.mjs';
-import { ensureAuth, ensureBinary, ghJson } from './lib/gh.mjs';
+import { ensureBinary, ghJson } from './lib/gh.mjs';
 import { resolvePullRequestTarget } from './lib/repo-target.mjs';
 
 const exec = promisify(execFile);
@@ -152,7 +152,6 @@ async function isAncestor(cwd, ancestor, descendant) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   await ensureBinary();
-  await ensureAuth();
   await ensureGit();
 
   const pr = await ghJson(`repos/${args.repo}/pulls/${args.number}`);
