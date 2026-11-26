@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.55, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.56, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1478,3 +1478,16 @@ Shared branches are explicitly outside CI-only recovery scope. Use the head repo
 Windows10.0.26100 / Node22.22.3 / Git2.54.0.windows.1 fixtures store raw NUL-bearing single-parent commit objects with local hash-object --literally (the ordinary current Git writer refuses them). Leading NUL makes amend fail; embedded/trailing NUL can exit0 with truncated message. Original bytes remain present. No reservation, remote or push is performed. Corrected native/policy regression5 cases failed against source54's guide, then the new cases plus existing message controls passed11/11 (11.43s). This does not prove live Cindy/GitHub enforcement. Current runtime acceptance gaps, previous cleanup blocks and installation boundaries remain.
 
 Final mandatory four suites plus plugin: **567 passed / 36 skipped / 0 failed (319.49 s)**; 17 native success cases require full directory sync unavailable here, 19 skips already existed. Forge full comparison: **30 files, 252925 archive bytes, 713507 uncompressed bytes**; new package deleted and absence verified. No candidate-validation copy, real CI-only rewrite or live installation. This round completed on 2026-11-26 UTC / 2026-11-27 Asia/Shanghai.
+
+
+## Main synchronization preserving strict recovery scope — 2026-11-27 Asia/Shanghai (source1.5.56, not installed)
+
+Source1.5.56 merges main66e2bfc7 into the existing feature branch. Only ghost.json version/releaseNotes and the version assertion conflicted; both were resolved with version1.5.56, above main1.5.37, preserving the feature's notes and upstream changes. No temporary validation copy is required: the changed upstream files are modifications, with the same plugin-root file set.
+
+Upstream removes redundant gh auth status prechecks and classifies sign-in/rate/network failures from actual API calls; a rate-limited probe enters existing backoff without a second full snapshot. Human waits cool to the existing 30-minute waiting stage after recent activity, while technical waits and targeted checks/threads remain responsive and due waits/defer still wake. The source Skill/reference and upstream regression tests are retained. The task's exact checked-in hook command, timeout, scheduler timing/model/target remain unchanged; this is not a migration to a launcher or a live plugin installation.
+
+The entire CI-retry guide (including sole-head-consumer and NUL checks), receipt I/O, main.js/settings and four locales are byte-identical to source55. Existing cap/slots, any-active-hook, signing/encoding/committer/raw-object/full-directory-sync boundaries remain. Budget-only CLI still returns before observation-trigger metadata; diagnostic observation retains conditional read-only persistence. Seven inherited files including pacing/snapshot tests, follow-up reference, pacing/gh helpers, cleanup and snapshot scripts exactly match main66; gate/Skill retain this feature's existing additions. No new mechanism, credentials, preferences, permissions, real quota use, fixtures or cleanup retry.
+
+This is source synchronization and automated regression coverage, not new runtime acceptance. The inherited auth/probe/wait behavior has not been exercised in the actual Cindy task UI; current UI/read-order/header/repair/disable/shared-consumer/signed-head/causal-attribution gaps remain. Existing blocked cleanup residuals stay disclosed; no new disposable candidate copy was made.
+
+Final mandatory four suites plus plugin: **569 passed / 38 skipped / 0 failed (278.97 s)**. Skips: 17 native success paths unsupported by full directory-sync on this environment, 19 prior skips, plus two inherited POSIX-only fake-gh/symlink command-line cases unavailable on Windows. The new gate/pacing unit regressions ran; those two POSIX command-line cases were not exercised here. Forge exact-content: **30 files, 253719 archive bytes, 715404 uncompressed bytes**; new package removed and absence verified. No new validation copy or cleanup retry.

@@ -914,7 +914,115 @@ test('低成本探测:与上次完整读取一致时不做完整快照;有理由
   assert.equal(probeAllowsSkip(settled, previous.probe, now + 31 * MIN), false, '30 分钟完整读一次');
   assert.equal(probeAllowsSkip(settled, { ...previous.probe, status: 'x' }, now + MIN), false);
   assert.equal(probeAllowsSkip(settled, null, now + MIN), false, '探测失败');
-  assert.equal(probeAllowsSkip({ ...settled, lastPassAt: now - 24 * 60 * MIN }, previous.probe, now + MIN), false, '保底巡检到点');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['ci_failing'], lastPassAt: now - 24 * 60 * MIN }, previous.probe, now + MIN), false, '保底巡检到点');
+  // 当保底巡检在 decide() 中被人工等待/活跃 wait/defer 抑制时，探测一致不应丢弃结果强拉完整快照。
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'READY', lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, 'READY 等合并超过 24 小时仍可走探测');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'BLOCKED_HUMAN', blockers: ['approval_required'], lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, '仅等人工审批超过 24 小时仍可走探测');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['approval_required'], humanOnlyPending: true, lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, 'humanOnlyPending 超过 24 小时仍可走探测');
+  const activeHumanWait = { kind: 'human', headSha: 'aaa1111', reason: 'wait merge', createdAt: now - 48 * 60 * MIN, until: null, checks: [], threads: [] };
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['ci_failing'], wait: activeHumanWait, lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, '未到点的 wait 不应被静默门禁强拉完整快照');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['ci_failing'], nextAllowAt: now + 30 * MIN, lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, '未到点的 defer 不应被静默门禁强拉完整快照');
+});
+
+test('超过 24 小时的人工等待在探测一致时跳过完整快照；首次 gh api 未登录报错仍诊断为 auth', async (t) => {
+  const fx = createFixture(t);
+  const probe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' };
+  fx.setProbe(probe);
+  fx.setSnapshot(snap({ verdict: 'READY' }));
+  await fx.run();
+  const wait = { kind: 'human', headSha: 'aaa1111', reason: 'waiting for maintainer merge', afterMinutes: null, checks: [], threads: [] };
+  assert.equal((await fx.run(['--wait', fx.writeWait(wait)])).code, 0);
+  // 模拟静默超过 48 小时，但最近刚做过一次完整读取（10 分钟前）
+  fx.advance(10);
+  fx.writeState({ lastPassAt: fx.now() - 48 * 60 * MIN });
+  const reads = fx.snapshotRuns();
+  const skipped = await fx.run(['--json']);
+  assert.equal(skipped.code, 2);
+  assert.equal(skipped.json().reason, 'unchanged');
+  assert.equal(fx.snapshotRuns(), reads, '探测匹配时不应强跑完整快照');
+
+  const noCredsPlan = snapshotFailurePlan(
+    { code: 1, stderr: '[gh] fatal on repos/acme/widgets/pulls/42: To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.\n' },
+    null,
+    fx.now(),
+    1,
+  );
+  assert.equal(noCredsPlan.diagnosis.kind, 'auth');
+  const badCredsPlan = snapshotFailurePlan(
+    { code: 1, stderr: '[gh] fatal on repos/acme/widgets/pulls/42: gh: Bad credentials (HTTP 401)\n' },
+    null,
+    fx.now(),
+    1,
+  );
+  assert.equal(badCredsPlan.diagnosis.kind, 'auth');
+});
+
+test('探针收到明确限流时直接进入退避、保留 retryAt，且零次调用完整快照', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-probe-rate-limit-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const fakeSnapshot = path.join(dir, 'fake-snapshot.mjs');
+  fs.writeFileSync(fakeSnapshot, '// placeholder for existsSync check\n', 'utf8');
+
+  let clock = T0;
+  let probeCalls = 0;
+  let snapshotCalls = 0;
+  let probeReply = { code: 0, stdout: JSON.stringify({ status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' }), stderr: '' };
+  const currentSnap = snap({ verdict: 'READY' });
+  const run = async (extra = []) => {
+    let stdout = '';
+    let stderr = '';
+    const code = await runGate([PR_URL, '--state-dir', stateDir, '--snapshot', fakeSnapshot, '--min-pass-spacing-minutes', '0', '--no-pacing', ...extra], {
+      now: () => clock,
+      runProbe: async () => { probeCalls += 1; return probeReply; },
+      runSnapshot: async () => { snapshotCalls += 1; return { code: 0, stdout: JSON.stringify(currentSnap), stderr: '' }; },
+      readTrigger: async () => null,
+      out: (text) => { stdout += text; },
+      err: (text) => { stderr += text; },
+    });
+    return { code, stdout, stderr };
+  };
+
+  // Seed baseline and acknowledge so the next tick uses probe first.
+  assert.equal((await run()).code, 0);
+  assert.equal((await run(['--ack'])).code, 0);
+  const readsBefore = snapshotCalls;
+
+  // Probe receives explicit rate limit with retryAt: must enter backoff directly with 0 full snapshots.
+  clock += 5 * MIN;
+  const resetAt = clock + 45 * MIN;
+  probeReply = {
+    code: 1,
+    stdout: '',
+    stderr: `[gh-rate-limit] retryAt=${resetAt}\n[gh] fatal on graphql: gh: API rate limit already exceeded (HTTP 403)\n`,
+  };
+  const blocked = await run();
+  assert.equal(blocked.code, 1, 'first rate-limit failure notifies once');
+  assert.match(blocked.stderr, /GitHub API rate limit reached/);
+  assert.equal(snapshotCalls, readsBefore, 'probe rate limit must not trigger a full snapshot');
+  const diagMatch = /CINDY_PR_CHECK_DIAGNOSIS (\{[^\n]+\})/.exec(blocked.stdout);
+  assert.ok(diagMatch, blocked.stdout);
+  assert.deepEqual(JSON.parse(diagMatch[1]), { kind: 'rate-limit', failures: 1, retryAt: resetAt + 1000 });
+  const saved = JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'));
+  assert.equal(saved.snapshotFailureBackoffUntil, resetAt + 1000);
+  assert.equal(saved.consecutiveSnapshotFailures, 1);
+
+  // Before retryAt, scheduled ticks skip immediately with 0 probes and 0 snapshots.
+  const probesBeforeBackoff = probeCalls;
+  clock += 10 * MIN;
+  const skipped = await run(['--json']);
+  assert.equal(skipped.code, 2);
+  assert.equal(JSON.parse(skipped.stdout).reason, 'snapshot-failure-backoff');
+  assert.equal(probeCalls, probesBeforeBackoff);
+  assert.equal(snapshotCalls, readsBefore);
+
+  // After retryAt passes, gate recovers via full snapshot and clears failure state.
+  clock = resetAt + 2000;
+  probeReply = { code: 0, stdout: JSON.stringify({ status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' }), stderr: '' };
+  const recovered = await run(['--json']);
+  assert.equal(recovered.code, 2);
+  assert.equal(snapshotCalls, readsBefore + 1);
+  assert.equal(JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8')).consecutiveSnapshotFailures, 0);
 });
 
 test('从未放行过的跟进也能数满静默时长:起点固定在首次检查,不随每轮刷新', async (t) => {
