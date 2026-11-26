@@ -2613,18 +2613,47 @@ test('resuming a paused legacy-hook schedule activates it and surfaces the repai
 test('pr:resume validates ownership, hook, draft/terminal state and reconciles races and retries', async () => {
   const url = 'https://github.com/octo/repo/pull/42';
 
-  // Draft and merged/closed PRs never show or run pr:resume.
+  // Draft and merged/closed PRs never show or run pr:resume, even when clicked directly on a stale paused card.
   for (const prOpts of [{ draft: true }, { merged: true }, { state: 'CLOSED' }]) {
+    for (const stale of [false, true]) {
+      const { hostApi, rows, calls } = followScheduler();
+      const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+      const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+      rows.get('sch-1').status = 'paused';
+      await rt.tool({ card_id: opened.callId });
+      rt.setGithub(prGraphql(prOpts));
+      if (!stale) {
+        await rt.tool({ card_id: opened.callId });
+        assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-action="pr:resume"/);
+      }
+      await rt.click(opened.callId, 'pr:resume');
+      assert.equal(calls.includes('schedule_resume'), false);
+      assert.equal(rows.get('sch-1').status, 'paused');
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-action="pr:resume"/);
+      const saved = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      if (prOpts.merged) assert.equal(saved.stage, 'merged');
+      else if (prOpts.state === 'CLOSED') assert.equal(saved.stage, 'closed');
+      else assert.equal(saved.pr.draft, true);
+    }
+  }
+
+  // If GitHub cannot be read when clicking pr:resume, do not resume; keep the button retryable.
+  {
     const { hostApi, rows, calls } = followScheduler();
     const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
     const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
     rows.get('sch-1').status = 'paused';
-    rt.setGithub(prGraphql(prOpts));
     await rt.tool({ card_id: opened.callId });
-    assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-action="pr:resume"/);
+    rt.setGithub(() => jsonResponse({ message: 'GitHub unavailable' }, 503));
     await rt.click(opened.callId, 'pr:resume');
     assert.equal(calls.includes('schedule_resume'), false);
     assert.equal(rows.get('sch-1').status, 'paused');
+    assert.match(rt.lastCard(opened.callId).html, /data-ghost-action="pr:resume"/);
+    assert.match(rt.lastCard(opened.callId).html, /读取 PR 信息失败/);
+    rt.setGithub(prGraphql());
+    await rt.click(opened.callId, 'pr:resume');
+    assert.equal(rows.get('sch-1').status, 'active');
+    assert.equal(calls.filter(c => c === 'schedule_resume').length, 1);
   }
 
   // Custom hook, foreign owner, or expired status blocks schedule_resume.
@@ -2714,12 +2743,27 @@ test('pr:resume validates ownership, hook, draft/terminal state and reconciles r
   }
 });
 
-test('older host without card scheduler hands pr:resume to the agent', async () => {
+test('older host without card scheduler checks live PR state and instructs following=true on pr:resume handoff', async () => {
+  const { MESSAGES } = createRuntime().context;
+  for (const locale of ['zh-CN', 'en', 'ja', 'ko']) {
+    assert.match(MESSAGES[locale].prClickResume, /following=true/, `${locale}: prClickResume must require following=true`);
+  }
+
   const { hostApi, rows } = followScheduler();
   const modern = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
   const opened = await modern.tool({ repo: 'octo/repo', pr: 42, published: true });
   rows.get('sch-1').status = 'paused';
   await modern.tool({ card_id: opened.callId });
+
+  // Stale paused card on older host must not hand off resume if GitHub fails or PR is merged.
+  const legacyUnavailable = createPrRuntime({ github: () => jsonResponse({ message: 'down' }, 503), files: new Map(modern.files) });
+  await legacyUnavailable.click(opened.callId, 'pr:resume');
+  assert.equal(legacyUnavailable.agentRuns.length, 0);
+
+  const legacyMerged = createPrRuntime({ github: prGraphql({ merged: true }), files: new Map(modern.files) });
+  await legacyMerged.click(opened.callId, 'pr:resume');
+  assert.equal(legacyMerged.agentRuns.length, 0);
+  assert.equal(JSON.parse(legacyMerged.files.get(`pr-cards/${opened.callId}.json`)).stage, 'merged');
 
   const legacy = createPrRuntime({ github: prGraphql(), files: modern.files });
   await legacy.click(opened.callId, 'pr:resume');
@@ -2727,10 +2771,14 @@ test('older host without card scheduler hands pr:resume to the agent', async () 
   assert.equal(legacy.agentRuns[0].event.action, 'resume');
   assert.equal(legacy.agentRuns[0].event.schedule_id, 'sch-1');
   assert.match(legacy.agentRuns[0].userMessage, /sch-1/);
+  assert.match(legacy.agentRuns[0].userMessage, /following=true/);
   assert.match(legacy.lastCard(opened.callId).html, /正在恢复跟进/);
   const updated = await legacy.tool({ card_id: opened.callId, following: true });
   assert.equal(updated.reply.ok, true);
-  assert.equal(JSON.parse(legacy.files.get(`pr-cards/${opened.callId}.json`)).pending, null);
+  assert.equal(updated.reply.result.follow_state, 'active');
+  const saved = JSON.parse(legacy.files.get(`pr-cards/${opened.callId}.json`));
+  assert.equal(saved.pending, null);
+  assert.equal(saved.scheduleStatus, null);
 });
 
 test('pre-1.5.37 cards missing manualStop verify live schedule provenance instead of misclassifying all old cards', async () => {
@@ -2764,7 +2812,12 @@ test('pre-1.5.37 cards missing manualStop verify live schedule provenance instea
 
   // User-edited or adopted schedule with manualStop missing locks to manualStop=true without deleting,
   // while still allowing pr:resume when paused.
-  for (const mutation of ['prompt', 'interval', 'timeout', 'name']) {
+  for (const mutation of [
+    'prompt', 'interval', 'timeout', 'name', 'silentWhenIdle',
+    'notify-desktop', 'notify-feishu', 'notify-extra',
+    'prTrigger-change', 'manual', 'useWorktree', 'persistentSession',
+    'workingDir', 'webhookTrigger', 'expireAt', 'executionMode',
+  ]) {
     for (const via of ['refresh', 'direct-stop']) {
       const { hostApi, rows, calls } = followScheduler();
       const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
@@ -2780,7 +2833,19 @@ test('pre-1.5.37 cards missing manualStop verify live schedule provenance instea
       if (mutation === 'prompt') row.prompt = 'Custom user prompt for https://github.com/octo/repo/pull/42';
       else if (mutation === 'interval') row.intervalMs = 600000;
       else if (mutation === 'timeout') row.preRunHook = { ...row.preRunHook, timeoutMs: 90000 };
-      else row.name = 'Custom PR #42';
+      else if (mutation === 'name') row.name = 'Custom PR #42';
+      else if (mutation === 'silentWhenIdle') row.silentWhenIdle = false;
+      else if (mutation === 'notify-desktop') row.notify = { desktop: false, feishu: false };
+      else if (mutation === 'notify-feishu') row.notify = { desktop: true, feishu: true };
+      else if (mutation === 'notify-extra') row.notify = { desktop: true, feishu: false, wecomGroup: 'g1' };
+      else if (mutation === 'prTrigger-change') row.prTrigger = { ...row.prTrigger, change: 'ci' };
+      else if (mutation === 'manual') row.manual = true;
+      else if (mutation === 'useWorktree') row.useWorktree = true;
+      else if (mutation === 'persistentSession') row.persistentSession = true;
+      else if (mutation === 'workingDir') row.workingDir = '/tmp/custom';
+      else if (mutation === 'webhookTrigger') row.webhookTrigger = { source: { preset: 'custom' } };
+      else if (mutation === 'expireAt') row.expireAt = 9999999999999;
+      else row.executionMode = 'script';
 
       if (via === 'refresh') await rt.tool({ card_id: opened.callId });
       else await rt.click(opened.callId, 'pr:stop');
