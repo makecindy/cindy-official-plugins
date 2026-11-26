@@ -9,13 +9,24 @@ function socketPath() {
   return path.join(os.homedir(), '.config', 'herdr', 'herdr.sock');
 }
 
+// 写入类方法一旦发出，超时或断线都不能断言「没执行」。
+const MUTATING = new Set(['agent.prompt', 'pane.send_text', 'pane.send_keys', 'pane.send_input', 'pane.focus']);
+
 function callOnce(method, params, timeoutMs) {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(socketPath());
     socket.setEncoding('utf8');
     let buffer = '';
     let settled = false;
-    const timer = setTimeout(() => finish(reject, new Error('timeout')), timeoutMs || 10000);
+    let sent = false;
+    const unknown = () => {
+      const error = new Error('outcome_unknown: ' + method);
+      error.code = 'outcome_unknown';
+      return error;
+    };
+    const timer = setTimeout(() => {
+      finish(reject, sent && MUTATING.has(method) ? unknown() : new Error('timeout'));
+    }, timeoutMs || 10000);
     function finish(fn, value) {
       if (settled) return;
       settled = true;
@@ -25,6 +36,7 @@ function callOnce(method, params, timeoutMs) {
     }
     socket.on('connect', () => {
       socket.write(JSON.stringify({ id: 'k1', method, params: params || {} }) + '\n');
+      sent = true;
     });
     socket.on('data', chunk => {
       buffer += chunk;
@@ -37,7 +49,7 @@ function callOnce(method, params, timeoutMs) {
         else finish(resolve, message.result);
       } catch (e) { finish(reject, e); }
     });
-    socket.on('error', e => finish(reject, e));
+    socket.on('error', e => finish(reject, sent && MUTATING.has(method) ? unknown() : e));
   });
 }
 

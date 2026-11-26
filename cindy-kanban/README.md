@@ -38,12 +38,18 @@ No network permission is declared. The plugin never performs privilege escalatio
 
 不声明网络权限；提权、绕沙箱、对外发布一律交还主人决定。
 
-## Local build / 本地打包
+## Packaging / 打包
+
+Official packaging runs in this repository, not with a hand-written `zip`.
+The CI packaging step archives the tracked files of this directory and adds the
+repository's Apache-2.0 license/notice, so keep the directory free of untracked
+files and secrets. For a local trial build, list the package files explicitly
+instead of recursing the directory:
 
 ```bash
-zip -X -r agent-board-1.0.0.cindy ghost.json main.js ui node assets locales
+zip -X cindy-kanban-1.0.0.cindy ghost.json main.js ui/board.html node/worker.cjs assets/icon.png locales/zh-CN.json locales/en.json locales/ja.json locales/ko.json
 ```
 
 ## License / 许可
 
-MIT
+Apache-2.0

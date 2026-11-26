@@ -17,9 +17,30 @@ async function kvGet() {
   try { const r = await fetch('/kv'); return r.ok ? await r.json() : {}; }
   catch { return {}; }
 }
-async function kvPut(obj) {
-  const r = await fetch('/kv', { method: 'PUT', body: JSON.stringify(obj) });
-  if (!r.ok) throw new Error(`kv write failed: ${r.status}`);
+
+// 写入路径必须严格：GET 失败时不能拿 {} 覆盖整份文档。
+async function kvRead() {
+  const r = await fetch('/kv');
+  if (!r.ok) throw new Error(`kv read failed: ${r.status}`);
+  return await r.json();
+}
+
+// 所有变更串行化，并在队列内重新读取，避免用旧快照覆盖别人的写入。
+let kvQueue = Promise.resolve();
+function kvWrite(mutate) {
+  const task = kvQueue.then(async () => {
+    const current = await kvRead();
+    const result = await mutate(current);
+    const res = await fetch('/kv', { method: 'PUT', body: JSON.stringify(current) });
+    if (!res.ok) throw new Error(`kv write failed: ${res.status}`);
+    return result;
+  });
+  kvQueue = task.then(() => undefined, () => undefined);
+  return task;
+}
+
+function kvFailure(e) {
+  return { ok: false, errorCode: 'KV_UNAVAILABLE', message: String(e?.message ?? e) };
 }
 
 async function snapshot() {
@@ -101,6 +122,17 @@ async function paneRead(args) {
   return { ok: true, text: String(read.text ?? read.content ?? ''), truncated: read.truncated === true };
 }
 
+function herdrFailure(prefix, message) {
+  const unknown = /outcome_unknown/.test(String(message ?? ''));
+  return {
+    ok: false,
+    errorCode: unknown ? 'HERDR_OUTCOME_UNKNOWN' : 'HERDR_ERROR',
+    message: unknown
+      ? `${prefix}：已写入 Herdr 但没收到回包，结果未知。先读画面核对，不要直接重试。`
+      : `${prefix}：${message ?? 'herdr 调用失败'}`,
+  };
+}
+
 async function paneAction(args) {
   const paneId = String(args.paneId ?? '').trim();
   const action = args.action;
@@ -109,19 +141,19 @@ async function paneAction(args) {
     const text = String(args.text ?? '');
     if (!text) return { ok: false, errorCode: 'INVALID_PARAMS', message: 'send 需要 text' };
     const r = await cindy.node.request({ method: 'herdr/send', params: { paneId, text }, timeoutMs: 20000 });
-    if (!r.ok) return { ok: false, errorCode: 'HERDR_ERROR', message: r.message ?? '发送失败' };
+    if (!r.ok) return herdrFailure('发送文本', r.message);
     return { ok: true, sent: true };
   }
   if (action === 'keys') {
     const keys = Array.isArray(args.keys) ? args.keys : [];
     if (!keys.length) return { ok: false, errorCode: 'INVALID_PARAMS', message: 'keys 需要按键数组' };
     const r = await cindy.node.request({ method: 'herdr/keys', params: { paneId, keys }, timeoutMs: 20000 });
-    if (!r.ok) return { ok: false, errorCode: 'HERDR_ERROR', message: r.message ?? '发送按键失败' };
+    if (!r.ok) return herdrFailure('发送按键', r.message);
     return { ok: true, keys };
   }
   if (action === 'interrupt') {
-    const r = await cindy.node.request({ method: 'herdr/keys', params: { paneId, keys: ['C-c'] }, timeoutMs: 20000 });
-    if (!r.ok) return { ok: false, errorCode: 'HERDR_ERROR', message: r.message ?? '中断失败' };
+    const r = await cindy.node.request({ method: 'herdr/keys', params: { paneId, keys: ['ctrl+c'] }, timeoutMs: 20000 });
+    if (!r.ok) return herdrFailure('中断', r.message);
     return { ok: true, interrupted: true };
   }
   return { ok: false, errorCode: 'INVALID_PARAMS', message: 'action 必须是 send/keys/interrupt' };
@@ -162,6 +194,7 @@ async function boardState() {
       queued: data.companions.flatMap(x => x.interactions.map(i => ({ id: x.id, title: i.title }))),
       idle: data.companions.filter(x => ['idle', 'done', 'unread'].includes(x.status) || !x.online).map(x => ({ id: x.id, title: x.name })),
     },
+    projects: (data.projects ?? []).map(p => ({ label: p.label, tasks: p.tasks })),
     agents: aggregate(data),
     errors: data.errors,
   };
@@ -175,7 +208,7 @@ async function dispatch(args) {
   if (kind === 'herdr') {
     if (typeof cindy.node?.request !== 'function') return { ok: false, errorCode: 'UNSUPPORTED_CAPABILITY', message: '本机没有 node worker' };
     const r = await cindy.node.request({ method: 'herdr/prompt', params: { target, text }, timeoutMs: 20000 });
-    if (!r.ok) return { ok: false, errorCode: 'HERDR_ERROR', message: r.message ?? 'herdr 调用失败' };
+    if (!r.ok) return herdrFailure('派活', r.message);
     return { ok: true, targetKind: kind, target, result: r.result };
   }
   if (typeof cindy.targets?.send !== 'function') return { ok: false, errorCode: 'UNSUPPORTED_CAPABILITY', message: '本机没有 targets.send' };
@@ -238,7 +271,7 @@ async function scheduleFind() {
   const parsed = JSON.parse(text);
   const list = parsed.schedules ?? parsed.data ?? parsed;
   const arr = Array.isArray(list) ? list : [];
-  return arr.find(s => s.name === '看板巡检') ?? arr[0] ?? null;
+  return arr.find(s => s.name === '看板巡检') ?? null;
 }
 
 async function scheduleGet() {
@@ -272,17 +305,32 @@ async function scheduleApply(args) {
   } catch (e) { return { ok: false, errorCode: e?.code ?? 'SCHEDULER_ERROR', message: String(e?.message ?? e) }; }
 }
 
+const RUN_TERMINAL = new Set(['completed', 'done', 'failed', 'error', 'cancelled', 'interrupted']);
+
+function messageText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map(block => (block && block.type === 'text' ? block.text : typeof block === 'string' ? block : ''))
+    .filter(Boolean)
+    .join('\n');
+}
+
 async function waitRun(taskId, runId) {
   for (let i = 0; i < 72; i++) {
     await new Promise(r => setTimeout(r, 5000));
-    const s = await cindy.tasks.getRun({ runId });
-    const st = s.status ?? s.run?.status;
-    if (st === 'done' || st === 'completed' || st === 'failed' || st === 'error') {
-      const page = await cindy.tasks.readMessages({ taskId, limit: 10 });
-      const msgs = page.messages ?? [];
-      const last = [...msgs].reverse().find(m => m.role === 'assistant');
-      return { ok: st !== 'failed' && st !== 'error', status: st, text: last?.text ?? '', taskId };
+    const run = await cindy.tasks.getRun({ runId });
+    const status = run.status ?? run.run?.status;
+    if (!RUN_TERMINAL.has(String(status))) continue;
+    const ok = status === 'completed' || status === 'done';
+    let text = '';
+    const outputId = run.outputMessageId ?? run.run?.outputMessageId ?? null;
+    if (ok && outputId) {
+      const page = await cindy.tasks.readMessages({ taskId, limit: 100 });
+      const item = (page.items ?? []).find(x => x.id === outputId);
+      if (item && item.role === 'assistant') text = messageText(item.content).trim();
     }
+    return { ok, status, text, taskId };
   }
   return { ok: false, status: 'timeout', text: '', taskId };
 }
@@ -299,13 +347,13 @@ async function runTaskAndWait({ title, text, route }) {
 }
 
 async function chat(args) {
-  const kv = await kvGet();
-  const history = Array.isArray(kv.chat) ? kv.chat : [];
+  const initial = await kvGet();
   const text = String(args.text ?? '').trim();
-  if (!text) return { ok: true, history: history.slice(-30) };
-
-  history.push({ role: 'user', text, at: Date.now() });
-  let taskId = typeof kv.chatTaskId === 'string' ? kv.chatTaskId : null;
+  if (!text) {
+    const history = Array.isArray(initial.chat) ? initial.chat : [];
+    return { ok: true, history: history.slice(-30) };
+  }
+  let taskId = typeof initial.chatTaskId === 'string' ? initial.chatTaskId : null;
   let task = null;
   if (taskId) { try { task = await cindy.tasks.get({ taskId }); } catch { task = null; } }
   let first = false;
@@ -328,13 +376,27 @@ async function chat(args) {
     ].join('\n\n');
   }
   const revision = task.revision ?? task.task?.revision;
+  try {
+    await kvWrite(kv => {
+      const history = Array.isArray(kv.chat) ? kv.chat : [];
+      history.push({ role: 'user', text, at: Date.now() });
+      kv.chat = history.slice(-30);
+      kv.chatTaskId = taskId;
+      return null;
+    });
+  } catch (e) { return kvFailure(e); }
+
   const run = await cindy.tasks.send({ taskId, expectedRevision: revision, requestKey: `kanban-chat-${Date.now()}-send`, text: fullText });
   const done = await waitRun(taskId, run.runId);
-  history.push({ role: 'assistant', text: done.text || `（${done.status}）`, at: Date.now() });
-  kv.chat = history.slice(-30);
-  kv.chatTaskId = taskId;
-  await kvPut(kv);
-  return { ok: done.ok, status: done.status, reply: done.text, history: kv.chat, taskId };
+  try {
+    const history = await kvWrite(kv => {
+      const log = Array.isArray(kv.chat) ? kv.chat : [];
+      log.push({ role: 'assistant', text: done.text || `（${done.status}）`, at: Date.now() });
+      kv.chat = log.slice(-30);
+      return kv.chat;
+    });
+    return { ok: done.ok, status: done.status, reply: done.text, history, taskId };
+  } catch (e) { return kvFailure(e); }
 }
 
 async function analyze(args) {
@@ -395,13 +457,21 @@ async function handle(message) {
   if (tool === 'board_policy') {
     const args = message.args ?? {};
     if (args.op === 'set') {
-      const kv = await kvGet();
-      if (args.herdrIdleAsBusy !== undefined) kv.herdrIdleAsBusy = args.herdrIdleAsBusy === true;
-      if (args.termInputVisible !== undefined) kv.termInputVisible = args.termInputVisible === true;
-      if (args.policy !== undefined) kv.policy = String(args.policy ?? '');
-      if (args.patrol !== undefined) kv.patrol = String(args.patrol ?? '');
-      await kvPut(kv);
-      return { ok: true, policy: typeof kv.policy === 'string' ? kv.policy : '', patrol: typeof kv.patrol === 'string' ? kv.patrol : '' };
+      try {
+        return await kvWrite(kv => {
+          if (args.herdrIdleAsBusy !== undefined) kv.herdrIdleAsBusy = args.herdrIdleAsBusy === true;
+          if (args.termInputVisible !== undefined) kv.termInputVisible = args.termInputVisible === true;
+          if (args.policy !== undefined) kv.policy = String(args.policy ?? '');
+          if (args.patrol !== undefined) kv.patrol = String(args.patrol ?? '');
+          return {
+            ok: true,
+            policy: typeof kv.policy === 'string' ? kv.policy : '',
+            patrol: typeof kv.patrol === 'string' ? kv.patrol : '',
+            herdrIdleAsBusy: kv.herdrIdleAsBusy === true,
+            termInputVisible: kv.termInputVisible !== false,
+          };
+        });
+      } catch (e) { return kvFailure(e); }
     }
     const kv = await kvGet();
     return { ok: true, policy: typeof kv.policy === 'string' ? kv.policy : '',
@@ -412,12 +482,14 @@ async function handle(message) {
   }
   if (tool === 'board_debug') {
     const args = message.args ?? {};
-    const kv = await kvGet();
-    const events = Array.isArray(kv.debug) ? kv.debug : [];
-    events.push({ at: Date.now(), event: String(args.event ?? ''), extra: args.extra ?? null });
-    kv.debug = events.slice(-40);
-    await kvPut(kv);
-    return { ok: true, n: kv.debug.length };
+    try {
+      return await kvWrite(kv => {
+        const events = Array.isArray(kv.debug) ? kv.debug : [];
+        events.push({ at: Date.now(), event: String(args.event ?? ''), extra: args.extra ?? null });
+        kv.debug = events.slice(-40);
+        return { ok: true, n: kv.debug.length };
+      });
+    } catch (e) { return kvFailure(e); }
   }
   if (tool === 'board_chat') return chat(message.args ?? {});
   if (tool === 'board_schedule_get') return scheduleGet();
@@ -426,19 +498,21 @@ async function handle(message) {
   if (tool === 'board_pane_action') return paneAction(message.args ?? {});
   if (tool === 'board_report') {
     const args = message.args ?? {};
-    const kv = await kvGet();
-    const reports = Array.isArray(kv.reports) ? kv.reports : [];
-    reports.push({
-      at: Date.now(),
-      verdict: String(args.verdict ?? '').slice(0, 200),
-      basis: String(args.basis ?? '').slice(0, 4000),
-      blocked: Array.isArray(args.blocked) ? args.blocked.slice(0, 20) : [],
-      queued: Array.isArray(args.queued) ? args.queued.slice(0, 20) : [],
-      refs: Array.isArray(args.refs) ? args.refs.slice(0, 20).map(String) : [],
-    });
-    kv.reports = reports.slice(-20);
-    await kvPut(kv);
-    return { ok: true, recorded: kv.reports.length };
+    try {
+      return await kvWrite(kv => {
+        const reports = Array.isArray(kv.reports) ? kv.reports : [];
+        reports.push({
+          at: Date.now(),
+          verdict: String(args.verdict ?? '').slice(0, 200),
+          basis: String(args.basis ?? '').slice(0, 4000),
+          blocked: Array.isArray(args.blocked) ? args.blocked.slice(0, 20) : [],
+          queued: Array.isArray(args.queued) ? args.queued.slice(0, 20) : [],
+          refs: Array.isArray(args.refs) ? args.refs.slice(0, 20).map(String) : [],
+        });
+        kv.reports = reports.slice(-20);
+        return { ok: true, recorded: kv.reports.length };
+      });
+    } catch (e) { return kvFailure(e); }
   }
   if (tool === 'board_pick_model') {
     if (typeof cindy.pickModel !== 'function') return { ok: false, errorCode: 'UNSUPPORTED_CAPABILITY', message: '本机没有 pickModel' };

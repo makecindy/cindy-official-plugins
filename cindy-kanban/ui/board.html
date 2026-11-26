@@ -291,13 +291,16 @@ const I18N = {
     cindyCompanions: 'Cindy companions', herdrAgents: 'Herdr agents', noAgents: 'No agents',
     readPane: 'Read pane', refreshPane: 'Refresh', focusHerdr: 'Focus Herdr', close: 'Close',
     inputPh: 'Type and press Enter to send to the pane…', sendFailed: 'Send failed: {e}',
-    termHint: 'Click the terminal and type directly. Enter sends, Tab completes, Ctrl+C interrupts, Ctrl+V pastes.',
+    termHint: 'Draft stays local: type here, Enter sends the whole line. Ctrl+C with an empty draft interrupts the pane.',
     autoRefreshTip: 'Auto refresh every {n}s',
     termPrompt: 'Type here, Enter sends to the pane…',
     sendEnter: 'Send Enter key to the pane',
     copied: 'Selection copied',
     hideInput: 'Hide input bar', showInput: 'Show input bar', inputHidden: 'Input bar hidden',
     keyTab: 'Tab completion', keyEsc: 'Escape', keyInt: 'Ctrl+C (interrupt)', keyUp: 'Previous', keyDown: 'Next',
+    sendFailedKeepDraft: 'Send failed, draft kept: {e}',
+    enterFailedCheck: 'Text sent but Enter failed — check the pane: {e}',
+
   },
   'zh-CN': {
     tabAgent: 'Agent', tabPolicy: '策略', idleBusy: '待命计入在途', refresh: '刷新',
@@ -331,13 +334,16 @@ const I18N = {
     cindyCompanions: 'Cindy 伙伴', herdrAgents: 'Herdr Agent', noAgents: '暂无 agent',
     readPane: '读取画面', refreshPane: '刷新', focusHerdr: '聚焦 Herdr', close: '关闭',
     inputPh: '输入内容，Enter 发送给 pane…', sendFailed: '发送失败：{e}',
-    termHint: '点击终端直接输入。Enter 发送，Tab 补全，Ctrl+C 中断，Ctrl+V 粘贴。',
+    termHint: '草稿保留在本地：在此输入，Enter 发送整行；草稿为空时 Ctrl+C 可中断 pane。',
     autoRefreshTip: '每 {n} 秒自动刷新',
     termPrompt: '在此输入，Enter 发送到 pane…',
     sendEnter: '向 pane 发送回车键',
     copied: '已复制选中内容',
     hideInput: '隐藏输入栏', showInput: '显示输入栏', inputHidden: '输入栏已隐藏',
     keyTab: 'Tab 补全', keyEsc: 'Esc', keyInt: 'Ctrl+C 中断', keyUp: '上一条', keyDown: '下一条',
+    sendFailedKeepDraft: '发送失败，草稿已保留：{e}',
+    enterFailedCheck: '文字已发送，但回车失败，请检查 pane：{e}',
+
   },
   'zh-TW': {
     tabAgent: 'Agent', tabPolicy: '策略', idleBusy: '待命計入在途', refresh: '重新整理',
@@ -407,7 +413,10 @@ const I18N = {
     readPane: '画面を読む', refreshPane: '更新', focusHerdr: 'Herdr にフォーカス', close: '閉じる',
     inputPh: 'Enter で pane に送信…', sendFailed: '送信に失敗：{e}',
     keyTab: 'Tab 補完', keyEsc: 'Esc', keyInt: 'Ctrl+C 中断', keyUp: '前へ', keyDown: '次へ',
-    termHint: "ターミナルをクリックして直接入力します。Enter 送信、Tab 補完、Ctrl+C 中断、Ctrl+V 貼り付け。",
+    termHint: '下書きはローカルに保持されます。ここに入力し、Enter で行ごと送信。下書きが空のときの Ctrl+C は pane の中断です。',
+    sendFailedKeepDraft: '送信に失敗しました（下書きは保持）：{e}',
+    enterFailedCheck: '本文は送信されましたが Enter に失敗しました。pane を確認してください：{e}',
+
   },
   ko: {
     tabAgent: 'Agent', tabPolicy: '정책', idleBusy: '대기를 진행 중으로 계산', refresh: '새로고침',
@@ -442,7 +451,10 @@ const I18N = {
     readPane: '화면 읽기', refreshPane: '새로고침', focusHerdr: 'Herdr로 이동', close: '닫기',
     inputPh: 'Enter로 pane에 전송…', sendFailed: '전송 실패: {e}',
     keyTab: 'Tab 자동완성', keyEsc: 'Esc', keyInt: 'Ctrl+C 중단', keyUp: '이전', keyDown: '다음',
-    termHint: "터미널을 클릭해 바로 입력합니다. Enter 전송, Tab 자동완성, Ctrl+C 중단, Ctrl+V 붙여넣기.",
+    termHint: '초안은 로컬에 남습니다. 여기에 입력하고 Enter로 줄 전체를 전송합니다. 초안이 비었을 때 Ctrl+C는 pane 중단입니다.',
+    sendFailedKeepDraft: '전송 실패, 초안은 유지됩니다: {e}',
+    enterFailedCheck: '텍스트는 전송됐지만 Enter가 실패했습니다. pane을 확인하세요: {e}',
+
   },
   es: {
     tabAgent: 'Agente', tabPolicy: 'Política', idleBusy: 'Contar espera como en curso', refresh: 'Actualizar',
@@ -835,12 +847,6 @@ function openTarget(kind, id) {
 }
 
 let termTimer = null;
-const TERM_KEYMAP = {
-  Enter: ['enter'], Tab: ['tab'], Backspace: ['backspace'], Escape: ['escape'],
-  ArrowUp: ['up'], ArrowDown: ['down'], ArrowLeft: ['left'], ArrowRight: ['right'],
-  Delete: ['delete'], Home: ['home'], End: ['end'], PageUp: ['pageup'], PageDown: ['pagedown'],
-};
-const TERM_CTRL = { c: 'ctrl+c', d: 'ctrl+d', l: 'ctrl+l', z: 'ctrl+z', a: 'ctrl+a', e: 'ctrl+e', k: 'ctrl+k', u: 'ctrl+u', w: 'ctrl+w', r: 'ctrl+r' };
 
 async function openPaneModal(paneId, title) {
   closePaneModal();
@@ -895,18 +901,30 @@ async function openPaneModal(paneId, title) {
     } catch (e) { toast(t('sendFailed', { e: e?.message ?? e }), true); }
     scheduleRefresh();
   }
+  let sending = false;
   async function sendLine() {
-    void debugLog('send-click', {});
+    if (sending) return;
     const text = line.value;
-    if (!text) { await sendKeys(['enter']); return; }
-    line.value = '';
-    echo.textContent = `› ${text}`;
+    if (!text) return;
+    sending = true;
+    void debugLog('send-click', {});
     try {
-      const r = await call('board_pane_action', { paneId, action: 'send', text });
-      if (!r.ok) toast(t('sendFailed', { e: r.message ?? r.errorCode ?? '' }), true);
-    } catch (e) { toast(t('sendFailed', { e: e?.message ?? e }), true); }
-    await sendKeys(['enter']);
-    setTimeout(() => { echo.textContent = ''; }, 1200);
+      const sent = await call('board_pane_action', { paneId, action: 'send', text });
+      if (!sent.ok) {
+        toast(t('sendFailedKeepDraft', { e: sent.message ?? sent.errorCode ?? '' }), true);
+        return;
+      }
+      line.value = '';
+      echo.textContent = `› ${text}`;
+      const entered = await call('board_pane_action', { paneId, action: 'keys', keys: ['enter'] });
+      if (!entered.ok) toast(t('enterFailedCheck', { e: entered.message ?? entered.errorCode ?? '' }), true);
+      setTimeout(() => { echo.textContent = ''; }, 1200);
+    } catch (e) {
+      toast(t('sendFailedKeepDraft', { e: e?.message ?? e }), true);
+    } finally {
+      sending = false;
+      scheduleRefresh();
+    }
   }
 
   const promptRow = modal.querySelector('.term-prompt');
@@ -937,37 +955,33 @@ async function openPaneModal(paneId, title) {
   enterBtn.onclick = () => { void sendKeys(['enter']); line.focus(); };
 
   let lastEnterAt = 0;
+  // 草稿全部本地编辑：只把 Enter 变成「发送整行」，其余按键不触碰远端 pane。
+  // Ctrl+C 只在草稿为空时作为中断手段，避免误伤本地编辑。
   function handleKey(e, phase) {
-    if (e.key === 'Enter') {
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       const now = Date.now();
-      if (now - lastEnterAt < 250) return;
+      if (now - lastEnterAt < 400) return;
       lastEnterAt = now;
       void debugLog('enter-' + phase, {});
       void sendLine();
-      return true;
+      return;
     }
-    if (e.isComposing) return false;
-    if (e.metaKey) return false;
-    if (e.ctrlKey) {
-      const name = TERM_CTRL[e.key.toLowerCase()];
-      if (name) { e.preventDefault(); void sendKeys([name]); return true; }
-      return false;
+    if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'c' && !line.value) {
+      e.preventDefault();
+      void sendKeys(['ctrl+c']);
     }
-    const mapped = TERM_KEYMAP[e.key];
-    if (mapped) { e.preventDefault(); void sendKeys(mapped); return true; }
-    return false;
   }
   line.addEventListener('keydown', e => {
     if (line.dataset.logged !== '1') { line.dataset.logged = '1'; void debugLog('keydown', { key: e.key, composing: e.isComposing }); }
     handleKey(e, 'down');
   });
-  line.addEventListener('keyup', e => { if (e.key === 'Enter') handleKey(e, 'up'); });
-  // 主进程/宿主可能吞掉元素级按键：document 捕获兜底（只在弹窗打开时生效）
+  // 宿主可能吞元素级按键：仅在焦点不在输入行时兜底 Enter
   const docKeydown = e => {
     if (!document.querySelector('.term-modal')) return;
     if (e.target === line) return;
-    if (e.target instanceof HTMLElement && e.target.closest('.term-modal') && e.target !== line) return;
+    if (e.target instanceof HTMLElement && e.target.closest('.term-modal')) return;
     handleKey(e, 'doc');
   };
   window.__kanbanDocKey = docKeydown;

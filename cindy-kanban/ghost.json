@@ -4,7 +4,7 @@
   "name": "Agent 看板",
   "description": "侧栏看板：四列展示 Cindy 伙伴与 Herdr agent，点卡片跳转对话或 pane，支持策略、启发分析和自动机制。",
   "whenToUse": "用户想一眼看清各个 agent 和任务谁在跑、谁卡住、谁排队、谁空闲，要制定调度策略、分析现状或设置自动机制时使用。",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minCindyVersion": "0.1.144",
   "entry": "main.js",
   "icon": "assets/icon.png",
@@ -101,6 +101,18 @@
           },
           "policy": {
             "type": "string"
+          },
+          "patrol": {
+            "type": "string",
+            "description": "巡检方式：每轮检查哪些列、阈值与处理规则"
+          },
+          "herdrIdleAsBusy": {
+            "type": "boolean",
+            "description": "Herdr idle 是否计入在途"
+          },
+          "termInputVisible": {
+            "type": "boolean",
+            "description": "终端输入行是否显示"
           }
         },
         "required": [
@@ -278,7 +290,7 @@
           },
           "time": {
             "type": "string",
-            "description": "HH:MM，daily/weekly 时使用"
+            "description": "daily/weekly 的时间点 HH:MM"
           },
           "weekday": {
             "type": "number",
@@ -286,10 +298,37 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "interval",
+              "daily",
+              "weekly"
+            ],
+            "description": "重复方式"
+          },
+          "every": {
+            "type": "number",
+            "description": "interval 模式下的数量"
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "minutes",
+              "hours"
+            ],
+            "description": "interval 模式的单位"
+          },
+          "weekdays": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "weekly 模式下的星期，0=周日…6=周六"
           }
         },
         "required": [
-          "preset",
           "enabled"
         ],
         "additionalProperties": false
@@ -353,7 +392,8 @@
         },
         "board_policy": {
           "visibility": [
-            "app"
+            "app",
+            "model"
           ]
         },
         "board_report": {
@@ -432,5 +472,6 @@
     "ja": "locales/ja.json",
     "ko": "locales/ko.json"
   },
-  "releaseNotes": "首个公开版本：Cindy/Herdr 双视图四列看板、点击跳转对话或 pane、可交互彩色终端、底部指挥聊天框、Outlook 式巡检计划与常驻策略、启发分析与自动机制。未安装 Herdr 时自动降级为 Cindy 单视图。"
+  "releaseNotes": "修复评审提出的问题：任务回复改按 outputMessageId 读取、KV 写入串行化并按最新数据合并、Herdr 写入超时标记为结果未知、巡检自动化改精确同名匹配、终端草稿改为纯本地编辑且发送失败不再回车、补齐 board_state 的项目任务与 board_policy 的模型可见性、清单补齐 author 与策略/巡检参数。",
+  "author": "joei4cm"
 }
