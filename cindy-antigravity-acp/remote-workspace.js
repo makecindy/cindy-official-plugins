@@ -240,7 +240,7 @@ function startRemoteWorkspace(agyPath, host) {
     return;
   }
 
-  /** `handshake` → `ready` (initialize answered) → `opening` (session process starting) → `session`. */
+  /** `handshake` → `ready` (initialize answered) → `opening` (session process initializing) → `opening-session` (session open in flight) → `session`. */
   let phase = 'handshake';
   let initRequest = null;
   let probe = null;
@@ -250,6 +250,7 @@ function startRemoteWorkspace(agyPath, host) {
   let finished = false;
   let stopCode = null;
   let forceTimer = null;
+  let agentCloseTimer = null;
   let stdinEnded = false;
   const queued = [];
   const children = new Set();
@@ -310,6 +311,7 @@ function startRemoteWorkspace(agyPath, host) {
     if (finished) return;
     finished = true;
     clearTimeout(forceTimer);
+    clearTimeout(agentCloseTimer);
     const done = () => process.exit(code);
     if (process.stdout.writableLength > 0) {
       process.stdout.once('drain', done);
@@ -447,16 +449,43 @@ function startRemoteWorkspace(agyPath, host) {
       if (current !== agent) return;
       agentExited = true;
       const status = stopCode !== null ? stopCode : exitCodeFor(code, signal);
-      const closeTimer = setTimeout(() => finish(status), timings.flush);
-      current.once('close', () => {
+      const endIfCurrent = () => {
         clearTimeout(closeTimer);
+        if (current !== agent) return;
+        if (agentCloseTimer === closeTimer) agentCloseTimer = null;
         finish(status);
-      });
+      };
+      const closeTimer = setTimeout(endIfCurrent, timings.flush);
+      agentCloseTimer = closeTimer;
+      current.once('close', endIfCurrent);
     });
     current.stdout.on('data', lineSplitter((line) => onAgentLine(current, line)));
     // The session process has not seen Cindy's `initialize` yet; its answer stays here.
     toAgent(initRequest);
     if (stdinEnded) endAgentInput();
+  };
+
+  const failOpen = (current, error) => {
+    const failedId = sessionRequest.id;
+    phase = 'ready';
+    agent = null;
+    agentExited = false;
+    sessionRequest = null;
+    serverNames = [];
+    seenCalls.clear();
+    clearTimeout(forceTimer);
+    forceTimer = null;
+    clearTimeout(agentCloseTimer);
+    agentCloseTimer = null;
+    toClient({ jsonrpc: '2.0', id: failedId, error });
+    for (const pending of queued.splice(0)) {
+      const pendingMessage = parseLine(pending);
+      if (pendingMessage && pendingMessage.id !== undefined) {
+        refuse(pendingMessage.id, -32600, 'Open a session first');
+      }
+    }
+    stopChild(current);
+    if (stdinEnded) finish(0);
   };
 
   const onAgentLine = (current, line) => {
@@ -468,26 +497,20 @@ function startRemoteWorkspace(agyPath, host) {
     }
     if (phase === 'opening' && message.id === initRequest.id && message.method === undefined) {
       if (message.error) {
-        const failedId = sessionRequest.id;
-        phase = 'ready';
-        agent = null;
-        agentExited = false;
-        sessionRequest = null;
-        serverNames = [];
-        clearTimeout(forceTimer);
-        forceTimer = null;
-        toClient({ jsonrpc: '2.0', id: failedId, error: message.error });
-        for (const pending of queued.splice(0)) {
-          const pendingMessage = parseLine(pending);
-          if (pendingMessage && pendingMessage.id !== undefined) {
-            refuse(pendingMessage.id, -32600, 'Open a session first');
-          }
-        }
-        stopChild(current);
-        if (stdinEnded) finish(0);
+        failOpen(current, message.error);
         return;
       }
       toAgent(sessionRequest);
+      phase = 'opening-session';
+      return;
+    }
+    if (phase === 'opening-session' && message.id === sessionRequest.id && message.method === undefined) {
+      if (message.error) {
+        failOpen(current, message.error);
+        return;
+      }
+      toClientLine(line, current.stdout);
+      sessionRequest = null;
       phase = 'session';
       for (const pending of queued.splice(0)) forwardClientLine(pending);
       return;
@@ -543,7 +566,7 @@ function startRemoteWorkspace(agyPath, host) {
       forwardClientLine(line, message);
       return;
     }
-    if (phase === 'opening') {
+    if (phase === 'opening' || phase === 'opening-session') {
       queued.push(line);
       return;
     }
