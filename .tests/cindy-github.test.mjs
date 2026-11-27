@@ -102,7 +102,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.48');
+  assert.equal(manifest.version, '1.5.49');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -645,6 +645,10 @@ test('settings.html ships no hardcoded copy before the host locale is known', ()
 // card HTML on desktop and projects only its text plus aria-label buttons on the phone,
 // so the visible text and the actions handed to the task's agent are the contract.
 const zhCopy = createRuntime().context.MESSAGES['zh-CN'];
+const followWorkflow = {
+  skill: 'pr', entry: 'skills/pr/SKILL.md', checker: 'skills/pr/scripts/pr-heartbeat-gate.mjs',
+  read: zhCopy.prFollowWorkflowRead, on_manual_failure: zhCopy.prFollowWorkflowFallback,
+};
 const fill = (text, vars) => text.replace(/\{(\w+)\}/g, (match, name) => (name in vars ? String(vars[name]) : match));
 
 function visibleText(html) {
@@ -776,6 +780,7 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
   assert.equal(cardId, ask.callId);
   assert.deepEqual(ask.reply.result, {
     card_id: cardId, stage: 'ask', settings: { auto_rename: false, auto_follow: false }, next: zhCopy.prNextAsk,
+    follow_workflow: followWorkflow,
   });
   const askCard = runtime.lastCard(cardId);
   assert.equal(askCard.state, 'done');
@@ -794,6 +799,7 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
     event: {
       card_id: cardId, action: 'publish', repo: 'octo/repo', head: 'feat/pr-card', base: 'main',
       settings: { auto_rename: false, auto_follow: false },
+      follow_workflow: followWorkflow,
     },
   }]);
   assert.deepEqual(visibleText(runtime.lastCard(cardId).html), [
@@ -1344,6 +1350,7 @@ test('card settings pick the auto-follow model with the host picker and hand its
 
   await runtime.tool({ card_id: cardId, pr: '7' });
   await runtime.click(cardId, 'pr:follow');
+  assert.deepEqual(runtime.agentRuns.at(-1).event.follow_workflow, followWorkflow);
   assert.deepEqual(runtime.agentRuns.at(-1).event.follow_model, {
     model_agent_kind: 'claude-code', provider_id: 'anthropic', model: 'claude-sonnet-5-5', effort: 'medium', fast_mode: false, label: 'Sonnet 5.5 · Anthropic',
   });
@@ -1967,6 +1974,15 @@ test('IM follow settings share card preferences and selected remote model withou
   const runtime = createPrRuntime({ kv: { unrelated: 'keep', prCard: { autoRename: true, autoFollow: true, followModel: model } }, github: prGraphql() });
   const read = await runtime.tool({}, 'pr_follow_settings');
   assert.equal(read.reply.ok, true);
+  assert.deepEqual(read.reply.result.follow_workflow, followWorkflow);
+  // Recover from a missing Manual using files actually shipped with this plugin,
+  // without depending on an assumed checkout or install-directory layout.
+  for (const entry of [followWorkflow.entry, followWorkflow.checker]) {
+    assert.ok(readFileSync(new URL(`../cindy-github/${entry}`, import.meta.url), 'utf8').length > 0);
+  }
+  assert.match(followWorkflow.read, /同一 namespace/);
+  assert.match(followWorkflow.on_manual_failure, /ghost_manual.*未声明手册/);
+  assert.match(followWorkflow.on_manual_failure, /不要另写、复制或内联/);
   assert.deepEqual(read.reply.result.settings, {
     auto_rename: true, auto_follow: true,
     follow_model: { model_agent_kind: 'claude-code', provider_id: 'example-provider', model: 'example-model', effort: 'high', fast_mode: false, agent_device_id: 'example-device', label: 'Example' },
@@ -2171,6 +2187,7 @@ function followScheduler(options = {}) {
     } },
     node: { async request({ method }) {
       assert.equal(method, 'followSkillDir');
+      if (options.beforeDir) options.beforeDir(rows);
       if (options.failDir) throw new Error('skill directory temporarily unavailable');
       const dir = options.skillDir ?? '/approved skills/agent-skills/skills/_root__cindy-github--pr';
       return { ok: true, result: options.platform === undefined ? dir : { dir, platform: options.platform } };
@@ -3138,6 +3155,40 @@ test('a bound card whose Stop fails transiently on read keeps Stop retryable and
       assert.equal(afterStop.reply.result.follow_state, 'stopped', scenario);
       assert.equal(afterStop.reply.result.note, undefined, scenario);
     }
+  }
+});
+
+test('bound Stop reads skill dir before the final schedule_get so edits during dir lookup block deletion', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  for (const edit of ['hook', 'ownership']) {
+    const fault = {};
+    const { hostApi, calls, rows } = followScheduler(fault);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_state, 'active', edit);
+
+    const customHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 };
+    fault.beforeDir = (liveRows) => {
+      const row = liveRows.get('sch-1');
+      if (!row) return;
+      if (edit === 'hook') row.preRunHook = customHook;
+      else row.targetSessionId = 'edited-session';
+    };
+
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(calls.filter((c) => c === 'schedule_delete').length, 0, edit);
+    assert.equal(rows.has('sch-1'), true, edit);
+    if (edit === 'hook') assert.deepEqual(rows.get('sch-1').preRunHook, customHook, edit);
+    else assert.equal(rows.get('sch-1').targetSessionId, 'edited-session', edit);
+
+    const card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(card.scheduleId, 'sch-1', edit);
+    assert.equal(card.following, false, edit);
+    assert.equal(card.scheduleStatus, 'unverified', edit);
+    assert.equal(card.pending, null, edit);
+    assert.equal(card.scheduleAction, null, edit);
+    assert.equal(card.scheduleErrorSource, 'verify', edit);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, edit);
   }
 });
 

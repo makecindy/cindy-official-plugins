@@ -95,6 +95,46 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
         // An agy that ignored the agent's tool list: one of its own tools runs, and the turn stays open.
         send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'call-n',
           name: 'write_to_file', kind: 'edit', title: 'note.txt', status: 'in_progress' } } });
+      } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'cards') {
+        // Native UI tools (even if tagged with edit/execute kinds) are adapted when elicitation.form is negotiated,
+        // preserved unchanged on older hosts, and failure updates are never dropped.
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'steps-r1',
+          name: 'update_steps', kind: 'edit', title: 'Run update_steps', status: 'in_progress',
+          rawInput: { steps: [{ title: 'Inspect', status: 'done' }, { title: 'Optional', status: 'skipped' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'steps-r1',
+          kind: 'edit', status: 'completed',
+          rawInput: { steps: [{ title: 'Inspect', status: 'done' }, { title: 'Optional', status: 'skipped' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'steps-r2',
+          name: 'update_steps', kind: 'edit', title: 'Run update_steps', status: 'in_progress',
+          rawInput: { steps: [{ title: 'Verify', status: 'in_progress' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'steps-r2',
+          kind: 'edit', status: 'failed', rawOutput: 'validation failed' } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ask-r1',
+          name: 'ask_question', kind: 'execute', title: 'Run ask_question', status: 'in_progress' } } });
+        send({ id: message.id, result: { stopReason: 'end_turn' } });
+      } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'cards_and_mcp') {
+        // Mix Antigravity native ask_question/update_steps with external MCP tools sharing the exact same names.
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'steps-native',
+          name: 'update_steps', kind: 'edit', title: 'Run update_steps', status: 'in_progress',
+          rawInput: { steps: [{ title: 'Native plan', status: 'in_progress' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ask-native',
+          name: 'ask_question', kind: 'execute', title: 'Run ask_question', status: 'in_progress' } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ext-ask',
+          name: 'ask_question', kind: 'other', title: 'Run ask_question', status: 'in_progress',
+          rawInput: { ServerName: 'partner', ToolName: 'ask_question', Arguments: { prompt: 'External prompt' } } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ext-steps',
+          name: 'update_steps', kind: 'other', title: 'Run update_steps', status: 'in_progress',
+          rawInput: { ServerName: 'partner', ToolName: 'update_steps', Arguments: { steps: [{ title: 'External step', status: 'in_progress' }] } } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'ext-steps',
+          name: 'update_steps', kind: 'other', title: 'Run update_steps', status: 'completed',
+          rawInput: { steps: [{ title: 'External step', status: 'done' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ext-direct',
+          name: 'mcp_partner_update_steps', kind: 'other', title: 'Run mcp_partner_update_steps', status: 'in_progress',
+          rawInput: { steps: [{ title: 'Direct MCP step', status: 'in_progress' }], toolSummary: 'update steps' } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'ext-direct',
+          name: 'update_steps', kind: 'other', title: 'Run update_steps', status: 'completed',
+          rawInput: { steps: [{ title: 'Direct MCP step', status: 'done' }] } } } });
+        send({ id: message.id, result: { stopReason: 'end_turn' } });
       } else if (message.method === 'session/prompt') {
         promptId = message.id;
         send({ id: 'perm-1', method: 'session/request_permission', params: { sessionId: 'sess-1',
@@ -113,6 +153,7 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
   return;
 }
 // Every launch must pass the constant ACP args (including no paid credits and no telemetry).
+if (args[0] === '--log-file' && require('node:path').isAbsolute(args[1]) && require('node:path').basename(args[1]) === 'session.log') args.splice(0, 2);
 if (JSON.stringify(args) !== ${JSON.stringify(JSON.stringify(EXPECTED_ACP_ARGS))}) {
   process.stderr.write('fake-agy: unexpected arguments ' + JSON.stringify(args) + '\\n');
   process.exit(2);
@@ -421,7 +462,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.deepEqual(launch.files, ['.agents'], 'agy runs in a directory holding only the agent definition');
     assert.ok(!samePath(launch.cwd, os.tmpdir()), 'not the shared temp folder');
     // One harmless tool of agy's own; the servers by name only. Their address and the task token stay in session/new.
-    assert.match(launch.definition, /^tools:\n  - search_web\nmcpServers:\n  - name: cindy_exec\n  - name: cindy\n---$/m);
+    assert.match(launch.definition, /^tools:\n  - search_web\n  - ask_question\n  - update_steps\nmcpServers:\n  - name: cindy_exec\n  - name: cindy\n---$/m);
     assert.doesNotMatch(launch.definition, /task-secret|127\.0\.0\.1/);
     assert.deepEqual(launch.session, { cwd: '/shadow/p', mcpServers: [server('cindy_exec'), server('cindy')] });
 
@@ -483,6 +524,173 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.ok(!fs.existsSync(launchFile), 'the session process was never started');
     bridge.child.stdin.end();
     assert.equal((await bridge.closed).code, 0);
+  });
+
+  test('remote-workspace mode adapts native update_steps and ask_question updates through the relay and preserves compatibility without elicitation.form', async (t) => {
+    const withForm = remoteSession(t, { FAKE_AGY_SCRIPT: 'cards' });
+    withForm.send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { elicitation: { form: {} } } },
+    });
+    await withForm.reply(0, 'initialize answer');
+    withForm.send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [withForm.server('cindy_exec')] } });
+    await withForm.reply(1, 'session/new answer');
+    withForm.send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'plan and ask' }] } });
+    assert.deepEqual((await withForm.reply(2, 'prompt answer')).result, { stopReason: 'end_turn' });
+    const updates = withForm.messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates, [
+      {
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Inspect', priority: 'medium', status: 'completed' },
+          { content: 'Optional', priority: 'medium', status: 'completed' },
+        ],
+      },
+      {
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Verify', priority: 'medium', status: 'in_progress' },
+        ],
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'steps-r2',
+        kind: 'edit',
+        status: 'failed',
+        rawOutput: 'validation failed',
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ask-r1',
+        name: 'AskUserQuestion',
+        kind: 'execute',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+    ]);
+    withForm.bridge.child.stdin.end();
+    assert.equal((await withForm.bridge.closed).code, 0);
+
+    // Older Cindy hosts (without elicitation.form) keep the raw update_steps and ask_question tool rows unchanged.
+    const legacy = remoteSession(t, { FAKE_AGY_SCRIPT: 'cards' });
+    legacy.send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false } } },
+    });
+    await legacy.reply(0, 'legacy initialize answer');
+    legacy.send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [legacy.server('cindy_exec')] } });
+    await legacy.reply(1, 'legacy session/new answer');
+    legacy.send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'plan and ask' }] } });
+    assert.deepEqual((await legacy.reply(2, 'legacy prompt answer')).result, { stopReason: 'end_turn' });
+    const legacyUpdates = legacy.messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.equal(legacyUpdates.some((u) => u.sessionUpdate === 'plan'), false);
+    assert.equal(legacyUpdates[0].name, 'update_steps');
+    assert.equal(legacyUpdates.at(-1).name, 'ask_question');
+    legacy.bridge.child.stdin.end();
+    assert.equal((await legacy.bridge.closed).code, 0);
+  });
+
+  test('remote-workspace mode checks MCP ownership before native card adaptation while keeping local-tool blocking active', async (t) => {
+    const relay = remoteSession(t, { FAKE_AGY_SCRIPT: 'cards_and_mcp' });
+    relay.send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { elicitation: { form: {} } } },
+    });
+    await relay.reply(0, 'initialize answer');
+    relay.send({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'session/new',
+      params: { cwd: '/shadow/p', mcpServers: [relay.server('cindy_exec'), relay.server('partner')] },
+    });
+    await relay.reply(1, 'session/new answer');
+    relay.send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'native and mcp' }] } });
+    assert.deepEqual((await relay.reply(2, 'prompt answer')).result, { stopReason: 'end_turn' });
+    const updates = relay.messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates, [
+      {
+        sessionUpdate: 'plan',
+        entries: [{ content: 'Native plan', priority: 'medium', status: 'in_progress' }],
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ask-native',
+        name: 'AskUserQuestion',
+        kind: 'execute',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ext-ask',
+        name: 'mcp__partner__ask_question',
+        kind: 'other',
+        title: 'mcp__partner__ask_question',
+        status: 'in_progress',
+        rawInput: { prompt: 'External prompt' },
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ext-steps',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'in_progress',
+        rawInput: { steps: [{ title: 'External step', status: 'in_progress' }] },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'ext-steps',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'completed',
+        rawInput: { steps: [{ title: 'External step', status: 'done' }] },
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ext-direct',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'in_progress',
+        rawInput: { steps: [{ title: 'Direct MCP step', status: 'in_progress' }] },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'ext-direct',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'completed',
+        rawInput: { steps: [{ title: 'Direct MCP step', status: 'done' }] },
+      },
+    ]);
+    relay.bridge.child.stdin.end();
+    assert.equal((await relay.bridge.closed).code, 0);
+
+    // Local file/command tools still terminate the remote task even when elicitation.form is negotiated.
+    const blocked = remoteSession(t, { FAKE_AGY_SCRIPT: 'native' });
+    blocked.send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { elicitation: { form: {} } } },
+    });
+    await blocked.reply(0, 'blocked initialize answer');
+    blocked.send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [blocked.server('cindy_exec')] } });
+    await blocked.reply(1, 'blocked session/new answer');
+    blocked.send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'write a note' }] } });
+    const closed = await Promise.race([blocked.bridge.closed, new Promise((resolve) => setTimeout(() => resolve(null), 8_000))]);
+    assert.ok(closed, 'the entry ended the task');
+    assert.equal(closed.code, 78);
+    assert.match(blocked.bridge.stderr.text(), /its own tool "write_to_file"/);
   });
 
   test('remote-workspace mode stops the task when Antigravity uses a tool of its own', async (t) => {
@@ -2307,7 +2515,82 @@ test('native /usage preserves exhausted groups and ignores model turns and disab
   assert.equal(usageFromReport({ status: 'SUCCESS', num_turns: 1, command }), null);
 });
 
-async function localRelay(t) {
+if (official) test('launches the Windows verification probe with the CLI updater disabled', async t => {
+  const fx = makeFixture(t);
+  const launch = path.join(fx.dir, 'usage-environment');
+  const { createVerification } = await import(pathToFileURL(path.join(root, 'agy-verification.js')));
+  const owner = createVerification(fx.agyPath, { platform: 'win32', env: { ...fx.env, FAKE_AGY_LAUNCHFILE: launch } });
+  t.after(() => owner.dispose());
+  fs.writeFileSync(owner.taskLog, 'I1127 15:13:05.876413     68 server_oauth.go:226] OAuth: authenticated successfully as a@example.test\n');
+  assert.deepEqual(await owner.check(owner.sessionAccount()), { status: 'unknown' });
+  assert.equal(fs.readFileSync(launch, 'utf8'), 'true');
+});
+
+if (official) test('binds usage checks to the opening ACP account and removes a pending probe on relay exit', async t => {
+  const fx = makeFixture(t);
+  const control = path.join(fx.dir, 'control');
+  fs.writeFileSync(path.join(fx.dir, 'fake-agy.js'), String.raw`
+    const fs = require('node:fs'), path = require('node:path');
+    const args = process.argv.slice(2), control = process.env.TEST_CONTROL;
+    const log = args[args.indexOf('--log-file') + 1];
+    const identity = who => 'I1127 15:13:05.876413     68 server_oauth.go:226] OAuth: authenticated successfully as ' + who + '@example.test\n';
+    if (args.includes('/usage')) {
+      const [who, state] = fs.readFileSync(control, 'utf8').split(' ');
+      if (process.platform === 'win32' && process.env.AGY_CLI_DISABLE_AUTO_UPDATE !== 'true') process.exit(2);
+      const error = { code:403, status:'PERMISSION_DENIED', details:[{reason:'VALIDATION_REQUIRED',domain:'cloudcode-pa.googleapis.com',
+        '@type':'type.googleapis.com/google.rpc.ErrorInfo',metadata:{validation_url:process.env.TEST_LANDING}}] };
+      fs.writeFileSync(log, (who === '?' ? '' : identity(who)) + (state === 'gate' ? JSON.stringify({error}, null, 2) : ''));
+      fs.writeFileSync(control + '.probe', process.cwd());
+      if (state === 'hold') setInterval(() => {}, 1000);
+      else console.log(JSON.stringify({status:'SUCCESS', num_turns:0,command:{name:'usage',data:{groups:[{name:'test',buckets:[{window:'5h',remaining_fraction:1}]}]}}}));
+    } else {
+      fs.writeFileSync(log, identity('a'));
+      fs.writeFileSync(control + '.session', path.resolve(log));
+      require('node:readline').createInterface({input:process.stdin}).on('line', line => {
+        const {id,method} = JSON.parse(line), result = method === 'initialize'
+          ? {agentInfo:{name:'Antigravity ACP Server',version:'1.5.18'}} : {sessionId:'one'};
+        console.log(JSON.stringify({jsonrpc:'2.0',id,result}));
+      });
+    }`);
+  const landing = 'https://accounts.google.com/v3/signin/continue?plt=test&continue=https://developers.google.com/gemini-code-assist/auth/auth_success_gemini';
+  const bridge = startBridge({ ...fx.env, TEST_CONTROL: control, TEST_LANDING: landing });
+  t.after(() => bridge.child.stdin.end());
+  let next = 0;
+  const send = method => {
+    const id = ++next;
+    bridge.child.stdin.write(JSON.stringify({ jsonrpc:'2.0', id, method, params:{sessionId:'one'} }) + '\n');
+    return id;
+  };
+  const call = async method => {
+    const id = send(method);
+    const response = () => bridge.stdout.text().trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).find(item => item.id === id);
+    await waitFor(response, 6000, method);
+    return response().result;
+  };
+  await call('initialize');
+  await call('session/new');
+  const probe = '_cindy/checkAccountVerification';
+  for (const [input, result] of [
+    ['a gate', { status:'required', url:landing }], ['b ready', { status:'unknown' }],
+    ['b gate', { status:'unknown' }], ['? ready', { status:'unknown' }], ['a ready', { status:'ready' }],
+  ]) {
+    fs.writeFileSync(control, input);
+    assert.deepEqual(await call(probe), result);
+    assert.equal(fs.existsSync(fs.readFileSync(control + '.probe', 'utf8')), false);
+  }
+  fs.rmSync(control + '.probe');
+  fs.writeFileSync(control, 'a hold');
+  send(probe);
+  await waitFor(() => fs.existsSync(control + '.probe'), 6000, 'live verification child');
+  bridge.child.stdin.end();
+  assert.equal((await bridge.closed).code, 0);
+  assert.equal(fs.existsSync(fs.readFileSync(control + '.probe', 'utf8')), false);
+  assert.equal(fs.existsSync(path.dirname(fs.readFileSync(control + '.session', 'utf8'))), false);
+  assert.ok(!bridge.stdout.text().includes('@example.test'));
+  assert.ok(!bridge.stderr.text().includes('@example.test'));
+});
+
+async function localRelay(t, checkAccount) {
   const { PassThrough } = await import('node:stream');
   const { default: steering } = await import(pathToFileURL(path.join(root, 'agy-steering.js')));
   const source = new PassThrough();
@@ -2317,7 +2600,7 @@ async function localRelay(t) {
   const client = [];
   child.stdin.on('data', (data) => server.push(JSON.parse(data)));
   output.on('data', (data) => client.push(JSON.parse(data)));
-  steering.attachSteering(source, output, child, (error) => { throw error; });
+  steering.attachSteering(source, output, child, (error) => { throw error; }, undefined, checkAccount && { sessionAccount: () => "synthetic", check: checkAccount });
   const write = (stream, message) => stream.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
   const request = (id, method, extra = {}) => write(source, { id, method, params: { sessionId: 'one', ...extra } });
   const response = (id, result) => write(child.stdout, { id, result });
@@ -2329,6 +2612,25 @@ async function localRelay(t) {
 }
 
 describe('Antigravity local ACP relay', () => {
+  if (official) test('returns account verification only for the live native session and a provider 403', async t => {
+    const { default: verification } = await import(pathToFileURL(path.join(root, 'agy-verification.js')));
+    const url = 'https://accounts.google.com/v3/signin/continue?plt=synthetic&continue=https://developers.google.com/gemini-code-assist/auth/auth_success_gemini';
+    const detail = { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', domain: 'cloudcode-pa.googleapis.com',
+      reason: 'VALIDATION_REQUIRED', metadata: { validation_url: url } };
+    const log = (code, item) => 'agy diagnostics: ' + JSON.stringify({ error: { code, status: 'PERMISSION_DENIED', details: [item] } }, null, 2);
+    assert.equal(verification.validationUrl(log(429, detail)), null);
+    assert.equal(verification.validationUrl(log(403, { ...detail, domain: 'example.test' })), null);
+    assert.equal(verification.validationUrl(log(403, { ...detail, reason: 'OTHER' })), null);
+    const probe = () => Promise.resolve({ status: 'required', url: verification.validationUrl(log(403, detail)) });
+    const { server, client, request, response } = await localRelay(t, probe);
+    request(1, 'initialize');
+    response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.18' } });
+    request(2, 'session/new'); response(2, { sessionId: 'one' });
+    request(3, '_cindy/checkAccountVerification'); await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(client.at(-1).result, { status: 'required', url });
+    assert.ok(!server.some(req => req.method === '_cindy/checkAccountVerification'));
+  });
+
   test('adds HTTP MCP to Antigravity initialize and preserves capabilities and steering metadata', async (t) => {
     const { client, request, response } = await localRelay(t);
     const result = {
@@ -2494,6 +2796,272 @@ process.stdout.write('', () => process.exit(0));
    * How much the pipes take before stdout keeps a queue varies with the load, so the burst grows until the
    * relay is still running when Cindy reads. The first such burst leaves only a little queued.
    */
+  test('adapts update_steps into ACP plans, drops duplicates, and renames ask_question only when elicitation.form is negotiated', async (t) => {
+    const withForm = await localRelay(t);
+    withForm.request(1, 'initialize', { clientCapabilities: { elicitation: { form: {} } } });
+    withForm.response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+    withForm.request(2, 'session/new', { cwd: '/repo', mcpServers: [] });
+    withForm.response(2, { sessionId: 'one' });
+
+    withForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'steps-l1',
+          name: 'update_steps',
+          kind: 'other',
+          title: 'Run update_steps',
+          status: 'in_progress',
+          rawInput: { steps: [{ title: 'Check', status: 'in_progress' }, { title: 'Skip', status: 'skipped' }] },
+        },
+      },
+    });
+    withForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'steps-l1',
+          kind: 'other',
+          status: 'completed',
+          rawInput: { steps: [{ title: 'Check', status: 'in_progress' }, { title: 'Skip', status: 'skipped' }] },
+        },
+      },
+    });
+    withForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'ask-l1',
+          name: 'ask_question',
+          kind: 'other',
+          title: 'Run ask_question',
+          status: 'in_progress',
+        },
+      },
+    });
+
+    const updatesWithForm = withForm.client.filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updatesWithForm, [
+      {
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Check', priority: 'medium', status: 'in_progress' },
+          { content: 'Skip', priority: 'medium', status: 'completed' },
+        ],
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ask-l1',
+        name: 'AskUserQuestion',
+        kind: 'other',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+    ]);
+
+    const withoutForm = await localRelay(t);
+    withoutForm.request(1, 'initialize', { clientCapabilities: { fs: { readTextFile: false } } });
+    withoutForm.response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+    withoutForm.request(2, 'session/new', { cwd: '/repo', mcpServers: [] });
+    withoutForm.response(2, { sessionId: 'one' });
+    withoutForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'steps-l2',
+          name: 'update_steps',
+          kind: 'other',
+          title: 'Run update_steps',
+          status: 'in_progress',
+          rawInput: { steps: [{ title: 'Keep legacy row', status: 'in_progress' }] },
+        },
+      },
+    });
+    withoutForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'ask-l2',
+          name: 'ask_question',
+          kind: 'other',
+          title: 'Run ask_question',
+          status: 'in_progress',
+        },
+      },
+    });
+    const updatesWithoutForm = withoutForm.client.filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.equal(updatesWithoutForm.length, 2);
+    assert.equal(updatesWithoutForm[0].sessionUpdate, 'tool_call');
+    assert.equal(updatesWithoutForm[0].name, 'update_steps');
+    assert.equal(updatesWithoutForm[1].name, 'ask_question');
+  });
+
+  test('local relay keeps follow-up short-name update_steps and ask_question updates on their registered MCP tool rows', async (t) => {
+    const relay = await localRelay(t);
+    relay.request(1, 'initialize', { clientCapabilities: { elicitation: { form: {} } } });
+    relay.response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+    relay.request(2, 'session/new', {
+      cwd: '/repo',
+      mcpServers: [{ type: 'http', name: 'partner', url: 'http://127.0.0.1:4711/mcp/partner' }],
+    });
+    relay.response(2, { sessionId: 'one' });
+
+    // External MCP update_steps starts with direct name, then follows up with short name `update_steps`.
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'mcp-steps-1',
+          name: 'mcp_partner_update_steps',
+          kind: 'other',
+          title: 'Run mcp_partner_update_steps',
+          status: 'in_progress',
+          rawInput: { steps: [{ title: 'Partner step', status: 'in_progress' }], toolSummary: 'update steps' },
+        },
+      },
+    });
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'mcp-steps-1',
+          name: 'update_steps',
+          kind: 'other',
+          title: 'Run update_steps',
+          status: 'completed',
+          rawInput: { steps: [{ title: 'Partner step', status: 'done' }] },
+        },
+      },
+    });
+
+    // External MCP ask_question starts via nested call_mcp_tool (or direct name), then follows up with short name `ask_question`.
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'mcp-ask-1',
+          name: 'call_mcp_tool',
+          kind: 'other',
+          title: 'MCP Tool ask_question',
+          status: 'in_progress',
+          rawInput: { ServerName: 'partner', ToolName: 'ask_question', Arguments: { prompt: 'Partner question' } },
+        },
+      },
+    });
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'mcp-ask-1',
+          name: 'ask_question',
+          kind: 'other',
+          title: 'Run ask_question',
+          status: 'completed',
+        },
+      },
+    });
+
+    // Native Antigravity update_steps and ask_question in the same session still adapt normally.
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'native-steps-1',
+          name: 'update_steps',
+          kind: 'other',
+          title: 'Run update_steps',
+          status: 'in_progress',
+          rawInput: { steps: [{ title: 'Native step', status: 'in_progress' }] },
+        },
+      },
+    });
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'native-ask-1',
+          name: 'ask_question',
+          kind: 'other',
+          title: 'Run ask_question',
+          status: 'in_progress',
+        },
+      },
+    });
+
+    const updates = relay.client.filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates, [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'mcp-steps-1',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'in_progress',
+        rawInput: { steps: [{ title: 'Partner step', status: 'in_progress' }] },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'mcp-steps-1',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'completed',
+        rawInput: { steps: [{ title: 'Partner step', status: 'done' }] },
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'mcp-ask-1',
+        name: 'mcp__partner__ask_question',
+        kind: 'other',
+        title: 'mcp__partner__ask_question',
+        status: 'in_progress',
+        rawInput: { prompt: 'Partner question' },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'mcp-ask-1',
+        name: 'mcp__partner__ask_question',
+        kind: 'other',
+        title: 'mcp__partner__ask_question',
+        status: 'completed',
+      },
+      {
+        sessionUpdate: 'plan',
+        entries: [{ content: 'Native step', priority: 'medium', status: 'in_progress' }],
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'native-ask-1',
+        name: 'AskUserQuestion',
+        kind: 'other',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+    ]);
+  });
+
   test('exits right after Cindy has read the last notification, not after the flush timeout', { timeout: 40_000 }, async (t) => {
     const flushTimeoutMs = 2_000;
     let bridge = null;
@@ -2570,4 +3138,109 @@ test('installation verifies the archive and staged CLI before activating it', {
   fs.rmdirSync(target);
   assert.deepEqual(install(digest), { state: 'installed', version: '1.5.14' });
   assert.deepEqual(fs.readFileSync(target), fs.readFileSync(cli));
+});
+
+test('adapts Antigravity update_steps into ACP plan updates and normalizes ask_question when form elicitation is negotiated', async () => {
+  const mcp = await import(pathToFileURL(path.join(root, 'agy-mcp.js')));
+  assert.equal(mcp.clientSupportsElicitationForm({ clientCapabilities: { elicitation: { form: {} } } }), true);
+  assert.equal(mcp.clientSupportsElicitationForm({ clientCapabilities: { fs: { readTextFile: false } } }), false);
+
+  const seenSteps = new Map();
+  const firstSteps = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'steps-1',
+    name: 'update_steps',
+    title: 'Run update_steps',
+    status: 'in_progress',
+    rawInput: {
+      steps: [
+        { title: 'Inspect codebase', status: 'done' },
+        { title: 'Apply fix', status: 'in_progress' },
+        { title: 'Skip optional', status: 'skipped' },
+      ],
+    },
+  }, { elicitationForm: true, seenSteps });
+  assert.deepEqual(firstSteps, {
+    action: 'replace',
+    update: {
+      sessionUpdate: 'plan',
+      entries: [
+        { content: 'Inspect codebase', priority: 'medium', status: 'completed' },
+        { content: 'Apply fix', priority: 'medium', status: 'in_progress' },
+        { content: 'Skip optional', priority: 'medium', status: 'completed' },
+      ],
+    },
+  });
+
+  // Duplicate completed update for the same toolCallId is dropped instead of rendering a raw tool card.
+  const duplicateSteps = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'steps-1',
+    name: 'update_steps',
+    status: 'completed',
+    rawInput: {
+      steps: [
+        { title: 'Inspect codebase', status: 'done' },
+        { title: 'Apply fix', status: 'in_progress' },
+        { title: 'Skip optional', status: 'skipped' },
+      ],
+    },
+  }, { elicitationForm: true, seenSteps });
+  assert.deepEqual(duplicateSteps, { action: 'drop' });
+
+  // Failed tool_call_update is preserved even when rawInput is omitted or repeats the same steps.
+  const failedOmitted = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'steps-1',
+    status: 'failed',
+    rawOutput: 'error',
+  }, { elicitationForm: true, seenSteps });
+  assert.equal(failedOmitted, null);
+
+  mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'steps-2',
+    name: 'update_steps',
+    status: 'in_progress',
+    rawInput: { steps: [{ title: 'Step A', status: 'in_progress' }] },
+  }, { elicitationForm: true, seenSteps });
+  const failedRepeated = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'steps-2',
+    name: 'update_steps',
+    status: 'failed',
+    rawInput: { steps: [{ title: 'Step A', status: 'in_progress' }] },
+  }, { elicitationForm: true, seenSteps });
+  assert.equal(failedRepeated, null);
+
+  // Older hosts (elicitationForm: false) keep raw update_steps unchanged so existing progress rows do not disappear.
+  const legacySteps = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'steps-legacy',
+    name: 'update_steps',
+    status: 'in_progress',
+    rawInput: { steps: [{ title: 'Legacy step', status: 'in_progress' }] },
+  }, { elicitationForm: false, seenSteps });
+  assert.equal(legacySteps, null);
+
+  // ask_question is normalized to AskUserQuestion only when the client negotiated form elicitation.
+  const askWithForm = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'ask-1',
+    name: 'ask_question',
+    title: 'Run ask_question',
+    status: 'in_progress',
+  }, { elicitationForm: true, seenSteps });
+  assert.equal(askWithForm?.action, 'replace');
+  assert.equal(askWithForm?.update.name, 'AskUserQuestion');
+  assert.equal(askWithForm?.update.title, 'AskUserQuestion');
+
+  const askWithoutForm = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'ask-2',
+    name: 'ask_question',
+    title: 'Run ask_question',
+    status: 'in_progress',
+  }, { elicitationForm: false, seenSteps });
+  assert.equal(askWithoutForm, null);
 });
