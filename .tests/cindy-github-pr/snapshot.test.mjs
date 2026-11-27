@@ -48,7 +48,10 @@ if [ "$1" = pr ] && [ "$2" = view ]; then cat "$d/resp-prview.json"; exit 0; fi
 if [ "$1" = api ] && [ "$2" = graphql ]; then
   q=""
   for a in "$@"; do case "$a" in query=*) q="$a" ;; esac; done
-  case "$q" in *checkRunCountsByState*) cat "$d/resp-probe.json"; exit 0 ;; esac
+  case "$q" in
+    *viewer*) ;;
+    *checkRunCountsByState*) cat "$d/resp-probe.json"; exit 0 ;;
+  esac
   for f in mergeQueueEntry beforeCommit ADDED_TO_MERGE_QUEUE_EVENT headRefOid baseRef; do
     case "$q" in *"$f"*) ;; *) echo "Missing query field: $f" >&2; exit 1 ;; esac
   done
@@ -628,7 +631,7 @@ process.exit(0);
   assert.ok(calls[1].includes('If-None-Match: W/"v1"'));
 });
 
-nodeTest('pr-snapshot --state-dir revalidates REST pulls and shared repo branch rules via live ETag 304 without staleness', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim / symlink' : false }, (t) => {
+nodeTest('pr-snapshot --state-dir revalidates REST pulls and shared repo branch rules via live ETag 304 with minimal cached fields', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim / symlink' : false }, (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-snapshot-etag-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const stateDir = path.join(dir, 'state');
@@ -675,8 +678,21 @@ if (args[0] === 'api' && /^repos\\/acme\\/game\\/pulls\\/\\d+$/.test(args[1])) {
   process.stdout.write(
     'HTTP/2.0 200 OK\\nETag: ' + cfg.pullEtag + '\\n\\n' +
     JSON.stringify({
-      base: { sha: 'base-1' }, head: { sha: cfg.headSha }, mergeable: true, state: 'open',
       html_url: 'https://github.com/acme/game/pull/' + args[1].split('/').pop(),
+      title: 'Private feature title',
+      body: 'CONFIDENTIAL_PRIVATE_PR_BODY_DO_NOT_PERSIST',
+      state: 'open',
+      merged: false,
+      mergeable: true,
+      mergeable_state: 'clean',
+      additions: 12,
+      deletions: 3,
+      changed_files: 2,
+      user: { login: 'author-secret' },
+      requested_reviewers: [{ login: 'reviewer-secret' }],
+      requested_teams: [{ slug: 'security-team' }],
+      base: { sha: 'base-1', repo: { full_name: 'acme/game', private: true, description: 'internal repo' } },
+      head: { sha: cfg.headSha, label: 'acme:feat', repo: { full_name: 'acme/private-fork', description: 'secret fork' } },
     }),
   );
   process.exit(0);
@@ -719,22 +735,67 @@ process.exit(2);
     headSha: 'head-1',
     pullEtag: 'W/"pull-v1"',
     rulesEtag: 'W/"rules-v1"',
-    rules: [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'late-test' }] } }],
+    rules: [
+      { type: 'pull_request', ruleset_id: 99, parameters: { required_approving_review_count: 2 } },
+      {
+        type: 'required_status_checks',
+        ruleset_source: 'internal-org-policy',
+        parameters: {
+          strict_required_status_checks_policy: true,
+          required_status_checks: [{ context: 'late-test', integration_id: 15368, extra_meta: 'drop-me' }],
+        },
+      },
+    ],
     rollup: [{ __typename: 'CheckRun', name: 'PR check', status: 'COMPLETED', conclusion: 'SUCCESS' }],
   };
 
-  // 1. First snapshot of PR #54 primes both pull and shared repo rules caches (200).
+  // 1. First snapshot of PR #54 primes both pull and shared repo rules caches (200)
+  //    and writes ONLY the minimal fields consumed by pr-snapshot.mjs.
   const r1 = runSnap(54, baseCfg);
   assert.equal(r1.snap.verdict, 'WAITING_CI');
   assert.equal(r1.calls.find(c => c.kind === 'pull').status, 200);
   assert.equal(r1.calls.find(c => c.kind === 'rules').status, 200);
 
-  // 2. Second snapshot of PR #54 hits 304 for both pull and rules (including under --strict-exit live revalidation).
-  // --strict-exit exits 10 for WAITING_CI while still printing the snapshot JSON.
+  const restCachePath = path.join(stateDir, 'acme__game-54.rest-cache.json');
+  const restCacheRaw = fs.readFileSync(restCachePath, 'utf8');
+  assert.doesNotMatch(restCacheRaw, /CONFIDENTIAL_PRIVATE_PR_BODY|requested_reviewers|requested_teams|private-fork|internal repo|author-secret/);
+  const restCache = JSON.parse(restCacheRaw);
+  assert.equal(restCache.schema, 2);
+  assert.deepEqual(Object.keys(restCache.data).sort(), [
+    'additions', 'changed_files', 'deletions', 'head', 'html_url',
+    'mergeable', 'mergeable_state', 'merged', 'state', 'title',
+  ]);
+  assert.deepEqual(Object.keys(restCache.data.head), ['sha']);
+
+  const rulesCachePath = path.join(stateDir, 'acme__game.rules-cache.json');
+  const rulesCacheRaw = fs.readFileSync(rulesCachePath, 'utf8');
+  assert.doesNotMatch(rulesCacheRaw, /pull_request|ruleset_id|internal-org-policy|strict_required_status_checks_policy|drop-me/);
+  const rulesCache = JSON.parse(rulesCacheRaw);
+  assert.equal(rulesCache.schema, 2);
+  assert.deepEqual(rulesCache.entries['alice:main'].rules, [
+    { type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'late-test', integration_id: 15368 }] } },
+  ]);
+
+  // 2. Second snapshot of PR #54 hits 304 for both pull and rules (including under --strict-exit live revalidation)
+  //    and yields the exact same snapshot payload as the 200 run.
   const r2 = runSnap(54, baseCfg, ['--expect-head', 'head-1', '--strict-exit'], 10);
   assert.equal(r2.snap.verdict, 'WAITING_CI');
   assert.equal(r2.calls.find(c => c.kind === 'pull').status, 304);
   assert.equal(r2.calls.find(c => c.kind === 'rules').status, 304);
+  assert.deepEqual({ ...r2.snap, fetchedAt: null }, { ...r1.snap, fetchedAt: null });
+
+  // 2b. A legacy schema:1 cache file containing full REST fields (e.g. body) is ignored and replaced by narrowed schema:2.
+  fs.writeFileSync(restCachePath, JSON.stringify({
+    schema: 1,
+    etag: baseCfg.pullEtag,
+    data: { state: 'open', head: { sha: baseCfg.headSha }, body: 'LEGACY_SECRET_BODY' },
+    updatedAt: 1000,
+  }));
+  const r2b = runSnap(54, baseCfg);
+  assert.equal(r2b.calls.find(c => c.kind === 'pull').status, 200);
+  const rewrittenRaw = fs.readFileSync(restCachePath, 'utf8');
+  assert.doesNotMatch(rewrittenRaw, /LEGACY_SECRET_BODY|CONFIDENTIAL_PRIVATE_PR_BODY/);
+  assert.equal(JSON.parse(rewrittenRaw).schema, 2);
 
   // 3. Another PR (#55) in the same repo & viewer reuses the shared rules ETag immediately (rules 304, pull 200).
   const r3 = runSnap(55, baseCfg);
@@ -784,7 +845,6 @@ process.exit(2);
   assert.equal(envSecond.find(c => c.kind === 'rules').status, 304);
 
   // 9. Branch-rules cache refreshes updatedAt on 304 hits so hot entries survive >20-entry eviction.
-  const rulesCachePath = path.join(stateDir, 'acme__game.rules-cache.json');
   const seededEntries = {
     'alice:main': { etag: 'W/"rules-v2"', rules: [], updatedAt: 1000 },
   };
@@ -795,7 +855,7 @@ process.exit(2);
       updatedAt: 1000 + i * 1000,
     };
   }
-  fs.writeFileSync(rulesCachePath, JSON.stringify({ schema: 1, entries: seededEntries }));
+  fs.writeFileSync(rulesCachePath, JSON.stringify({ schema: 2, entries: seededEntries }));
   // Hot entry `alice:main` hits 304 (even with unchanged ETag) -> refreshes updatedAt above cold entries.
   const hotHit = runSnap(54, { ...baseCfg, headSha: 'head-2', pullEtag: 'W/"pull-v2"', rulesEtag: 'W/"rules-v2"', rules: [] });
   assert.equal(hotHit.calls.find(c => c.kind === 'rules').status, 304);
@@ -811,4 +871,131 @@ process.exit(2);
   // Confirm alice:main still gets 304 immediately after eviction.
   const afterEvictHit = runSnap(54, { ...baseCfg, headSha: 'head-2', pullEtag: 'W/"pull-v2"', rulesEtag: 'W/"rules-v2"', rules: [] });
   assert.equal(afterEvictHit.calls.find(c => c.kind === 'rules').status, 304);
+});
+
+test('full snapshot emits the same probe fingerprint as --probe when check counts agree, and omits probe on skew', (t) => {
+  const run = fixture(t);
+  const twoGreen = [
+    { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-11-26T00:00:00Z' },
+    { __typename: 'CheckRun', name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-11-26T00:00:00Z' },
+  ];
+  const pr = {
+    state: 'OPEN',
+    isDraft: false,
+    mergeable: 'MERGEABLE',
+    headRefOid: 'head-sha',
+    baseRef: { target: { oid: 'base-sha' }, branchProtectionRule: null },
+    mergeQueueEntry: null,
+    timelineItems: { nodes: [] },
+    comments: { totalCount: 1, nodes: [{ id: 'C1', author: { login: 'alice', __typename: 'User' }, body: 'hi', createdAt: '2026-11-26T00:00:00Z', updatedAt: '2026-11-26T00:05:00Z', url: '' }] },
+    reviews: { totalCount: 1, nodes: [{ id: 'R1', author: { login: 'bob', __typename: 'User' }, state: 'COMMENTED', body: 'ok', submittedAt: '2026-11-26T00:06:00Z', updatedAt: '2026-11-26T00:07:00Z', url: '', commit: { oid: 'head-sha' } }] },
+    reviewThreads: { totalCount: 2, pageInfo: { hasNextPage: false }, nodes: [] },
+    reactions: { totalCount: 3, nodes: [] },
+    commits: {
+      nodes: [{
+        commit: {
+          oid: 'head-sha',
+          statusCheckRollup: {
+            contexts: {
+              totalCount: 2,
+              pageInfo: { hasNextPage: false },
+              checkRunCountsByState: [{ state: 'SUCCESS', count: 2 }],
+              statusContextCountsByState: [],
+              nodes: [],
+            },
+          },
+        },
+      }],
+    },
+  };
+  const probe = run(pr, 'ahead', { args: ['--probe'], rollup: twoGreen });
+  const full = run(pr, 'ahead', { rollup: twoGreen });
+  assert.deepEqual(full.probe, probe);
+
+  // Rerun attempts on the same check name still match GraphQL checkRunCountsByState (computed before latestChecks dedup).
+  const rerunRollup = [
+    { __typename: 'CheckRun', name: 'verify', status: 'COMPLETED', conclusion: 'CANCELLED', startedAt: '2026-11-26T00:00:00Z' },
+    { __typename: 'CheckRun', name: 'verify', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-11-26T00:01:00Z' },
+    { __typename: 'StatusContext', context: 'ci/deploy', state: 'SUCCESS' },
+  ];
+  const rerunPr = {
+    ...pr,
+    commits: {
+      nodes: [{
+        commit: {
+          oid: 'head-sha',
+          statusCheckRollup: {
+            contexts: {
+              totalCount: 3,
+              pageInfo: { hasNextPage: false },
+              checkRunCountsByState: [{ state: 'CANCELLED', count: 1 }, { state: 'SUCCESS', count: 1 }],
+              statusContextCountsByState: [{ state: 'SUCCESS', count: 1 }],
+              nodes: [],
+            },
+          },
+        },
+      }],
+    },
+  };
+  assert.deepEqual(run(rerunPr, 'ahead', { rollup: rerunRollup }).probe, run(rerunPr, 'ahead', { args: ['--probe'], rollup: rerunRollup }));
+
+  // If a check reran and failed between gh pr view (two green checks) and GraphQL (FAILURE:1,SUCCESS:2),
+  // full snapshot must emit probe: null so the gate does not cache the unseen failure.
+  const skewedPr = {
+    ...pr,
+    commits: {
+      nodes: [{
+        commit: {
+          oid: 'head-sha',
+          statusCheckRollup: {
+            contexts: {
+              totalCount: 3,
+              pageInfo: { hasNextPage: false },
+              checkRunCountsByState: [{ state: 'SUCCESS', count: 2 }, { state: 'FAILURE', count: 1 }],
+              statusContextCountsByState: [],
+              nodes: [],
+            },
+          },
+        },
+      }],
+    },
+  };
+  assert.equal(run(skewedPr, 'ahead', { rollup: twoGreen }).probe, null);
+
+  // StatusContext skew and truncated/unavailable checks must also emit probe: null.
+  const statusSkewPr = {
+    ...rerunPr,
+    commits: {
+      nodes: [{
+        commit: {
+          oid: 'head-sha',
+          statusCheckRollup: {
+            contexts: {
+              ...rerunPr.commits.nodes[0].commit.statusCheckRollup.contexts,
+              statusContextCountsByState: [{ state: 'FAILURE', count: 1 }],
+            },
+          },
+        },
+      }],
+    },
+  };
+  assert.equal(run(statusSkewPr, 'ahead', { rollup: rerunRollup }).probe, null);
+  assert.equal(run(pr, 'ahead', { rollup: twoGreen, checkHead: 'old-head' }).probe, null);
+  const truncatedPr = {
+    ...pr,
+    commits: {
+      nodes: [{
+        commit: {
+          oid: 'head-sha',
+          statusCheckRollup: {
+            contexts: {
+              ...pr.commits.nodes[0].commit.statusCheckRollup.contexts,
+              pageInfo: { hasNextPage: true },
+            },
+          },
+        },
+      }],
+    },
+  };
+  assert.equal(run(truncatedPr, 'ahead', { rollup: twoGreen }).probe, null);
 });

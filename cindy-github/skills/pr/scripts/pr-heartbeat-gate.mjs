@@ -79,7 +79,7 @@ import { appendTrace, scrub } from './lib/follow-trace.mjs';
 import { createHash } from 'node:crypto';
 import { BACKOFF_STEPS_MIN, baseMovedWait, checkOutcome, handledFailure, inspectWait, makeWait, setsAside, waitDueAt, waitFacts, waitIsDue, waitNotice } from './lib/follow-wait.mjs';
 import { mergeQueueFingerprint } from './lib/merge-queue.mjs';
-import { SETTLE_MAX_MS, TICK_MS, breaksSettle, expectedBots, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
+import { SETTLE_MAX_MS, TICK_MS, breaksSettle, expectedBots, isEmptyPass, isPendingTerminalBackoffRetry, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -119,6 +119,18 @@ const DEFAULT_MAX_PASS_ATTEMPTS = 3;
  * 同时保证失败/崩溃的 PR 任务在下一小时内重新获得执行机会。
  */
 const DEFAULT_RETRY_BACKOFF_MINUTES = 30;
+/**
+ * Escalating reminder intervals (minutes) after a merged/closed PR exhausts its initial cleanup
+ * passes and the schedule is still alive (e.g. a reused schedule the agent cannot delete itself).
+ * Survives --ack so an agent acknowledging a manual-stop reminder cannot trigger a 5-minute burn loop.
+ */
+const TERMINAL_BACKOFF_STEPS_MIN = [30, 120, 360, 720];
+
+function terminalBackoffMs(backoffIndex, retryBackoffMs) {
+  const stepMin = TERMINAL_BACKOFF_STEPS_MIN[Math.min(Math.max(0, backoffIndex), TERMINAL_BACKOFF_STEPS_MIN.length - 1)];
+  const scaled = Math.round(retryBackoffMs * (stepMin / DEFAULT_RETRY_BACKOFF_MINUTES));
+  return Math.max(retryBackoffMs, scaled);
+}
 
 /**
  * 两次放行之间的最小有效间隔(分钟):比这更密的放行**不计入**任何重试/唤起计数。
@@ -1019,7 +1031,7 @@ export function decide({
   // 距上次放行太近 = 上一次放行没换来一轮真实处理(宿主顺延/spawn 失败/重启),
   // 本轮照常放行但不消耗额度。理由见 DEFAULT_MIN_PASS_SPACING_MINUTES 的注释。
   const lastPassAt = Number(previous?.lastPassAt) || 0;
-  const emptyPass = minPassSpacingMs > 0 && lastPassAt > 0 && now - lastPassAt < minPassSpacingMs;
+  const emptyPass = isEmptyPass(previous, now, minPassSpacingMs);
   const emptyPassNote = emptyPass
     ? ` (previous release was only ${formatDuration(now - lastPassAt)} ago and produced no real run; not counted)`
     : '';
@@ -1112,16 +1124,76 @@ export function decide({
   });
 
   if (snap.merged || snap.closed) {
-    // 收口每轮都必须放行,不受重试上限约束(agent 收口失败就得再来一轮)
+    // Allow up to maxPassAttempts fast cleanup wakes (ignoring host-deferred empty passes), then
+    // escalate reminders (30m -> 2h -> 6h -> 12h) using dedicated terminalPassCount /
+    // terminalBackoffUntil fields that survive --ack (e.g. reused schedules requiring manual stop).
+    // Cleared automatically if a closed PR reopens or a new follow-up starts.
+    const stateLabel = snap.merged ? 'merged' : 'closed';
+    const prevTerminalCount = Number(previous?.terminalPassCount) || (pendingKey === 'terminal' ? pendingCount : 0);
+    const prevTerminalBackoffUntil = Number(previous?.terminalBackoffUntil) || 0;
+    const unackedEmptyPass = Boolean(pendingWatch) && emptyPass;
+    const repeatBackoffAttempt = isPendingTerminalBackoffRetry(previous, now, minPassSpacingMs);
+    const attempt = prevTerminalCount > 0 && unackedEmptyPass ? prevTerminalCount : prevTerminalCount + 1;
+    if (attempt > maxPassAttempts) {
+      if (repeatBackoffAttempt) {
+        const nextReminderNote = prevTerminalBackoffUntil > 0
+          ? ` (next reminder at ${isoAt(prevTerminalBackoffUntil)})`
+          : '';
+        return {
+          ...base,
+          exitCode: EXIT_PASS,
+          reason: 'terminal-backoff-attempt',
+          detail: `${stateLabel}; cleanup already attempted ${attempt} times and the schedule is still running${nextReminderNote}: notify the user (schedule_notify_current_run) with the schedule ID so it can be stopped manually if it cannot be deleted automatically${emptyPassNote}`,
+          nextWatch: baseline,
+          nextPendingWatch: pendingWatch ?? result.next,
+          nextPendingKey: 'terminal',
+          nextPendingCount: attempt,
+          nextTerminalPassCount: attempt,
+          ...(prevTerminalBackoffUntil > 0 ? { nextTerminalBackoffUntil: prevTerminalBackoffUntil } : {}),
+        };
+      }
+      const backoffUntil = prevTerminalBackoffUntil > 0
+        ? prevTerminalBackoffUntil
+        : (lastPassAt > 0 ? lastPassAt : now) + terminalBackoffMs(0, retryBackoffMs);
+      if (backoffUntil > now) {
+        return {
+          ...base,
+          exitCode: EXIT_SKIP,
+          reason: 'terminal-backoff',
+          detail: `${stateLabel}; cleanup already requested ${prevTerminalCount} times, next reminder at ${isoAt(backoffUntil)}`,
+          nextWatch: baseline,
+          nextPendingWatch: pendingWatch,
+          nextPendingKey: pendingWatch ? 'terminal' : null,
+          nextPendingCount: pendingWatch ? prevTerminalCount : 0,
+          nextTerminalPassCount: prevTerminalCount,
+          nextTerminalBackoffUntil: backoffUntil,
+        };
+      }
+      const backoffIndex = Math.min(attempt - maxPassAttempts, TERMINAL_BACKOFF_STEPS_MIN.length - 1);
+      const nextBackoffMs = terminalBackoffMs(backoffIndex, retryBackoffMs);
+      return {
+        ...base,
+        exitCode: EXIT_PASS,
+        reason: 'terminal-backoff-attempt',
+        detail: `${stateLabel}; cleanup already attempted ${prevTerminalCount} times and the schedule is still running (next reminder in ${Math.round(nextBackoffMs / 60_000)} min): notify the user (schedule_notify_current_run) with the schedule ID so it can be stopped manually if it cannot be deleted automatically${emptyPassNote}`,
+        nextWatch: baseline,
+        nextPendingWatch: pendingWatch ?? result.next,
+        nextPendingKey: 'terminal',
+        nextPendingCount: attempt,
+        nextTerminalPassCount: attempt,
+        nextTerminalBackoffUntil: now + nextBackoffMs,
+      };
+    }
     return {
       ...base,
       exitCode: EXIT_PASS,
       reason: 'terminal',
-      detail: snap.merged ? 'merged' : 'closed',
+      detail: `${stateLabel}; attempt=${attempt}/${maxPassAttempts}${emptyPassNote}`,
       nextWatch: baseline,
       nextPendingWatch: pendingWatch ?? result.next,
       nextPendingKey: 'terminal',
-      nextPendingCount: pendingKey === 'terminal' ? pendingCount + 1 : 1,
+      nextPendingCount: attempt,
+      nextTerminalPassCount: attempt,
     };
   }
   if (snap.gate?.requiredChecksUnavailable) {
@@ -1352,15 +1424,35 @@ function runProbe(snapshotPath, repo, number) {
   });
 }
 
+function parseProbeValue(value) {
+  return typeof value?.status === 'string' && typeof value?.remarks === 'string'
+    ? { status: value.status, remarks: value.remarks, ...(typeof value.base === 'string' ? { base: value.base } : {}) } : null;
+}
+
 function parseProbe(run) {
   if (run?.code !== 0) return null;
   try {
-    const value = JSON.parse(run.stdout);
-    return typeof value?.status === 'string' && typeof value?.remarks === 'string'
-      ? { status: value.status, remarks: value.remarks, ...(typeof value.base === 'string' ? { base: value.base } : {}) } : null;
+    return parseProbeValue(JSON.parse(run.stdout));
   } catch {
     return null;
   }
+}
+
+/**
+ * Compare two probe status strings. Whenever the base branch advances, GitHub briefly reports
+ * `mergeable=UNKNOWN` while recalculating mergeability. If every other status field matches and
+ * the previous full read already had a known mergeable state (`MERGEABLE` or `CONFLICTING`),
+ * treat transient `UNKNOWN` as unchanged so base churn does not force full 4-call snapshots.
+ * Real transitions (`MERGEABLE` <-> `CONFLICTING`, or `UNKNOWN` -> known) still mismatch.
+ */
+function probeStatusMatches(previousStatus, currentStatus) {
+  if (previousStatus === currentStatus) return true;
+  const prevParts = String(previousStatus ?? '').split(' ');
+  const currParts = String(currentStatus ?? '').split(' ');
+  if (prevParts.length < 4 || prevParts.length !== currParts.length) return false;
+  if (currParts[2] !== 'UNKNOWN') return false;
+  if (prevParts[2] !== 'MERGEABLE' && prevParts[2] !== 'CONFLICTING') return false;
+  return prevParts.every((part, i) => i === 2 || part === currParts[i]);
 }
 
 /**
@@ -1370,7 +1462,7 @@ function parseProbe(run) {
  */
 export function probeAllowsSkip(previous, probe, now, maxSilenceMs = DEFAULT_MAX_SILENCE_HOURS * 3_600_000) {
   if (!probe || !previous?.watch || !previous.probe) return false;
-  if (probe.status !== previous.probe.status || probe.remarks !== previous.probe.remarks) return false;
+  if (!probeStatusMatches(previous.probe.status, probe.status) || probe.remarks !== previous.probe.remarks) return false;
   // 检查失败期间 base 前进要报,探测看到 base 变了就完整读取。
   if (previous.watch.baseSha && probe.base && probe.base !== previous.watch.baseSha) return false;
   if (previous.pendingWatch || previous.inFlight || previous.merged || previous.closed) return false;
@@ -1657,7 +1749,7 @@ async function gateMain(argv, ctx) {
   // 按阶段决定这一轮要不要看:不到时间就直接跳过,不调用 GitHub,也不改状态。
   const scheduledRetryDue = backoffUntil > 0 && !backingOff;
   if (args.pacing && !scheduledRetryDue) {
-    const pace = pacingDue(previous, now, { triggered });
+    const pace = pacingDue(previous, now, { triggered, minPassSpacingMs: args.minPassSpacingMs });
     if (!pace.due) {
       emit(args, {
         exitCode: EXIT_SKIP,
@@ -1826,8 +1918,20 @@ async function gateMain(argv, ctx) {
     : typeof previous?.lastKnownConflicting === 'boolean'
       ? previous.lastKnownConflicting
       : null;
-  // 上次读到检查在跑或合并态还没算出:下一轮不靠探测跳过,直接完整读取。
-  const inFlight = !mergeSignalKnown(snap) || (snap.checks ?? []).some((c) => checkOutcome(c) === 'pending');
+  // 上次读到检查在跑、合并态还没算出、或快照内检查列表与探测计数发生时间错位:
+  // 下一轮不靠探测跳过，按活跃节奏直接完整读取。
+  const checksTrustworthy = !snap.checksSummary?.unavailable && !snap.checksSummary?.truncated;
+  const snapshotHasProbe = snap && Object.hasOwn(snap, 'probe');
+  const snapProbe = snapshotHasProbe ? parseProbeValue(snap.probe) : null;
+  const probeSkewed = !snap.merged && !snap.closed && checksTrustworthy && snapshotHasProbe && !snapProbe;
+  const inFlight = !mergeSignalKnown(snap)
+    || (snap.checks ?? []).some((c) => checkOutcome(c) === 'pending')
+    || probeSkewed;
+  const savedProbe = !checksTrustworthy
+    ? null
+    : snapshotHasProbe
+      ? snapProbe
+      : probe;
   persist(file, {
     // watch 只由 --ack / --defer 或「没有新事件」推进,放行时不推进
     watch: decision.nextWatch,
@@ -1841,6 +1945,8 @@ async function gateMain(argv, ctx) {
         }
       : {}),
     ...(decision.nextRetryBackoffUntil ? { retryBackoffUntil: decision.nextRetryBackoffUntil } : {}),
+    ...(decision.nextTerminalPassCount ? { terminalPassCount: decision.nextTerminalPassCount } : {}),
+    ...(decision.nextTerminalBackoffUntil ? { terminalBackoffUntil: decision.nextTerminalBackoffUntil } : {}),
     // 旧版状态的未确认指纹:在 agent 确认前保留,让升级那一轮能继续按未确认处理
     ...(previous?.pendingFingerprint && !previous?.watch && decision.nextPendingWatch
       ? { pendingFingerprint: previous.pendingFingerprint } : {}),
@@ -1854,7 +1960,7 @@ async function gateMain(argv, ctx) {
     merged: Boolean(snap.merged),
     closed: Boolean(snap.closed),
     url: snap.url ?? null,
-    ...(probe ? { probe } : {}),
+    ...(savedProbe ? { probe: savedProbe } : {}),
     inFlight,
     lastFullReadAt: now,
     consecutiveSnapshotFailures: !checkSucceeded

@@ -86,6 +86,8 @@ function parseArgs(argv, env = process.env) {
 }
 
 const MAX_RULES_CACHE_ENTRIES = 20;
+const PR_REST_CACHE_SCHEMA = 2;
+const RULES_CACHE_SCHEMA = 2;
 
 function safeCacheSlug(repo) {
   return String(repo).replace(/[^a-zA-Z0-9._-]+/g, '__');
@@ -124,43 +126,108 @@ function isValidPullCacheData(data) {
   return Boolean(data && typeof data === 'object' && !Array.isArray(data) && typeof data.state === 'string' && data.head && typeof data.head === 'object');
 }
 
+/**
+ * Persist only the minimal fields that pr-snapshot.mjs actually consumes from
+ * REST `repos/{owner}/{repo}/pulls/{number}` — never bodies, reviewers, or
+ * nested repository payloads.
+ */
+function pickPullCacheData(data) {
+  if (!isValidPullCacheData(data)) return null;
+  return {
+    ...(typeof data.html_url === 'string' ? { html_url: data.html_url } : {}),
+    ...(typeof data.title === 'string' ? { title: data.title } : {}),
+    state: data.state,
+    merged: Boolean(data.merged),
+    mergeable: typeof data.mergeable === 'boolean' ? data.mergeable : null,
+    mergeable_state: typeof data.mergeable_state === 'string' ? data.mergeable_state : null,
+    head: { sha: typeof data.head.sha === 'string' ? data.head.sha : null },
+    additions: Number.isFinite(data.additions) ? data.additions : null,
+    deletions: Number.isFinite(data.deletions) ? data.deletions : null,
+    changed_files: Number.isFinite(data.changed_files) ? data.changed_files : null,
+  };
+}
+
+/**
+ * Persist only the required-status-check entries consumed by requiredChecksOf,
+ * discarding unrelated branch rules and ruleset metadata.
+ */
+function pickBranchRulesCacheData(rules) {
+  if (!Array.isArray(rules) || rules.length >= 100) return null;
+  const projected = [];
+  for (const rule of rules) {
+    if (!rule || typeof rule !== 'object') continue;
+    if (rule.type !== 'required_status_checks') continue;
+    const checks = rule.parameters?.required_status_checks;
+    if (!Array.isArray(checks)) return null;
+    const projectedChecks = [];
+    for (const check of checks) {
+      if (!check || typeof check !== 'object' || typeof check.context !== 'string' || !check.context) {
+        return null;
+      }
+      projectedChecks.push({
+        context: check.context,
+        ...(Number.isInteger(check.integration_id) && check.integration_id > 0
+          ? { integration_id: check.integration_id }
+          : {}),
+      });
+    }
+    projected.push({
+      type: 'required_status_checks',
+      parameters: { required_status_checks: projectedChecks },
+    });
+  }
+  return projected;
+}
+
 async function fetchPrView(repo, number, stateDir) {
   const apiPath = `repos/${repo}/pulls/${number}`;
   const cachePath = stateDir ? prRestCachePath(stateDir, repo, number) : null;
   const cached = cachePath ? readJsonCache(cachePath) : null;
-  const validCached = cached?.schema === 1 && typeof cached.etag === 'string' && isValidPullCacheData(cached.data)
-    ? cached
+  const cachedData = cached?.schema === PR_REST_CACHE_SCHEMA && typeof cached.etag === 'string'
+    ? pickPullCacheData(cached.data)
     : null;
+  const validCached = cachedData ? { etag: cached.etag, data: cachedData } : null;
   const res = await ghJsonConditional(apiPath, {
     etag: validCached?.etag ?? null,
     includeHeaders: true,
   });
   if (res.notModified && validCached) {
     if (cachePath && res.etag && res.etag !== validCached.etag) {
-      writeJsonCacheAtomic(cachePath, { schema: 1, etag: res.etag, data: validCached.data, updatedAt: Date.now() });
+      writeJsonCacheAtomic(cachePath, {
+        schema: PR_REST_CACHE_SCHEMA,
+        etag: res.etag,
+        data: validCached.data,
+        updatedAt: Date.now(),
+      });
     }
-    return { ...validCached.data };
+    return { ...validCached.data, head: { ...validCached.data.head } };
   }
   const data = res.notModified
     ? await ghJson(apiPath, { includeHeaders: true })
     : res.data;
-  if (cachePath && res.etag && isValidPullCacheData(data)) {
-    writeJsonCacheAtomic(cachePath, { schema: 1, etag: res.etag, data, updatedAt: Date.now() });
+  const picked = pickPullCacheData(data);
+  if (cachePath && res.etag && picked) {
+    writeJsonCacheAtomic(cachePath, {
+      schema: PR_REST_CACHE_SCHEMA,
+      etag: res.etag,
+      data: picked,
+      updatedAt: Date.now(),
+    });
   }
-  return data;
+  return picked ?? data;
 }
 
 function upsertBranchRulesCache(cachePath, cacheKey, entry) {
   if (!cachePath) return;
   const freshStore = readJsonCache(cachePath);
-  const prevEntries = freshStore?.schema === 1 && freshStore.entries && typeof freshStore.entries === 'object'
+  const prevEntries = freshStore?.schema === RULES_CACHE_SCHEMA && freshStore.entries && typeof freshStore.entries === 'object'
     ? { ...freshStore.entries }
     : {};
   prevEntries[cacheKey] = entry;
   const sortedEntries = Object.entries(prevEntries)
     .sort((a, b) => (Number(b[1]?.updatedAt) || 0) - (Number(a[1]?.updatedAt) || 0))
     .slice(0, MAX_RULES_CACHE_ENTRIES);
-  writeJsonCacheAtomic(cachePath, { schema: 1, entries: Object.fromEntries(sortedEntries) });
+  writeJsonCacheAtomic(cachePath, { schema: RULES_CACHE_SCHEMA, entries: Object.fromEntries(sortedEntries) });
 }
 
 async function fetchBranchRules(repo, baseRefName, viewer, stateDir) {
@@ -168,12 +235,13 @@ async function fetchBranchRules(repo, baseRefName, viewer, stateDir) {
   const cachePath = stateDir ? repoRulesCachePath(stateDir, repo) : null;
   const cacheKey = `${viewer ?? ''}:${baseRefName}`;
   const store = cachePath ? readJsonCache(cachePath) : null;
-  const rawEntry = store?.schema === 1 && store.entries && typeof store.entries === 'object'
+  const rawEntry = store?.schema === RULES_CACHE_SCHEMA && store.entries && typeof store.entries === 'object'
     ? store.entries[cacheKey]
     : null;
-  const validEntry = rawEntry && typeof rawEntry.etag === 'string' && Array.isArray(rawEntry.rules) && rawEntry.rules.length < 100
-    ? rawEntry
+  const cachedRules = rawEntry && typeof rawEntry.etag === 'string'
+    ? pickBranchRulesCacheData(rawEntry.rules)
     : null;
+  const validEntry = cachedRules ? { etag: rawEntry.etag, rules: cachedRules } : null;
   const res = await ghJsonConditional(apiPath, {
     etag: validEntry?.etag ?? null,
     includeHeaders: true,
@@ -195,10 +263,11 @@ async function fetchBranchRules(repo, baseRefName, viewer, stateDir) {
     : res.data;
   // A full page may be truncated. Unknown is not an empty inventory; never cache incomplete rules.
   if (!Array.isArray(rules) || rules.length >= 100) throw new Error('Incomplete branch rules');
-  if (cachePath && res.etag) {
-    upsertBranchRulesCache(cachePath, cacheKey, { etag: res.etag, rules, updatedAt: Date.now() });
+  const picked = pickBranchRulesCacheData(rules);
+  if (cachePath && res.etag && picked) {
+    upsertBranchRulesCache(cachePath, cacheKey, { etag: res.etag, rules: picked, updatedAt: Date.now() });
   }
-  return rules;
+  return picked ?? rules;
 }
 
 function lastCommit(prView) {
@@ -427,6 +496,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       closed
       merged
       isDraft
+      mergeable
       mergedAt
       closedAt
       createdAt
@@ -494,6 +564,8 @@ query($owner: String!, $name: String!, $number: Int!) {
               contexts(first: 100) {
                 totalCount
                 pageInfo { hasNextPage }
+                checkRunCountsByState { state count }
+                statusContextCountsByState { state count }
                 nodes {
                   __typename
                   ... on CheckRun { name isRequired(pullRequestNumber: $number) status conclusion detailsUrl startedAt completedAt checkSuite { app { databaseId slug } } }
@@ -505,17 +577,20 @@ query($owner: String!, $name: String!, $number: Int!) {
         }
       }
       reviews(last: 50) {
+        totalCount
         nodes {
           id
           author { login __typename }
           state
           body
           submittedAt
+          updatedAt
           url
           commit { oid }
         }
       }
       reactions(last: 30) {
+        totalCount
         nodes { content createdAt user { login } }
       }
       comments(last: 100) {
@@ -576,6 +651,31 @@ query($owner: String!, $name: String!, $number: Int!) {
 
 const counts = (list) => (list ?? []).filter((c) => c.count > 0).map((c) => `${c.state}:${c.count}`).sort().join(',');
 
+/**
+ * Recompute checkRunCountsByState / statusContextCountsByState from the raw `gh pr view`
+ * statusCheckRollup (before latestChecks deduplication). Comparing this with GraphQL's rollup
+ * counts detects checks that changed between the two requests so we never cache a newer probe
+ * baseline over an older check list.
+ */
+function rollupProbeCounts(rawRollup) {
+  const checkRuns = new Map();
+  const statusContexts = new Map();
+  for (const item of rawRollup) {
+    if (item.__typename === 'CheckRun') {
+      const state = item.status === 'COMPLETED' && item.conclusion ? item.conclusion : item.status;
+      if (!state) return null;
+      checkRuns.set(state, (checkRuns.get(state) ?? 0) + 1);
+    } else if (item.__typename === 'StatusContext') {
+      if (!item.state) return null;
+      statusContexts.set(item.state, (statusContexts.get(item.state) ?? 0) + 1);
+    } else {
+      return null;
+    }
+  }
+  const format = (map) => [...map.entries()].map(([state, count]) => `${state}:${count}`).sort().join(',');
+  return { checkRuns: format(checkRuns), statusContexts: format(statusContexts) };
+}
+
 function probeFingerprint(pr) {
   const contexts = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts;
   return {
@@ -611,6 +711,7 @@ async function main() {
   const prView = await fetchPrView(args.repo, args.number, args.stateDir);
   const ghView = prView;
 
+  let rawCheckRollup = [];
   let checkRollup = [];
   let checksUnavailable = false;
   let checksError = null;
@@ -618,15 +719,17 @@ async function main() {
   try {
     const stdoutShape = await ghPrViewJson(args.number, args.repo);
     checksHeadOid = stdoutShape.headRefOid || null;
-    checkRollup = Array.isArray(stdoutShape.statusCheckRollup)
-      ? latestChecks(stdoutShape.statusCheckRollup.map(normalizeCheckRun).filter(Boolean))
+    rawCheckRollup = Array.isArray(stdoutShape.statusCheckRollup)
+      ? stdoutShape.statusCheckRollup.filter((x) => x && typeof x === 'object')
       : [];
+    checkRollup = latestChecks(rawCheckRollup.map(normalizeCheckRun).filter(Boolean));
     if (Array.isArray(stdoutShape.commits) && stdoutShape.commits.length) {
       prView.__ghCommits = stdoutShape.commits;
     }
   } catch (e) {
     checksUnavailable = true;
     checksError = String(e.stderr || e.message || e).slice(0, 1000);
+    rawCheckRollup = [];
     checkRollup = [];
   }
 
@@ -644,6 +747,7 @@ async function main() {
   if (!pr.headRefOid || checksHeadOid !== pr.headRefOid || ghView.head?.sha !== pr.headRefOid) {
     checksUnavailable = true;
     checksError = checksError || 'PR head changed between snapshot requests or check head is unavailable';
+    rawCheckRollup = [];
     checkRollup = [];
     ghView.mergeable = null;
     ghView.mergeable_state = null;
@@ -707,6 +811,12 @@ async function main() {
       appId: n.checkSuite?.app?.databaseId ?? null, appSlug: n.checkSuite?.app?.slug ?? null,
     })) : [];
   const checksTruncated = Boolean(checkContexts?.pageInfo?.hasNextPage);
+  const rawCounts = !checksUnavailable && !checksTruncated && (!checkCommit?.oid || checkCommit.oid === pr.headRefOid)
+    ? rollupProbeCounts(rawCheckRollup)
+    : null;
+  const probeCountsMatch = Boolean(rawCounts)
+    && rawCounts.checkRuns === counts(checkContexts?.checkRunCountsByState)
+    && rawCounts.statusContexts === counts(checkContexts?.statusContextCountsByState);
   const checksSummary = summarizeChecks(
     checkRollup,
     checksUnavailable,
@@ -802,6 +912,10 @@ async function main() {
     reactions: (pr.reactions?.nodes || []).map((r) => ({ content: r.content ?? null, at: r.createdAt ?? null, author: r.user?.login ?? null })),
     // Older top-level comments beyond the 100 read (a PR with more than that; the gate watches new ones only).
     commentsOmitted: Math.max(0, (pr.comments?.totalCount ?? 0) - (pr.comments?.nodes?.length ?? 0)),
+    // Emit the GraphQL probe baseline only when it agrees with the check rollup evaluated in this
+    // snapshot; on skew (or unavailable/truncated checks), return null so the gate forces a full
+    // read on the next tick instead of caching a newer check state.
+    probe: probeCountsMatch ? probeFingerprint(pr) : null,
   };
 
   process.stdout.write(JSON.stringify(out, null, 2) + '\n');
