@@ -250,9 +250,6 @@ function createSteeringRelay() {
       actions.toClient.push(makeError(inj.hostId, reason));
       inj.hostId = undefined;
     }
-    if (inj.previousResponse.result?.usage) {
-      turn.usage = mergeUsage(turn.usage, inj.previousResponse.result.usage);
-    }
     let primary;
     if (inj.previousResponse.error) {
       primary = inj.previousResponse;
@@ -264,6 +261,12 @@ function createSteeringRelay() {
           : { jsonrpc: '2.0', result: { stopReason: 'cancelled' } });
     } else {
       primary = inj.replacementResponse.error ? inj.replacementResponse : inj.previousResponse;
+    }
+    if (primary !== inj.previousResponse && inj.previousResponse.result?.usage) {
+      turn.usage = mergeUsage(turn.usage, inj.previousResponse.result.usage);
+    }
+    if (primary !== inj.replacementResponse && inj.replacementResponse.result?.usage) {
+      turn.usage = mergeUsage(turn.usage, inj.replacementResponse.result.usage);
     }
     closeTurn(turn, primary, actions);
   }
@@ -628,7 +631,6 @@ function attachSteering(input, output, child, stop, errorRelay, verification) {
         });
         return null;
       }
-      if (errorRelay) errorRelay.request(message);
       if (message.method === 'initialize') {
         initializeId = message.id;
         elicitationForm = clientSupportsElicitationForm(params);
@@ -643,14 +645,21 @@ function attachSteering(input, output, child, stop, errorRelay, verification) {
       mcpSessions.delete(params.sessionId);
     }
     const handled = steering.handleClientMessage(message);
-    if (!handled) return line;
+    if (!handled) {
+      if (errorRelay && message.id !== undefined) errorRelay.request(message);
+      return line;
+    }
     if (handled.toClient) {
       for (const item of handled.toClient) pushToClient(item);
     }
     if (handled.toAgent) {
       for (const item of handled.toAgent) pushToAgent(item);
     }
-    return handled.forward ? line : null;
+    if (handled.forward) {
+      if (errorRelay && message.id !== undefined) errorRelay.request(message);
+      return line;
+    }
+    return null;
   });
   toAgent.on('error', stop);
   toClient.on('error', stop);

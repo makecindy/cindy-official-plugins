@@ -340,7 +340,6 @@ function startRemoteWorkspace(agyPath, host) {
   const forwardClientLine = (line, parsed) => {
     const message = parsed === undefined ? parseLine(line) : parsed;
     if (message) {
-      errorRelay.request(message);
       const handled = steering.handleClientMessage(message);
       if (handled) {
         if (handled.toClient) {
@@ -351,6 +350,7 @@ function startRemoteWorkspace(agyPath, host) {
         }
         if (!handled.forward) return;
       }
+      errorRelay.request(message);
     }
     toAgentLine(line);
   };

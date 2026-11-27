@@ -250,9 +250,6 @@ function createSteeringRelay() {
       actions.toClient.push(makeError(inj.hostId, reason));
       inj.hostId = undefined;
     }
-    if (inj.previousResponse.result?.usage) {
-      turn.usage = mergeUsage(turn.usage, inj.previousResponse.result.usage);
-    }
     let primary;
     if (inj.previousResponse.error) {
       primary = inj.previousResponse;
@@ -264,6 +261,12 @@ function createSteeringRelay() {
           : { jsonrpc: '2.0', result: { stopReason: 'cancelled' } });
     } else {
       primary = inj.replacementResponse.error ? inj.replacementResponse : inj.previousResponse;
+    }
+    if (primary !== inj.previousResponse && inj.previousResponse.result?.usage) {
+      turn.usage = mergeUsage(turn.usage, inj.previousResponse.result.usage);
+    }
+    if (primary !== inj.replacementResponse && inj.replacementResponse.result?.usage) {
+      turn.usage = mergeUsage(turn.usage, inj.replacementResponse.result.usage);
     }
     closeTurn(turn, primary, actions);
   }

@@ -3028,6 +3028,42 @@ describe('Antigravity local ACP relay', () => {
       assert.deepEqual(replDone.turnResponse, { jsonrpc: '2.0', id: 1, result: { stopReason: 'cancelled' } });
     }
 
+    // 3b. Cancel race where previous returns cancelled and replacement already finished with end_turn
+    // counts each segment's usage once (no double-counting previous or dropping replacement).
+    {
+      const relay = createSteeringRelay();
+      relay.completeInitializeResult({ agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+      relay.handleClientMessage({ jsonrpc: '2.0', id: 1, method: 'session/prompt', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'work' }] } });
+      const steerId = relay.handleClientMessage({ jsonrpc: '2.0', id: 2, method: '_session/steering', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'steer' }] } }).toAgent[0].id;
+      relay.handleClientMessage({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId: 's1' } });
+      const replFinished = relay.handleAgentResponse({ jsonrpc: '2.0', id: steerId, result: { stopReason: 'end_turn', usage: { outputTokens: 7 } } });
+      assert.equal(replFinished.turnResponse, null);
+      const prevCancelled = relay.handleAgentResponse({ jsonrpc: '2.0', id: 1, result: { stopReason: 'cancelled', usage: { outputTokens: 10 } } });
+      assert.equal(prevCancelled.toClient[0].id, 2);
+      assert.equal(prevCancelled.toClient[0].error.code, -32603);
+      assert.deepEqual(prevCancelled.turnResponse, {
+        jsonrpc: '2.0',
+        id: 1,
+        result: { stopReason: 'cancelled', usage: { outputTokens: 17 } },
+      });
+    }
+
+    // 3c. Cancel race where both segments return end_turn aggregates both segments onto synthesized cancelled result.
+    {
+      const relay = createSteeringRelay();
+      relay.completeInitializeResult({ agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+      relay.handleClientMessage({ jsonrpc: '2.0', id: 1, method: 'session/prompt', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'work' }] } });
+      const steerId = relay.handleClientMessage({ jsonrpc: '2.0', id: 2, method: '_session/steering', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'steer' }] } }).toAgent[0].id;
+      relay.handleClientMessage({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId: 's1' } });
+      relay.handleAgentResponse({ jsonrpc: '2.0', id: 1, result: { stopReason: 'end_turn', usage: { outputTokens: 10 } } });
+      const settled = relay.handleAgentResponse({ jsonrpc: '2.0', id: steerId, result: { stopReason: 'end_turn', usage: { outputTokens: 7 } } });
+      assert.deepEqual(settled.turnResponse, {
+        jsonrpc: '2.0',
+        id: 1,
+        result: { stopReason: 'cancelled', usage: { outputTokens: 17 } },
+      });
+    }
+
     // 4. Previous prompt error during steering cancels replacement and preserves classified error data.
     {
       const relay = createSteeringRelay();
