@@ -102,7 +102,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.43');
+  assert.equal(manifest.version, '1.5.44');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -125,7 +125,7 @@ test('connection tests never cache an identity that the plugin cannot attribute 
 test('settings show only host availability and fallback-token storage state', () => {
   assert.match(settingsSource, /function renderHostAccount\(available\)/);
   assert.doesNotMatch(settingsSource, /renderHostAccount\(hostAvailable,\s*\w+/);
-  assert.doesNotMatch(settingsSource, /connectedLogin|connectedSource|fetch\(['"]\/kv/);
+  assert.doesNotMatch(settingsSource, /connectedLogin|connectedSource/);
   assert.doesNotMatch(settingsSource, /else void test\(\)/);
   assert.match(settingsSource, /检查当前 GitHub 连接/);
   assert.doesNotMatch(settingsSource, /gh auth token/);
@@ -259,8 +259,9 @@ function createSettings(options = {}) {
   const context = createContext({
     document,
     AbortController,
-    BroadcastChannel: class { postMessage() {} addEventListener() {} removeEventListener() {} },
-    setTimeout: () => 0,
+    crypto: globalThis.crypto,
+    BroadcastChannel: options.channel ?? class { postMessage() {} addEventListener() {} removeEventListener() {} },
+    setTimeout: options.setTimeout ?? (() => 0),
     clearTimeout() {},
     clearInterval() {},
     setInterval: () => 0,
@@ -275,6 +276,7 @@ function createSettings(options = {}) {
         return { ok: true, json: async () => [{ key: 'github_pat', saved: options.saved ?? false, tail: options.tail,
           hostSource: 'gh-cli', hostAvailable: options.hostAvailable ?? false }] };
       }
+      if (url === '/kv') return { ok: true, json: async () => options.kv ?? {} };
       if (options.secretWrite) return options.secretWrite(url, init);
       return { status: 204 };
     },
@@ -595,7 +597,7 @@ for (const locale of hostLocales) {
     const m = page.messages[locale];
     assert.equal(page.fetchCalls[0].url, '/app-context', 'locale is resolved before any copy is rendered');
     assert.equal(page.document.documentElement.lang, locale);
-    assert.equal(page.copyNodes['data-i18n'].length, 8);
+    assert.equal(page.copyNodes['data-i18n'].length, 10);
     for (const node of page.copyNodes['data-i18n']) {
       const key = node.getAttribute('data-i18n');
       if (key !== 'save') assert.equal(node.textContent, m[key], key);
@@ -1713,6 +1715,92 @@ test('IM follow settings share card preferences and selected remote model withou
   assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.auto_follow, false);
 });
 
+test('settings switch saves through the runtime and restores its stored value on failure', async () => {
+  const kv = { prCard: { autoFollow: false }, unrelated: 1 };
+  let failWrite = false;
+  const runtime = createRuntime({ localFetch: async (url, init) => {
+    assert.equal(url, '/kv');
+    if (init?.method === 'PUT' && !failWrite) Object.assign(kv, JSON.parse(init.body));
+    return { ok: init?.method !== 'PUT' || !failWrite, json: async () => structuredClone(kv) };
+  } });
+  class Channel extends EventTarget {
+    constructor() {
+      super();
+      runtime.channel.postMessage = data => this.dispatchEvent(new MessageEvent('message', { data }));
+    }
+    postMessage(data) { runtime.channel.onmessage({ data }); }
+  }
+  const page = createSettings({ channel: Channel, kv });
+  await flushAsync();
+  const control = page.elements.get('follow-after-open');
+  assert.equal(control.disabled, false);
+  assert.equal(control.checked, false);
+  control.checked = true;
+  await control.listeners.change();
+  await flushAsync();
+  assert.equal((await runtime.tool('pr_follow_settings')).result.settings.auto_follow, true);
+  failWrite = true;
+  control.checked = false;
+  await control.listeners.change();
+  await flushAsync();
+  assert.equal(control.checked, true);
+  assert.equal(control.disabled, false);
+  assert.ok(page.elements.get('follow-status').textContent);
+});
+
+test('settings switch waits for a delivered save that is queued behind another PR action', async () => {
+  const kv = { prCard: { autoFollow: false } };
+  const timers = [];
+  let release;
+  const blocker = new Promise((resolve) => { release = resolve; });
+  const runtime = createRuntime({ localFetch: async (url, init) => {
+    assert.equal(url, '/kv');
+    if (init?.method === 'PUT') Object.assign(kv, JSON.parse(init.body));
+    return { ok: true, json: async () => structuredClone(kv) };
+  } });
+  class Channel extends EventTarget {
+    constructor() {
+      super();
+      runtime.channel.postMessage = data => this.dispatchEvent(new MessageEvent('message', { data }));
+    }
+    postMessage(data) { runtime.channel.onmessage({ data }); }
+  }
+  const page = createSettings({ channel: Channel, kv, setTimeout: (fn) => { timers.push(fn); return timers.length; } });
+  await flushAsync();
+  const control = page.elements.get('follow-after-open');
+  // Another PR action (for example an open model picker) holds the shared queue.
+  const held = runtime.context.enqueuePr(() => blocker);
+  control.checked = true;
+  await control.listeners.change();
+  await flushAsync();
+  for (const fn of timers.splice(0)) fn();
+  assert.equal(control.checked, true);
+  assert.equal(control.disabled, true);
+  assert.equal(page.elements.get('follow-status').textContent, page.messages['zh-CN'].followPending);
+  release();
+  await held;
+  await flushAsync();
+  assert.equal(kv.prCard.autoFollow, true);
+  assert.equal(control.checked, true);
+  assert.equal(control.disabled, false);
+  assert.equal(page.elements.get('follow-status').textContent, '');
+});
+
+test('setting auto-follow is explicit, preserves other preferences and never starts work', async () => {
+  const runtime = createPrRuntime({ kv: { unrelated: 'keep', prCard: { autoArchive: true, futureKey: 1 } } });
+  for (const enabled of [true, true, false]) {
+    const { reply } = await runtime.tool({ auto_follow: enabled }, 'set_pr_follow_settings');
+    assert.equal(reply.result.settings.auto_follow, enabled);
+    assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.auto_follow, enabled);
+  }
+  assert.equal((await runtime.tool({ auto_follow: 'true' }, 'set_pr_follow_settings')).reply.ok, false);
+  assert.equal(runtime.kv.prCard.autoFollow, false);
+  assert.equal(runtime.kv.prCard.futureKey, 1);
+  assert.equal(runtime.kv.prCard.autoArchive, true);
+  assert.equal(runtime.kv.unrelated, 'keep');
+  assert.equal(runtime.agentRuns.length, 0);
+});
+
 test('IM preferences remain available when cards cannot be delivered; missing differs from unreadable', async () => {
   for (const autoFollow of [false, true]) {
     const runtime = createPrRuntime({ refuseCards: true, kv: { prCard: { autoFollow } } });
@@ -1819,6 +1907,26 @@ function followScheduler(options = {}) {
   };
   return { hostApi, calls, rows, runs };
 }
+
+test('first card selection before publishing sets the model on the first follow-up', async () => {
+  const { hostApi, rows } = followScheduler();
+  const runtime = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } },
+    pickModel: () => assert.fail('an inline choice must not open a second picker') });
+  const route = { agentKind: 'codex', providerId: 'openai', model: 'sol', effort: 'high', fastMode: false };
+  const { callId } = await runtime.tool({ repo: 'octo/repo', head: 'topic' });
+  const html = runtime.lastCard(callId).html;
+  assert.match(html, /data-ghost-action="prset:model"[^>]+data-ghost-model-select=""/);
+  assert.ok(html.indexOf('data-ghost-action="prset:model"') < html.indexOf('data-ghost-action="pr:publish"'));
+  await runtime.click(callId, 'prset:model', { modelSelection: route });
+  assert.deepEqual(runtime.kv.prCard.followModel.route, route);
+  assert.match(runtime.lastCard(callId).html, /data-ghost-action="prset:modelPick"[^>]+sol/);
+  assert.equal(rows.size, 0);
+  await runtime.tool({ card_id: callId, pr: 42, published: true });
+  assert.equal(rows.size, 1);
+  assert.equal(rows.get('sch-1').model, 'sol');
+  assert.equal(rows.get('sch-1').effort, 'high');
+  assert.doesNotMatch(runtime.lastCard(callId).html, /data-ghost-action="prset:model"/);
+});
 
 test('publication starts exactly one verified follow-up without a model turn and stop removes it', async () => {
   const { hostApi, calls, rows } = followScheduler();

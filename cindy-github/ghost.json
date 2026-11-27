@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.43",
-  "releaseNotes": "修复 PR 卡片在 macOS/Linux 上无法识别宿主稳定化后的单引号前置检查命令的问题：按宿主平台核验引用格式（macOS/Linux 兼容单引号路径、Windows 保持双引号并拒绝单引号），使旧调度在未确认为 Node.js 18+ 时能正常显示「跟进待修复」并给出修复命令，新启动脚本的稳定化命令也能直接通过核验。",
+  "version": "1.5.44",
+  "releaseNotes": "修复 PR 卡片在 macOS/Linux 上无法识别宿主稳定化后的单引号前置检查命令的问题：按宿主平台核验引用格式（macOS/Linux 兼容单引号路径、Windows 保持双引号并拒绝单引号），使旧调度在未确认为 Node.js 18+ 时能正常显示「跟进待修复」并给出修复命令，新启动脚本的稳定化命令也能直接通过核验。可在插件设置或通过 AI 开关本机的「发完自动跟进」，与 PR 卡片共用偏好。开启后可在发布前选好跟进模型，手动跟进也可先选模型。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -186,6 +186,22 @@
       "parameters": {
         "type": "object",
         "properties": {}
+      }
+    },
+    {
+      "name": "set_pr_follow_settings",
+      "description": "设置本机「发完自动跟进」默认值。auto_follow 必须是布尔值；只影响以后发布的非草稿 PR。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "auto_follow": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "auto_follow"
+        ],
+        "additionalProperties": false
       }
     },
     {
