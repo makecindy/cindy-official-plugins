@@ -51,7 +51,7 @@ function supportsSteering(agentVersion) {
  * as soon as a new one takes over. Keep Cindy's original request open until
  * the newest prompt finishes and relay all of the session's streamed updates.
  */
-function attachSteering(input, output, child, stop) {
+function attachSteering(input, output, child, stop, checkAccount) {
   const turns = new Map();
   const requests = new Map();
   const openingSessions = new Map();
@@ -116,6 +116,13 @@ function attachSteering(input, output, child, stop) {
     const message = parse(line);
     if (!message?.method || message.id === undefined) return line;
     const params = message.params;
+    if (message.method === '_cindy/checkAccountVerification' && isAntigravity && checkAccount &&
+        typeof params?.sessionId === 'string' && mcpSessions.has(params.sessionId)) {
+      void checkAccount().catch(() => ({ status: 'unknown' })).then(result => {
+        if (!toClient.destroyed && !toClient.readableEnded) toClient.push(encode({ jsonrpc: '2.0', id: message.id, result }));
+      });
+      return null;
+    }
     if (message.method === 'initialize') initializeId = message.id;
     if (isAntigravity && isSessionOpen(message.method)) {
       const servers = Array.isArray(params?.mcpServers) ? params.mcpServers : [];

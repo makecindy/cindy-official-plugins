@@ -2307,7 +2307,7 @@ test('native /usage preserves exhausted groups and ignores model turns and disab
   assert.equal(usageFromReport({ status: 'SUCCESS', num_turns: 1, command }), null);
 });
 
-async function localRelay(t) {
+async function localRelay(t, checkAccount) {
   const { PassThrough } = await import('node:stream');
   const { default: steering } = await import(pathToFileURL(path.join(root, 'agy-steering.js')));
   const source = new PassThrough();
@@ -2317,7 +2317,7 @@ async function localRelay(t) {
   const client = [];
   child.stdin.on('data', (data) => server.push(JSON.parse(data)));
   output.on('data', (data) => client.push(JSON.parse(data)));
-  steering.attachSteering(source, output, child, (error) => { throw error; });
+  steering.attachSteering(source, output, child, (error) => { throw error; }, checkAccount);
   const write = (stream, message) => stream.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
   const request = (id, method, extra = {}) => write(source, { id, method, params: { sessionId: 'one', ...extra } });
   const response = (id, result) => write(child.stdout, { id, result });
@@ -2329,6 +2329,25 @@ async function localRelay(t) {
 }
 
 describe('Antigravity local ACP relay', () => {
+  if (official) test('returns account verification only for the live native session and a provider 403', async t => {
+    const { default: verification } = await import(pathToFileURL(path.join(root, 'agy-verification.js')));
+    const url = 'https://accounts.google.com/v3/signin/continue?plt=synthetic&continue=https://developers.google.com/gemini-code-assist/auth/auth_success_gemini';
+    const detail = { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', domain: 'cloudcode-pa.googleapis.com',
+      reason: 'VALIDATION_REQUIRED', metadata: { validation_url: url } };
+    const log = (code, item) => 'agy diagnostics: ' + JSON.stringify({ error: { code, status: 'PERMISSION_DENIED', details: [item] } }, null, 2);
+    assert.equal(verification.validationUrl(log(429, detail)), null);
+    assert.equal(verification.validationUrl(log(403, { ...detail, domain: 'example.test' })), null);
+    assert.equal(verification.validationUrl(log(403, { ...detail, reason: 'OTHER' })), null);
+    const probe = () => Promise.resolve({ status: 'required', url: verification.validationUrl(log(403, detail)) });
+    const { server, client, request, response } = await localRelay(t, probe);
+    request(1, 'initialize');
+    response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.18' } });
+    request(2, 'session/new'); response(2, { sessionId: 'one' });
+    request(3, '_cindy/checkAccountVerification'); await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(client.at(-1).result, { status: 'required', url });
+    assert.ok(!server.some(req => req.method === '_cindy/checkAccountVerification'));
+  });
+
   test('adds HTTP MCP to Antigravity initialize and preserves capabilities and steering metadata', async (t) => {
     const { client, request, response } = await localRelay(t);
     const result = {

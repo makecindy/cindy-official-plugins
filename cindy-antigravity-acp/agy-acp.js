@@ -20,6 +20,7 @@
  */
 
 const os = require('node:os');
+const { checkAccount } = require('./agy-verification.js');
 const { attachSteering } = require('./agy-steering.js');
 const { ACP_ARGS, detectAgy, readCustomAgyConfig, resolveAgy, spawnAgy, killTree } = require('./resolve-agy.js');
 const remoteWorkspace = require('./remote-workspace.js');
@@ -130,7 +131,7 @@ function run(agyPath) {
     });
   });
 
-  const { detach: detachSteering, relay: stdoutRelay } = attachSteering(process.stdin, process.stdout, child, () => stop('SIGTERM'));
+  const { detach: detachSteering, relay: stdoutRelay } = attachSteering(process.stdin, process.stdout, child, () => stop('SIGTERM'), () => checkAccount(agyPath));
   child.stdin.on('error', () => {
     // EPIPE after agy exited; the exit handler takes care of shutting down.
   });
