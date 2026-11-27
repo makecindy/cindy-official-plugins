@@ -131,9 +131,12 @@ do not edit the generated `dist/maker.js` by hand.
    plugin directory as the scope — for example
    `fix(qq-mail): validate the move result`. Available types: `feat`, `fix`,
    `refactor`, `perf`, `chore`, `docs`, `test`, `revert`, `build`, `ci`.
-3. **Any change to plugin content must bump `ghost.json`'s `version` in the same
-   pull request.** The new `major.minor.patch` SemVer must be greater than the
-   version on `main`; otherwise CI blocks the pull request.
+3. **Do not downgrade `ghost.json.version` below `main`.** Manual patch bumps
+   are optional for routine plugin updates — `.github/scripts/package-plugin.sh`
+   automatically computes a strictly increasing `major.minor.patch` SemVer on
+   `main` when `ghost.json.version` is unchanged (eliminating version-bump merge
+   conflicts across parallel PRs). Bump `ghost.json.version` manually when you
+   want an explicit minor or major version jump.
    The same change must migrate an existing schema-v2 manifest to
    `schemaVersion: 3`: add `minCindyVersion`, remove `slots`, and express the
    same capabilities through their direct fields. Follow the
