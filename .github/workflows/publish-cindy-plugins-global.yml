@@ -65,7 +65,8 @@ jobs:
             const pluginRoots = trackedFiles
               .filter((file) => path.posix.basename(file) === 'ghost.json')
               .map((file) => path.posix.dirname(file))
-              .filter((directory) => directory !== '.')
+              // The withdrawn personal ID is retained as source only.
+              .filter((directory) => directory !== '.' && directory !== 'agy-acp')
               .sort((left, right) => right.length - left.length || left.localeCompare(right));
 
             if (process.env.EVENT_NAME === 'workflow_dispatch') {

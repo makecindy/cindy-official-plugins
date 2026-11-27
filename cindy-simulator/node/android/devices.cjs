@@ -81,7 +81,7 @@ function createDevices({root,sdk,run,children,spawn:launchProcess=spawn}){
     // ADB serials are ports and can be reused by Android Studio. Confirm the
     // exact private AVD before every command, including after worker restart.
     const named=await run(local.adb,['-s',ep.serial,'emu','avd','name'],commandBudget(4000,deadline));
-    if(named.stdout.split(/\r?\n/)[0]!==device.avdName)throw fail('DEVICE_NOT_OWNED','The Android connection now belongs to another device. Refresh this plugin.');
+    if(named.stdout.split(/\r{0,2}\n/,1)[0]!==device.avdName)throw fail('DEVICE_NOT_OWNED','The Android connection now belongs to another device. Refresh this plugin.');
     // adb shell joins its arguments into a remote shell command. Quote every
     // argument there even though the host itself always uses shell:false.
     const remote=args[0]==='shell'?['shell',...args.slice(1).map(v=>"'"+String(v).replace(/'/g,"'\\''")+"'")]:args;

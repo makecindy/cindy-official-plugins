@@ -1,0 +1,5 @@
+{
+  "name": "DeepSeek Harness",
+  "description": "DeepSeek Harness CLI(dsh)로 Cindy 작업을 실행할 때 사용합니다.",
+  "whenToUse": "DeepSeek Harness CLI(dsh)로 Cindy 작업을 실행할 때 사용합니다."
+}

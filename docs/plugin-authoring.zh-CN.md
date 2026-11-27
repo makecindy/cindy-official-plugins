@@ -364,14 +364,10 @@ Host 自动回调插件。旧 `cindy-request` 图片/视频生成接口用于存
    工作目录，避免本地凭证文件混入包中；harness
    打包未提交工作区时必须使用经过审查的显式文件清单。检查每个最终归档只含预期文件、
    没有外层插件目录或凭证；验收证据必须适用于最终提交内容。
-4. 按[审查契约](../.greptile/rules.md#运行验证与证据复用)提供受影响路径的真实运行证据。
-   安装、迁移或工具行为变化，需在满足实际要求的 Cindy 环境运行相应包，验证相关
-   失败分支和保留能力。记录已测包/源码、Cindy 版本/渠道、场景、结果与未测项。
-   开发构建必须如实标注，没有适用证据不能据此声称兼容已发布客户端。
-   沿用已有证据时，说明从已测版本到当前提交的完整差异为何不影响相应路径；旧包
-   实测不等于最新包已安装验收。作者或维护者均可提供证据。有可用且获授权的操作
-   工具时由 Agent 完成，否则明确交接未验证步骤。不要求固定验证勾选项，CI 也不
-   读取此类勾选；绿色 CI 不采集运行证据，不证明最低版本正确，也不自动比较迁移能力。
+4. 运行仓库契约校验与插件自动化测试，并在 PR 说明中附上结果（见
+   [审查契约](../.greptile/rules.md)）。全新插件首发或接入新宿主能力时建议在 Cindy
+   中冒烟验证，但人工实机测试不再作为常规更新的合并硬门禁——上架审核由合并后的
+   Global Plugin Platform 承担。
 
 ## 文档与注释的解释边界
 
@@ -388,21 +384,23 @@ Host 自动回调插件。旧 `cindy-request` 图片/视频生成接口用于存
 
 ### 当前能力声明与后续同步
 
-以下字段以 [Host 提交 4584f410b7](https://github.com/makecindy/cindy/blob/4584f410b7fad38514842d90a45b6112c6e67d61/packages/plugin-protocol/src/manifest.ts)（`v0.1.141`）
+以下字段以 [Host 提交 8a90e65e36](https://github.com/makecindy/cindy/blob/8a90e65e36e139d060784dee5eab50295b085c7c/packages/plugin-protocol/src/manifest.ts)（`v0.1.145`）
 及对应运行时参考为来源，用于查找能力；实际可用性仍以目标 Host 为准。
 
 | 能力 | 声明字段 |
 | --- | --- |
-| 工具审批策略 | `tools[].approval`（`auto / each-call`） |
+| 工具审批与启动挂载 | `tools[].approval`（`auto / each-call`）、`tools[].exposure: "startup"` |
 | 任务与伙伴协作 | `agent.tasks / hiddenTasks / targets / delegation / observe / companions` |
-| 宿主工具组 | `agent.hostTools`，可用组与授权见 [Host 工具参考](https://github.com/makecindy/cindy/blob/4584f410b7fad38514842d90a45b6112c6e67d61/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-host-tools.md) |
+| 宿主工具组 | `agent.hostTools`，可用组与授权见 [Host 工具参考](https://github.com/makecindy/cindy/blob/8a90e65e36e139d060784dee5eab50295b085c7c/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-host-tools.md) |
 | 界面 | `mainView.open / side / multiple`、`taskView`、`taskView.remote: true`（需声明 `liveScreen: true`）、`mobile` |
 | 配置与使用前置 | `showTaskPreferences`、`setup.requires[].anyOf` |
 | 介绍与邮件 | `readme`、`mail`、`mailReader` |
-| 模型与例行任务事件 | `models.types`、`cindy.models`（`decisions`、`rerank`）、`routineEvents.events` |
+| 模型与例行任务事件 | `models.types`、`cindy.models`（`decisions`、`rerank`、`media_request`）、`routineEvents.events`。媒体直调沿用 Host 的模型动作授权 |
+| 插件执行引擎 | v3 `harnesses` 声明引擎，`entry` 对应 `node.entries`，通过 `PUT /harnesses` 上报运行可用性。当前 Host 运行 `acp`。见[引擎参考](https://github.com/makecindy/cindy/blob/8a90e65e36e139d060784dee5eab50295b085c7c/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-harnesses.md) |
+| 表单弹窗 | v3 `form: true` 声明表单能力，由 Host 处理 `form-request` 并返回用户填写结果。见[表单参考](https://github.com/makecindy/cindy/blob/8a90e65e36e139d060784dee5eab50295b085c7c/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-form-dialog.md) |
 | 事件订阅 | `subscribe.topics` 的 `turn`、`session`、`message`、`task-state`、`tool-execution`、`native-recovery` |
 | 工具生命周期钩子 | `subscribe.hooks` 的 `will-tool-call`、`did-tool-result` |
-| 宿主偏好与界面 | `agent.modelPreferences`、`mainView.preferredIcon`、`mcpApps.ui.resources[].hostFullscreenButton`、`composer.header` 扩展位置 |
+| 宿主偏好与界面 | `agent.modelPreferences`、`mainView.preferredIcon`、`mcpApps.ui.resources[].hostFullscreenButton`、`mcpApps.ui.resources[].initialHeight`、`composer.header` 扩展位置 |
 | IM 入口 | 启用 `imEntrance` 时需同时声明 `agent.tasks` 与 `agent.targets` |
 | 本地更新 | `githubRelease` 为带 `settingsHtml` 的本地插件指定 GitHub.com 的 `owner/repository` |
 | 静态系统提示词 | `systemPrompt`（v3，`scope: "selected-task"`） |
@@ -410,18 +408,21 @@ Host 自动回调插件。旧 `cindy-request` 图片/视频生成接口用于存
 | 凭证检查 | `network.secrets[].check` |
 | 电脑间同步与设备屏幕 | `deviceSync`、`liveScreen` |
 
+- `tools[].exposure: "startup"` 是 v3 工具的可选声明。Host 在本地任务启动时，将当前工作目录可用、已启用且安装已获批准的插件中对模型可见的工具按具名工具提供；未声明时仍按需发现。市场安装读取包内原始清单。服务端规范化省略该字段，因此仓库发布预检不会仅凭该字段的变化识别到运行内容变化。见[工具参考](https://github.com/makecindy/cindy/blob/8a90e65e36e139d060784dee5eab50295b085c7c/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-tools.md)。
+- `mcpApps.ui.resources[].initialHeight` 是可选的初始高度提示，单位为 CSS 像素。Host 的本地新包校验要求有限数值，服务端上传和官方仓固定校验器保留该字段。市场包和已安装快照按既有路径读取，Host 渲染页面时忽略无效提示，并将有效提示限制在 80–720 CSS 像素。见[页面声明参考](https://github.com/makecindy/cindy/blob/8a90e65e36e139d060784dee5eab50295b085c7c/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-host-ui.md)。
+
 服务端将 `cindy-org-*` 保留给平台管理的通用插件。官方仓投稿不能用该前缀新建插件，
 存量插件沿用既有 ID。详见[服务端发布契约](https://github.com/xindong/cindy-server/blob/7c26366d7d/docs/plugin-server.md)。
 
 页面资源仍由 `mcpApps.ui` 声明：`resources` 与 `tools` 至少一项非空；只提供页面、
 由具名入口打开时可以使用空的 `tools: {}`。
-Host v0.1.141 的顶层工具与 UI 工具关联各最多 48 项，页面资源最多 16 项。
+Host v0.1.145 的顶层工具与 UI 工具关联各最多 48 项，页面资源最多 16 项。
 官方仓固定校验器仍要求顶层工具最多 16 项。
 
 Host 的 `network.hosts` 支持精确 HTTP(S)/WS(S) origin，可包含非默认端口。
 域名模式匹配 HTTPS 默认端口，精确 origin 匹配协议、主机和端口。
 官方仓固定校验器仍要求域名模式。运行时请求和凭证规则见
-[Host 网络参考](https://github.com/makecindy/cindy/blob/4584f410b7fad38514842d90a45b6112c6e67d61/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-network.md)。
+[Host 网络参考](https://github.com/makecindy/cindy/blob/8a90e65e36e139d060784dee5eab50295b085c7c/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-network.md)。
 
 Host 的资源语言包括 `zh-CN / zh-TW / en / ja / ko / es / fr / de / pt-PT / pt-BR`。
 Host 能力与官方仓发布要求分别维护；本文更新不改变本仓现有四语要求、固定校验器、

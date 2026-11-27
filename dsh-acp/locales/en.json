@@ -1,0 +1,5 @@
+{
+  "name": "DeepSeek Harness",
+  "description": "Run Cindy tasks with the DeepSeek Harness (dsh) installed on this computer.",
+  "whenToUse": "Use when running Cindy tasks with DeepSeek Harness through the local dsh CLI."
+}

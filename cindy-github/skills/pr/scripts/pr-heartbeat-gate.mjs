@@ -77,9 +77,9 @@
 
 import { appendTrace, scrub } from './lib/follow-trace.mjs';
 import { createHash } from 'node:crypto';
-import { BACKOFF_STEPS_MIN, baseMovedWait, checkOutcome, handledFailure, inspectWait, makeWait, setsAside, waitDueAt, waitFacts, waitIsDue, waitNotice } from './lib/follow-wait.mjs';
+import { BACKOFF_STEPS_MIN, baseMovedWait, checkOutcome, handledFailure, inspectWait, isSettledBaselineWait, makeWait, setsAside, waitAbsorbsBase, waitDueAt, waitFacts, waitIsDue, waitNotice } from './lib/follow-wait.mjs';
 import { mergeQueueFingerprint } from './lib/merge-queue.mjs';
-import { SETTLE_MAX_MS, TICK_MS, breaksSettle, expectedBots, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
+import { SETTLE_MAX_MS, TICK_MS, breaksSettle, expectedBots, isEmptyPass, isPendingTerminalBackoffRetry, pacingDue, resolvePrReviewerBots, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -90,6 +90,13 @@ import { fileURLToPath } from 'node:url';
 const EXIT_PASS = 0;
 const EXIT_BLOCK = 1;
 const EXIT_SKIP = 2;
+
+const MIN_NODE_MAJOR = 18;
+function supportedNodeMajor(version = process.versions.node) {
+  if (!/^\d+\.\d+\.\d+(?:[-+].*)?$/.test(String(version || ''))) return null;
+  const major = Number(String(version).split('.')[0]);
+  return major >= MIN_NODE_MAJOR ? major : null;
+}
 
 /**
  * pr-snapshot.mjs 的默认位置:与本 gate 同目录的版本控制脚本(随 pr 技能一起
@@ -119,6 +126,18 @@ const DEFAULT_MAX_PASS_ATTEMPTS = 3;
  * 同时保证失败/崩溃的 PR 任务在下一小时内重新获得执行机会。
  */
 const DEFAULT_RETRY_BACKOFF_MINUTES = 30;
+/**
+ * Escalating reminder intervals (minutes) after a merged/closed PR exhausts its initial cleanup
+ * passes and the schedule is still alive (e.g. a reused schedule the agent cannot delete itself).
+ * Survives --ack so an agent acknowledging a manual-stop reminder cannot trigger a 5-minute burn loop.
+ */
+const TERMINAL_BACKOFF_STEPS_MIN = [30, 120, 360, 720];
+
+function terminalBackoffMs(backoffIndex, retryBackoffMs) {
+  const stepMin = TERMINAL_BACKOFF_STEPS_MIN[Math.min(Math.max(0, backoffIndex), TERMINAL_BACKOFF_STEPS_MIN.length - 1)];
+  const scaled = Math.round(retryBackoffMs * (stepMin / DEFAULT_RETRY_BACKOFF_MINUTES));
+  return Math.max(retryBackoffMs, scaled);
+}
 
 /**
  * 两次放行之间的最小有效间隔(分钟):比这更密的放行**不计入**任何重试/唤起计数。
@@ -777,6 +796,9 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
   let passed = headMoved ? false : Boolean(watch.passed);
   let passedChecks = headMoved ? [] : watch.passedChecks ?? [];
   let owedChecks = headMoved ? [] : watch.owedChecks ?? [];
+  const priorChecks = watch.waitFacts?.complete ? watch.waitFacts.checks ?? [] : [];
+  let failureCompletionOwed = !headMoved && (watch.failureCompletionOwed ??
+    (priorChecks.some((c) => c.outcome === 'failed') && priorChecks.some((c) => c.outcome === 'pending')));
   const checksUnavailable = Boolean(snap?.checksSummary?.unavailable);
   const checks = checksUnavailable ? [] : (snap?.checks ?? []).filter((c) => c?.name);
   if (checks.length > 0) {
@@ -787,6 +809,16 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
     const newlyFailed = failed.filter((c) => !failedChecks.includes(failedKey(c)) && !failedChecks.includes(c.name));
     if (newlyFailed.length > 0) events.push({ kind: 'checks-failed', failed: newlyFailed });
     failedChecks = failed.map(failedKey);
+    // Report the end of the batch once if a failure was seen before all checks finished.
+    // Keep the obligation through partial or unavailable reads and on the acknowledged watch.
+    if (!snap.gate?.truncated && !snap.checksSummary?.truncated) {
+      const pending = checks.some((c) => checkOutcome(c) === 'pending');
+      if (newlyFailed.length && pending) failureCompletionOwed = true;
+      if (!pending && failureCompletionOwed) {
+        if (failed.length) events.push({ kind: 'checks-finished', count: checks.length, failed });
+        failureCompletionOwed = false;
+      }
+    }
 
     const required = checks.filter((c) => c.required === true);
     const gate = required.length > 0 ? required : checks;
@@ -882,7 +914,7 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
     events,
     exhausted: commentsOnly && wakes >= COMMENT_WAKE_LIMIT,
     next: {
-      headSha, failedChecks, passed, passedChecks, owedChecks, remarksThrough, remarkIds,
+      headSha, failedChecks, passed, passedChecks, owedChecks, failureCompletionOwed, remarksThrough, remarkIds,
       conflicting, isDraft, queueProblems, wakes, checksAwaitedSince, noChecksReminded, everHadChecks, baseSha,
       waitFacts: waitFacts(snap), inventoryRecoveryOwed,
     },
@@ -920,6 +952,9 @@ export function eventReport(events, snap, exhausted = false) {
         const outcome = String(c.conclusion ?? c.status ?? '').toLowerCase();
         return `  - ${c.name}${outcome && outcome !== 'failure' ? ` (${outcome})` : ''}${c.detailsUrl ? ` ${c.detailsUrl}` : ''}`;
       }));
+    } else if (e.kind === 'checks-finished') {
+      lines.push(`- All ${e.count} checks finished${commit}; ${e.failed.length} still failed:`,
+        ...listed(e.failed, (c) => `  - ${c.workflowName ? c.workflowName + ' / ' : ''}${c.name}${c.detailsUrl ? ' ' + c.detailsUrl : ''}`));
     } else if (e.kind === 'rules-recovered') {
       lines.push('- Required-check rules are readable again. Reassess the previously withheld ready-to-merge result.');
     } else if (e.kind === 'checks-passed') {
@@ -1003,7 +1038,7 @@ export function decide({
   // 距上次放行太近 = 上一次放行没换来一轮真实处理(宿主顺延/spawn 失败/重启),
   // 本轮照常放行但不消耗额度。理由见 DEFAULT_MIN_PASS_SPACING_MINUTES 的注释。
   const lastPassAt = Number(previous?.lastPassAt) || 0;
-  const emptyPass = minPassSpacingMs > 0 && lastPassAt > 0 && now - lastPassAt < minPassSpacingMs;
+  const emptyPass = isEmptyPass(previous, now, minPassSpacingMs);
   const emptyPassNote = emptyPass
     ? ` (previous release was only ${formatDuration(now - lastPassAt)} ago and produced no real run; not counted)`
     : '';
@@ -1012,6 +1047,11 @@ export function decide({
   const legacy = !previous?.watch && Boolean(previous?.fingerprint || previous?.pendingFingerprint);
   let baseline = previous?.watch
     ?? (legacy ? watchFromSnapshot(snap, now, lastKnownConflicting) : freshWatch(snap, now));
+  // A takeover may retain only CI registration facts, not an acknowledged
+  // watch. Fill the missing baseline fields using the current snapshot.
+  if (previous?.watch && !previous.watch.remarksThrough) {
+    baseline = { ...freshWatch(snap, now), ...previous.watch };
+  }
   // 规则故障提醒还没被确认就恢复了:待确认的那份记着「欠一次复核」,不能因为已确认的 watch
   // 没有这个标记而丢掉。
   if (pendingWatch?.inventoryRecoveryOwed === true && !baseline.inventoryRecoveryOwed
@@ -1091,16 +1131,76 @@ export function decide({
   });
 
   if (snap.merged || snap.closed) {
-    // 收口每轮都必须放行,不受重试上限约束(agent 收口失败就得再来一轮)
+    // Allow up to maxPassAttempts fast cleanup wakes (ignoring host-deferred empty passes), then
+    // escalate reminders (30m -> 2h -> 6h -> 12h) using dedicated terminalPassCount /
+    // terminalBackoffUntil fields that survive --ack (e.g. reused schedules requiring manual stop).
+    // Cleared automatically if a closed PR reopens or a new follow-up starts.
+    const stateLabel = snap.merged ? 'merged' : 'closed';
+    const prevTerminalCount = Number(previous?.terminalPassCount) || (pendingKey === 'terminal' ? pendingCount : 0);
+    const prevTerminalBackoffUntil = Number(previous?.terminalBackoffUntil) || 0;
+    const unackedEmptyPass = Boolean(pendingWatch) && emptyPass;
+    const repeatBackoffAttempt = isPendingTerminalBackoffRetry(previous, now, minPassSpacingMs);
+    const attempt = prevTerminalCount > 0 && unackedEmptyPass ? prevTerminalCount : prevTerminalCount + 1;
+    if (attempt > maxPassAttempts) {
+      if (repeatBackoffAttempt) {
+        const nextReminderNote = prevTerminalBackoffUntil > 0
+          ? ` (next reminder at ${isoAt(prevTerminalBackoffUntil)})`
+          : '';
+        return {
+          ...base,
+          exitCode: EXIT_PASS,
+          reason: 'terminal-backoff-attempt',
+          detail: `${stateLabel}; cleanup already attempted ${attempt} times and the schedule is still running${nextReminderNote}: notify the user (schedule_notify_current_run) with the schedule ID so it can be stopped manually if it cannot be deleted automatically${emptyPassNote}`,
+          nextWatch: baseline,
+          nextPendingWatch: pendingWatch ?? result.next,
+          nextPendingKey: 'terminal',
+          nextPendingCount: attempt,
+          nextTerminalPassCount: attempt,
+          ...(prevTerminalBackoffUntil > 0 ? { nextTerminalBackoffUntil: prevTerminalBackoffUntil } : {}),
+        };
+      }
+      const backoffUntil = prevTerminalBackoffUntil > 0
+        ? prevTerminalBackoffUntil
+        : (lastPassAt > 0 ? lastPassAt : now) + terminalBackoffMs(0, retryBackoffMs);
+      if (backoffUntil > now) {
+        return {
+          ...base,
+          exitCode: EXIT_SKIP,
+          reason: 'terminal-backoff',
+          detail: `${stateLabel}; cleanup already requested ${prevTerminalCount} times, next reminder at ${isoAt(backoffUntil)}`,
+          nextWatch: baseline,
+          nextPendingWatch: pendingWatch,
+          nextPendingKey: pendingWatch ? 'terminal' : null,
+          nextPendingCount: pendingWatch ? prevTerminalCount : 0,
+          nextTerminalPassCount: prevTerminalCount,
+          nextTerminalBackoffUntil: backoffUntil,
+        };
+      }
+      const backoffIndex = Math.min(attempt - maxPassAttempts, TERMINAL_BACKOFF_STEPS_MIN.length - 1);
+      const nextBackoffMs = terminalBackoffMs(backoffIndex, retryBackoffMs);
+      return {
+        ...base,
+        exitCode: EXIT_PASS,
+        reason: 'terminal-backoff-attempt',
+        detail: `${stateLabel}; cleanup already attempted ${prevTerminalCount} times and the schedule is still running (next reminder in ${Math.round(nextBackoffMs / 60_000)} min): notify the user (schedule_notify_current_run) with the schedule ID so it can be stopped manually if it cannot be deleted automatically${emptyPassNote}`,
+        nextWatch: baseline,
+        nextPendingWatch: pendingWatch ?? result.next,
+        nextPendingKey: 'terminal',
+        nextPendingCount: attempt,
+        nextTerminalPassCount: attempt,
+        nextTerminalBackoffUntil: now + nextBackoffMs,
+      };
+    }
     return {
       ...base,
       exitCode: EXIT_PASS,
       reason: 'terminal',
-      detail: snap.merged ? 'merged' : 'closed',
+      detail: `${stateLabel}; attempt=${attempt}/${maxPassAttempts}${emptyPassNote}`,
       nextWatch: baseline,
       nextPendingWatch: pendingWatch ?? result.next,
       nextPendingKey: 'terminal',
-      nextPendingCount: pendingKey === 'terminal' ? pendingCount + 1 : 1,
+      nextPendingCount: attempt,
+      nextTerminalPassCount: attempt,
     };
   }
   if (snap.gate?.requiredChecksUnavailable) {
@@ -1144,13 +1244,17 @@ export function decide({
   if (result.events.length > 0) {
     const kinds = [...new Set(result.events.map((e) => e.kind))];
     const reason = result.exhausted ? 'comment-limit' : kinds.length === 1 && kinds[0].startsWith('draft-') ? kinds[0] : 'changed';
-    return passPending(
+    const delivery = passPending(
       reason,
       `events=[${kinds.join(',')}]; verdict=${snap.verdict}`,
       eventReport(result.events, snap, result.exhausted),
       eventKey(result.events),
       result.next,
     );
+    if (delivery.exitCode === EXIT_PASS && kinds.some((kind) => kind === 'checks-failed' || kind === 'checks-finished')) {
+      delivery.detail += '; handle the check results and notify the user (schedule_notify_current_run): report the outcome or exact blocker, even if waiting for CI or an external fix';
+    }
+    return delivery;
   }
 
   // 没有新事件:推送、检查在跑、自己的评论这类变化直接并入基线,不唤起 agent。
@@ -1289,12 +1393,20 @@ function promotePending(state, now) {
 }
 
 /** 跑快照。永不 throw:把退出码与输出原样交回,由调用方翻译成协议语义。 */
-function runSnapshot(snapshotPath, repo, number) {
+function runSnapshot(snapshotPath, repo, number, { stateDir = null, env = process.env } = {}) {
   return new Promise((resolve) => {
+    // Preserve the legacy CLI argument contract (`<number> --repo <owner/repo>`) for
+    // older/custom `--snapshot` and `PR_SNAPSHOT_SCRIPT` scripts; pass cache location
+    // via `CINDY_PR_STATE_DIR`, and explicitly strip it in diagnostic read-only runs.
+    const childEnv = { ...env };
+    for (const key of Object.keys(childEnv)) {
+      if (key.toUpperCase() === 'CINDY_PR_STATE_DIR') delete childEnv[key];
+    }
+    if (stateDir) childEnv.CINDY_PR_STATE_DIR = stateDir;
     execFile(
       process.execPath,
       [snapshotPath, String(number), '--repo', repo],
-      { encoding: 'utf8', maxBuffer: SNAPSHOT_MAX_BUFFER },
+      { encoding: 'utf8', maxBuffer: SNAPSHOT_MAX_BUFFER, env: childEnv },
       (err, stdout, stderr) => {
         resolve({
           code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
@@ -1307,23 +1419,78 @@ function runSnapshot(snapshotPath, repo, number) {
   });
 }
 
-/** 低成本探测(pr-snapshot.mjs --probe)。永不 throw;失败时 gate 照常做完整读取。 */
+/** 低成本探测(pr-snapshot.mjs --probe)。永不 throw;除明确限流外失败时 gate 照常做完整读取。 */
 function runProbe(snapshotPath, repo, number) {
   return new Promise((resolve) => {
     execFile(process.execPath, [snapshotPath, String(number), '--repo', repo, '--probe'], { encoding: 'utf8' },
-      (err, stdout, stderr) => resolve({ code: err ? 1 : 0, stdout: stdout ?? '', stderr: stderr ?? '' }));
+      (err, stdout, stderr) => resolve({
+        code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
+        stdout: stdout ?? '',
+        stderr: stderr ?? '',
+      }));
   });
+}
+
+function parseProbeValue(value) {
+  return typeof value?.status === 'string' && typeof value?.remarks === 'string'
+    ? { status: value.status, remarks: value.remarks, ...(typeof value.base === 'string' ? { base: value.base } : {}) }
+    : null;
 }
 
 function parseProbe(run) {
   if (run?.code !== 0) return null;
   try {
-    const value = JSON.parse(run.stdout);
-    return typeof value?.status === 'string' && typeof value?.remarks === 'string'
-      ? { status: value.status, remarks: value.remarks, ...(typeof value.base === 'string' ? { base: value.base } : {}) } : null;
+    return parseProbeValue(JSON.parse(run.stdout));
   } catch {
     return null;
   }
+}
+
+/**
+ * Compare two probe status strings. Whenever the base branch advances, GitHub briefly reports
+ * `mergeable=UNKNOWN` while recalculating mergeability. If every other status field matches and
+ * the previous full read already had a known mergeable state (`MERGEABLE` or `CONFLICTING`),
+ * treat transient `UNKNOWN` as unchanged so base churn does not force full 4-call snapshots.
+ * Real transitions (`MERGEABLE` <-> `CONFLICTING`, or `UNKNOWN` -> known) still mismatch.
+ */
+function probeStatusMatches(previousStatus, currentStatus) {
+  if (previousStatus === currentStatus) return true;
+  const prevParts = String(previousStatus ?? '').split(' ');
+  const currParts = String(currentStatus ?? '').split(' ');
+  if (prevParts.length < 4 || prevParts.length !== currParts.length) return false;
+  if (currParts[2] !== 'UNKNOWN') return false;
+  if (prevParts[2] !== 'MERGEABLE' && prevParts[2] !== 'CONFLICTING') return false;
+  return prevParts.every((part, i) => i === 2 || part === currParts[i]);
+}
+
+/**
+ * 仅凭上次状态与当前时间即可确定必须做完整快照的场景:此时不必白跑一次 --probe。
+ * 包括未确认放行、检查在跑/合并态未知、终态、收齐窗口未闭、defer/wait/无检查/保底巡检已到点。
+ */
+export function mustFullReadBeforeProbe(previous, now, maxSilenceMs = DEFAULT_MAX_SILENCE_HOURS * 3_600_000) {
+  if (!previous?.watch) return false;
+  if (previous.pendingWatch || previous.inFlight || previous.merged || previous.closed) return true;
+  // News is being held until the bots answer: read in full each time so the hold ends at its deadline.
+  if ((Number(previous.settleUntil) || 0) > 0) return true;
+  if ((Number(previous.nextAllowAt) || 0) > 0 && now >= Number(previous.nextAllowAt)) return true;
+  if (waitIsDue(previous.wait, now)) return true;
+  const awaited = previous.watch.checksAwaitedSince ? Date.parse(previous.watch.checksAwaitedSince) : NaN;
+  if (Number.isFinite(awaited) && now - awaited >= NO_CHECKS_MS) return true;
+  // Mirror decide(): when silence-guard is suppressed (active non-due wait/defer or human-only wait),
+  // do not discard a matching probe and force a full snapshot on every tick.
+  if (previous.wait || (Number(previous.nextAllowAt) || 0) > now || previous.humanOnlyPending === true || waitingOnHumans(previous)) {
+    return false;
+  }
+  const silenceAnchor = silenceAnchorOf(previous);
+  return silenceAnchor > 0 && now - silenceAnchor >= maxSilenceMs;
+}
+
+/** 本轮是否存在走 --probe 跳过完整快照的可能(未检查实际 probe 结果前)。 */
+export function canSkipWithProbe(previous, now, maxSilenceMs = DEFAULT_MAX_SILENCE_HOURS * 3_600_000) {
+  if (!previous?.watch || !previous.probe) return false;
+  if (mustFullReadBeforeProbe(previous, now, maxSilenceMs)) return false;
+  if (!(now - (Number(previous.lastFullReadAt) || 0) < FULL_REREAD_MS)) return false;
+  return true;
 }
 
 /**
@@ -1332,20 +1499,12 @@ function parseProbe(run) {
  * 新 head 等检查的期限到了、保底巡检到点。
  */
 export function probeAllowsSkip(previous, probe, now, maxSilenceMs = DEFAULT_MAX_SILENCE_HOURS * 3_600_000) {
-  if (!probe || !previous?.watch || !previous.probe) return false;
-  if (probe.status !== previous.probe.status || probe.remarks !== previous.probe.remarks) return false;
-  // 检查失败期间 base 前进要报,探测看到 base 变了就完整读取。
-  if (previous.watch.baseSha && probe.base && probe.base !== previous.watch.baseSha) return false;
-  if (previous.pendingWatch || previous.inFlight || previous.merged || previous.closed) return false;
-  // News is being held until the bots answer: read in full each time so the hold ends at its deadline.
-  if ((Number(previous.settleUntil) || 0) > 0) return false;
-  if ((Number(previous.nextAllowAt) || 0) > 0 && now >= Number(previous.nextAllowAt)) return false;
-  if (waitIsDue(previous.wait, now)) return false;
-  if (!(now - (Number(previous.lastFullReadAt) || 0) < FULL_REREAD_MS)) return false;
-  const awaited = previous.watch.checksAwaitedSince ? Date.parse(previous.watch.checksAwaitedSince) : NaN;
-  if (Number.isFinite(awaited) && now - awaited >= NO_CHECKS_MS) return false;
-  const silenceAnchor = silenceAnchorOf(previous);
-  return !(silenceAnchor > 0 && now - silenceAnchor >= maxSilenceMs);
+  if (!probe || !canSkipWithProbe(previous, now, maxSilenceMs)) return false;
+  if (!probeStatusMatches(previous.probe.status, probe.status) || probe.remarks !== previous.probe.remarks) return false;
+  // 检查失败期间 base 前进要报,探测看到 base 变了就完整读取;
+  // 但若显式 wait 已覆盖全部失败检查(且 baseline wait 已记录首次基线移动),后续 base 前进会被吸收。
+  if (previous.watch.baseSha && probe.base && probe.base !== previous.watch.baseSha && !waitAbsorbsBase(previous)) return false;
+  return true;
 }
 
 const FINISH_HINT = 'Finish: blocked → --wait <plan.json>; handled/pushed → --resume <reason>; clear → --ack. See references/follow-up.md.';
@@ -1365,7 +1524,7 @@ function emit(args, payload, out = (text) => process.stdout.write(text)) {
   );
 }
 
-// gh auth status prints recovery suggestions even when it cannot reach GitHub.
+// gh CLI auth failures may print recovery suggestions even when it cannot reach GitHub.
 function snapshotDiagnosis(stderr) {
   const explicitRateLimit = /\[gh-rate-limit\]|HTTP 429\b/i.test(stderr);
   const dns = /\blookup ([\w.-]+)(?::\d+)?[^\n]*(?:no such host|server misbehaving|i\/o timeout|context deadline exceeded)|\b(?:ENOTFOUND|EAI_AGAIN) ([\w.-]+)/i.exec(stderr);
@@ -1379,7 +1538,7 @@ function snapshotDiagnosis(stderr) {
   if (/i\/o timeout|timed? ?out|context deadline exceeded/i.test(stderr)) {
     return { kind: 'timeout', summary: 'Connection to GitHub timed out' };
   }
-  if (/HTTP 401\b|bad credentials|token[^\n]* is invalid|not logged into any GitHub hosts|authentication required/i.test(stderr)) {
+  if (/HTTP 401\b|bad credentials|token[^\n]* is invalid|not logged into any(?: GitHub)? hosts|no oauth token found|gh auth login|populate the GH_TOKEN|authentication required|requires authentication/i.test(stderr)) {
     return { kind: 'auth', summary: 'GitHub sign-in required' };
   }
   const lines = stderr.trim().split(/\r?\n/).map(line => line.trim())
@@ -1419,7 +1578,8 @@ export function snapshotFailurePlan(run, previous, now, threshold = DEFAULT_MAX_
 }
 
 async function gateMain(argv, ctx) {
-  const { env, out, err } = ctx;
+  const { env, out, err, nodeMajor } = ctx;
+  const emitPrecheckOk = () => out(`CINDY_PRECHECK_OK\nCINDY_PR_NODE=${nodeMajor}\n`);
   const args = parseArgs(argv, env);
   if (args.help) {
     usage(err);
@@ -1427,7 +1587,13 @@ async function gateMain(argv, ctx) {
   }
 
   const file = stateFilePath(args.stateDir, args.repo, args.number);
-  adoptLegacyStateFile(args.stateDir, args.repo, args.number, file);
+  const trigger = await ctx.readTrigger();
+  // Host test/self-test calls only preview the hook; they do not inject a
+  // model turn. Never consume pending observations, waits, retries or trace
+  // history on behalf of the real schedule.
+  const diagnostic = trigger?.kind === 'diagnostic';
+  if (!diagnostic) adoptLegacyStateFile(args.stateDir, args.repo, args.number, file);
+  const persist = diagnostic ? () => {} : writeState;
   const now = ctx.now();
 
   // --last-result:只读最近一轮普通 gate 的实际结果。preRunHook 本身只负责 run/skip；
@@ -1479,6 +1645,7 @@ async function gateMain(argv, ctx) {
 
   // Finish commands are local: validate before acknowledging or changing any wait.
   if (args.ack || args.deferMinutes !== undefined || args.waitFile || args.resumeReason) {
+    if (diagnostic) throw new Error('A diagnostic hook cannot acknowledge or replace a real follow-up wait.');
     const previous = readState(file) ?? {};
     const facts = previous.pendingWatch?.waitFacts ?? previous.watch?.waitFacts;
     if (!args.waitFile && !args.resumeReason) {
@@ -1523,7 +1690,7 @@ async function gateMain(argv, ctx) {
     } else if (notice === 'reminder') {
       detail += `; still waiting for human action after ${formatDuration(now - wait.since)}: state progress and the blocker; if the user must decide, ask for that specific decision again with a recommendation (in a background round also schedule_notify_current_run)`;
     }
-    writeState(file, next);
+    persist(file, next);
     emit(args, {
       exitCode: EXIT_PASS,
       repo: args.repo,
@@ -1541,26 +1708,77 @@ async function gateMain(argv, ctx) {
     throw new Error(`snapshot script not found: ${args.snapshot}`);
   }
 
-  const previous = readState(file);
+  let previous = readState(file);
+  // The first hook of a newly created schedule must not inherit the old follower's
+  // acknowledged failures or waits after the user stopped and started following again.
+  // A deferred first run can execute the hook several times; keep the ID so retries
+  // use the ordinary pending-watch protocol instead of resetting on every attempt.
+  const newFollow = Boolean(trigger?.firstScheduleId && previous?.followStartId !== trigger.firstScheduleId);
+  if (newFollow) {
+    // Retain only PR-level facts and actual API retry evidence, not the old
+    // owner's deliveries, acknowledgements, pacing or suppression markers.
+    // New notification fields must not silently inherit an old owner's state.
+    const facts = ['headOid', 'roundCount', 'reviewersSeen', 'deferredHeadOid',
+      'initialAdditions', 'headSeenAt', 'reviewerBots', 'reviewerBotsVersion', 'lastKnownConflicting',
+      'currentFingerprint', 'fingerprintFields', 'lastChangeAt', 'inventoryFailures',
+      'consecutiveSnapshotFailures', 'lastSnapshotFailureAt', 'snapshotFailureFingerprint',
+      'snapshotFailureSummary', 'snapshotFailureBackoffUntil', 'snapshotWatchRetryAt'];
+    // The 1.5.35 cache stored the failure reason only in lastResult.
+    if (previous?.lastResult?.reason === 'snapshot-failed') facts.push('lastResult');
+    // CI having existed is a PR fact, not an acknowledgement. Prefer the
+    // last observed (possibly unacknowledged) head. When its missing-CI
+    // notice still awaits acknowledgement, its original timer is in watch.
+    const observed = previous?.pendingWatch ?? previous?.watch;
+    const everHadChecks = Boolean(observed?.everHadChecks || previous?.watch?.everHadChecks);
+    const awaited = observed?.checksAwaitedSince ??
+      (observed?.noChecksReminded && observed.headSha === previous?.watch?.headSha
+        ? previous.watch.checksAwaitedSince : null);
+    previous = { ...Object.fromEntries(Object.entries(previous ?? {}).filter(([key]) => facts.includes(key))),
+      followStartId: trigger.firstScheduleId,
+      // Keep the clock only for its original head. If the old notice was
+      // confirmed (clock consumed), the new owner can start a fresh clock.
+      ...(everHadChecks ? { watch: { everHadChecks, headSha: awaited ? observed.headSha : null,
+        checksAwaitedSince: awaited ?? null } } : {}) };
+    persist(file, previous);
+  }
   const backoffUntil = Number(previous?.snapshotFailureBackoffUntil) || 0;
   const backingOff = backoffUntil > now;
+  if (newFollow && backingOff) {
+    // Notify the new owner of the previous failure without touching GitHub
+    // before the actual retry deadline. The same outage is deduplicated again.
+    const inheritedReason = previous.snapshotFailureSummary ||
+      (previous.lastResult?.reason === 'snapshot-failed' && previous.lastResult.detail) || 'Previous PR snapshot failed';
+    const detail = `${inheritedReason}; retry at ${new Date(backoffUntil).toISOString()}`;
+    const lastResult = { decision: 'block', exitCode: EXIT_BLOCK, reason: 'snapshot-failed', detail, checkedAt: now };
+    const reports = previous.snapshotFailureFingerprint ? { [previous.snapshotFailureFingerprint]: now } : {};
+    persist(file, { ...previous, snapshotFailureReports: reports, lastDecision: 'block',
+      lastDecisionReason: lastResult.reason, lastResult });
+    throw new Error(detail);
+  }
   const watchRetryDue = Number.isFinite(previous?.snapshotWatchRetryAt) && previous.snapshotWatchRetryAt <= now;
-  const hookTrigger = backingOff && !watchRetryDue ? null : await ctx.readTrigger();
+  const hookTrigger = backingOff && !watchRetryDue ? null : trigger;
   if (backingOff && hookTrigger?.source !== 'pr-status') {
     const detail = `nextProbeAt=${new Date(backoffUntil).toISOString()}`;
     const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'snapshot-failure-backoff', detail, checkedAt: now };
-    writeState(file, { ...previous, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
+    persist(file, { ...previous, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
     emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
     return EXIT_SKIP;
   }
-  // 宿主看到这个 PR 的状态变了而提前触发的一轮:不看节奏,也不做探测(宿主已经知道有变化)。
-  const triggered = args.triggered || (hookTrigger?.kind === 'watch');
+  const isReconcileWatch = hookTrigger?.kind === 'watch' && hookTrigger?.reason === 'reconcile';
+  const settledBaseline = isSettledBaselineWait(previous);
+  const targetedWait = Boolean(previous?.wait)
+    && ((previous.wait.threads?.length ?? 0) > 0
+      || ((previous.wait.checks?.length ?? 0) > 0 && !settledBaseline));
+  // 宿主看到这个 PR 的状态变了而提前触发的一轮:不看节奏;明确状态变化直接完整读取,
+  // 但 overflow/重连补查 (reason='reconcile') 先走轻量 --probe 验证是否真有评论或状态变化,
+  // 避免未变化的 PR 在补查扫表时反复拉全量快照。
+  const triggered = args.triggered || (hookTrigger?.kind === 'watch') || newFollow || diagnostic;
   // Neither an idle tick nor an unchanged summary proves that a failed snapshot recovered.
   const recovering = previous?.consecutiveSnapshotFailures > 0;
   // 按阶段决定这一轮要不要看:不到时间就直接跳过,不调用 GitHub,也不改状态。
   const scheduledRetryDue = backoffUntil > 0 && !backingOff;
   if (args.pacing && !scheduledRetryDue) {
-    const pace = pacingDue(previous, now, { triggered });
+    const pace = pacingDue(previous, now, { triggered, minPassSpacingMs: args.minPassSpacingMs });
     if (!pace.due) {
       emit(args, {
         exitCode: EXIT_SKIP,
@@ -1569,23 +1787,42 @@ async function gateMain(argv, ctx) {
         reason: 'not-due',
         detail: `pace=${pace.pace}; next look at ${isoAt(pace.nextAt)}`,
       }, out);
-      if (!args.json && !recovering) out('CINDY_PRECHECK_OK\n');
+      if (!args.json && !recovering) emitPrecheckOk();
       return EXIT_SKIP;
     }
   }
   // 先问一句「有没有变」:一个很小的查询,与上次完整读取时一致就不做三四个接口的完整读取。
   // Counts alone cannot reveal a named check's rerun or a thread being resolved/replied to.
   // While explicitly waiting on those items, inspect them each tick rather than waiting 30 minutes.
-  const targetedWait = previous?.wait && (previous.wait.checks.length > 0 || previous.wait.threads.length > 0);
-  const probe = triggered || targetedWait || recovering ? null : parseProbe(await ctx.runProbe(args.snapshot, args.repo, args.number));
-  if (!triggered && probeAllowsSkip(previous, probe, now, args.maxSilenceMs)) {
+  // Settled baseline waits (all failed checks finished, no named threads) wait on a base-branch fix
+  // rather than a rerun on the old head, so they can use the lightweight probe between 30m full reads.
+  // Also skip the probe whenever state already forces a full snapshot (except when a legacy snapshot
+  // without embedded `snap.probe` still needs the probe solely to refresh the probe baseline).
+  const skipProbe = args.triggered || newFollow || diagnostic
+    || (hookTrigger?.kind === 'watch' && !isReconcileWatch)
+    || targetedWait || recovering
+    || mustFullReadBeforeProbe(previous, now, args.maxSilenceMs)
+    || (Boolean(previous?.snapshotProvidesProbe) && !canSkipWithProbe(previous, now, args.maxSilenceMs));
+  const probeRun = skipProbe ? null : await ctx.runProbe(args.snapshot, args.repo, args.number);
+  const probe = parseProbe(probeRun);
+  if (!skipProbe && probeAllowsSkip(previous, probe, now, args.maxSilenceMs)) {
     const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'unchanged', detail: 'probe matches the last full read', checkedAt: now };
-    writeState(file, { ...previous, lastProbeAt: now, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
+    persist(file, { ...previous, lastProbeAt: now, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
     emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
-    if (!args.json) out('CINDY_PRECHECK_OK\n');
+    if (!args.json) emitPrecheckOk();
     return EXIT_SKIP;
   }
-  const run = await ctx.runSnapshot(args.snapshot, args.repo, args.number);
+  // An explicit GitHub rate limit on the probe must enter the existing backoff path immediately
+  // without issuing a second (full snapshot) set of API calls while already rate-limited.
+  const probeRateLimited = Boolean(
+    probeRun && probeRun.code !== 0 && snapshotDiagnosis(String(probeRun.stderr ?? '')).kind === 'rate-limit',
+  );
+  const run = probeRateLimited
+    ? { code: probeRun.code, stdout: '', stderr: String(probeRun.stderr ?? '') }
+    : await ctx.runSnapshot(args.snapshot, args.repo, args.number, {
+        stateDir: diagnostic ? null : args.stateDir,
+        env,
+      });
 
   let snap = null;
   if (run.code === 0) {
@@ -1603,11 +1840,12 @@ async function gateMain(argv, ctx) {
     const { failures } = plan;
     const { summary, ...cause } = plan.diagnosis;
     const detail = `${summary}; snapshotExit=${run.code} failures=${failures}/${args.maxSnapshotFailures}`;
-    writeState(file, {
+    persist(file, {
       ...(previous ?? {}),
       consecutiveSnapshotFailures: failures,
       lastSnapshotFailureAt: now,
       snapshotFailureFingerprint: plan.fingerprint,
+      snapshotFailureSummary: summary,
       snapshotFailureBackoffUntil: plan.until,
       snapshotWatchRetryAt: plan.watchRetryAt,
       snapshotFailureReports: plan.reports,
@@ -1666,7 +1904,7 @@ async function gateMain(argv, ctx) {
     decision.nextPendingWatch = { ...decision.nextPendingWatch, inventoryRecoveryOwed: true };
   }
   if (passed && snap.gate?.requiredChecksUnavailable) decision.detail += '; rules unknown: observed check results are not proof the PR is ready to merge';
-  writeState(repoFile, { ...repoState, reviewerBots: repoBots });
+  persist(repoFile, { ...repoState, reviewerBots: repoBots });
   // 回合状态:per-head 持久化,供「回合制与收敛止损」的机判使用(references/review-convergence.md)。
   // 这些信息理论上能从即时快照推导,但快照的 reviews 窗口只有 50 条、defer 痕迹又只活
   // 一轮,推导出的判据在边界上会失效 —— 所以由 gate 用确定性代码跨轮累积:
@@ -1715,11 +1953,24 @@ async function gateMain(argv, ctx) {
     : typeof previous?.lastKnownConflicting === 'boolean'
       ? previous.lastKnownConflicting
       : null;
-  // 上次读到检查在跑或合并态还没算出:下一轮不靠探测跳过,直接完整读取。
-  const inFlight = !mergeSignalKnown(snap) || (snap.checks ?? []).some((c) => checkOutcome(c) === 'pending');
-  writeState(file, {
+  // 上次读到检查在跑、合并态还没算出、或快照内检查列表与探测计数发生时间错位:
+  // 下一轮不靠探测跳过，按活跃节奏直接完整读取。
+  const checksTrustworthy = !snap.checksSummary?.unavailable && !snap.checksSummary?.truncated;
+  const snapshotHasProbe = Boolean(snap && Object.hasOwn(snap, 'probe'));
+  const snapProbe = snapshotHasProbe ? parseProbeValue(snap.probe) : null;
+  const probeSkewed = !snap.merged && !snap.closed && checksTrustworthy && snapshotHasProbe && !snapProbe;
+  const inFlight = !mergeSignalKnown(snap)
+    || (snap.checks ?? []).some((c) => checkOutcome(c) === 'pending')
+    || probeSkewed;
+  const savedProbe = !checksTrustworthy
+    ? null
+    : snapshotHasProbe
+      ? snapProbe
+      : probe;
+  persist(file, {
     // watch 只由 --ack / --defer 或「没有新事件」推进,放行时不推进
     watch: decision.nextWatch,
+    ...(previous?.followStartId ? { followStartId: previous.followStartId } : {}),
     ...(decision.nextWait ? { wait: decision.nextWait } : {}),
     ...(decision.nextPendingWatch
       ? {
@@ -1729,6 +1980,8 @@ async function gateMain(argv, ctx) {
         }
       : {}),
     ...(decision.nextRetryBackoffUntil ? { retryBackoffUntil: decision.nextRetryBackoffUntil } : {}),
+    ...(decision.nextTerminalPassCount ? { terminalPassCount: decision.nextTerminalPassCount } : {}),
+    ...(decision.nextTerminalBackoffUntil ? { terminalBackoffUntil: decision.nextTerminalBackoffUntil } : {}),
     // 旧版状态的未确认指纹:在 agent 确认前保留,让升级那一轮能继续按未确认处理
     ...(previous?.pendingFingerprint && !previous?.watch && decision.nextPendingWatch
       ? { pendingFingerprint: previous.pendingFingerprint } : {}),
@@ -1742,7 +1995,8 @@ async function gateMain(argv, ctx) {
     merged: Boolean(snap.merged),
     closed: Boolean(snap.closed),
     url: snap.url ?? null,
-    ...(probe ? { probe } : {}),
+    ...(savedProbe ? { probe: savedProbe } : {}),
+    ...(snapshotHasProbe ? { snapshotProvidesProbe: true } : {}),
     inFlight,
     lastFullReadAt: now,
     consecutiveSnapshotFailures: !checkSucceeded
@@ -1784,7 +2038,10 @@ async function gateMain(argv, ctx) {
     ...(typeof lastKnownConflicting === 'boolean' ? { lastKnownConflicting } : {}),
     // 节奏与收齐:新提交首次看到的时刻、本 PR 见过的 bot reviewer、收齐窗口截止、上次有变化的时刻
     ...(headSeenAt ? { headSeenAt } : {}),
-    reviewerBots: [...new Set([...(Array.isArray(previous?.reviewerBots) ? previous.reviewerBots : []), ...reviewerBotsOf(snap)])].sort(),
+    ...(() => {
+      const resolved = resolvePrReviewerBots(previous, snap);
+      return { reviewerBots: resolved.bots, reviewerBotsVersion: resolved.version };
+    })(),
     ...(settle.open && decision.reason === 'settling' ? { settleUntil: settle.until } : {}),
     lastChangeAt: decision.fingerprint !== previous?.currentFingerprint || !previous?.lastChangeAt
       ? now : previous.lastChangeAt,
@@ -1799,14 +2056,14 @@ async function gateMain(argv, ctx) {
     repo: args.repo,
     number: args.number,
     reason: decision.reason,
-    detail: decision.detail,
+    detail: diagnostic ? `${decision.detail}; diagnostic only, follow-up state unchanged` : decision.detail,
     report: decision.report,
     verdict: snap.verdict ?? null,
     ...(passed ? { finish: FINISH_HINT } : {}),
   }, out);
   // Optional host marker: healthy SKIP is recovery, backoff SKIP is not.
   if (!args.json && checkSucceeded) {
-    out('CINDY_PRECHECK_OK\n');
+    emitPrecheckOk();
   }
   return decision.exitCode;
 }
@@ -1855,7 +2112,16 @@ export async function readHookTrigger(stdin = process.stdin, timeoutMs = 500) {
   });
   try {
     const payload = JSON.parse(text);
-    return payload && typeof payload.trigger === 'object' ? payload.trigger : null;
+    const trigger = payload && typeof payload.trigger === 'object' ? payload.trigger : null;
+    if (payload?.event === 'schedule-pre-run' &&
+      (payload.scheduleId === 'test' || payload.scheduleId === 'self-test') && payload.runId === payload.scheduleId) {
+      return { kind: 'diagnostic' };
+    }
+    if (payload?.event === 'schedule-pre-run' && typeof payload.scheduleId === 'string'
+      && payload.scheduleId && payload.lastFinishedAt == null) {
+      return { ...trigger, firstScheduleId: payload.scheduleId };
+    }
+    return trigger;
   } catch {
     return null;
   }
@@ -1869,7 +2135,13 @@ export async function runGate(argv, {
   readTrigger = readHookTrigger,
   out = (text) => process.stdout.write(text),
   err = (text) => process.stderr.write(text),
+  nodeVersion = process.versions.node,
 } = {}) {
+  const nodeMajor = supportedNodeMajor(nodeVersion);
+  if (!nodeMajor) {
+    err(`[pr-heartbeat-gate] Node.js ${MIN_NODE_MAJOR}+ is required (running ${nodeVersion || 'unknown'}). Switch to pr-node.cjs in Automation settings.\n`);
+    return EXIT_BLOCK;
+  }
   let record, traceFile, args, code;
   const at = now();
   try {
@@ -1886,7 +2158,7 @@ export async function runGate(argv, {
         ...(args.waitFile ? {waitPlan:{...scrub(JSON.parse(fs.readFileSync(args.waitFile,'utf8')),HUMAN_APPROVAL_LANGUAGE),reason:'recorded wait'}} : {}) };
     }
     } catch { record = null; }
-    const ctx = { env, now: () => at, out, err,
+    const ctx = { env, now: () => at, out, err, nodeMajor,
       runSnapshot: async (...a) => {
         const value = await snapshotRunner(...a);
         if (record) {
@@ -1898,14 +2170,30 @@ export async function runGate(argv, {
       runProbe: async (...a) => { const value = await probeRunner(...a); if (record) { try { record.probe = value.code === 0 ? JSON.parse(value.stdout) : null; } catch { record.probe = null; } } return value; },
       readTrigger: async () => {
         const event = await readTrigger();
+        if (event?.kind === 'diagnostic') {
+          // Do not append a diagnostic observation to the replayable production trace.
+          record = null;
+          return { kind: 'diagnostic' };
+        }
         const url = `https://github.com/${args.repo}/pull/${args.number}`;
         let trigger = null;
         if (event?.kind === 'watch') {
           // Keep replay deterministic without retaining arbitrary event details.
-          trigger = { kind: 'watch' };
+          trigger = {
+            kind: 'watch',
+            ...(event.reason === 'reconcile' ? { reason: 'reconcile' } : {}),
+          };
           if (event.source === 'pr-status' && typeof event.detail === 'string' && event.detail.toLowerCase() === url.toLowerCase()) {
-            trigger = { kind: 'watch', source: 'pr-status', detail: url };
+            trigger = {
+              kind: 'watch',
+              source: 'pr-status',
+              detail: url,
+              ...(event.reason === 'reconcile' ? { reason: 'reconcile' } : {}),
+            };
           }
+        }
+        if (typeof event?.firstScheduleId === 'string' && event.firstScheduleId) {
+          trigger = { ...trigger, firstScheduleId: event.firstScheduleId };
         }
         if (record) record.trigger = trigger;
         return trigger;
@@ -1924,7 +2212,7 @@ export async function runGate(argv, {
     // Never retain the human/model explanation passed to resume.
     if (record.argv.includes('--resume')) record.argv[record.argv.indexOf('--resume')+1] = 'recorded resume';
     // Pacing-only firings contain no new evidence. Do not duplicate the old state each tick.
-    if (record.snapshot || Object.hasOwn(record,'probe') || ['wait','resume','ack','defer'].includes(record.decision) || record.replayable === false) {
+    if (record.trigger?.firstScheduleId || record.snapshot || Object.hasOwn(record,'probe') || ['wait','resume','ack','defer'].includes(record.decision) || record.replayable === false) {
       // 连续编号放在状态文件旁的小文件里(不动状态本身),写入失败也照常前进:
       // 下一条成功记录的编号会跳号,回放据此标出缺口。
       try {
