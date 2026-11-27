@@ -102,7 +102,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.46');
+  assert.equal(manifest.version, '1.5.48');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -3054,6 +3054,89 @@ test('a bound card whose schedule_delete is rejected keeps the stop error across
       await rt.click(opened.callId, 'pr:stop');
       assert.equal(calls.filter(c => c === 'schedule_delete').length, deletesBefore);
       assert.deepEqual(rows.get('sch-1').preRunHook, customHook);
+    }
+  }
+});
+
+test('a bound card whose Stop fails transiently on read keeps Stop retryable and re-verifies ownership and hook on retry', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  for (const scenario of [
+    'fail-get-retry-stop',
+    'fail-get-and-list-retry-stop',
+    'fail-dir-retry-stop',
+    'mutated-hook-before-retry',
+    'mutated-ownership-before-retry',
+  ]) {
+    const fault = {};
+    const { hostApi, calls, rows } = followScheduler(fault);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_state, 'active', scenario);
+
+    if (scenario === 'fail-dir-retry-stop') {
+      fault.failDir = true;
+    } else {
+      fault.failGet = true;
+      if (scenario === 'fail-get-and-list-retry-stop') fault.failList = true;
+    }
+
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(rows.has('sch-1'), true, scenario);
+    assert.equal(calls.includes('schedule_delete'), false, scenario);
+    let card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(card.scheduleId, 'sch-1', scenario);
+    assert.equal(card.following, false, scenario);
+    assert.equal(card.scheduleStatus, 'unverified', scenario);
+    assert.equal(card.pending, null, scenario);
+    assert.equal(card.scheduleAction, null, scenario);
+    assert.equal(card.scheduleErrorSource, 'read', scenario);
+    assert.match(rt.lastCard(opened.callId).html, /跟进待核实/, scenario);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /正在停止/, scenario);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-live-label=/, scenario);
+    assert.match(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, scenario);
+
+    // Recover reads without calling pr_card refresh, then retry Stop directly on the original card.
+    fault.failGet = false;
+    fault.failList = false;
+    fault.failDir = false;
+
+    if (scenario === 'mutated-hook-before-retry') {
+      const customHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 };
+      rows.get('sch-1').preRunHook = customHook;
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(calls.includes('schedule_delete'), false, scenario);
+      assert.deepEqual(rows.get('sch-1').preRunHook, customHook, scenario);
+      card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      assert.equal(card.scheduleErrorSource, 'verify', scenario);
+      assert.match(card.scheduleError, /无法确认这条调度仍使用插件生成的前置检查/, scenario);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, scenario);
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(calls.includes('schedule_delete'), false, scenario);
+    } else if (scenario === 'mutated-ownership-before-retry') {
+      rows.get('sch-1').targetSessionId = 'other-session';
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(calls.includes('schedule_delete'), false, scenario);
+      assert.equal(rows.get('sch-1').targetSessionId, 'other-session', scenario);
+      card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      assert.equal(card.scheduleErrorSource, 'verify', scenario);
+      assert.match(card.scheduleError, /无法确认 PR 卡片所属任务/, scenario);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, scenario);
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(calls.includes('schedule_delete'), false, scenario);
+    } else {
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(rows.size, 0, scenario);
+      assert.equal(calls.filter((c) => c === 'schedule_delete').length, 1, scenario);
+      card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      assert.equal(card.scheduleId, null, scenario);
+      assert.equal(card.following, false, scenario);
+      assert.equal(card.scheduleStatus, null, scenario);
+      assert.equal(card.scheduleError, null, scenario);
+      assert.equal(card.scheduleErrorSource, null, scenario);
+      assert.equal(card.note, null, scenario);
+      const afterStop = await rt.tool({ card_id: opened.callId });
+      assert.equal(afterStop.reply.result.follow_state, 'stopped', scenario);
+      assert.equal(afterStop.reply.result.note, undefined, scenario);
     }
   }
 });

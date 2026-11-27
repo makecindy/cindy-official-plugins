@@ -2738,8 +2738,12 @@ function isBoundStopError(card) {
   return !!card.scheduleId && !!card.scheduleError && card.scheduleErrorSource === 'stop';
 }
 
+function isBoundStopRetryableError(card) {
+  return !!card.scheduleId && !!card.scheduleError && (card.scheduleErrorSource === 'stop' || card.scheduleErrorSource === 'read');
+}
+
 function boundHookUnverified(card) {
-  return !!card.scheduleId && !!card.scheduleError && !isBoundStopError(card);
+  return !!card.scheduleId && !!card.scheduleError && !isBoundStopRetryableError(card);
 }
 
 function boundFollowUnverified(card) {
@@ -4040,8 +4044,6 @@ async function syncCardSchedule(card, settings, start) {
       card.scheduleStatus = null;
       card.followedEver = true;
     } else {
-      var stopEnv;
-      try { stopEnv = await cardFollowSkillEnv(); } catch (_) {}
       errorSource = 'read';
       var owned = await prSchedule('schedule_get', { id: card.scheduleId });
       if (owned) {
@@ -4049,6 +4051,7 @@ async function syncCardSchedule(card, settings, start) {
           errorSource = 'verify';
           throw new Error(t('prOwnershipUnknown'));
         }
+        var stopEnv = await cardFollowSkillEnv();
         if (!exactFollowHook(owned, card, stopEnv)) {
           errorSource = 'verify';
           throw new Error(t('prScheduleHookUnknown'));
@@ -4076,17 +4079,24 @@ async function syncCardSchedule(card, settings, start) {
       card.following = false;
       card.scheduleStatus = 'unverified';
     }
-    // A confirmed absence releases the reservation. An unreadable scheduler
-    // keeps it until a refresh reconciles the operation.
-    try {
-      var remaining = await schedulesForPr(card);
-      if (start && !remaining.some(function (s) { return s.targetSessionId === card.sessionId; })) {
-        card.pending = card.scheduleAction = null;
-      }
-      if (!start && remaining.some(function (s) { return s.id === card.scheduleId; })) {
-        card.pending = card.scheduleAction = null;
-      }
-    } catch (_) {}
+    // Before schedule_delete runs (read/verify failure), no write went out: clear
+    // the in-flight Stop state even if schedulesForPr also fails transiently, so
+    // the card does not stay stuck on "stopping" and Stop remains retryable.
+    if (!start && (errorSource === 'read' || errorSource === 'verify')) {
+      card.pending = card.scheduleAction = null;
+    } else {
+      // A confirmed absence releases the reservation. An unreadable scheduler
+      // keeps it until a refresh reconciles the operation.
+      try {
+        var remaining = await schedulesForPr(card);
+        if (start && !remaining.some(function (s) { return s.targetSessionId === card.sessionId; })) {
+          card.pending = card.scheduleAction = null;
+        }
+        if (!start && remaining.some(function (s) { return s.id === card.scheduleId; })) {
+          card.pending = card.scheduleAction = null;
+        }
+      } catch (_) {}
+    }
   }
   await savePrCardRetry(card);
 }
