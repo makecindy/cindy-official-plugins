@@ -503,6 +503,7 @@ function fixture(t) {
       const code = await runGate(args(flags, target), {
         env,
         now: () => 123456789,
+        readTrigger: async () => null,
         runSnapshot: async () => { throw new Error('reservation must not query GitHub or run a snapshot'); },
         runProbe: async () => { throw new Error('reservation must not probe GitHub'); },
         out: text => { stdout += text; }, err: text => { stderr += text; },

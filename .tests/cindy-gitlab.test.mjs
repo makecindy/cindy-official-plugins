@@ -6,9 +6,9 @@ import { runInNewContext } from 'node:vm';
 const source = readFileSync(new URL('../cindy-gitlab/main.js', import.meta.url), 'utf8');
 const url = 'https://git.team.test/group/sub/repo/-/merge_requests/2';
 
-function runtime(draft = false, followModel = null, nativeScheduler = true) {
+function runtime(draft = false, followModel = null, nativeScheduler = true, onCreateSchedule = null) {
   let handler, card, result, call = 0;
-  const files = new Map(), schedules = new Map(), requests = [], merges = [];
+  const files = new Map(), schedules = new Map(), requests = [], merges = [], createAttempts = [];
   const failures = new Set(), handoffs = [];
   const viewer = { id: 19 };
   let mergeOutcome = 'merged';
@@ -70,6 +70,11 @@ function runtime(draft = false, followModel = null, nativeScheduler = true) {
         let data;
         if (tool === 'schedule_list') data = [...schedules.values()];
         else if (tool === 'schedule_create') {
+          createAttempts.push({ ...args });
+          if (onCreateSchedule) {
+            const rejected = onCreateSchedule(args);
+            if (rejected) return { isError: true, content: [{ type: 'text', text: JSON.stringify(rejected) }] };
+          }
           assert.equal(schedules.size, 0);
           data = { ...args, id: 'schedule', status: 'active' }; schedules.set(data.id, data);
         } else if (tool === 'schedule_get') data = schedules.get(args.id) ?? null;
@@ -80,7 +85,7 @@ function runtime(draft = false, followModel = null, nativeScheduler = true) {
     },
   });
   return {
-    files, schedules, mr, viewer, requests, failures, merges, handoffs,
+    files, schedules, mr, viewer, requests, failures, merges, handoffs, createAttempts,
     setMergeOutcome(value) { mergeOutcome = value; },
     lastCard: () => card,
     setSettingsReadable(value) { settingsReadable = value; },
@@ -335,4 +340,197 @@ test('card pruning preserves the current anchor of an active MR and drops its su
   assert.equal(r.files.has('mr-cards/' + previous.anchor + '.json'), false);
   await r.click(visible.anchor, 'pr:stop');
   assert.equal(r.schedules.size, 0);
+});
+
+test('plugin-engine (acp) follow models survive card validation and reach auto-follow scheduling', async () => {
+  const route = {
+    agentKind: 'acp',
+    providerId: 'acp-plugin:antigravity:agy',
+    model: 'gemini-4-neon',
+    effort: 'high',
+    fastMode: false,
+  };
+  const r = runtime(true, { route, label: 'Gemini 4 Neon · Antigravity' });
+  const view = await r.show({ mr: url, published: true });
+  await r.click(view.card_id, 'pr:ready');
+  assert.equal(r.mr.draft, false);
+  assert.equal(r.schedules.get('schedule')?.modelAgentKind, 'acp');
+  assert.equal(r.schedules.get('schedule')?.providerId, 'acp-plugin:antigravity:agy');
+  assert.equal(r.schedules.get('schedule')?.model, 'gemini-4-neon');
+  assert.equal(r.schedules.get('schedule')?.effort, 'high');
+  assert.equal(r.schedules.get('schedule')?.fastMode, false);
+  assert.equal(r.schedules.get('schedule')?.targetSessionId, 's1');
+  assert.doesNotMatch(r.lastCard().html, /follow-up started with this task/);
+});
+
+test('malformed plugin-engine (acp) routes are dropped by card validation', async () => {
+  for (const badRoute of [
+    { agentKind: 'acp', providerId: 'not-a-plugin-prefix', model: 'gemini-4-neon', effort: 'high', fastMode: false },
+    { agentKind: 'acp', providerId: 'acp-plugin:', model: 'gemini-4-neon', effort: 'high', fastMode: false },
+    { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: true },
+  ]) {
+    const r = runtime(false, { route: badRoute, label: 'Invalid ACP' });
+    const view = await r.show({ mr: url, published: true });
+    assert.equal(view.follow_state, 'active');
+    assert.equal(r.schedules.get('schedule')?.modelAgentKind, undefined);
+    assert.equal(r.schedules.get('schedule')?.providerId, undefined);
+    assert.equal(r.schedules.get('schedule')?.targetSessionId, 's1');
+  }
+});
+
+test('bound ACP follow-up falls back to the task model when the host explicitly rejects bound ACP overrides', async () => {
+  const route = {
+    agentKind: 'acp',
+    providerId: 'acp-plugin:antigravity:agy',
+    model: 'gemini-4-neon',
+    effort: 'high',
+    fastMode: false,
+  };
+  const hostRejections = [
+    { ok: false, message: 'A plugin engine schedule starts a new task each run' },
+    { ok: false, message: 'Plugin engines run on the automation host only' },
+    { ok: false, message: 'Explicit scheduled model Harness requires a supported Harness and model' },
+    { ok: false, message: 'Collaborative tasks cannot switch to or from a plugin engine' },
+    {
+      ok: false,
+      errorCode: 'INVALID_ARGS',
+      data: {
+        validation_errors: [
+          { path: ['modelAgentKind'], message: "Invalid enum value. Expected 'claude-code' | 'codex' | 'pi', received 'acp'" },
+        ],
+      },
+    },
+  ];
+  for (const rejection of hostRejections) {
+    const r = runtime(false, { route, label: 'Gemini 4 Neon · Antigravity' }, true, (args) => {
+      if (args.modelAgentKind === 'acp' && args.targetSessionId) return rejection;
+      return null;
+    });
+    const view = await r.show({ mr: url, published: true });
+    assert.equal(view.follow_state, 'active');
+    assert.equal(view.follow_model_fallback, true);
+    assert.match(view.note ?? '', /follow-up started with this task's current model/);
+    assert.match(view.html, /follow-up started with this task&#39;s current model|follow-up started with this task's current model/);
+    assert.equal(r.createAttempts.length, 2);
+    assert.equal(r.createAttempts[0].modelAgentKind, 'acp');
+    assert.equal(r.createAttempts[0].targetSessionId, 's1');
+    assert.equal(r.createAttempts[1].modelAgentKind, undefined);
+    assert.equal(r.createAttempts[1].model, undefined);
+    assert.equal(r.createAttempts[1].providerId, undefined);
+    assert.equal(r.createAttempts[1].modelAgentDeviceId, undefined);
+    assert.equal(r.createAttempts[1].targetSessionId, 's1');
+    assert.equal(r.schedules.size, 1);
+    assert.equal(r.schedules.get('schedule')?.modelAgentKind, undefined);
+    // Refreshing while active keeps the fallback notice; stopping clears it.
+    const refreshed = await r.show({ card_id: view.card_id });
+    assert.equal(refreshed.follow_model_fallback, true);
+    assert.match(refreshed.note ?? '', /follow-up started with this task's current model/);
+    await r.click(refreshed.anchor, 'pr:stop');
+    assert.equal(r.schedules.size, 0);
+    assert.doesNotMatch(r.lastCard().html, /follow-up started with this task/);
+  }
+});
+
+test('bound ACP follow-up fails closed on non-compatibility errors and never falls back for non-ACP overrides', async () => {
+  const acpRoute = {
+    agentKind: 'acp',
+    providerId: 'acp-plugin:antigravity:agy',
+    model: 'gemini-4-neon',
+    effort: 'high',
+    fastMode: false,
+  };
+  for (const errorBody of [
+    { ok: false, message: 'Plugin engine is currently unavailable' },
+    { ok: false, message: 'A plugin engine schedule cannot use a persistent session' },
+    { ok: false, errorCode: 'INVALID_ARGS', data: { validation_errors: [{ path: ['cronExpr'], message: 'Invalid cron' }] } },
+  ]) {
+    const r = runtime(false, { route: acpRoute, label: 'Gemini 4 Neon · Antigravity' }, true, () => errorBody);
+    const view = await r.show({ mr: url, published: true });
+    assert.equal(view.follow_state, 'failed');
+    assert.equal(r.createAttempts.length, 1);
+    assert.equal(r.schedules.size, 0);
+  }
+
+  const codexRoute = {
+    agentKind: 'codex',
+    providerId: 'openai',
+    model: 'gpt-5.6',
+    effort: 'high',
+    fastMode: false,
+  };
+  const rCodex = runtime(false, { route: codexRoute, label: 'GPT-5.6' }, true, () => ({
+    ok: false,
+    message: 'A plugin engine schedule starts a new task each run',
+  }));
+  const viewCodex = await rCodex.show({ mr: url, published: true });
+  assert.equal(viewCodex.follow_state, 'failed');
+  assert.equal(rCodex.createAttempts.length, 1);
+  assert.equal(rCodex.schedules.size, 0);
+});
+
+test('plugin-engine (acp) follow models are preserved in agent handoff when native scheduler is absent', async () => {
+  const route = {
+    agentKind: 'acp',
+    providerId: 'acp-plugin:antigravity:agy',
+    model: 'gemini-4-neon',
+    effort: 'high',
+    fastMode: false,
+    agentDeviceId: 'mac-mini',
+  };
+  const r = runtime(false, { route, label: 'Gemini 4 Neon · Antigravity' }, false);
+  const view = await r.show({ mr: url });
+  await r.click(view.anchor, 'pr:follow');
+  assert.equal(r.handoffs.length, 1);
+  assert.deepEqual({ ...r.handoffs[0].event.follow_model }, {
+    model_agent_kind: 'acp',
+    provider_id: 'acp-plugin:antigravity:agy',
+    model: 'gemini-4-neon',
+    effort: 'high',
+    fast_mode: false,
+    label: 'Gemini 4 Neon · Antigravity',
+    agent_device_id: 'mac-mini',
+  });
+});
+
+test('live MR follow-up schedule in another task resolves to existing_task even when its peer card is missing', async () => {
+  const r = runtime();
+  const opened = await r.show({ mr: url, published: true }, 's-owner');
+  assert.equal(opened.follow_state, 'active');
+  assert.equal(r.schedules.size, 1);
+
+  // Simulate the owning task's card being evicted/absent while its schedule keeps running.
+  r.files.delete('mr-cards/' + opened.card_id + '.json');
+
+  const viewed = await r.show({ mr: url }, 's-other');
+  assert.equal(viewed.disposition, 'existing_task');
+  assert.equal(viewed.owner_session_id, 's-owner');
+  assert.equal(viewed.task_url, 'cindy://session/s-owner');
+  assert.equal(viewed.follow_claimed, false);
+  assert.match(viewed.html, /cindy:\/\/session\/s-owner/);
+  assert.doesNotMatch(viewed.html, /data-ghost-action="pr:follow"/);
+
+  // Legacy client fallback click on "Open follow-up task" resolves the live schedule owner.
+  await r.click(viewed.anchor, 'pr:open-task', { sessionId: 's-other' });
+  assert.equal(r.handoffs.length, 1);
+  assert.equal(r.handoffs[0].event.action, 'open-task');
+  assert.equal(r.handoffs[0].event.task_url, 'cindy://session/s-owner');
+
+  // Clicking follow or calling published: true in another task stays read-only and creates no duplicate.
+  await r.click(viewed.anchor, 'pr:follow', { sessionId: 's-other' });
+  const pub = await r.show({ mr: url, published: true }, 's-third');
+  assert.equal(pub.disposition, 'existing_task');
+  assert.equal(pub.owner_session_id, 's-owner');
+  assert.equal(r.schedules.size, 1);
+});
+
+test('unrecognized or ambiguous foreign MR schedules still fail closed without misdirecting', async () => {
+  const r = runtime();
+  r.schedules.set('custom', {
+    id: 'custom', targetSessionId: 's-other', recurring: true, status: 'active',
+    prTrigger: { url, change: 'any' }, prompt: 'Custom reminder for ' + url,
+  });
+  const pub = await r.show({ mr: url, published: true }, 's-orig');
+  assert.equal(pub.disposition, undefined);
+  assert.equal(pub.follow_state, 'failed');
+  assert.equal(r.schedules.size, 1);
 });

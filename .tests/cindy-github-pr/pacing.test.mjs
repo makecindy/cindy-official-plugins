@@ -102,6 +102,22 @@ test('pacing: each stage looks at its own interval; fast reasons look every tick
   assert.equal(pacingDue(terminalAttempt, T0 + 5 * MIN).due, false, '超过空放行窗口后恢复退避');
   assert.equal(pacingDue({ ...terminalAttempt, pendingWatch: undefined }, T0 + 1.5 * MIN).due, false, '已 --ack 确认后即使在 5 分钟内也不再重复放行');
   assert.equal(pacingDue({ ...terminalAttempt, lastDecisionReason: 'terminal-backoff' }, T0 + 1.5 * MIN).due, false, '普通退避跳过态保持零调用');
+
+  // retry-backoff: unacknowledged updates waiting for their next retry window skip with zero API calls,
+  // while host triggers still break in immediately and expiry resumes at fast pace.
+  const retryBackedOff = looked({
+    pendingWatch: watch(),
+    retryBackoffUntil: T0 + 30 * MIN,
+  });
+  assert.deepEqual(pacingDue(retryBackedOff, T0 + 5 * MIN), {
+    due: false,
+    pace: 'retry-backoff',
+    reason: 'retry-backoff',
+    nextAt: T0 + 30 * MIN,
+  });
+  assert.equal(pacingDue(retryBackedOff, T0 + 5 * MIN, { triggered: true }).due, true, '宿主事件触发仍可穿透 retry-backoff');
+  assert.equal(pacingDue(retryBackedOff, T0 + 30 * MIN).due, true, '到达 retryBackoffUntil 后恢复 fast 立即重试');
+  assert.equal(pacingDue(retryBackedOff, T0 + 30 * MIN).pace, 'fast');
 });
 
 test('settle: expected bots answer by a submitted review on the head or a thumbs-up reaction', () => {

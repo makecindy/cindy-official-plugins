@@ -84,8 +84,9 @@ Actions 时，为已确认的临时故障提供有限恢复途径。
    密钥/账号的按自选接受（`{ "emails": [] }`）。`author` 必须是真实作者。
 3. **开发**——在任意 coding Agent 或开发环境中按照
    [工具无关的快速路径](#工具无关的快速路径)操作，不要求 Cindy 专用制作工具。
-4. **提交 PR**——标题 `feat(<目录名>): …`；bump `ghost.json.version`；补
-   `provisioning.json` 条目；四语言 locale（`zh-CN` / `en` / `ja` / `ko`）齐全；
+4. **提交 PR**——标题 `feat(<目录名>): …`；填写初始 `ghost.json.version`
+   （存量插件日常修复不再强制手工 bump patch，打包时会自动按 `main` 历史单调递增）；
+   补 `provisioning.json` 条目；四语言 locale（`zh-CN` / `en` / `ja` / `ko`）齐全；
    每个 commit 带签名（`git commit -s`，[DCO](./DCO)）。细节见
    [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md)。
 5. **审查**——CI 在本仓校验 manifest、交付限制、本地化、provisioning、改动插件单测
@@ -134,7 +135,7 @@ Actions 时，为已确认的临时故障提供有限恢复途径。
 - [ ] 自主域名、`node` 入口与子进程边界最小化
 - [ ] 不可逆外部副作用失败路径区分「未执行 / 已执行 / 不确定」
 - [ ] 四语言 locale 通过 `node --test .tests/localization.test.mjs`
-- [ ] `ghost.json.version` 已 bump；涉及时同步 `provisioning.json` 与 `THIRD-PARTY-LICENSES.txt`
+- [ ] `ghost.json.version` 未降级（日常 patch 无需手工 bump）；涉及时同步 `provisioning.json` 与 `THIRD-PARTY-LICENSES.txt`
 - [ ] 若改动第三方 OAuth scope 或依赖未就绪宿主授权，已在 PR 说明写清状态
 - [ ] 每个 commit 带 DCO 签名（`git commit -s`）
 
@@ -188,8 +189,9 @@ Plugin Server；Platform 创建待审核 release。
 审核通过后，兼容客户端会收到该 release；低于 `minCindyVersion` 的客户端会继续收到
 已有的最新兼容旧 release（如果存在）。Desktop 信任该 Server 投影，不再追加版本确认。
 
-修改插件内容时必须同步更新 `ghost.json.version`。新的 `major.minor.patch` SemVer 必须
-大于 `main` 上的当前版本，否则 CI 会在提交 Server 前阻止合并。
+修改插件内容时不得降低 `ghost.json.version`。日常修复或优化无需手工 bump patch——
+`.github/scripts/package-plugin.sh` 会在打包时按 `main` 提交历史自动计算严格递增的
+`major.minor.patch` 版本写入 `.cindy` 包；仅需显式提升 minor/major 时再手工修改。
 
 ## 本地开发
 
@@ -384,9 +386,9 @@ unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 
 ## 社区
 
-提 PR 前请读 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md)：其中包含 PR 标题规范、必须同步
-bump `ghost.json.version` 的要求、本地化检查、内嵌 Node Worker 的重新构建方式，以及
-每个 commit 都需要的 [DCO](./DCO) 签名（`git commit -s`）。
+提 PR 前请读 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md)：其中包含 PR 标题规范、版本
+号策略（日常 patch 打包自动递增，无需手工 bump）、本地化检查、内嵌 Node Worker 的重新
+构建方式，以及每个 commit 都需要的 [DCO](./DCO) 签名（`git commit -s`）。
 
 参与社区请遵守 [`CODE_OF_CONDUCT.zh-CN.md`](./CODE_OF_CONDUCT.zh-CN.md)。使用问题以及提 issue
 需要附上的信息见 [`SUPPORT.zh-CN.md`](./SUPPORT.zh-CN.md)。
