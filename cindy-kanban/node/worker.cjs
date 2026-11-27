@@ -47,9 +47,19 @@ function callOnce(method, params, timeoutMs) {
         const message = JSON.parse(line);
         if (message.error) finish(reject, new Error(message.error.message || message.error.code || 'herdr error'));
         else finish(resolve, message.result);
-      } catch (e) { finish(reject, e); }
+      } catch (e) {
+        finish(reject, sent && MUTATING.has(method) ? unknown() : new Error('herdr 返回了无法解析的响应'));
+      }
     });
-    socket.on('error', e => finish(reject, sent && MUTATING.has(method) ? unknown() : e));
+    socket.on('error', e => {
+      let err = e;
+      if (!sent) {
+        const code = e && e.code;
+        if (code === 'ENOENT') err = new Error('找不到 Herdr 的 socket，请先启动 Herdr（可用 HERDR_SOCKET_PATH 指定路径）');
+        else if (code === 'EACCES') err = new Error('没有权限访问 Herdr 的 socket，请检查文件权限或 HERDR_SOCKET_PATH');
+      }
+      finish(reject, sent && MUTATING.has(method) ? unknown() : err);
+    });
   });
 }
 
@@ -95,6 +105,15 @@ readline.createInterface({ input: process.stdin }).on('line', async line => {
   if (request.method === 'herdr/send') {
     try {
       const result = await callOnce('pane.send_text', { pane_id: request.params?.paneId, text: String(request.params?.text ?? '') }, 15000);
+      reply({ jsonrpc: '2.0', id: request.id, result });
+    } catch (e) {
+      reply({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: String(e && e.message || e) } });
+    }
+    return;
+  }
+  if (request.method === 'herdr/send_input') {
+    try {
+      const result = await callOnce('pane.send_input', { pane_id: request.params?.paneId, text: String(request.params?.text ?? ''), keys: Array.isArray(request.params?.keys) ? request.params.keys : [] }, 20000);
       reply({ jsonrpc: '2.0', id: request.id, result });
     } catch (e) {
       reply({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: String(e && e.message || e) } });

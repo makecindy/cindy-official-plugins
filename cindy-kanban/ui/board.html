@@ -913,16 +913,14 @@ async function openPaneModal(paneId, title) {
     sending = true;
     void debugLog('send-click', {});
     try {
-      const sent = await call('board_pane_action', { paneId, action: 'send', text });
+      // 原子提交整行（text + Enter 一次写入），避免两次 RPC 之间被其它输入插队拼接。
+      const sent = await call('board_pane_action', { paneId, action: 'send_input', text });
       if (!sent.ok) {
         toast(t('sendFailedKeepDraft', { e: sent.message ?? sent.errorCode ?? '' }), true);
         return;
       }
-      // 发送期间用户可能又改了草稿：只在内容没变时清空。
       if (line.value === text) line.value = '';
       echo.textContent = `› ${text}`;
-      const entered = await call('board_pane_action', { paneId, action: 'keys', keys: ['enter'] });
-      if (!entered.ok) toast(t('enterFailedCheck', { e: entered.message ?? entered.errorCode ?? '' }), true);
       setTimeout(() => { echo.textContent = ''; }, 1200);
     } catch (e) {
       toast(t('sendFailedKeepDraft', { e: e?.message ?? e }), true);

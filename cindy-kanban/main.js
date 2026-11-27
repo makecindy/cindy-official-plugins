@@ -69,7 +69,7 @@ async function snapshot() {
   if (typeof cindy.targets?.list === 'function' && typeof cindy.observe?.projectTasks === 'function') {
     try {
       const { targets } = await cindy.targets.list({ targetKind: 'project' });
-      for (const t of targets.slice(0, 20)) {
+      for (const t of targets) {
         try {
           const { tasks } = await cindy.observe.projectTasks({ project: t.id });
           data.projects.push({
@@ -150,6 +150,13 @@ async function paneAction(args) {
     const r = await cindy.node.request({ method: 'herdr/keys', params: { paneId, keys }, timeoutMs: 20000 });
     if (!r.ok) return herdrFailure('发送按键', r.message);
     return { ok: true, keys };
+  }
+  if (action === 'send_input') {
+    const text = String(args.text ?? '');
+    if (!text) return { ok: false, errorCode: 'INVALID_PARAMS', message: 'send_input 需要 text' };
+    const r = await cindy.node.request({ method: 'herdr/send_input', params: { paneId, text, keys: ['enter'] }, timeoutMs: 20000 });
+    if (!r.ok) return herdrFailure('提交整行', r.message);
+    return { ok: true, sentLine: true };
   }
   if (action === 'interrupt') {
     const r = await cindy.node.request({ method: 'herdr/keys', params: { paneId, keys: ['ctrl+c'] }, timeoutMs: 20000 });
@@ -282,7 +289,8 @@ function cronFrom(args) {
   if (mode === 'daily') return { cronExpr: `${mm} ${hh} * * *` };
   if (mode === 'weekly') {
     const legacy = Number.isFinite(Number(args.weekday)) ? [Number(args.weekday)] : [];
-    const days = Array.isArray(args.weekdays) && args.weekdays.length ? args.weekdays : legacy.length ? legacy : [1];
+    const days = Array.isArray(args.weekdays) && args.weekdays.length ? args.weekdays : legacy;
+    if (!days.length) return null;   // 空选择拒绝，而不是默认周一
     const clean = [...new Set(days.map(d => Math.min(Math.max(Number(d) || 0, 0), 6)))].sort();
     return { cronExpr: `${mm} ${hh} * * ${clean.join(',')}` };
   }
@@ -332,6 +340,10 @@ async function scheduleApply(args) {
     const upd = await cindy.host.call('cindy_scheduler', 'schedule_update', patch);
     const updText = (upd.content ?? []).filter(b => b.type === 'text').map(b => b.text).join('\n');
     if (upd.isError) return { ok: false, errorCode: 'UPDATE_FAILED', message: updText };
+    const updBody = (() => { try { return JSON.parse(updText); } catch { return null; } })();
+    if (updBody && updBody.ok === false) {
+      return { ok: false, errorCode: 'UPDATE_REJECTED', message: `调度器拒绝了频率修改：${updBody.error?.message ?? updBody.error?.code ?? '未知原因'}` };
+    }
     const target = args.enabled === false ? 'schedule_pause' : 'schedule_resume';
     const r = await cindy.host.call('cindy_scheduler', target, { id: s.id });
     const t = (r.content ?? []).filter(b => b.type === 'text').map(b => b.text).join('\n');
@@ -342,6 +354,10 @@ async function scheduleApply(args) {
         partial: true,
         message: `频率已更新（${cron.cronExpr}），但启停操作失败，请到 Cindy 自动化页确认当前状态：${t}`,
       };
+    }
+    const body = (() => { try { return JSON.parse(t); } catch { return null; } })();
+    if (body && body.ok === false) {
+      return { ok: false, errorCode: 'TOGGLE_REJECTED', partial: true, message: `频率已更新，但启停被拒绝：${body.error?.message ?? body.error?.code ?? '未知原因'}，请到自动化页确认当前状态` };
     }
     return { ok: true, id: s.id, cronExpr: cron.cronExpr, intervalMs: cron.intervalMs ?? null, enabled: args.enabled !== false };
   } catch (e) { return { ok: false, errorCode: e?.code ?? 'SCHEDULER_ERROR', message: String(e?.message ?? e) }; }
@@ -397,7 +413,12 @@ async function chat(args) {
   }
   let taskId = typeof initial.chatTaskId === 'string' ? initial.chatTaskId : null;
   let task = null;
-  if (taskId) { try { task = await cindy.tasks.get({ taskId }); } catch { task = null; } }
+  if (taskId) {
+    try {
+      task = await cindy.tasks.get({ taskId });
+      if (task && task.status && task.status !== 'active') task = null;   // 已归档/不可复用 → 重建
+    } catch { task = null; }
+  }
   let first = false;
   if (!task) {
     const create = { requestKey: `kanban-chat-${Date.now()}-create`, title: '看板指挥', autoTitle: false };
@@ -446,15 +467,18 @@ async function analyze(args) {
   const state = await boardState();
   const kv = await kvGet();
   const focus = String(args.focus ?? '').trim();
+  const patrol = args.patrol === true;
   const text = [
-    '你是看板调度顾问。下面是当前 Agent 看板的完整状态（JSON），以及主人设置的常驻策略。',
-    '请输出：1) 一句话整体判断；2) 最多 3 条启发式建议（每条一行，指明对象与动作）；3) 若策略与现状冲突，指出冲突。',
+    '你是看板调度顾问。下面是当前 Agent 看板的完整状态（JSON），以及主人设置的常驻策略与巡检方式。',
+    patrol
+      ? '这是一轮巡检：1) 按巡检方式逐项检查；2) 无论结果如何，完成后调用 cindy-kanban 插件的 board_report 工具写入本轮判断依据（verdict/basis/blocked/queued/refs）；3) 发现能安全解阻塞的低风险动作才动手，否则在回复里说明建议；4) 回复第一行给出结论词（ok / 有卡点 / 有排队待处理）+ 一句话说明。'
+      : '请输出：1) 一句话整体判断；2) 最多 3 条启发式建议（每条一行，指明对象与动作）；3) 若策略与现状冲突，指出冲突。',
     focus ? `主人本次关注点：${focus}` : '',
     '常驻策略：' + (typeof kv.policy === 'string' && kv.policy ? kv.policy : '（未设置）'),
     '巡检方式：' + (typeof kv.patrol === 'string' && kv.patrol ? kv.patrol : '（未设置，按默认：发现卡点可用 board_pane_read 读画面，必要时 board_pane_action 中断或输入）'),
     '看板状态：' + JSON.stringify(state),
   ].filter(Boolean).join('\n\n');
-  const r = await runTaskAndWait({ title: '看板策略分析', text, route: args.route ?? null });
+  const r = await runTaskAndWait({ title: patrol ? '看板巡检' : '看板策略分析', text, route: args.route ?? null });
   return { ok: r.ok, status: r.status, analysis: r.text, taskId: r.taskId };
 }
 
