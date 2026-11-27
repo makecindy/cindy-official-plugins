@@ -533,7 +533,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
           const id = `s${sessions.size}`;
           sessions.add(id);
           res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
-          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }));
+          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
         }
         if (message.id === undefined) return res.writeHead(202).end();
         res.writeHead(200, { 'content-type': 'application/json' });
@@ -1802,8 +1802,12 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.equal(element('custom-path-reset').hidden, false);
 
     // Reset sends empty path and restores auto-detection.
+    const checksBeforeReset = cliActions.filter((a) => a === 'check').length;
     element('custom-path-reset').click();
     await waitFor(() => element('version').textContent === '1.5.9', 3_000, 'reset to auto-detect');
+    // Wait for the reset-triggered CLI update check to settle so its active:false reply cannot race the update lock below.
+    await waitFor(() => cliActions.filter((a) => a === 'check').length > checksBeforeReset
+      && element('cli-status').textContent === 'Up to date', 3_000, 'reset CLI update check settled');
     assert.equal(element('custom-path-reset').hidden, true);
     assert.deepEqual(savedPaths, ['bad', '/opt/custom/agy', '/gone/agy', '']);
 
@@ -3497,7 +3501,7 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
           const id = `warm-${warmedSessions.size}`;
           warmedSessions.add(id);
           res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
-          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }));
+          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
         }
         if (message.id === undefined) return res.writeHead(202).end();
         res.writeHead(200, { 'content-type': 'application/json' });
@@ -3570,7 +3574,7 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
           const id = `warm-fail-${activeSessions.size}`;
           activeSessions.add(id);
           res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
-          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }));
+          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
         }
         if (message.id === undefined) return res.writeHead(202).end();
         res.writeHead(200, { 'content-type': 'application/json' });
@@ -3625,7 +3629,7 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
           const id = `warm-inflight-${activeSessions.size}`;
           activeSessions.add(id);
           res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
-          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }));
+          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
         }
         if (message.id === undefined) return res.writeHead(202).end();
         // Hold tools/list open longer than restricted agy's 80ms fail-open error so warm-up is still in flight.
@@ -3694,7 +3698,7 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
             const id = 'warm-slow-init';
             activeSessions.add(id);
             res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
-            res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }));
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
           }, 2_200);
           return;
         }
@@ -3728,58 +3732,71 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
     assert.equal(seenMethods.includes('tools/list'), false, 'did not send tools/list after cancel');
   });
 
-  // Why: when an in-flight initialize returns an invalid/malformed response with a foreign session header,
-  // cancelling the task must not send DELETE for that unconfirmed session.
-  test('does not delete foreign sessions on invalid initialize responses when cancelled in flight', async (t) => {
-    const authHeader = `Bearer ${randomUUID()}`;
-    const activeSessions = new Set(['foreign-invalid']);
-    const deletedSessions = [];
-    let resolveInitReceived;
-    const initReceived = new Promise((resolve) => { resolveInitReceived = resolve; });
-    const mcp = http.createServer((req, res) => {
-      let body = '';
-      req.on('data', (chunk) => { body += chunk; });
-      req.on('end', () => {
-        if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
-        const sid = req.headers['mcp-session-id'];
-        if (req.method === 'GET') return res.writeHead(405).end();
-        if (req.method === 'DELETE') {
-          deletedSessions.push(sid);
-          activeSessions.delete(sid);
-          return res.writeHead(200).end();
-        }
-        const message = body ? JSON.parse(body) : {};
-        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
-        if (!sid) {
-          resolveInitReceived();
-          setTimeout(() => {
-            if (res.destroyed) return;
-            res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-invalid' });
-            res.end('{not-valid-json');
-          }, 150);
-          return;
-        }
-        res.writeHead(404).end();
+  // Why: when an in-flight initialize returns an invalid/malformed or incomplete MCP InitializeResult with a
+  // foreign session header, cancelling the task must not send DELETE for that unconfirmed session.
+  test('does not delete foreign sessions on invalid or incomplete initialize responses when cancelled in flight', async (t) => {
+    for (const badCase of [
+      {
+        name: 'malformed JSON',
+        sid: 'foreign-invalid',
+        body: () => '{not-valid-json',
+      },
+      {
+        name: 'incomplete InitializeResult missing serverInfo',
+        sid: 'foreign-incomplete',
+        body: (message) => JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }),
+      },
+    ]) {
+      const authHeader = `Bearer ${randomUUID()}`;
+      const activeSessions = new Set([badCase.sid]);
+      const deletedSessions = [];
+      let resolveInitReceived;
+      const initReceived = new Promise((resolve) => { resolveInitReceived = resolve; });
+      const mcp = http.createServer((req, res) => {
+        let body = '';
+        req.on('data', (chunk) => { body += chunk; });
+        req.on('end', () => {
+          if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
+          const sid = req.headers['mcp-session-id'];
+          if (req.method === 'GET') return res.writeHead(405).end();
+          if (req.method === 'DELETE') {
+            deletedSessions.push(sid);
+            activeSessions.delete(sid);
+            return res.writeHead(200).end();
+          }
+          const message = body ? JSON.parse(body) : {};
+          if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+          if (!sid) {
+            resolveInitReceived();
+            setTimeout(() => {
+              if (res.destroyed) return;
+              res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': badCase.sid });
+              res.end(badCase.body(message));
+            }, 120);
+            return;
+          }
+          res.writeHead(404).end();
+        });
       });
-    });
-    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
-    t.after(() => mcp.close());
+      await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
+      t.after(() => mcp.close());
 
-    const { bridge, send, reply } = remoteSteerHarness(t);
-    bridge.child.stdin.write(INITIALIZE);
-    await reply(0, 'initialize answer');
-    const exec = {
-      type: 'http',
-      name: 'cindy_exec',
-      url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
-      headers: [{ name: 'Authorization', value: authHeader }],
-    };
-    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec] } });
-    await initReceived;
-    bridge.child.stdin.end();
-    assert.equal((await bridge.closed).code, 0);
-    assert.deepEqual(deletedSessions, [], 'no DELETE was sent for malformed initialize response');
-    assert.ok(activeSessions.has('foreign-invalid'), 'foreign session remained untouched');
+      const { bridge, send, reply } = remoteSteerHarness(t);
+      bridge.child.stdin.write(INITIALIZE);
+      await reply(0, `${badCase.name}: initialize answer`);
+      const exec = {
+        type: 'http',
+        name: 'cindy_exec',
+        url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
+        headers: [{ name: 'Authorization', value: authHeader }],
+      };
+      send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec] } });
+      await initReceived;
+      bridge.child.stdin.end();
+      assert.equal((await bridge.closed).code, 0);
+      assert.deepEqual(deletedSessions, [], `${badCase.name}: no DELETE was sent`);
+      assert.ok(activeSessions.has(badCase.sid), `${badCase.name}: foreign session remained untouched`);
+    }
   });
 });
 

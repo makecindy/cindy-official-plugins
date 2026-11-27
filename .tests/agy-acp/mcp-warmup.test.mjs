@@ -35,10 +35,15 @@ const DISCOVER = { jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _
 const INITIALIZE = { jsonrpc: '2.0', id: 2, method: 'initialize', params: { clientInfo: CLIENT_INFO, protocolVersion: '2025-11-25', capabilities: CAPABILITIES } };
 
 /** A server like Cindy's bridge behind the tunnel; `log` lists what reached it. */
-async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false, paginate = false, failInitialize = false, failInitializeJsonRpc = false, initializeResponse = null, onRequest = null } = {}) {
+async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false, paginate = false, failInitialize = false, failInitializeJsonRpc = false, multilineSse = false, initializeResponse = null, onRequest = null } = {}) {
   const sessions = new Map();
   const log = [];
   let activeToken = TOKEN;
+  const encodeSse = (payload) => {
+    if (!multilineSse) return `event: message\ndata: ${JSON.stringify(payload)}\n\n`;
+    const pretty = JSON.stringify(payload, null, 2).split('\n').map((line) => `data: ${line}`).join('\r\n');
+    return `: keepalive\r\n\r\nevent: message\r\nid: evt-${payload.id}\r\n${pretty}\r\n\r\n`;
+  };
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (chunk) => { body += chunk; });
@@ -80,8 +85,11 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
           const id = crypto.randomUUID();
           sessions.set(id, message.params.clientInfo.name);
           res.writeHead(200, { 'content-type': 'text/event-stream', 'mcp-session-id': id });
-          return res.end(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: message.id,
-            result: { protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'cindy_exec', version: '1' } } })}\n\n`);
+          return res.end(encodeSse({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: { protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'cindy_exec', version: '1' } },
+          }));
         }
         if (!sessions.has(sid)) return res.writeHead(404).end();
         if (message.id === undefined) return res.writeHead(202).end();
@@ -106,7 +114,7 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
           result = { content: [{ type: 'text', text: `${message.params.name} ran for ${sessions.get(sid)}` }] };
         }
         res.writeHead(200, { 'content-type': 'text/event-stream' });
-        res.end(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: message.id, result })}\n\n`);
+        res.end(encodeSse({ jsonrpc: '2.0', id: message.id, result }));
       }, delayMs);
     });
   });
@@ -117,14 +125,22 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
   return { entry, log, sessions, setToken: (next) => { activeToken = next; } };
 }
 
-/** One request as agy sends it; the answer as agy reads it. */
+/** One request as agy sends it; the answer as agy reads it (parsing full SSE event blocks). */
 async function agyRequest(url, { method = 'POST', message, sid, authorization = TOKEN, extraHeaders = {} } = {}) {
   const headers = { ...(authorization ? { authorization } : {}), ...(sid ? { 'mcp-session-id': sid } : {}), ...extraHeaders };
   if (message) Object.assign(headers, { accept: 'application/json, text/event-stream', 'content-type': 'application/json' });
   const response = await fetch(url, { method, headers, body: message ? JSON.stringify(message) : undefined });
   const text = await response.text();
-  const data = text.split('\n').find((line) => line.startsWith('data:'));
-  return { status: response.status, sid: response.headers.get('mcp-session-id'), body: data ? JSON.parse(data.slice(5)) : text };
+  let parsed = text;
+  if (String(response.headers.get('content-type') || '').includes('text/event-stream')) {
+    for (const block of text.split(/\r?\n\r?\n/)) {
+      const dataLines = block.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).replace(/^ /, ''));
+      if (!dataLines.length) continue;
+      parsed = JSON.parse(dataLines.join('\n').trim());
+      break;
+    }
+  }
+  return { status: response.status, sid: response.headers.get('mcp-session-id'), body: parsed, rawText: text };
 }
 
 describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () => {
@@ -296,7 +312,7 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
         sid: 'foreign-no-jsonrpc',
         respond: (message, _req, res) => {
           res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-no-jsonrpc' });
-          res.end(JSON.stringify({ id: message.id, result: { protocolVersion: '2025-11-25' } }));
+          res.end(JSON.stringify({ id: message.id, result: { protocolVersion: '2025-11-25', capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
         },
       },
       {
@@ -304,7 +320,7 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
         sid: 'foreign-wrong-id',
         respond: (_message, _req, res) => {
           res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-wrong-id' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: 'other-request', result: { protocolVersion: '2025-11-25' } }));
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: 'other-request', result: { protocolVersion: '2025-11-25', capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
         },
       },
       {
@@ -312,7 +328,47 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
         sid: 'foreign-both-result-error',
         respond: (message, _req, res) => {
           res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-both-result-error' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {}, error: { code: -32000, message: 'ambiguous' } }));
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-11-25', capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } }, error: { code: -32000, message: 'ambiguous' } }));
+        },
+      },
+      {
+        name: 'empty MCP InitializeResult missing all required fields',
+        sid: 'foreign-empty-result',
+        respond: (message, _req, res) => {
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-empty-result' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }));
+        },
+      },
+      {
+        name: 'MCP InitializeResult missing protocolVersion',
+        sid: 'foreign-no-protocol',
+        respond: (message, _req, res) => {
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-no-protocol' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
+        },
+      },
+      {
+        name: 'MCP InitializeResult missing capabilities',
+        sid: 'foreign-no-capabilities',
+        respond: (message, _req, res) => {
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-no-capabilities' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-11-25', serverInfo: { name: 'cindy_exec', version: '1' } } }));
+        },
+      },
+      {
+        name: 'MCP InitializeResult missing serverInfo',
+        sid: 'foreign-no-server-info',
+        respond: (message, _req, res) => {
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-no-server-info' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-11-25', capabilities: {} } }));
+        },
+      },
+      {
+        name: 'MCP InitializeResult missing serverInfo.version',
+        sid: 'foreign-no-server-version',
+        respond: (message, _req, res) => {
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-no-server-version' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-11-25', capabilities: {}, serverInfo: { name: 'cindy_exec' } } }));
         },
       },
       {
@@ -320,7 +376,7 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
         sid: 'foreign-text-plain',
         respond: (message, _req, res) => {
           res.writeHead(200, { 'content-type': 'text/plain', 'mcp-session-id': 'foreign-text-plain' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-11-25' } }));
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-11-25', capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
         },
       },
       {
@@ -346,24 +402,71 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
       assert.equal(server.log.some((entry) => entry.method === 'DELETE'), false, `${item.name}: no DELETE sent`);
     }
 
-    // Even if close() arrives while a delayed invalid initialize is still in flight, no DELETE is sent.
-    let resolveReceived;
-    const initReceived = new Promise((resolve) => { resolveReceived = resolve; });
-    const delayedBad = await bridgeServer(t, {
-      delayMs: 150,
-      onRequest: (item) => { if (item.rpc === 'initialize') resolveReceived(); },
-      initializeResponse: (_message, _req, res, sessions) => {
-        sessions.set('foreign-delayed-invalid', 'other');
-        res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-delayed-invalid' });
-        res.end('{broken');
+    // Even if close() arrives while a delayed invalid or incomplete initialize is still in flight, no DELETE is sent.
+    for (const delayedCase of [
+      {
+        name: 'delayed malformed JSON',
+        sid: 'foreign-delayed-invalid',
+        respond: (_message, res) => res.end('{broken'),
       },
+      {
+        name: 'delayed incomplete InitializeResult missing serverInfo',
+        sid: 'foreign-delayed-incomplete',
+        respond: (message, res) => res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-11-25', capabilities: {} } })),
+      },
+    ]) {
+      let resolveReceived;
+      const initReceived = new Promise((resolve) => { resolveReceived = resolve; });
+      const delayedBad = await bridgeServer(t, {
+        delayMs: 120,
+        onRequest: (item) => { if (item.rpc === 'initialize') resolveReceived(); },
+        initializeResponse: (message, _req, res, sessions) => {
+          sessions.set(delayedCase.sid, 'other');
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': delayedCase.sid });
+          delayedCase.respond(message, res);
+        },
+      });
+      const warmup = warmMcpServers([delayedBad.entry]);
+      await initReceived;
+      await warmup.close();
+      assert.deepEqual(await warmup.ready, [delayedBad.entry], `${delayedCase.name}: falls back to direct`);
+      assert.ok(delayedBad.sessions.has(delayedCase.sid), `${delayedCase.name}: leaves foreign session untouched`);
+      assert.equal(delayedBad.log.some((entry) => entry.method === 'DELETE'), false, `${delayedCase.name}: no DELETE sent`);
+    }
+  });
+
+  // Why: multi-line SSE `data:` payloads must be read and rewritten on the same SSE event boundary so
+  // agy receives its own JSON-RPC request ids for both initialize and tools/list instead of warm-up ids.
+  test('multi-line SSE responses rewrite request ids for initialize and tools/list on the same event boundary', async (t) => {
+    const { entry, log } = await bridgeServer(t, { delayMs: 40, multilineSse: true });
+    const warmup = warmMcpServers([entry]);
+    t.after(() => warmup.close());
+    const [given] = await warmup.ready;
+    assert.notDeepEqual(given, entry, 'multi-line SSE server was warmed');
+    const beforeReplay = log.length;
+
+    const init = await agyRequest(given.url, { message: { ...INITIALIZE, id: 42 } });
+    assert.equal(init.status, 200);
+    assert.equal(init.body.id, 42, 'replayed initialize carries agy request id');
+    assert.equal(init.body.result.protocolVersion, '2025-11-25');
+    assert.match(init.rawText, /event: message\nid: evt-cindy-warm-initialize\ndata: /);
+    assert.doesNotMatch(init.rawText, /"id"\s*:\s*"cindy-warm-initialize"/);
+    assert.equal((await agyRequest(given.url, { message: { jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, sid: init.sid })).status, 202);
+
+    const list = await agyRequest(given.url, { message: { jsonrpc: '2.0', id: 99, method: 'tools/list', params: {} }, sid: init.sid });
+    assert.equal(list.status, 200);
+    assert.equal(list.body.id, 99, 'replayed tools/list carries agy request id');
+    assert.deepEqual(list.body.result.tools.map((tool) => tool.name), ['Bash']);
+    assert.doesNotMatch(list.rawText, /"id"\s*:\s*"cindy-warm-tools"/);
+    assert.equal(log.length, beforeReplay, 'multi-line SSE handshake replayed from cache');
+
+    const call = await agyRequest(given.url, {
+      message: { jsonrpc: '2.0', id: 100, method: 'tools/call', params: { name: 'Bash', arguments: { command: 'pwd' } } },
+      sid: init.sid,
     });
-    const warmup = warmMcpServers([delayedBad.entry]);
-    await initReceived;
-    await warmup.close();
-    assert.deepEqual(await warmup.ready, [delayedBad.entry], 'cancelled invalid initialize falls back to direct');
-    assert.ok(delayedBad.sessions.has('foreign-delayed-invalid'), 'delayed invalid initialize leaves foreign session untouched');
-    assert.equal(delayedBad.log.some((entry) => entry.method === 'DELETE'), false, 'no DELETE for delayed invalid initialize');
+    assert.equal(call.status, 200);
+    assert.equal(call.body.id, 100);
+    assert.equal(call.body.result.content[0].text, 'Bash ran for antigravity-client');
   });
 
   // Why: close() can arrive before the loopback relay finishes listening; no handshake may start afterwards.

@@ -53,6 +53,11 @@ const DISCOVER_PARAMS = Object.freeze({ _meta: {
 } });
 const INITIALIZE_PARAMS = Object.freeze({ clientInfo: CLIENT_INFO, protocolVersion: INITIALIZE_PROTOCOL, capabilities: CLIENT_CAPABILITIES });
 const EMPTY_PARAMS = Object.freeze({});
+const WARM_IDS = Object.freeze({
+  discover: 'cindy-warm-discover',
+  initialize: 'cindy-warm-initialize',
+  tools: 'cindy-warm-tools',
+});
 const ACCEPT = 'application/json, text/event-stream';
 /** Request headers that describe this hop only. */
 const HOP_HEADERS = new Set(['host', 'connection', 'content-length', 'transfer-encoding', 'keep-alive', 'upgrade', 'proxy-connection']);
@@ -172,25 +177,52 @@ function mediaTypeOf(headers) {
   return String(headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase();
 }
 
-/** The answer with the JSON-RPC id of the request it now answers (JSON or event-stream bodies). */
-function withId(kept, id) {
+/** Splits an SSE body into raw event blocks using one shared event boundary for reading and rewriting. */
+function sseBlocks(text) {
+  return text.split(/\r?\n\r?\n/);
+}
+
+/** Parses one SSE event block into preserved metadata lines and its joined `data` payload (or null if none). */
+function parseSseBlock(block) {
+  const meta = [];
+  const data = [];
+  for (const line of block.split(/\r?\n/)) {
+    if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
+    else if (line === 'data') data.push('');
+    else if (line.length > 0) meta.push(line);
+  }
+  return { meta, payload: data.length ? data.join('\n') : null };
+}
+
+/** The answer with the JSON-RPC id of the request it now answers (JSON or full-event SSE bodies). */
+function withId(kept, id, expectedId) {
   const mediaType = mediaTypeOf(kept.headers);
   const text = kept.body.toString('utf8');
+  const matches = (message) => isObject(message)
+    && 'id' in message
+    && !('method' in message)
+    && (expectedId === undefined || message.id === expectedId);
   if (mediaType === 'application/json') {
     const message = parseJson(text);
-    return isObject(message) && 'id' in message ? Buffer.from(JSON.stringify({ ...message, id })) : kept.body;
+    return matches(message) ? Buffer.from(JSON.stringify({ ...message, id })) : kept.body;
   }
   if (mediaType === 'text/event-stream') {
-    return Buffer.from(text.split(/\r?\n/).map((line) => {
-      if (!line.startsWith('data:')) return line;
-      const message = parseJson(line.slice(5).trim());
-      return isObject(message) && 'id' in message && !('method' in message) ? `data: ${JSON.stringify({ ...message, id })}` : line;
-    }).join('\n'));
+    let rewritten = false;
+    const blocks = sseBlocks(text).map((block) => {
+      if (rewritten) return block;
+      const { meta, payload } = parseSseBlock(block);
+      if (payload === null) return block;
+      const message = parseJson(payload.trim());
+      if (!matches(message)) return block;
+      rewritten = true;
+      return [...meta, `data: ${JSON.stringify({ ...message, id })}`].join('\n');
+    });
+    return rewritten ? Buffer.from(blocks.join('\n\n')) : kept.body;
   }
   return kept.body;
 }
 
-/** The first JSON-RPC response in a valid JSON or SSE answer body. */
+/** The first JSON-RPC response in a valid JSON or SSE answer body, parsed on the same event boundary as `withId`. */
 function firstResponse(kept) {
   const mediaType = mediaTypeOf(kept.headers);
   const text = kept.body.toString('utf8');
@@ -199,12 +231,10 @@ function firstResponse(kept) {
     return isObject(message) && 'id' in message && !('method' in message) ? message : undefined;
   }
   if (mediaType === 'text/event-stream') {
-    for (const rawEvent of text.split(/\r?\n\r?\n/)) {
-      const dataLines = rawEvent.split(/\r?\n/)
-        .filter((line) => line.startsWith('data:'))
-        .map((line) => line.slice(5).replace(/^ /, ''));
-      if (!dataLines.length) continue;
-      const message = parseJson(dataLines.join('\n').trim());
+    for (const block of sseBlocks(text)) {
+      const { payload } = parseSseBlock(block);
+      if (payload === null) continue;
+      const message = parseJson(payload.trim());
       if (isObject(message) && 'id' in message && !('method' in message)) return message;
     }
   }
@@ -219,6 +249,16 @@ function isJsonRpcResult(message, expectedId) {
     && !('method' in message)
     && !('error' in message)
     && isObject(message.result);
+}
+
+/** Whether `result` satisfies the MCP InitializeResult required fields (`protocolVersion`, `capabilities`, `serverInfo`). */
+function isValidInitializeResult(result) {
+  return isObject(result)
+    && typeof result.protocolVersion === 'string' && result.protocolVersion.trim().length > 0
+    && isObject(result.capabilities)
+    && isObject(result.serverInfo)
+    && typeof result.serverInfo.name === 'string' && result.serverInfo.name.trim().length > 0
+    && typeof result.serverInfo.version === 'string' && result.serverInfo.version.trim().length > 0;
 }
 
 /** JSON with object keys in a fixed order, so equal values compare equal. */
@@ -253,31 +293,32 @@ async function warmServer(server, signal, closing, initializeSignal) {
     signal: requestSignal,
   });
   const handshake = async () => {
-    const discover = post({ jsonrpc: '2.0', id: 'cindy-warm-discover', method: 'server/discover', params: DISCOVER_PARAMS },
+    const discover = post({ jsonrpc: '2.0', id: WARM_IDS.discover, method: 'server/discover', params: DISCOVER_PARAMS },
       { 'mcp-method': 'server/discover', 'mcp-protocol-version': DISCOVER_PROTOCOL }).catch(() => null);
     // An initialize already sent is bounded by `initializeSignal` so close()/deadline lets upstream confirm
     // ownership and immediately DELETE the created session instead of abandoning it on the remote host.
-    const initialize = await post({ jsonrpc: '2.0', id: 'cindy-warm-initialize', method: 'initialize', params: INITIALIZE_PARAMS },
+    const initialize = await post({ jsonrpc: '2.0', id: WARM_IDS.initialize, method: 'initialize', params: INITIALIZE_PARAMS },
       {}, initializeSignal);
     const result = firstResponse(initialize);
     const created = initialize.headers['mcp-session-id'];
-    // Only a confirmed HTTP 200 JSON-RPC 2.0 success response proves ownership; failed or malformed
-    // responses leave sessionId unset so nothing is ended for them and agy connects directly.
+    // Only a confirmed HTTP 200 JSON-RPC 2.0 MCP InitializeResult proves ownership; failed, malformed, or
+    // incomplete responses leave sessionId unset so nothing is ended for them and agy connects directly.
     if (initialize.status !== 200 || typeof created !== 'string' || !created.trim()
-      || !isJsonRpcResult(result, 'cindy-warm-initialize')) return null;
+      || !isJsonRpcResult(result, WARM_IDS.initialize)
+      || !isValidInitializeResult(result.result)) return null;
     sessionId = created;
     // Deadline or close() already fired while initialize was in flight: skip the rest and DELETE now.
     if (signal.aborted) return null;
-    const protocol = typeof result.result.protocolVersion === 'string' ? result.result.protocolVersion : INITIALIZE_PROTOCOL;
+    const protocol = result.result.protocolVersion;
     const session = { ...auth, 'mcp-session-id': sessionId, 'mcp-protocol-version': protocol };
     const initialized = await post({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, session);
     if (initialized.status < 200 || initialized.status >= 300) return null;
     const [stream, tools] = await Promise.all([
       streamRefusal(server.url, { ...session, accept: 'text/event-stream' }, signal),
-      post({ jsonrpc: '2.0', id: 'cindy-warm-tools', method: 'tools/list', params: {} }, session),
+      post({ jsonrpc: '2.0', id: WARM_IDS.tools, method: 'tools/list', params: {} }, session),
     ]);
     const listed = firstResponse(tools);
-    if (tools.status !== 200 || !isJsonRpcResult(listed, 'cindy-warm-tools')) return null;
+    if (tools.status !== 200 || !isJsonRpcResult(listed, WARM_IDS.tools) || !Array.isArray(listed.result.tools)) return null;
     const discoverRes = await discover;
     const keptDiscover = discoverRes && discoverRes.status !== 401 && discoverRes.status !== 403 && discoverRes.status < 500
       ? discoverRes : null;
@@ -466,7 +507,7 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
     if (key === 'initialize') state.owned = false;
     pending[key] = false;
     const kept = warm[key];
-    return { kept, body: key === 'stream' ? kept.body : withId(kept, message.id) };
+    return { kept, body: key === 'stream' ? kept.body : withId(kept, message.id, WARM_IDS[key]) };
   };
 
   const ready = new Promise((resolve) => {
