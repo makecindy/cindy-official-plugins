@@ -171,7 +171,7 @@
           },
           "claim_follow": {
             "type": "boolean",
-            "description": "开始跟进前先传 true 申请在当前任务跟进。只有成功且 follow_claimed=true 才能创建定时任务；认领不等于已开启，建好并确认定时任务后须用 following=true 回报，否则 10 分钟后查不到定时任务时认领自动释放。existing_task 表示其它任务正在跟进。following 仅报告已完成的开启或停止。"
+            "description": "开始跟进前先传 true 申请在当前任务跟进。支持的宿主上由卡片直接创建并核实定时任务，返回 follow_state，此时不要再建；只有成功且 follow_claimed=true 才能自己创建定时任务，认领不等于已开启，建好并确认后须用 following=true 回报，回报或用 following=false 释放之前认领一直保留。existing_task 表示其它任务正在跟进。following 仅报告已完成的开启或停止。"
           },
           "published": {
             "type": "boolean",

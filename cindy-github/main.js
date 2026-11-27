@@ -223,7 +223,7 @@ var MESSAGES = {
     prNextAsk: '卡片已显示。等用户点击或在对话里明确说要发，不要再用文字重复询问；点击会以本插件代发的消息送达。创建 PR 后用 card_id 和 pr 再调用 pr_card，renamed / following 只填已经完成的动作。',
     prNextApply: '卡片设置要求发完后做 todo 里的事。做完还没做的，再用 card_id 调用 pr_card，带上 renamed / following。',
     prNextUpdated: '卡片已更新。',
-    prNextClaimed: '已为本任务认领跟进，但后台跟进还没有开启（auto_follow 只是偏好）。现在按 pr 技能创建定时任务，确认运行后用 card_id 和 following=true 回报；决定不跟进时用 following=false 释放认领。{minutes} 分钟内没有回报且查不到定时任务时，卡片会自动释放认领并恢复跟进按钮。',
+    prNextClaimed: '已为本任务认领跟进，但后台跟进还没有开启（auto_follow 只是偏好）。现在按 pr 技能创建定时任务，确认运行后用 card_id 和 following=true 回报；决定不跟进时用 following=false 释放认领。回报或释放之前，认领一直保留，卡片显示正在开启跟进。',
     prClaimExpired: '认领后 {minutes} 分钟内没有开启跟进，已恢复为未跟进',
     prTodoRename: '根据「{title}」提炼简短主题，用 cindy_helper 的 set_current_session_title 把当前任务改名为「#编号 简短主题」；保留编号和核心含义，去掉 PR、跟进等流程前缀及冗余描述，不照搬完整 PR 标题',
     prTodoFollow: '按 pr 技能开始后台跟进 {url}',
@@ -378,7 +378,7 @@ var MESSAGES = {
     prNextAsk: 'The card is shown. Wait for the user to click or explicitly ask to open it, and do not ask again in text; clicks arrive as messages sent by this plugin. After creating the PR, call pr_card again with card_id and pr; set renamed / following only for actions already done.',
     prNextApply: 'The card settings ask for the todo items after opening. Do any not done yet, then call pr_card with card_id, renamed and following.',
     prNextUpdated: 'Card updated.',
-    prNextClaimed: 'Follow-up is claimed for this task but not running yet (auto_follow is only a preference). Create the schedule with the pr skill now, confirm it is running, then report following=true with card_id; if you decide not to follow, release the claim with following=false. If nothing is reported within {minutes} minutes and no schedule is found, the card releases the claim and shows the follow button again.',
+    prNextClaimed: 'Follow-up is claimed for this task but not running yet (auto_follow is only a preference). Create the schedule with the pr skill now, confirm it is running, then report following=true with card_id; if you decide not to follow, release the claim with following=false. Until you report or release it, the claim stays and the card shows that following is starting.',
     prClaimExpired: 'Follow-up was not started within {minutes} minutes of the claim, so the card is back to not following',
     prTodoRename: 'Condense "{title}" into "#number short topic" and rename the current task with cindy_helper set_current_session_title; preserve the number and core meaning, omit workflow prefixes such as PR or Follow and redundant wording, and do not copy the full PR title',
     prTodoFollow: 'Start following {url} in the background with the pr Skill',
@@ -533,7 +533,7 @@ var MESSAGES = {
     prNextAsk: 'カードを表示しました。ユーザーのクリックか会話での明確な依頼を待ち、テキストで重ねて確認しないでください。クリックはこのプラグインが送るメッセージとして届きます。PR を作成したら card_id と pr を付けて pr_card を再度呼び、renamed / following には完了済みの操作だけを指定してください。',
     prNextApply: 'カード設定により、作成後に todo の操作が必要です。未完了のものを済ませてから、card_id・renamed・following を付けて pr_card を呼んでください。',
     prNextUpdated: 'カードを更新しました。',
-    prNextClaimed: 'このタスクでフォローを確保しましたが、バックグラウンドフォローはまだ開始していません（auto_follow は設定値にすぎません）。pr スキルでスケジュールを作成し、実行中であることを確認してから card_id と following=true で報告してください。フォローしない場合は following=false で確保を解除してください。{minutes} 分以内に報告がなく、スケジュールも見つからない場合、カードは確保を解除してフォローボタンに戻ります。',
+    prNextClaimed: 'このタスクでフォローを確保しましたが、バックグラウンドフォローはまだ開始していません（auto_follow は設定値にすぎません）。pr スキルでスケジュールを作成し、実行中であることを確認してから card_id と following=true で報告してください。フォローしない場合は following=false で確保を解除してください。報告または解除するまで確保は維持され、カードはフォロー開始中と表示されます。',
     prClaimExpired: '確保から {minutes} 分以内にフォローが開始されなかったため、未フォローに戻しました',
     prTodoRename: '「{title}」から短いテーマをまとめ、cindy_helper の set_current_session_title で現在のタスク名を「#番号 短いテーマ」に変更する。番号と核心を保ち、PR・フォローなどの手順の接頭辞や冗長な説明を省き、PR タイトル全体をそのまま使わない',
     prTodoFollow: 'pr スキルで {url} のバックグラウンドフォローを開始する',
@@ -688,7 +688,7 @@ var MESSAGES = {
     prNextAsk: '카드를 표시했습니다. 사용자가 클릭하거나 대화에서 분명히 요청할 때까지 기다리고, 텍스트로 다시 묻지 마세요. 클릭은 이 플러그인이 보낸 메시지로 도착합니다. PR을 만든 뒤 card_id와 pr로 pr_card를 다시 호출하고, renamed / following에는 이미 완료한 작업만 넣으세요.',
     prNextApply: '카드 설정에 따라 PR을 만든 뒤 todo 항목을 처리해야 합니다. 아직 하지 않은 항목을 마친 뒤 card_id, renamed, following으로 pr_card를 호출하세요.',
     prNextUpdated: '카드를 업데이트했습니다.',
-    prNextClaimed: '이 작업에서 팔로우를 확보했지만 백그라운드 팔로우는 아직 시작되지 않았습니다(auto_follow는 설정값일 뿐입니다). pr 스킬로 예약 작업을 만들고 실행 중인지 확인한 뒤 card_id와 following=true로 보고하세요. 팔로우하지 않기로 했다면 following=false로 확보를 해제하세요. {minutes}분 안에 보고가 없고 예약 작업도 찾을 수 없으면 카드가 확보를 해제하고 팔로우 버튼으로 돌아갑니다.',
+    prNextClaimed: '이 작업에서 팔로우를 확보했지만 백그라운드 팔로우는 아직 시작되지 않았습니다(auto_follow는 설정값일 뿐입니다). pr 스킬로 예약 작업을 만들고 실행 중인지 확인한 뒤 card_id와 following=true로 보고하세요. 팔로우하지 않기로 했다면 following=false로 확보를 해제하세요. 보고하거나 해제할 때까지 확보가 유지되며 카드에는 팔로우 시작 중으로 표시됩니다.',
     prClaimExpired: '확보 후 {minutes}분 안에 팔로우가 시작되지 않아 팔로우하지 않는 상태로 되돌렸습니다',
     prTodoRename: '"{title}"을 "#번호 짧은 주제"로 요약하고 cindy_helper의 set_current_session_title로 현재 작업 이름을 변경하세요. 번호와 핵심 의미를 유지하고 PR·팔로우 등의 절차 접두사와 중복 설명은 빼며 전체 PR 제목을 그대로 복사하지 마세요',
     prTodoFollow: 'pr 스킬로 {url} 백그라운드 팔로우 시작',
@@ -2620,7 +2620,7 @@ async function savePrCard(card) {
     path: prCardPath(card.id), content: JSON.stringify(card),
   });
   var saved = Boolean(r && r.ok);
-  if (saved && prClaimWaiting(card) && !prClaimTimers[card.id]) armPrClaimTimer(card.id, prClaimDelay(card));
+  if (saved && prClaimWaiting(card) && !prClaimTimers[card.id] && prClaimRearm(card)) armPrClaimTimer(card.id, prClaimDelay(card));
   return saved;
 }
 
@@ -3705,14 +3705,20 @@ function stampPrClaim(card) {
 
 /**
  * Settle an expired, unconfirmed claim. Returns 'following' when a running schedule of this task was found and
- * reconciled (it may still need a repair or stay unverified), 'released' when the scheduler confirmed there is none, 'stamped' for a record saved before claims were
- * timed, or null when nothing changed: not yet expired, the scheduler cannot be queried here or failed (an
- * unconfirmed schedule may still exist), or a schedule exists that is not running.
+ * reconciled (it may still need a repair or stay unverified); 'kept' when such a schedule could not be confirmed
+ * (the claim stays, with the reason on the card); 'released' when the card creates schedules itself and the
+ * scheduler confirmed there is none; 'stamped' for a record saved before claims were timed; or null when nothing
+ * changed: not yet expired, the scheduler cannot be queried or failed, a schedule exists that is not running, or
+ * this host leaves schedule creation to the task.
  */
 async function expirePrClaim(card, now) {
   if (!prClaimWaiting(card)) return null;
   if (typeof card.claimedAt !== 'number') { card.claimedAt = now; return 'stamped'; }
   if (now - card.claimedAt < PR_CLAIM_TTL) return null;
+  // Only where the card creates schedules itself is a release safe: a later claim is fulfilled in the same
+  // serialized step. Elsewhere a granted claim lets the task call the generic scheduler, which no release can
+  // revoke, so the reservation stays until the task reports or returns it; a running schedule is still adopted.
+  var mayRelease = hasCardScheduler();
   if (card.stage === 'open' && card.pr) {
     if (!hasSchedulerQuery()) return null;
     var rows;
@@ -3728,8 +3734,10 @@ async function expirePrClaim(card, now) {
       delete probe.claimedAt;
       await reconcileLegacyFollow(probe, null);
       if (!prFollowActive(probe)) {
-        card.note = probe.scheduleError || null;
-        return null;
+        var reason = probe.scheduleError || null;
+        if (card.note === reason) return null;
+        card.note = reason;
+        return 'kept';
       }
       Object.keys(card).forEach(function (key) { if (!(key in probe)) delete card[key]; });
       Object.assign(card, probe);
@@ -3738,6 +3746,7 @@ async function expirePrClaim(card, now) {
     // A paused or unrecognised schedule for this task is not ours to judge: keep the reservation.
     if (mine.length) return null;
   }
+  if (!mayRelease) return null;
   card.pending = null;
   delete card.claimedAt;
   card.note = t('prClaimExpired', prClaimMinutes());
@@ -3751,11 +3760,15 @@ async function settlePrClaim(card) {
     armPrClaimTimer(card.id, PR_CLAIM_RETRY);
     return null;
   }
-  // Without a way to query, an expired claim stays until the task reports; do not poll for nothing.
-  if (prClaimWaiting(card)) {
-    if (!(prClaimExpired(card) && !hasSchedulerQuery())) armPrClaimTimer(card.id, prClaimDelay(card));
-  } else if (outcome) await sendPrCard(card, await readPrSettings(), null);
+  // Where the task creates schedules, an expired claim stays until the task reports; one check at the deadline is
+  // enough (ordinary refreshes still adopt a schedule). Where the card creates them, keep checking.
+  if (prClaimWaiting(card) && prClaimRearm(card)) armPrClaimTimer(card.id, prClaimDelay(card));
+  if (outcome) await sendPrCard(card, await readPrSettings(), null);
   return outcome;
+}
+
+function prClaimRearm(card) {
+  return hasCardScheduler() || !prClaimExpired(card);
 }
 
 function prClaimDelay(card) {
@@ -3939,9 +3952,13 @@ async function prCardTool(args, callId) {
   // A claim is permission to create a schedule, not a report that one already exists.
   // Keep stop reservations until deletion is confirmed; contradictory requests never reacquire.
   var pendingBefore = card.pending;
+  var claimStart = false;
   if (!legacyFollow && a.claim_follow === true && a.following !== false && card.stage === 'open' && card.pending !== 'stop' && !card.following && !card.scheduleId) {
     card.pending = 'follow';
     stampPrClaim(card);
+    // Where the card creates schedules itself, the claim and the creation are one serialized step: no task ever
+    // holds a permission that a later release could outlive, so a second schedule cannot appear.
+    claimStart = hasCardScheduler();
   }
 
   var settings = await readPrSettings();
@@ -3963,9 +3980,10 @@ async function prCardTool(args, callId) {
     }
   }
 
-  if (nativeStart || (card.scheduleAction && hasCardScheduler())) {
-    var start = nativeStart || card.scheduleAction === 'start';
-    if (start && (card.stage !== 'open' || card.pr.draft)) {
+  if (nativeStart || claimStart || (card.scheduleAction && hasCardScheduler())) {
+    var start = nativeStart || claimStart || card.scheduleAction === 'start';
+    // An explicit claim may follow a draft (the user asked for it); publication settings never do.
+    if (start && (card.stage !== 'open' || (card.pr.draft && !claimStart))) {
       card.scheduleAction = card.pending = null;
     } else if (start && (settings.unreadable || status && status.err)) {
       card.note = settings.unreadable ? t('prSettingsUnreadable') : t('prFetchFailed', { detail: status.err });
@@ -4003,7 +4021,7 @@ async function prCardTool(args, callId) {
     stage: card.stage === 'open' && card.pr.draft ? 'draft' : card.stage,
     settings: prSettingsForAgent(settings, settings.autoFollow),
   };
-  if (nativeStart || card.scheduleId || card.scheduleAction || card.managedFollow) {
+  if (nativeStart || claimStart || card.scheduleId || card.scheduleAction || card.managedFollow) {
     if (card.scheduleAction || card.legacyHookRepair || unverifiedLegacyFollow(card)) result.follow_state = 'unverified';
     else if (card.following) result.follow_state = 'active';
     else if (card.scheduleStatus === 'paused') result.follow_state = 'paused';
@@ -4011,7 +4029,8 @@ async function prCardTool(args, callId) {
   }
   if (card.legacyHookRepair) result.legacy_hook_repair = card.legacyHookRepair;
   if (!delivered) { result.card_shown = false; notes.push(t('prCardNotShown')); }
-  if (a.claim_follow === true) result.follow_claimed = a.following !== false && card.stage === 'open' &&
+  // A claim the card fulfilled itself is never a permission for the task to create another schedule.
+  if (a.claim_follow === true) result.follow_claimed = !claimStart && a.following !== false && card.stage === 'open' &&
     card.pending !== 'stop' && !card.scheduleId && !unverifiedLegacyFollow(card) && !(legacyFollow && hasCardScheduler()) && prFollowActive(card);
   if (card.pr) {
     result.pr = { number: card.pr.number, title: card.pr.title, url: card.pr.url, state: card.pr.state, draft: card.pr.draft };
@@ -4748,7 +4767,7 @@ void enqueuePr(async function () {
     var saved = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: listing.entries[i].path });
     var record = null;
     try { record = saved && saved.ok ? JSON.parse(saved.content) : null; } catch (_) {}
-    if (record && record.id === match[1] && prClaimWaiting(record) && !(prClaimExpired(record) && !hasSchedulerQuery())) {
+    if (record && record.id === match[1] && prClaimWaiting(record) && prClaimRearm(record)) {
       armPrClaimTimer(record.id, prClaimDelay(record));
     }
   }
