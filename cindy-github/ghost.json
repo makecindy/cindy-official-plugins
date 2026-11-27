@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.41",
-  "releaseNotes": "PR 卡片跟进不再无故卡在「正在开启跟进」：认领后的返回结果说明认领和 auto_follow 都不等于已开启，还需创建定时任务并回报；点了跟进却 10 分钟没有任务接手、也查不到定时任务时，卡片自动恢复跟进按钮并说明原因；任务已建好却漏报的定时任务会被核对后接管。优化旧版 PR 跟进卡片展示：经调度器实际运行确认为 Node.js 18+ 后，不再将正常运行的旧启动命令标为「跟进待修复」或展示手动替换命令；移除卡片上常驻的手动停止提示，改为保留只读「手动停止」入口按需查看调度 ID 与说明；修复点击卡片交互时清除修复说明及「跟进待修复」误用对勾图标的问题。",
+  "version": "1.5.42",
+  "releaseNotes": "PR 卡片跟进不再无故卡在「正在开启跟进」：认领后的返回结果说明认领和 auto_follow 都不等于已开启，还需创建定时任务并回报；点了跟进却 10 分钟没有任务接手、也查不到定时任务时，卡片自动恢复跟进按钮并说明原因；任务已建好却漏报的定时任务会被核对后接管。PR 技能主文档按场景拆入 references/ 精简上下文，并在 pr-preflight 输出末尾补充发后调用 pr_card(published: true) 的跟进交接提醒（含群聊归属判断与仅发布 following: false 前置约束），同时在偏好读取恢复后保留发布时的停用选择。沿用 1.5.40 旧版卡片优化：经调度器实际运行确认为 Node.js 18+ 后，不再将正常运行的旧启动命令标为「跟进待修复」。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
