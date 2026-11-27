@@ -5,7 +5,7 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.45",
+  "version": "1.5.46",
   "releaseNotes": "进一步降低 PR 自动跟进的 GitHub API 消耗：已结束检查的基线等待（baseline wait）降频至 15 分钟并复用轻量探针，吸收首笔基线更新后的后续主干提交不再每 5 分钟强拉完整快照；检查运行中、合批窗口内或已明确需要完整读取时直接跳过多余的轻量探针请求。沿用 1.5.40 旧版卡片优化：经调度器实际运行确认为 Node.js 18+ 后，不再将正常运行的旧启动命令标为「跟进待修复」。",
   "locales": {
     "en": "locales/en.json",
@@ -175,14 +175,14 @@
           },
           "published": {
             "type": "boolean",
-            "description": "仅当当前任务刚刚成功创建了该 PR 时传 true；查看已有 PR 时省略。"
+            "description": "仅当当前任务刚刚成功创建了该 PR 时传 true；仅展示来源任务卡片并由专属任务跟进时传 false；查看已有 PR 时省略。"
           }
         }
       }
     },
     {
       "name": "pr_follow_settings",
-      "description": "只读获取与 PR 卡片共用的自动改名、自动跟进和跟进模型偏好。不显示卡片、不创建任务、不启动跟进；返回 settings，不代表跟进已经开启。IM 发 PR 后也用此入口读取偏好，再按 pr 流程创建并核验跟进。读取失败时设置未知，不当作关闭。",
+      "description": "只读获取与 PR 卡片共用的自动改名、自动跟进和跟进模型偏好。不显示卡片、不创建任务、不启动跟进；返回 settings，不代表跟进已经开启。每次发 PR 后都用 pr_card 在 Cindy 任务中出卡，包括 X 和其他聊天渠道。仅在卡片调用未返回偏好或用户单独查询设置时用此工具。读取失败时设置未知，不当作关闭。",
       "parameters": {
         "type": "object",
         "properties": {}
