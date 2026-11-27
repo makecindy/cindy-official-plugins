@@ -329,6 +329,10 @@ export function pacingDue(previous, now, { triggered = false, minPassSpacingMs =
     && !isPendingTerminalBackoffRetry(previous, now, minPassSpacingMs)) {
     return { due: false, pace: 'terminal-backoff', reason: 'terminal-backoff', nextAt: terminalBackoffUntil };
   }
+  const retryBackoffUntil = Number(previous.retryBackoffUntil) || 0;
+  if (previous.pendingWatch && retryBackoffUntil > now) {
+    return { due: false, pace: 'retry-backoff', reason: 'retry-backoff', nextAt: retryBackoffUntil };
+  }
   const watch = previous.watch;
   const lastLook = Math.max(
     Number(previous.lastFullReadAt) || 0,
@@ -343,7 +347,7 @@ export function pacingDue(previous, now, { triggered = false, minPassSpacingMs =
     || waitIsDue(previous.wait, now)
     || (awaited !== null && now - awaited >= 15 * 60_000)
     || (Number(previous.settleUntil) || 0) > 0
-    || Number(previous.retryBackoffUntil) > 0
+    || (retryBackoffUntil > 0 && now >= retryBackoffUntil)
     || (terminalBackoffUntil > 0 && now >= terminalBackoffUntil);
   if (fast) return { due: true, pace: 'fast', reason: 'fast' };
   const recent = (value) => Number.isFinite(Number(value)) && Number(value) > 0 && now - Number(value) < ACTIVE_WINDOW_MS;

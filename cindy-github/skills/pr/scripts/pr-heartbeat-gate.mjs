@@ -540,6 +540,85 @@ export function repoStateFilePath(stateDir, repo) {
   return path.join(stateDir, `${repo.replace('/', '__')}.repo.json`);
 }
 
+/** 共享 GitHub 限流退避文件的最大可信跨度:主限流窗口为 1 小时,超过 2 小时视作异常时钟并截断。 */
+const MAX_SHARED_RATE_LIMIT_MS = 2 * 60 * 60_000;
+
+/** 账号级共享 GitHub 限流退避文件:同 stateDir 下所有 PR 心跳共用,避免限流时重复消耗配额与并发刷屏。 */
+export function rateLimitFilePath(stateDir) {
+  return path.join(stateDir, '.rate-limit.json');
+}
+
+export function readSharedRateLimit(stateDir, now = Date.now()) {
+  const parsed = readState(rateLimitFilePath(stateDir));
+  const until = Number(parsed?.until);
+  if (!Number.isFinite(until) || until <= now) return null;
+  return {
+    until: Math.min(until, now + MAX_SHARED_RATE_LIMIT_MS),
+    reportedAt: Number(parsed?.reportedAt) || 0,
+    reportedBy: typeof parsed?.reportedBy === 'string' ? parsed.reportedBy : null,
+    summary: typeof parsed?.summary === 'string' ? parsed.summary : 'GitHub API rate limit reached',
+  };
+}
+
+function tryAtomicCreateFile(file, content) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+  try {
+    fs.writeFileSync(tmp, content, 'utf8');
+    try {
+      fs.linkSync(tmp, file);
+      return true;
+    } catch (err) {
+      if (err?.code === 'EEXIST') return false;
+      // Fallback for filesystems without hard links.
+      try {
+        fs.writeFileSync(file, content, { encoding: 'utf8', flag: 'wx' });
+        return true;
+      } catch (wxErr) {
+        if (wxErr?.code === 'EEXIST') return false;
+        throw wxErr;
+      }
+    }
+  } finally {
+    try { fs.unlinkSync(tmp); } catch { /* best-effort temp cleanup */ }
+  }
+}
+
+/**
+ * 跨 PR 共享 GitHub 限流退避:同一限流窗口内只有第一个原子创建 .rate-limit.json 的 PR
+ * 负责 fail-closed 提醒一次,其余并发或后续 PR 直接静默退避并零额外 API 调用。
+ */
+function claimSharedRateLimit(stateDir, { until, reportedBy, summary }, now) {
+  const file = rateLimitFilePath(stateDir);
+  const clampedUntil = Math.min(Math.max(Number(until) || 0, now + TICK_MS), now + MAX_SHARED_RATE_LIMIT_MS);
+  const entry = { until: clampedUntil, reportedAt: now, reportedBy, summary, updatedAt: now };
+  const payload = `${JSON.stringify(entry, null, 2)}\n`;
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (tryAtomicCreateFile(file, payload)) {
+        return { claimed: true, until: clampedUntil, existing: null };
+      }
+      const existing = readSharedRateLimit(stateDir, now);
+      if (existing) {
+        const mergedUntil = Math.max(existing.until, clampedUntil);
+        if (mergedUntil > existing.until) {
+          try {
+            writeState(file, { ...existing, until: mergedUntil, updatedAt: now });
+          } catch { /* best-effort extension */ }
+        }
+        return { claimed: false, until: mergedUntil, existing };
+      }
+      if (attempt === 0) {
+        try { fs.unlinkSync(file); } catch { /* another process may have removed or replaced it */ }
+      }
+    }
+    writeState(file, entry);
+    return { claimed: true, until: clampedUntil, existing: null };
+  } catch {
+    return { claimed: true, until: clampedUntil, existing: null };
+  }
+}
+
 export function adoptLegacyStateFile(stateDir, repo, number, file) {
   if (!repo.includes('__')) return;
   const legacy = path.join(stateDir, `${repo.replace(/\//g, '__')}-${number}.json`);
@@ -1764,6 +1843,16 @@ async function gateMain(argv, ctx) {
     emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
     return EXIT_SKIP;
   }
+  // 同一账号下任一 PR 触发 GitHub 限流后,其余 PR(含 pr-status 提前触发)在重置前直接静默跳过,
+  // 不消耗剩余配额也不重复抛 exit 1 报警。
+  const sharedRateLimit = diagnostic ? null : readSharedRateLimit(args.stateDir, now);
+  if (sharedRateLimit) {
+    const detail = `shared GitHub rate limit; nextProbeAt=${isoAt(sharedRateLimit.until)}`;
+    const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'snapshot-failure-backoff', detail, checkedAt: now };
+    persist(file, { ...(previous ?? {}), lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
+    emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
+    return EXIT_SKIP;
+  }
   const isReconcileWatch = hookTrigger?.kind === 'watch' && hookTrigger?.reason === 'reconcile';
   const settledBaseline = isSettledBaselineWait(previous);
   const targetedWait = Boolean(previous?.wait)
@@ -1839,35 +1928,53 @@ async function gateMain(argv, ctx) {
     const plan = snapshotFailurePlan(run, previous, now, args.maxSnapshotFailures);
     const { failures } = plan;
     const { summary, ...cause } = plan.diagnosis;
-    const detail = `${summary}; snapshotExit=${run.code} failures=${failures}/${args.maxSnapshotFailures}`;
+    let effectiveUntil = plan.until;
+    let shouldBlock = plan.block;
+    let sharedSuppressed = false;
+    if (plan.rateLimited && !diagnostic) {
+      const sharedClaim = claimSharedRateLimit(
+        args.stateDir,
+        { until: plan.until, reportedBy: `${args.repo}#${args.number}`, summary },
+        now,
+      );
+      effectiveUntil = Math.max(plan.until, sharedClaim.until);
+      if (!sharedClaim.claimed) {
+        shouldBlock = false;
+        sharedSuppressed = true;
+      }
+    }
+    const reports = shouldBlock ? plan.reports : (previous?.snapshotFailureReports ?? {});
+    const detail = sharedSuppressed
+      ? `${summary}; shared rate-limit backoff already active, nextProbeAt=${isoAt(effectiveUntil)}`
+      : `${summary}; snapshotExit=${run.code} failures=${failures}/${args.maxSnapshotFailures}`;
     persist(file, {
       ...(previous ?? {}),
       consecutiveSnapshotFailures: failures,
       lastSnapshotFailureAt: now,
       snapshotFailureFingerprint: plan.fingerprint,
       snapshotFailureSummary: summary,
-      snapshotFailureBackoffUntil: plan.until,
+      snapshotFailureBackoffUntil: effectiveUntil,
       snapshotWatchRetryAt: plan.watchRetryAt,
-      snapshotFailureReports: plan.reports,
-      lastDecision: plan.block ? 'block' : 'skip',
-      lastDecisionReason: 'snapshot-failed',
+      snapshotFailureReports: reports,
+      lastDecision: shouldBlock ? 'block' : 'skip',
+      lastDecisionReason: sharedSuppressed ? 'snapshot-failure-backoff' : 'snapshot-failed',
       lastResult: {
-        decision: plan.block ? 'block' : 'skip',
-        exitCode: plan.block ? EXIT_BLOCK : EXIT_SKIP,
-        reason: 'snapshot-failed',
+        decision: shouldBlock ? 'block' : 'skip',
+        exitCode: shouldBlock ? EXIT_BLOCK : EXIT_SKIP,
+        reason: sharedSuppressed ? 'snapshot-failure-backoff' : 'snapshot-failed',
         detail,
         checkedAt: now,
       },
     }, out);
-    if (plan.block) {
-      out(`CINDY_PR_CHECK_DIAGNOSIS ${JSON.stringify({ ...cause, failures, retryAt: plan.until })}\n`);
-      throw new Error(`${summary}; PR snapshot failed ${failures} consecutive rounds. Scheduled checks may retry from ${new Date(plan.until).toISOString()}\n${run.stderr.trim()}`);
+    if (shouldBlock) {
+      out(`CINDY_PR_CHECK_DIAGNOSIS ${JSON.stringify({ ...cause, failures, retryAt: effectiveUntil })}\n`);
+      throw new Error(`${summary}; PR snapshot failed ${failures} consecutive rounds. Scheduled checks may retry from ${new Date(effectiveUntil).toISOString()}\n${run.stderr.trim()}`);
     }
     emit(args, {
       exitCode: EXIT_SKIP,
       repo: args.repo,
       number: args.number,
-      reason: 'snapshot-failed',
+      reason: sharedSuppressed ? 'snapshot-failure-backoff' : 'snapshot-failed',
       detail,
     }, out);
     return EXIT_SKIP;

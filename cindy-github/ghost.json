@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.50",
-  "releaseNotes": "汇总 1.5.50 多项 PR 卡片与跟进稳定性优化：1）分级淘汰旧卡片状态并保护未关闭 PR、进行中状态及活跃锚点别名，点击被旧版误清的卡片自动按锚点补齐，确实过期或读失败时给出四语言提示；2）修复卡片点击「停止」遇临时读取失败后隐藏停止按钮、无法直接在原卡重试的问题（先查技能目录再做最终调度读取与归属/前置检查核验，临时失败保留可重试入口）；3）已结束检查的基线等待降频至 15 分钟并跳过冗余探针以降低 API 消耗。沿用 1.5.40–1.5.49 优化：经调度器实际运行确认为 Node.js 18+ 后不再标为「跟进待修复」。",
+  "version": "1.5.51",
+  "releaseNotes": "优化 PR 后台跟进门禁的 GitHub 限流协同与退避节流：同状态目录下新增共享限流退避（.rate-limit.json），任一 PR 触发 GitHub 限流后仅报警一次，其余 PR 在重置前零调用跳过并抑制并发重复报错；修复 ghGraphQL 在 HTTP 200 GraphQL RATE_LIMITED 响应下保留重置时间头；修复未确认事件的 retry-backoff 退避窗口在普通巡检下仍每 5 分钟拉取全量快照的问题，改为退避期内零调用跳过（宿主状态事件仍可即时唤醒）。沿用 1.5.40–1.5.50 优化：卡片防过早淘汰、停止读失败可重试、已结束基线等待 15 分钟降频及经调度器确认为 Node.js 18+ 后不再标为「跟进待修复」。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",

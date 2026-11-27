@@ -3380,3 +3380,181 @@ test('replay: skips redundant probe when state already requires a full read', as
   assert.equal(canSkipWithProbe(quiet, T0 + 31 * MIN), false);
   assert.equal(mustFullReadBeforeProbe(quiet, T0 + 31 * MIN), false, '30m reread handled separately so legacy snapshots keep refreshing probe');
 });
+
+test('跨 PR 共享限流退避: 首条报警写 .rate-limit.json，后续与并发 PR 零额外调用且不重复 exit 1，重置后恢复', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-shared-rate-limit-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const fakeSnapshot = path.join(dir, 'fake-snapshot.mjs');
+  fs.writeFileSync(fakeSnapshot, '// placeholder\n', 'utf8');
+
+  let clock = T0;
+  let probeCalls = 0;
+  let snapshotCalls = 0;
+  const resetAt = clock + 40 * MIN;
+  let rateLimited = true;
+
+  const invoke = async (prUrl, { trigger = null, snapshotImpl, probeImpl, extra = [] } = {}) => {
+    let stdout = '';
+    let stderr = '';
+    const code = await runGate(
+      [prUrl, '--state-dir', stateDir, '--snapshot', fakeSnapshot, '--min-pass-spacing-minutes', '0', ...extra],
+      {
+        now: () => clock,
+        runProbe: async (...args) => {
+          probeCalls += 1;
+          return probeImpl ? probeImpl(...args) : { code: 1, stdout: '', stderr: '' };
+        },
+        runSnapshot: async (...args) => {
+          snapshotCalls += 1;
+          if (snapshotImpl) return snapshotImpl(...args);
+          if (rateLimited) {
+            return {
+              code: 1,
+              stdout: '',
+              stderr: `[gh-rate-limit] retryAt=${resetAt}\n[gh] fatal on graphql: API rate limit already exceeded\n`,
+            };
+          }
+          return { code: 0, stdout: JSON.stringify(snap({ verdict: 'READY' })), stderr: '' };
+        },
+        readTrigger: async () => trigger,
+        out: (text) => { stdout += text; },
+        err: (text) => { stderr += text; },
+      },
+    );
+    return { code, stdout, stderr };
+  };
+
+  const pr1 = 'https://github.com/acme/widgets/pull/101';
+  const pr2 = 'https://github.com/acme/widgets/pull/102';
+  const pr3 = 'https://github.com/acme/widgets/pull/103';
+  const pr4 = 'https://github.com/acme/widgets/pull/104';
+
+  // 1. Concurrent race: PR #101 and PR #102 both pass the early check before .rate-limit.json exists
+  // and hit GitHub rate limit together. Exactly one must exit 1 (alert) and the other must exit 2 (skip).
+  let releaseBoth;
+  let arrived = 0;
+  const bothReady = new Promise((resolve) => { releaseBoth = resolve; });
+  const barrierSnapshot = async () => {
+    arrived += 1;
+    if (arrived === 2) releaseBoth();
+    await bothReady;
+    return {
+      code: 1,
+      stdout: '',
+      stderr: `[gh-rate-limit] retryAt=${resetAt}\n[gh] fatal on graphql: API rate limit already exceeded\n`,
+    };
+  };
+  const [r1, r2] = await Promise.all([
+    invoke(pr1, { snapshotImpl: barrierSnapshot, extra: ['--triggered'] }),
+    invoke(pr2, { snapshotImpl: barrierSnapshot, extra: ['--triggered'] }),
+  ]);
+  const codes = [r1.code, r2.code].sort((a, b) => a - b);
+  assert.deepEqual(codes, [1, 2], `concurrent rate-limit failures must alert strictly once: r1=${r1.code}, r2=${r2.code}`);
+
+  // 2. Subsequent PR #103 (normal tick) and PR #104 (host pr-status watch trigger) skip with 0 probes & 0 snapshots.
+  const probesBefore = probeCalls;
+  const snapshotsBefore = snapshotCalls;
+  clock += 5 * MIN;
+  const r3 = await invoke(pr3, { extra: ['--json'] });
+  assert.equal(r3.code, 2);
+  assert.equal(JSON.parse(r3.stdout).reason, 'snapshot-failure-backoff');
+  assert.match(JSON.parse(r3.stdout).detail, /shared GitHub rate limit/);
+  const r4 = await invoke(pr4, {
+    trigger: { kind: 'watch', source: 'pr-status', detail: pr4 },
+    extra: ['--json'],
+  });
+  assert.equal(r4.code, 2);
+  assert.equal(JSON.parse(r4.stdout).reason, 'snapshot-failure-backoff');
+  assert.equal(probeCalls, probesBefore, 'shared rate-limit skip must not call runProbe');
+  assert.equal(snapshotCalls, snapshotsBefore, 'shared rate-limit skip must not call runSnapshot');
+  assert.equal(
+    JSON.parse(fs.readFileSync(stateFilePath(stateDir, 'acme/widgets', 103), 'utf8')).consecutiveSnapshotFailures,
+    undefined,
+    'shared rate-limit skip must not poison another PR failure counter',
+  );
+
+  // 3. Diagnostic preview neither gets blocked by nor mutates shared rate limit.
+  const diag = await invoke(pr3, {
+    trigger: { kind: 'diagnostic' },
+    snapshotImpl: async () => ({ code: 0, stdout: JSON.stringify(snap({ verdict: 'READY' })), stderr: '' }),
+    extra: ['--json'],
+  });
+  assert.equal(diag.code, 0);
+  assert.match(JSON.parse(diag.stdout).detail, /diagnostic only/);
+
+  // 4. After resetAt passes, PR #103 recovers with a normal snapshot read.
+  rateLimited = false;
+  clock = resetAt + 2000;
+  const recovered = await invoke(pr3, { extra: ['--json'] });
+  assert.equal(recovered.code, 0);
+  assert.equal(JSON.parse(recovered.stdout).reason, 'changed');
+  assert.ok(snapshotCalls > snapshotsBefore);
+});
+
+test('retry-backoff 退避期内普通巡检零 API 调用，宿主触发仍可即时穿透，到期后恢复重试', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-retry-backoff-zero-api-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const fakeSnapshot = path.join(dir, 'fake-snapshot.mjs');
+  fs.writeFileSync(fakeSnapshot, '// placeholder\n', 'utf8');
+
+  let clock = T0;
+  let probeCalls = 0;
+  let snapshotCalls = 0;
+  const probePayload = { status: 'OPEN false MERGEABLE aaa1111  FAILURE:1 ', remarks: '0  0  0', base: 'base-1' };
+  const failingSnap = { ...snap({ checks: [check('build', 'failed', { required: true })] }), probe: probePayload };
+
+  const run = async (extra = [], trigger = null) => {
+    let stdout = '';
+    let stderr = '';
+    const code = await runGate(
+      [PR_URL, '--state-dir', stateDir, '--snapshot', fakeSnapshot, '--min-pass-spacing-minutes', '0', '--max-pass-attempts', '1', '--json', ...extra],
+      {
+        now: () => clock,
+        runProbe: async () => {
+          probeCalls += 1;
+          return { code: 0, stdout: JSON.stringify(probePayload), stderr: '' };
+        },
+        runSnapshot: async () => {
+          snapshotCalls += 1;
+          return { code: 0, stdout: JSON.stringify(failingSnap), stderr: '' };
+        },
+        readTrigger: async () => trigger,
+        out: (text) => { stdout += text; },
+        err: (text) => { stderr += text; },
+      },
+    );
+    return { code, stdout, stderr, json: () => JSON.parse(stdout) };
+  };
+
+  // Pass 1 (initial failure) -> Pass 2 (+5m) enters 30m retry-backoff-attempt.
+  assert.equal((await run()).code, 0);
+  clock += 5 * MIN;
+  const backoffAttempt = await run();
+  assert.equal(backoffAttempt.code, 0);
+  assert.equal(backoffAttempt.json().reason, 'retry-backoff-attempt');
+
+  // Ticks inside the 30-minute retryBackoffUntil window skip at pacing with 0 probes and 0 snapshots.
+  const probesDuringBackoff = probeCalls;
+  const snapshotsDuringBackoff = snapshotCalls;
+  clock += 5 * MIN;
+  const skipped = await run();
+  assert.equal(skipped.code, 2);
+  assert.equal(skipped.json().reason, 'not-due');
+  assert.match(skipped.json().detail, /pace=retry-backoff/);
+  assert.equal(probeCalls, probesDuringBackoff);
+  assert.equal(snapshotCalls, snapshotsDuringBackoff);
+
+  // Host pr-status trigger still inspects immediately without waiting for retryBackoffUntil.
+  const triggered = await run([], { kind: 'watch', source: 'pr-status', detail: PR_URL });
+  assert.equal(triggered.code, 2);
+  assert.equal(triggered.json().reason, 'retry-backoff');
+  assert.equal(snapshotCalls, snapshotsDuringBackoff + 1);
+
+  // Once retryBackoffUntil expires, the scheduled tick runs retry-backoff-attempt again.
+  clock += 25 * MIN;
+  const retried = await run();
+  assert.equal(retried.code, 0);
+  assert.equal(retried.json().reason, 'retry-backoff-attempt');
+});
