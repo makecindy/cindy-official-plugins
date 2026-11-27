@@ -17,9 +17,10 @@ Before any GitHub call the check asks whether a look is due, from what its last 
 | Stage | Looks |
 |---|---|
 | Fast: an unacknowledged update, a due model wait or defer or no-checks deadline, an open settle window | every firing |
-| Explicit technical wait (`checks`, `baseline`, `retry`) | every 5 minutes to detect new work; this does not call the model |
+| Explicit active wait (`checks`, `retry`, or an unsettled `baseline` wait with running checks or named threads) | every 5 minutes to detect new work; this does not call the model |
 | Active: checks running, a failure, a conflict or merge-queue problem, a new commit or an agent round in the last hour | every firing of the 5-minute schedule |
 | Idle | about every 10 minutes |
+| Backoff: a settled `baseline` wait (all failed checks finished, no named threads or unhandled failures/conflicts) | about every 15 minutes (deadline wakes immediately via Fast; host triggers still inspect immediately) |
 | Waiting: only a human approval or the merge is left (`READY`, `BLOCKED_HUMAN`, or an explicit `human` wait after recent activity cools down) | about every 30 minutes |
 | Quiet: a draft, or nothing changed for 6 hours | about every hour |
 
@@ -45,7 +46,7 @@ While a round settles the watch does not advance, so the held items and anything
 
 ## Cost: a small question first
 
-Every check first runs `pr-snapshot.mjs --probe`: one small GraphQL query for the PR's state, head, mergeability, check counts by state, the newest comment and review, and the base branch's commit (used only while a check is failing). When it matches the last full read, the check stops there (`unchanged`). Transient `UNKNOWN` mergeability while GitHub recalculates after base branch activity does not break a previously known `MERGEABLE`/`CONFLICTING` probe match, while real transitions (such as `MERGEABLE` → `CONFLICTING`) still trigger a full read; full snapshots also refresh the saved probe baseline when their GraphQL check counts agree with the evaluated check rollup (and force a full read on the next tick if the two requests diverged), so host-triggered rounds do not invalidate the next probe without risking hidden check failures. It reads the PR in full (three or four API calls) only when the probe differs or when one of these holds: an update was released but not yet acknowledged, checks were still running or mergeability was unknown at the last full read, the PR is merged or closed (unless in terminal backoff), 30 minutes have passed since the last full read (the probe cannot see edits inside review threads), a new commit's check deadline or a defer/wait is due, or the silence guard is due (when not suppressed by an active wait, defer, or human-only wait). A failed probe also falls back to a full read, except an explicit GitHub rate limit, which enters rate-limit backoff immediately without issuing a full snapshot. While an explicit wait names checks or threads, each due poll reads in full instead of probing: equal counts can hide a rerun or an inline resolution. Such changes must not wait for the 30-minute fallback. Waits without named targets still use the small probe. Host triggers accelerate observation, never bypass the wait filter.
+Every check first runs `pr-snapshot.mjs --probe`: one small GraphQL query for the PR's state, head, mergeability, check counts by state, the newest comment and review, and the base branch's commit (used only while a check is failing). When it matches the last full read, the check stops there (`unchanged`). Transient `UNKNOWN` mergeability while GitHub recalculates after base branch activity does not break a previously known `MERGEABLE`/`CONFLICTING` probe match, while real transitions (such as `MERGEABLE` → `CONFLICTING`) still trigger a full read; full snapshots also refresh the saved probe baseline when their GraphQL check counts agree with the evaluated check rollup (and force a full read on the next tick if the two requests diverged), so host-triggered rounds do not invalidate the next probe without risking hidden check failures. When existing state already guarantees a full read — an unacknowledged update, checks running or mergeability unknown, a merged/closed PR (unless in terminal backoff), an open bot settle window, or a due defer/wait/no-checks/silence deadline (and on snapshots that embed `probe`, the 30-minute full reread too) — the check skips `--probe` and reads in full directly instead of running both. It reads the PR in full (three or four API calls) when the probe differs or when one of those full-read conditions holds, or after 30 minutes since the last full read (the probe cannot see edits inside review threads). A failed probe also falls back to a full read, except an explicit GitHub rate limit, which enters rate-limit backoff immediately without issuing a full snapshot. While an explicit wait names threads, or names checks outside a settled `baseline` wait, each due poll reads in full instead of probing: equal counts can hide a rerun or an inline resolution. Such changes must not wait for the 30-minute fallback. Settled `baseline` waits (all failed checks already finished, no named threads) and waits without named targets use the small probe; once a `baseline` wait has already recorded its first absorbed base commit (`baseMovedAt`), further base commits are absorbed at the probe without forcing full reads before the 30-minute reread or wait deadline. Host triggers accelerate observation, never bypass the wait filter.
 
 ## When the agent is woken
 
@@ -166,9 +167,11 @@ Safety and resumption:
 - Missing/truncated data is never evidence of continued waiting. It requests investigation without
   advancing past potentially unseen events. Existing network failures and rate-limit backoff still apply.
 
-Latency: with Cindy running and GitHub available, an explicit technical wait (`checks`, `baseline`,
-`retry`) is inspected on each five-minute poll, while a `human` wait cools down to the 30-minute
-`waiting` pace after recent activity passes; a host status trigger can inspect sooner. Model start
+Latency: with Cindy running and GitHub available, an explicit active wait (`checks`, `retry`, or an
+unsettled `baseline` wait) is inspected on each five-minute poll, a settled `baseline` wait is
+inspected about every 15 minutes (waking immediately at its deadline), and a `human` wait cools
+down to the 30-minute `waiting` pace after recent activity passes; a host status trigger can inspect
+sooner. Model start
 still depends on the task being available. Only post-push bot/check feedback retains the existing
 maximum 20-minute batching window. This is not a real-time delivery guarantee. Without an explicit
 wait, existing stage pacing and the 30-minute full-read fallback remain unchanged.
