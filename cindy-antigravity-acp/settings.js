@@ -3,7 +3,8 @@
  * Shows the detection result and asks the logic page (main.js) to check again when
  * the page opens, becomes visible again, or the user clicks "Check again".
  * Detection and publishing live in main.js; this page only displays the result.
- * Accounts are added and managed in Cindy's Model Providers; this page only points there.
+ * Accounts are added and managed in Cindy's Model Providers; this page only points there, with a
+ * button that opens that page where Cindy offers it (POST /harnesses/open-settings).
  */
 (function () {
   'use strict';
@@ -36,6 +37,8 @@
       accountsTitle: '账号',
       accountsGuide: '账号在 Cindy 的「设置 → 模型供应商 → Antigravity」里添加和管理：可以登录多个 Google 账号，查看各自的用量，并设置任务怎样在账号之间分配。',
       accountsGuideSignedOut: '还没有已登录的账号。请到 Cindy 的「设置 → 模型供应商 → Antigravity」添加账号。',
+      accountsOpen: '在模型供应商里管理',
+      accountsOpenFailed: '没能直接打开，请按上面的路径在 Cindy 的设置里找到它。',
       customPath: '自定义路径',
       customPathPlaceholder: '留空自动检测 agy 可执行文件',
       customPathSave: '保存',
@@ -77,6 +80,8 @@
       accountsTitle: 'Accounts',
       accountsGuide: 'Add and manage accounts in Cindy under Settings → Model Providers → Antigravity: sign in to several Google accounts, see each one’s usage, and choose how tasks are shared between them.',
       accountsGuideSignedOut: 'No account is signed in yet. Add one in Cindy under Settings → Model Providers → Antigravity.',
+      accountsOpen: 'Manage in Model Providers',
+      accountsOpenFailed: 'Couldn’t open it from here. Follow the path above in Cindy’s settings.',
       customPath: 'Custom path',
       customPathPlaceholder: 'Leave blank to auto-detect agy',
       customPathSave: 'Save',
@@ -109,6 +114,9 @@
   var customPathDirty = false;
   var customPathNote = null;
   var cliBusy = false;
+  /** Cindy can open the engine's page in Model Providers for this page (see probeOpenProviders). */
+  var canOpenProviders = false;
+  var openProvidersFailed = false;
 
   function $(id) {
     return document.getElementById(id);
@@ -248,6 +256,33 @@
     $('accounts-guide-title').textContent = t.accountsTitle;
     $('accounts-guide-text').textContent = signInRequired ? t.accountsGuideSignedOut : t.accountsGuide;
     $('accounts-guide-text').setAttribute('data-tone', signInRequired ? 'warning' : 'neutral');
+    $('accounts-open').textContent = t.accountsOpen;
+    show('accounts-open', canOpenProviders);
+    $('accounts-open-note').textContent = t.accountsOpenFailed;
+    show('accounts-open-note', openProvidersFailed);
+  }
+
+  var OPEN_PROVIDERS_PATH = '/harnesses/open-settings';
+
+  /**
+   * A Cindy that opens the engine's settings answers a GET here with 405 (it only takes POST); an
+   * older one, a phone or a remote view has no such path (404), and the page keeps the text alone.
+   */
+  function probeOpenProviders() {
+    return fetch(OPEN_PROVIDERS_PATH)
+      .then(function (response) { canOpenProviders = Boolean(response) && response.status === 405; })
+      .catch(function () { canOpenProviders = false; })
+      .then(render);
+  }
+
+  /** Asks Cindy to show Antigravity in Settings → Model Providers; Cindy only does so right after a click. */
+  function openProviders() {
+    fetch(OPEN_PROVIDERS_PATH, { method: 'POST', body: JSON.stringify({ id: 'agy' }) })
+      .then(function (response) { return Boolean(response) && response.ok === true; }, function () { return false; })
+      .then(function (opened) {
+        openProvidersFailed = !opened;
+        render();
+      });
   }
 
   function settle(state, nextSnapshot, errorKey) {
@@ -429,5 +464,8 @@
     requestCustomPath('');
   });
 
+  $('accounts-open').addEventListener('click', openProviders);
+
   loadLocale().then(requestDetect);
+  probeOpenProviders();
 })();

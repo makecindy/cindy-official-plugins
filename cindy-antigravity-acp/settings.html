@@ -52,6 +52,7 @@
   .accounts-guide-title { font-weight: 600; }
   .accounts-guide p { margin: 8px 0 0; color: var(--text-secondary, #5c5c58); font-size: 12px; }
   .accounts-guide p[data-tone="warning"] { color: var(--warning-fg, #b54708); }
+  .accounts-guide .actions { margin: 12px 0 0; }
   .foot { margin: 16px 0 0; color: var(--text-tertiary, #8a8a86); font-size: 12px; }
   .cli-version-label { display: flex; align-items: center; align-self: start; min-height: 32px; }
   dd.cli-version { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
@@ -132,6 +133,10 @@
   <section class="accounts-guide" id="accounts-guide" aria-labelledby="accounts-guide-title" hidden>
     <span class="accounts-guide-title" id="accounts-guide-title"></span>
     <p id="accounts-guide-text"></p>
+    <div class="actions">
+      <button type="button" id="accounts-open" hidden></button>
+    </div>
+    <p id="accounts-open-note" role="status" aria-live="polite" hidden></p>
   </section>
 
   <p class="detail" id="detail" hidden></p>

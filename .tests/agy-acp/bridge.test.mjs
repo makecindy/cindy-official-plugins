@@ -1076,6 +1076,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
         }
       }
     }
+    const openProviders = { offered: true, refuse: false, posts: [] };
     const elements = new Map();
     const element = (id) => {
       if (!elements.has(id)) {
@@ -1091,8 +1092,17 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     const context = vm.createContext({
       BroadcastChannel: Channel, crypto: globalThis.crypto, setTimeout, clearTimeout, setInterval, clearInterval,
       document: { getElementById: element, documentElement: {}, visibilityState: 'visible', addEventListener() {} },
-      fetch: async (url) => ({ ok: true,
-        json: async () => (url === '/app-context' ? { context: { uiLocale: 'zh-CN' } } : { state: 'on' }) }),
+      fetch: async (url, init) => {
+        // Cindy's "show this engine in Model Providers": POST only, so a GET answers 405 where it exists.
+        if (url === '/harnesses/open-settings') {
+          if (!openProviders.offered) return { ok: false, status: 404 };
+          if (!init || init.method !== 'POST') return { ok: false, status: 405 };
+          openProviders.posts.push(init.body);
+          return openProviders.refuse ? { ok: false, status: 403 } : { ok: true, status: 200 };
+        }
+        return { ok: true, status: 200,
+          json: async () => (url === '/app-context' ? { context: { uiLocale: 'zh-CN' } } : { state: 'on' }) };
+      },
     });
     // Stands in for main.js: agy is installed and signed in.
     const main = new Channel(pluginId);
@@ -1148,6 +1158,22 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
       for (const id of ['account', 'account-login', 'account-logout', 'account-confirm-yes', 'harness-usage']) {
         assert.equal(elements.has(id), false, `the page has no ${id}`);
       }
+      // The button opens Antigravity in Cindy's Model Providers where Cindy offers that, naming this plugin's own engine.
+      await waitFor(() => element('accounts-open').hidden === false, 3_000, 'manage button offered');
+      assert.equal(element('accounts-open').textContent, '在模型供应商里管理');
+      assert.equal(element('accounts-open-note').hidden, true);
+      element('accounts-open').click();
+      await waitFor(() => openProviders.posts.length === 1, 3_000, 'open request sent');
+      assert.deepEqual(JSON.parse(openProviders.posts[0]), { id: 'agy' });
+      assert.equal(element('accounts-open-note').hidden, true);
+      // Cindy did not open it (for example the click was already used): the text path stays as the way there.
+      openProviders.refuse = true;
+      element('accounts-open').click();
+      await waitFor(() => element('accounts-open-note').hidden === false, 3_000, 'fallback note');
+      assert.match(element('accounts-open-note').textContent, /没能直接打开/);
+      openProviders.refuse = false;
+      element('accounts-open').click();
+      await waitFor(() => element('accounts-open-note').hidden === true, 3_000, 'note cleared after it opened');
     } else {
       await waitFor(() => element('account-status').textContent === '已登录 · Google AI Pro', 3_000, 'signed-in status');
       assert.equal(element('badge').textContent, '可以使用');
@@ -1194,6 +1220,16 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
       assert.equal(element('badge').attributes['data-tone'], 'warning');
       assert.match(element('accounts-guide-text').textContent, /还没有已登录的账号.*模型供应商/);
       assert.equal(element('accounts-guide-text').attributes['data-tone'], 'warning');
+
+      // An older Cindy, a phone or a remote view has no such path: no button, only the text.
+      openProviders.offered = false;
+      Channel.all = [main];
+      elements.clear();
+      openSettings();
+      await waitFor(() => element('accounts-guide').hidden === false, 3_000, 'guide on an older Cindy');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(element('accounts-open').hidden, true);
+      assert.match(element('accounts-guide-text').textContent, /设置 → 模型供应商 → Antigravity/);
     }
   });
 
