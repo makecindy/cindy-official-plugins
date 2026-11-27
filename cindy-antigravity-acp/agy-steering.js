@@ -82,6 +82,16 @@ function attachSteering(input, output, child, stop, errorRelay) {
     if (!message) return line;
     if (message.method) {
       const normalized = isAntigravity && normalizeToolMessage(message);
+      const outgoing = normalized || message;
+      if (errorRelay) {
+        const action = errorRelay.notification(outgoing);
+        if (action) {
+          if (action.flush) {
+            for (const item of action.flush) toClient.push(encode(item));
+          }
+          if (action.hold) return null;
+        }
+      }
       return normalized ? encode(normalized) : line;
     }
     if (message.id === undefined) return line;

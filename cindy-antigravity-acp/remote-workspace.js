@@ -462,6 +462,15 @@ function startRemoteWorkspace(agyPath, host) {
     const update = message.method === 'session/update' && params && isObject(params.update) ? params.update : null;
     const isToolUpdate = Boolean(update) && (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update');
     if (!params || (!isPermission && !isToolUpdate)) {
+      if (update) {
+        const action = errorRelay.notification(message);
+        if (action) {
+          if (action.flush) {
+            for (const item of action.flush) toClient(item, agent.stdout);
+          }
+          if (action.hold) return;
+        }
+      }
       toClientLine(line, agent.stdout);
       return;
     }
@@ -478,8 +487,17 @@ function startRemoteWorkspace(agyPath, host) {
       );
       return;
     }
+    const outgoing = verdict.type === 'mcp'
+      ? { ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }
+      : message;
+    if (isToolUpdate) {
+      const action = errorRelay.notification(outgoing);
+      if (action?.flush) {
+        for (const item of action.flush) toClient(item, agent.stdout);
+      }
+    }
     if (verdict.type === 'mcp') {
-      toClient({ ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }, agent.stdout);
+      toClient(outgoing, agent.stdout);
       return;
     }
     toClientLine(line, agent.stdout);
