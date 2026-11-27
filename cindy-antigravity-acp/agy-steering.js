@@ -51,7 +51,7 @@ function supportsSteering(agentVersion) {
  * as soon as a new one takes over. Keep Cindy's original request open until
  * the newest prompt finishes and relay all of the session's streamed updates.
  */
-function attachSteering(input, output, child, stop, checkAccount) {
+function attachSteering(input, output, child, stop, errorRelay, verification) {
   const turns = new Map();
   const requests = new Map();
   const openingSessions = new Map();
@@ -82,6 +82,16 @@ function attachSteering(input, output, child, stop, checkAccount) {
     if (!message) return line;
     if (message.method) {
       const normalized = isAntigravity && normalizeToolMessage(message);
+      const outgoing = normalized || message;
+      if (errorRelay) {
+        const action = errorRelay.notification(outgoing);
+        if (action) {
+          if (action.flush) {
+            for (const item of action.flush) toClient.push(encode(item));
+          }
+          if (action.hold) return null;
+        }
+      }
       return normalized ? encode(normalized) : line;
     }
     if (message.id === undefined) return line;
@@ -100,29 +110,41 @@ function attachSteering(input, output, child, stop, checkAccount) {
     if (opening) {
       openingSessions.delete(message.id);
       const sessionId = opening.sessionId ?? message.result?.sessionId;
-      if (isObject(message.result) && typeof sessionId === 'string') mcpSessions.set(sessionId, opening);
+      if (isObject(message.result) && typeof sessionId === 'string') {
+        if (verification) {
+          const previous = mcpSessions.get(sessionId);
+          opening.account = previous ? previous.account : verification.sessionAccount();
+        }
+        mcpSessions.set(sessionId, opening);
+      }
     }
 
     const turn = requests.get(message.id);
-    if (!turn) return line;
+    if (!turn) {
+      const classified = errorRelay ? errorRelay.response(message) : message;
+      return classified !== message ? encode(classified) : line;
+    }
     requests.delete(message.id);
     if (message.id === turn.latestId) turn.result = message;
     if (--turn.pending !== 0) return null;
     turns.delete(turn.sessionId);
-    return encode({ ...turn.result, id: turn.originalId });
+    const finalMessage = { ...turn.result, id: turn.originalId };
+    const classified = errorRelay ? errorRelay.response(finalMessage) : finalMessage;
+    return encode(classified);
   });
 
   const toAgent = lineTransform((line) => {
     const message = parse(line);
     if (!message?.method || message.id === undefined) return line;
     const params = message.params;
-    if (message.method === '_cindy/checkAccountVerification' && isAntigravity && checkAccount &&
+    if (message.method === '_cindy/checkAccountVerification' && isAntigravity && verification &&
         typeof params?.sessionId === 'string' && mcpSessions.has(params.sessionId)) {
-      void checkAccount().catch(() => ({ status: 'unknown' })).then(result => {
+      void verification.check(mcpSessions.get(params.sessionId).account).catch(() => ({ status: 'unknown' })).then(result => {
         if (!toClient.destroyed && !toClient.readableEnded) toClient.push(encode({ jsonrpc: '2.0', id: message.id, result }));
       });
       return null;
     }
+    if (errorRelay) errorRelay.request(message);
     if (message.method === 'initialize') initializeId = message.id;
     if (isAntigravity && isSessionOpen(message.method)) {
       const servers = Array.isArray(params?.mcpServers) ? params.mcpServers : [];

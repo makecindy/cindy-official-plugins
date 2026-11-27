@@ -113,6 +113,7 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
   return;
 }
 // Every launch must pass the constant ACP args (including no paid credits and no telemetry).
+if (args[0] === '--log-file' && require('node:path').isAbsolute(args[1]) && require('node:path').basename(args[1]) === 'session.log') args.splice(0, 2);
 if (JSON.stringify(args) !== ${JSON.stringify(JSON.stringify(EXPECTED_ACP_ARGS))}) {
   process.stderr.write('fake-agy: unexpected arguments ' + JSON.stringify(args) + '\\n');
   process.exit(2);
@@ -2307,6 +2308,81 @@ test('native /usage preserves exhausted groups and ignores model turns and disab
   assert.equal(usageFromReport({ status: 'SUCCESS', num_turns: 1, command }), null);
 });
 
+if (official) test('launches the Windows verification probe with the CLI updater disabled', async t => {
+  const fx = makeFixture(t);
+  const launch = path.join(fx.dir, 'usage-environment');
+  const { createVerification } = await import(pathToFileURL(path.join(root, 'agy-verification.js')));
+  const owner = createVerification(fx.agyPath, { platform: 'win32', env: { ...fx.env, FAKE_AGY_LAUNCHFILE: launch } });
+  t.after(() => owner.dispose());
+  fs.writeFileSync(owner.taskLog, 'I1127 15:13:05.876413     68 server_oauth.go:226] OAuth: authenticated successfully as a@example.test\n');
+  assert.deepEqual(await owner.check(owner.sessionAccount()), { status: 'unknown' });
+  assert.equal(fs.readFileSync(launch, 'utf8'), 'true');
+});
+
+if (official) test('binds usage checks to the opening ACP account and removes a pending probe on relay exit', async t => {
+  const fx = makeFixture(t);
+  const control = path.join(fx.dir, 'control');
+  fs.writeFileSync(path.join(fx.dir, 'fake-agy.js'), String.raw`
+    const fs = require('node:fs'), path = require('node:path');
+    const args = process.argv.slice(2), control = process.env.TEST_CONTROL;
+    const log = args[args.indexOf('--log-file') + 1];
+    const identity = who => 'I1127 15:13:05.876413     68 server_oauth.go:226] OAuth: authenticated successfully as ' + who + '@example.test\n';
+    if (args.includes('/usage')) {
+      const [who, state] = fs.readFileSync(control, 'utf8').split(' ');
+      if (process.platform === 'win32' && process.env.AGY_CLI_DISABLE_AUTO_UPDATE !== 'true') process.exit(2);
+      const error = { code:403, status:'PERMISSION_DENIED', details:[{reason:'VALIDATION_REQUIRED',domain:'cloudcode-pa.googleapis.com',
+        '@type':'type.googleapis.com/google.rpc.ErrorInfo',metadata:{validation_url:process.env.TEST_LANDING}}] };
+      fs.writeFileSync(log, (who === '?' ? '' : identity(who)) + (state === 'gate' ? JSON.stringify({error}, null, 2) : ''));
+      fs.writeFileSync(control + '.probe', process.cwd());
+      if (state === 'hold') setInterval(() => {}, 1000);
+      else console.log(JSON.stringify({status:'SUCCESS', num_turns:0,command:{name:'usage',data:{groups:[{name:'test',buckets:[{window:'5h',remaining_fraction:1}]}]}}}));
+    } else {
+      fs.writeFileSync(log, identity('a'));
+      fs.writeFileSync(control + '.session', path.resolve(log));
+      require('node:readline').createInterface({input:process.stdin}).on('line', line => {
+        const {id,method} = JSON.parse(line), result = method === 'initialize'
+          ? {agentInfo:{name:'Antigravity ACP Server',version:'1.5.18'}} : {sessionId:'one'};
+        console.log(JSON.stringify({jsonrpc:'2.0',id,result}));
+      });
+    }`);
+  const landing = 'https://accounts.google.com/v3/signin/continue?plt=test&continue=https://developers.google.com/gemini-code-assist/auth/auth_success_gemini';
+  const bridge = startBridge({ ...fx.env, TEST_CONTROL: control, TEST_LANDING: landing });
+  t.after(() => bridge.child.stdin.end());
+  let next = 0;
+  const send = method => {
+    const id = ++next;
+    bridge.child.stdin.write(JSON.stringify({ jsonrpc:'2.0', id, method, params:{sessionId:'one'} }) + '\n');
+    return id;
+  };
+  const call = async method => {
+    const id = send(method);
+    const response = () => bridge.stdout.text().trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).find(item => item.id === id);
+    await waitFor(response, 6000, method);
+    return response().result;
+  };
+  await call('initialize');
+  await call('session/new');
+  const probe = '_cindy/checkAccountVerification';
+  for (const [input, result] of [
+    ['a gate', { status:'required', url:landing }], ['b ready', { status:'unknown' }],
+    ['b gate', { status:'unknown' }], ['? ready', { status:'unknown' }], ['a ready', { status:'ready' }],
+  ]) {
+    fs.writeFileSync(control, input);
+    assert.deepEqual(await call(probe), result);
+    assert.equal(fs.existsSync(fs.readFileSync(control + '.probe', 'utf8')), false);
+  }
+  fs.rmSync(control + '.probe');
+  fs.writeFileSync(control, 'a hold');
+  send(probe);
+  await waitFor(() => fs.existsSync(control + '.probe'), 6000, 'live verification child');
+  bridge.child.stdin.end();
+  assert.equal((await bridge.closed).code, 0);
+  assert.equal(fs.existsSync(fs.readFileSync(control + '.probe', 'utf8')), false);
+  assert.equal(fs.existsSync(path.dirname(fs.readFileSync(control + '.session', 'utf8'))), false);
+  assert.ok(!bridge.stdout.text().includes('@example.test'));
+  assert.ok(!bridge.stderr.text().includes('@example.test'));
+});
+
 async function localRelay(t, checkAccount) {
   const { PassThrough } = await import('node:stream');
   const { default: steering } = await import(pathToFileURL(path.join(root, 'agy-steering.js')));
@@ -2317,7 +2393,7 @@ async function localRelay(t, checkAccount) {
   const client = [];
   child.stdin.on('data', (data) => server.push(JSON.parse(data)));
   output.on('data', (data) => client.push(JSON.parse(data)));
-  steering.attachSteering(source, output, child, (error) => { throw error; }, checkAccount);
+  steering.attachSteering(source, output, child, (error) => { throw error; }, undefined, checkAccount && { sessionAccount: () => "synthetic", check: checkAccount });
   const write = (stream, message) => stream.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
   const request = (id, method, extra = {}) => write(source, { id, method, params: { sessionId: 'one', ...extra } });
   const response = (id, result) => write(child.stdout, { id, result });
