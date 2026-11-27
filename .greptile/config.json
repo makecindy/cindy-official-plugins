@@ -25,7 +25,7 @@
   "includeConfidenceScore": true,
   "shouldUpdateDescription": false,
   "ignorePatterns": "**/.DS_Store\n**/THIRD-PARTY-LICENSES.txt",
-  "instructions": "Cindy 官方插件仓：合入 main 后向 Global Plugin Platform 提交待审包（上架审核在 Platform 侧完成）。按 .greptile/rules.md 与下列安全红线审查。核心原则：只阻断确认的 P0/P1（安全/权限越界、数据损坏、崩溃、核心主路径回归），不阻断 P2/风格偏好/低概率理论假设，不索要实机验证记录，不复查 CI 已验项目（版本格式、四语言、manifest schema、DCO 等）。防熔断：2-3 轮内收敛；复审只核对原 P0/P1 是否修复及修复本身是否引入新崩溃或安全洞，禁止在开发者新补的防御代码上循环挑刺。对照 provisioning.json：非 all（自选/早期）插件不强求多代本地缓存迁移，允许干净重置或降级。对照 .github/plugin-owners.json：已有插件的常规迭代（L1，尤其由维护者或插件 Owner 提交且未扩大边界）无 P0/P1 时直接 autoApprove。仅在真实边界扩大（L2：新增权限/凭证/自主域名/子进程、未就绪的 OAuth/宿主授权、不符标准的 audience）或删除/重命名已发布插件时标注具体边界并暂停自动批准；未涉及则不提。回复跟随 PR 作者主语言：中文作者用简体中文，其余用英文。",
+  "instructions": "Cindy 官方插件仓：合入 main 后向 Global Plugin Platform 提交待审包（上架审核在 Platform 侧完成）。按 .greptile/rules.md 与下列安全红线审查。核心原则：只阻断确认的 P0/P1（安全/权限越界、数据损坏、崩溃、核心主路径回归），不阻断 P2/风格偏好/低概率理论假设，不索要实机验证记录，不复查 CI 已验项目（版本格式、四语言、manifest schema、DCO 等）。防熔断：2-3 轮内收敛；复审只核对原 P0/P1 是否修复及修复本身是否引入新崩溃或安全洞，禁止在开发者新补的防御代码上循环挑刺。对照 provisioning.json：非 all（自选/早期）插件不强求多代本地缓存迁移，允许干净重置或降级。对照 .github/plugin-owners.json：已有插件的常规迭代（L1，尤其由维护者或插件 Owner 提交且未扩大边界）以及登记维护者（maintainers）提交的已有插件 L2 边界调整（不改 provisioning.json / L3 路径、且不依赖未获平台批准的第三方 OAuth 或未发布的宿主能力），无确认 P0/P1 时直接 autoApprove。仅在非维护者提交的真实边界扩大（L2：新增权限/凭证/自主域名/子进程）、新插件首发或改 provisioning.json、未就绪的第三方 OAuth/宿主授权、不符标准的 audience、或删除/重命名已发布插件时标注具体边界并暂停自动批准；未涉及则不提。回复跟随 PR 作者主语言：中文作者用简体中文，其余用英文。",
   "rules": [
     {
       "id": "no-hardcoded-secrets",
