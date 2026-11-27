@@ -135,7 +135,7 @@ function createSteeringRelay() {
   };
 }
 
-function attachSteering(input, output, child, stop, errorRelay) {
+function attachSteering(input, output, child, stop, errorRelay, verification) {
   const steering = createSteeringRelay();
   const openingSessions = new Map();
   const mcpSessions = new Map();
@@ -197,17 +197,24 @@ function attachSteering(input, output, child, stop, errorRelay) {
     if (opening) {
       openingSessions.delete(message.id);
       const sessionId = opening.sessionId ?? message.result?.sessionId;
-      if (isObject(message.result) && typeof sessionId === 'string') mcpSessions.set(sessionId, opening);
+      if (isObject(message.result) && typeof sessionId === 'string') {
+        if (verification) {
+          const previous = mcpSessions.get(sessionId);
+          opening.account = previous ? previous.account : verification.sessionAccount();
+        }
+        mcpSessions.set(sessionId, opening);
+      }
     }
 
     const handled = steering.handleAgentResponse(message);
     if (handled.action === 'drop') return null;
+    const flushHeld = (item) => toClient.push(encode(item));
     if (handled.action === 'reply') {
-      const classified = errorRelay ? errorRelay.response(handled.message) : handled.message;
+      const classified = errorRelay ? errorRelay.response(handled.message, flushHeld) : handled.message;
       return encode(classified);
     }
     if (errorRelay) {
-      const classified = errorRelay.response(message);
+      const classified = errorRelay.response(message, flushHeld);
       if (classified !== message) return encode(classified);
     }
     return line;
@@ -217,6 +224,13 @@ function attachSteering(input, output, child, stop, errorRelay) {
     const message = parse(line);
     if (!message?.method || message.id === undefined) return line;
     const params = message.params;
+    if (message.method === '_cindy/checkAccountVerification' && isAntigravity && verification &&
+        typeof params?.sessionId === 'string' && mcpSessions.has(params.sessionId)) {
+      void verification.check(mcpSessions.get(params.sessionId).account).catch(() => ({ status: 'unknown' })).then(result => {
+        if (!toClient.destroyed && !toClient.readableEnded) toClient.push(encode({ jsonrpc: '2.0', id: message.id, result }));
+      });
+      return null;
+    }
     if (errorRelay) errorRelay.request(message);
     if (message.method === 'initialize') {
       initializeId = message.id;

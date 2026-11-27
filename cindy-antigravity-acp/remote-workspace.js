@@ -514,7 +514,7 @@ function startRemoteWorkspace(agyPath, host) {
     clearTimeout(agentCloseTimer);
     agentCloseTimer = null;
     const rawFailure = { jsonrpc: '2.0', id: failedId, error };
-    const trackedFailure = errorRelay.response(rawFailure);
+    const trackedFailure = errorRelay.response(rawFailure, (item) => toClient(item));
     toClient(trackedFailure !== rawFailure ? trackedFailure : classifyAccountErrorResponse(rawFailure));
     for (const pending of queued.splice(0)) {
       const pendingMessage = parseLine(pending);
@@ -554,7 +554,7 @@ function startRemoteWorkspace(agyPath, host) {
         failOpen(message.error);
         return;
       }
-      const classified = errorRelay.response(message);
+      const classified = errorRelay.response(message, (item) => toClient(item, agent.stdout));
       if (classified !== message) toClient(classified, agent.stdout);
       else toClientLine(line, agent.stdout);
       sessionRequest = null;
@@ -563,13 +563,14 @@ function startRemoteWorkspace(agyPath, host) {
       return;
     }
     if (message.method === undefined && message.id !== undefined) {
+      const flushHeld = (item) => toClient(item, agent.stdout);
       const handled = steering.handleAgentResponse(message);
       if (handled.action === 'drop') return;
       if (handled.action === 'reply') {
-        toClient(errorRelay.response(handled.message), agent.stdout);
+        toClient(errorRelay.response(handled.message, flushHeld), agent.stdout);
         return;
       }
-      const classified = errorRelay.response(message);
+      const classified = errorRelay.response(message, flushHeld);
       if (classified !== message) {
         toClient(classified, agent.stdout);
         return;
