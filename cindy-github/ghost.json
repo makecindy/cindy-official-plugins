@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.45",
-  "releaseNotes": "发布 PR 后在原 Cindy 任务中显示卡片（含 X 等外部渠道）；修复未结束 PR 卡片与活跃锚点别名被过早淘汰、过期点击无响应的问题；已结束检查的基线等待降频至 15 分钟并跳过冗余探针；模拟器或已脱敏截图免弹窗确认。沿用 1.5.40 旧版卡片优化：经调度器实际运行确认为 Node.js 18+ 后，不再将正常运行的旧启动命令标为「跟进待修复」。",
+  "version": "1.5.46",
+  "releaseNotes": "汇总 1.5.46 多项 PR 卡片与跟进稳定性优化：1）分级淘汰旧卡片状态并保护未关闭 PR、进行中状态及活跃锚点别名，点击被旧版误清的卡片自动按锚点补齐，确实过期或读失败时给出四语言提示；2）修复卡片跟进校验报错残留与误标「跟进中」的问题，修复或删除旧调度后普通刷新即可恢复；3）已结束检查的基线等待降频至 15 分钟并跳过冗余探针以降低 API 消耗；4）模拟器、mock 或已脱敏截图免弹窗附带，发起确认后等待答复再执行。沿用 1.5.40 旧版卡片优化：经调度器实际运行确认为 Node.js 18+ 后不再标为「跟进待修复」。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
