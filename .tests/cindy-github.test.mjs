@@ -2577,6 +2577,125 @@ test('a failed creation error survives passive and transient-read refreshes with
   assert.equal(stopped.reply.result.note, undefined);
 });
 
+test('a failed restart after an earlier successful follow survives passive refresh until retried or explicitly stopped', async () => {
+  for (const resolution of ['retry', 'stop']) {
+    const fault = {};
+    const { hostApi, rows } = followScheduler(fault);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_state, 'active');
+
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(rows.size, 0);
+    assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).followedEver, true);
+
+    fault.reject = true;
+    await rt.click(opened.callId, 'pr:follow');
+    let card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(card.followedEver, true, resolution);
+    assert.equal(card.scheduleErrorSource, 'create', resolution);
+    assert.match(card.scheduleError, /scheduler unavailable/, resolution);
+
+    const refreshed = await rt.tool({ card_id: opened.callId });
+    card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(refreshed.reply.result.follow_state, 'failed', resolution);
+    assert.match(refreshed.reply.result.note, /scheduler unavailable/, resolution);
+    assert.equal(card.scheduleErrorSource, 'create', resolution);
+
+    fault.failList = true;
+    const readFailed = await rt.tool({ card_id: opened.callId, claim_follow: true });
+    assert.equal(readFailed.reply.result.follow_state, 'failed', resolution);
+    assert.equal(readFailed.reply.result.follow_claimed, false, resolution);
+    assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleErrorSource, 'create', resolution);
+
+    fault.failList = false;
+    const afterReadRecovery = await rt.tool({ card_id: opened.callId });
+    assert.equal(afterReadRecovery.reply.result.follow_state, 'failed', resolution);
+    assert.match(afterReadRecovery.reply.result.note, /scheduler unavailable/, resolution);
+
+    if (resolution === 'retry') {
+      fault.reject = false;
+      await rt.click(opened.callId, 'pr:follow');
+      assert.equal(rows.size, 1);
+      const active = await rt.tool({ card_id: opened.callId });
+      card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      assert.equal(active.reply.result.follow_state, 'active');
+      assert.equal(card.scheduleError, null);
+      assert.equal(card.scheduleErrorSource, null);
+    } else {
+      const stopped = await rt.tool({ card_id: opened.callId, following: false });
+      card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      assert.equal(stopped.reply.result.follow_state, 'stopped');
+      assert.equal(stopped.reply.result.note, undefined);
+      assert.equal(card.scheduleError, null);
+      assert.equal(card.scheduleErrorSource, null);
+    }
+  }
+});
+
+test('legacy persisted verification errors clear after host locale switch while non-verification stop errors persist', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  // 1) Pre-upgrade bound card with Chinese prScheduleHookUnknown (no scheduleErrorSource), restarted in English.
+  {
+    const { hostApi, rows } = followScheduler();
+    const zh = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } }, locale: 'zh-CN' });
+    const opened = await zh.tool({ repo: 'octo/repo', pr: 42, published: true });
+    const validHook = { ...rows.get('sch-1').preRunHook };
+    rows.get('sch-1').preRunHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 };
+    await zh.click(opened.callId, 'pr:stop');
+    const key = `pr-cards/${opened.callId}.json`;
+    const legacy = JSON.parse(zh.files.get(key));
+    delete legacy.scheduleErrorSource;
+    zh.files.set(key, JSON.stringify(legacy));
+
+    rows.get('sch-1').preRunHook = validHook;
+    const en = createPrRuntime({ github: prGraphql(), hostApi, files: zh.files, kv: { prCard: { autoFollow: true } }, locale: 'en' });
+    const recovered = await en.tool({ card_id: opened.callId });
+    const card = JSON.parse(en.files.get(key));
+    assert.equal(recovered.reply.result.follow_state, 'active');
+    assert.equal(card.scheduleError, null);
+    assert.equal(card.scheduleErrorSource, null);
+    assert.equal(card.note, null);
+  }
+  // 2) Pre-upgrade bound card with rejected schedule_delete (no scheduleErrorSource), restarted in English: stays preserved.
+  {
+    const fault = { failDelete: true };
+    const { hostApi } = followScheduler(fault);
+    const zh = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } }, locale: 'zh-CN' });
+    const opened = await zh.tool({ repo: 'octo/repo', pr: 42, published: true });
+    await zh.click(opened.callId, 'pr:stop');
+    const key = `pr-cards/${opened.callId}.json`;
+    const legacy = JSON.parse(zh.files.get(key));
+    delete legacy.scheduleErrorSource;
+    zh.files.set(key, JSON.stringify(legacy));
+
+    const en = createPrRuntime({ github: prGraphql(), hostApi, files: zh.files, kv: { prCard: { autoFollow: true } }, locale: 'en' });
+    const refreshed = await en.tool({ card_id: opened.callId });
+    const card = JSON.parse(en.files.get(key));
+    assert.equal(refreshed.reply.result.follow_state, 'unverified');
+    assert.match(card.scheduleError, /cannot delete schedule/);
+  }
+  // 3) Pre-upgrade ID-less card with Chinese prOwnershipUnknown (no scheduleErrorSource), restarted in English after deletion.
+  {
+    const { hostApi, rows } = followScheduler();
+    rows.set('foreign', { id: 'foreign', prompt: 'Follow ' + url, targetSessionId: 'other', status: 'active' });
+    const zh = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } }, locale: 'zh-CN' });
+    const opened = await zh.tool({ repo: 'octo/repo', pr: 42, published: true });
+    const key = `pr-cards/${opened.callId}.json`;
+    const legacy = JSON.parse(zh.files.get(key));
+    delete legacy.scheduleErrorSource;
+    zh.files.set(key, JSON.stringify(legacy));
+
+    rows.delete('foreign');
+    const en = createPrRuntime({ github: prGraphql(), hostApi, files: zh.files, kv: { prCard: { autoFollow: true } }, locale: 'en' });
+    const recovered = await en.tool({ card_id: opened.callId });
+    const card = JSON.parse(en.files.get(key));
+    assert.equal(recovered.reply.result.follow_state, 'stopped');
+    assert.equal(card.scheduleError, null);
+    assert.equal(card.scheduleErrorSource, null);
+  }
+});
+
 test('a card blocked by another task recovers after a transient schedule_list error and allows claim_follow again', async () => {
   const url = 'https://github.com/octo/repo/pull/42';
   for (const claimOnRecovery of [false, true]) {

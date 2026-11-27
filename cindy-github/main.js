@@ -2631,11 +2631,24 @@ function manualFollowStop(card) {
   return !!card.scheduleId && card.manualStop !== false;
 }
 
+function isLegacyVerificationErrorText(text) {
+  if (!text) return false;
+  var locales = Object.keys(MESSAGES);
+  for (var i = 0; i < locales.length; i++) {
+    var table = MESSAGES[locales[i]];
+    var wrap = String(table.prScheduleFailed || '');
+    if (text === wrap.replace('{detail}', String(table.prOwnershipUnknown || '')) ||
+        text === wrap.replace('{detail}', String(table.prScheduleHookUnknown || ''))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function isBoundStopError(card) {
   if (!card.scheduleId || !card.scheduleError) return false;
   if (card.scheduleErrorSource) return card.scheduleErrorSource === 'stop';
-  return card.scheduleError !== t('prScheduleFailed', { detail: t('prOwnershipUnknown') }) &&
-    card.scheduleError !== t('prScheduleFailed', { detail: t('prScheduleHookUnknown') });
+  return !isLegacyVerificationErrorText(card.scheduleError);
 }
 
 function boundHookUnverified(card) {
@@ -3536,9 +3549,8 @@ function isPreservedCreateError(card) {
   if (!card.scheduleError) return false;
   if (card.scheduleErrorSource) return card.scheduleErrorSource === 'create';
   // Legacy cards persisted before scheduleErrorSource existed: clear known
-  // verification errors once no blocking schedule remains, preserve others.
-  return card.scheduleError !== t('prScheduleFailed', { detail: t('prOwnershipUnknown') }) &&
-    card.scheduleError !== t('prScheduleFailed', { detail: t('prScheduleHookUnknown') });
+  // verification errors in any locale once no blocking schedule remains.
+  return !card.followedEver && !isLegacyVerificationErrorText(card.scheduleError);
 }
 
 // Reconcile all ID-less legacy follow fields in one place, using only the
@@ -3590,7 +3602,7 @@ async function reconcileLegacyFollow(card, readError, hadClaim, clearOnStop) {
   card.following = !!row && row.status === 'active';
   card.scheduleStatus = unverified ? 'unverified' : row && !card.following ? row.status : null;
   card.legacyHookRepair = card.stage === 'open' && card.following && hook ? hook.repair : null;
-  if (!row && hadClaim === false && !card.followedEver && isPreservedCreateError(card) &&
+  if (!row && hadClaim === false && isPreservedCreateError(card) &&
       ((!error && !clearOnStop) || errorSource === 'read')) {
     // Keep a failed-creation error across passive empty or transient-read
     // refreshes until retried, adopted, replaced by a verification conflict,
