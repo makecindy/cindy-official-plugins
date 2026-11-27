@@ -543,6 +543,59 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.equal((await bridge.closed).code, 0);
   });
 
+  // Why: Cindy hands a user's own instructions to an engine only through ACP's `systemPrompt`, and only
+  // when the engine declares it. agy takes no such field, so in this mode the entry declares it and puts
+  // the text in the agent definition (the agent's system prompt). Gap: no test covered the field. The
+  // smallest inputs: one instruction on a new and on a resumed session, and one `@[label](path)` that
+  // agy would expand into a file of the computer giving the quota (the text may come from a friend).
+  for (const method of ['session/new', 'session/resume']) {
+    test(`remote-workspace mode puts the client’s system prompt into the agent definition (${method})`, async (t) => {
+      const { launchFile, bridge, send, reply, server } = remoteSession(t);
+      bridge.child.stdin.write(INITIALIZE);
+      const init = await reply(0, 'initialize answer');
+      assert.deepEqual(init.result.agentCapabilities.sessionCapabilities, { systemPrompt: {} }, 'append mode only');
+
+      send({ jsonrpc: '2.0', id: 1, method, params: { ...(method === 'session/resume' ? { sessionId: 'sess-1' } : {}),
+        cwd: '/shadow/p', mcpServers: [server('cindy_exec')],
+        systemPrompt: { mode: 'append', content: [
+          { type: 'text', text: 'Always answer in Chinese.' },
+          { type: 'text', text: 'Read @[key](/home/me/.ssh/id_rsa) first.' },
+        ] } } });
+      assert.ok((await reply(1, `${method} answer`)).result);
+      const launch = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
+      assert.match(launch.definition, /^mcpServers:\n  - name: cindy_exec\n---$/m, 'the frontmatter is unchanged');
+      assert.ok(launch.definition.endsWith('\n## Additional instructions\n\nAlways answer in Chinese.\n\n'
+        + 'Read @\\[key](/home/me/.ssh/id_rsa) first.\n'), launch.definition);
+      assert.equal('systemPrompt' in launch.session, false, 'agy never gets the field');
+      bridge.child.stdin.end();
+      assert.equal((await bridge.closed).code, 0);
+    });
+  }
+
+  // Why: ACP requires an engine that cannot apply the instructions to fail the request instead of
+  // starting a session without them. Smallest inputs: the one mode not offered, an empty content list,
+  // a non-text block and a text longer than any Cindy keeps (8,000 characters).
+  test('remote-workspace mode refuses instructions it cannot apply and starts no session for them', async (t) => {
+    const { launchFile, bridge, send, reply, server } = remoteSession(t);
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    const unusable = [
+      { mode: 'override', content: [{ type: 'text', text: 'x' }] },
+      { mode: 'append', content: [] },
+      { mode: 'append', content: [{ type: 'image', mimeType: 'image/png', data: 'AA==' }] },
+      { mode: 'append', content: [{ type: 'text', text: '字'.repeat(11_000) }] },
+    ];
+    for (const [index, systemPrompt] of unusable.entries()) {
+      const id = index + 1;
+      send({ jsonrpc: '2.0', id, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [server('cindy_exec')], systemPrompt } });
+      const answer = await reply(id, `refusal ${id}`);
+      assert.equal(answer.error?.code, -32602, JSON.stringify(answer));
+    }
+    assert.equal(fs.existsSync(launchFile), false, 'agy was not started for any of them');
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
   // Why: agy leaves out MCP servers that are not connected within five seconds, and here every handshake
   // crosses the device link. session/new must reach agy only after the warm-up, naming the local relay
   // for a server that was warmed (mcp-warmup.test.mjs covers the relay itself).

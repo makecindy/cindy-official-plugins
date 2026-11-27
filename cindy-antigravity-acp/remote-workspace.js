@@ -36,6 +36,12 @@
  *  - agy reports an MCP call in its own way: through a generic caller (`MCP Tool Bash`, arguments
  *    nested) in a new session, as a tool named `mcp_<server>_<tool>` in a resumed one. Both are
  *    passed to Cindy as the tool they are, so Cindy shows and checks its own Bash, Read, Write….
+ *  - agy does not declare ACP's `systemPrompt` (client instructions; checked up to 1.5.17), but the
+ *    body of an agent definition is that agent's system prompt. The entry answers ACP's `systemPrompt` itself (append mode only): the
+ *    client's text goes at the end of the definition, so subagents get it too, and the field never
+ *    reaches agy. The text may come from a friend the model is shared with: `@[label](path)`, which
+ *    agy expands into the file at `path` in rule text, is made inert so it cannot pull a file of this
+ *    computer into the conversation.
  *
  * Nothing persistent changes: the definition lives in a private directory of this one launch,
  * removed when the task ends. The user's Antigravity settings, sign-in and agents are untouched.
@@ -89,6 +95,11 @@ const LAUNCH_DIR_PREFIX = 'cindy-agy-remote-';
 const WARMUP_CLOSE_GRACE_MS = CLOSE_BUDGET_MS + 250;
 /** A launch directory this old belongs to a task that ended without cleaning up (a crash, a hard kill). */
 const STALE_LAUNCH_DIR_MS = 24 * 60 * 60 * 1000;
+/**
+ * Largest client `systemPrompt` taken, in UTF-8 bytes. Cindy keeps at most 8,000 characters of
+ * personal instructions, at most 4 bytes each; anything larger is refused rather than cut short.
+ */
+const MAX_SYSTEM_PROMPT_BYTES = 32 * 1024;
 
 /** Non-local agy tools explicitly allow-listed in `agentDefinition` (never touch host files or shell). */
 const REMOTE_SAFE_NATIVE_TOOLS = new Set(FULL_TOOLS);
@@ -178,9 +189,10 @@ function removeStaleLaunchDirs(root, now = Date.now()) {
  * The agent the session runs under. `tools` is an allow-list of agy's own tools, all of which
  * touch no computer. With the full set, `agents` makes this same definition the one subagent
  * there is, and `inheritCustomizations: false` keeps every other agent out. `mcpServers` only
- * names the servers the agent may use; where they are comes with `session/new`.
+ * names the servers the agent may use; where they are comes with `session/new`. `instructions`, the
+ * client's `systemPrompt` text, ends the body.
  */
-function agentDefinition(serverNames, { fullTools = false } = {}) {
+function agentDefinition(serverNames, { fullTools = false, instructions = '' } = {}) {
   const others = serverNames.filter((name) => name !== EXEC_SERVER);
   return [
     '---',
@@ -208,7 +220,64 @@ function agentDefinition(serverNames, { fullTools = false } = {}) {
     '- Never say you read, changed or ran something unless the tool call for it succeeded. If a tool is refused or missing, say so instead of guessing.',
     '- Keep answers short and concrete: what you changed, and how you checked it.',
     '',
+    ...(instructions ? ['## Additional instructions', '', inertClientText(instructions), ''] : []),
   ].join('\n');
+}
+
+/** `@[label](path)` stays text: agy would otherwise read the file at `path` on this computer into the prompt. */
+function inertClientText(text) {
+  return text.replace(/@\[/g, '@\\[');
+}
+
+/**
+ * The client's `systemPrompt` of a session open request, as ACP defines it, in the one mode this
+ * entry applies (`append`): `{ text }`, empty when there is none, or `{ error }` when it cannot be
+ * applied. Then the session must not open (ACP: answer -32602 instead of dropping the text).
+ */
+function clientSystemPrompt(params) {
+  const prompt = isObject(params) ? params.systemPrompt : undefined;
+  if (prompt === undefined || prompt === null) return { text: '' };
+  if (!isObject(prompt)) return { error: 'systemPrompt must be an object' };
+  if (prompt.mode !== 'append') {
+    return { error: `systemPrompt mode ${JSON.stringify(prompt.mode)} is not supported; Antigravity only appends ("append")` };
+  }
+  if (!Array.isArray(prompt.content) || prompt.content.length === 0) {
+    return { error: 'systemPrompt content must be a non-empty array' };
+  }
+  const parts = [];
+  for (const block of prompt.content) {
+    if (!isObject(block) || block.type !== 'text' || typeof block.text !== 'string') {
+      return { error: 'systemPrompt content may only hold text blocks' };
+    }
+    parts.push(block.text);
+  }
+  const text = parts.join('\n\n').trim();
+  if (Buffer.byteLength(text, 'utf8') > MAX_SYSTEM_PROMPT_BYTES) {
+    return { error: `systemPrompt is longer than ${MAX_SYSTEM_PROMPT_BYTES} bytes` };
+  }
+  return { text };
+}
+
+/** The session open request as agy gets it: the entry applies `systemPrompt` itself. */
+function withoutSystemPrompt(params) {
+  if (!isObject(params) || !('systemPrompt' in params)) return params;
+  const rest = { ...params };
+  delete rest.systemPrompt;
+  return rest;
+}
+
+/**
+ * The `initialize` answer Cindy gets: `systemPrompt` in append mode, applied by this entry whatever
+ * agy itself declares (this mode never hands the field to agy).
+ */
+function advertiseSystemPrompt(result) {
+  if (!isObject(result)) return result;
+  const capabilities = isObject(result.agentCapabilities) ? result.agentCapabilities : {};
+  const session = isObject(capabilities.sessionCapabilities) ? capabilities.sessionCapabilities : {};
+  return {
+    ...result,
+    agentCapabilities: { ...capabilities, sessionCapabilities: { ...session, systemPrompt: {} } },
+  };
 }
 
 function writeAgentDefinition(dir, serverNames, options) {
@@ -519,7 +588,7 @@ function startRemoteWorkspace(agyPath, host) {
       answered = true;
       phase = 'ready';
       toClient(message.result !== undefined
-        ? { ...message, result: steering.completeInitializeResult(completeInitializeResult(message.result)) }
+        ? { ...message, result: advertiseSystemPrompt(steering.completeInitializeResult(completeInitializeResult(message.result))) }
         : message);
       try {
         current.stdin.end();
@@ -534,6 +603,12 @@ function startRemoteWorkspace(agyPath, host) {
   /* ── second process: runs the session under the restricted agent ─────── */
 
   const openSession = (request) => {
+    const instructions = clientSystemPrompt(request.params);
+    if (instructions.error) {
+      // ACP: instructions that cannot be applied fail the request; agy is not started for it.
+      refuse(request.id, -32602, `Antigravity cannot use these instructions: ${instructions.error}.`);
+      return;
+    }
     const { servers, dropped } = usableServers(request.params);
     if (!servers.some((server) => server.name === EXEC_SERVER)) {
       refuse(request.id, -32602, `Antigravity can only run this task with Cindy's file and command tools (${EXEC_SERVER}), and they were not provided.`);
@@ -543,7 +618,10 @@ function startRemoteWorkspace(agyPath, host) {
       process.stderr.write(`[agy-acp] These MCP servers cannot be given to Antigravity and were left out: ${dropped.join(', ')}\n`);
     }
     try {
-      writeAgentDefinition(dir, servers.map((server) => server.name), { fullTools: fullToolsSupported(host.agyVersion) });
+      writeAgentDefinition(dir, servers.map((server) => server.name), {
+        fullTools: fullToolsSupported(host.agyVersion),
+        instructions: instructions.text,
+      });
       agent = launch([...acpArgs, '--agent', AGENT_NAME]);
       // Started only once agy is: a launch that throws leaves no warm-up running. session/new waits for
       // it (see onAgentLine).
@@ -557,7 +635,7 @@ function startRemoteWorkspace(agyPath, host) {
     }
     phase = 'opening';
     serverNames = servers.map((server) => server.name);
-    sessionRequest = { ...request, params: { ...request.params, mcpServers: servers } };
+    sessionRequest = { ...request, params: { ...withoutSystemPrompt(request.params), mcpServers: servers } };
     const current = agent;
     current.on('error', (error) => {
       if (phase === 'failed') return;
