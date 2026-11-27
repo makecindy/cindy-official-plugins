@@ -20,7 +20,7 @@ Manual Cindy client testing is optional for routine fixes; note any known gaps i
 <!-- Fill ONLY when applicable:
 - New plugin or `provisioning.json` audience change (`all` vs opt-in `{ "emails": [] }`)
 - New/widened permissions, credentials, autonomous network hosts, subprocesses, or Manifest-v3 direct capability fields
-- Changed third-party OAuth scopes or dependency on an unready/unreleased Cindy host authorization (list scope, platform approval, and host release status)
+- Changed third-party OAuth scopes or dependency on an unmerged Cindy host capability (list scope, platform approval, and host PR merge status; once merged to `main` with `minCindyVersion` isolation or old-host fallback, no need to wait for a stable client release)
 - Renaming/deleting a published plugin, or changing `.github/workflows/**` / review rules
 
-仅在涉及时填写：新增插件或改 audience；新增/扩大权限、凭证、自主域名、子进程或 Manifest-v3 直接能力字段；变更第三方 OAuth scope 或依赖未就绪的 Cindy 本体授权（写明平台批准与宿主发布状态）；重命名/删除已发布插件或修改发布/审查规则。 -->
+仅在涉及时填写：新增插件或改 audience；新增/扩大权限、凭证、自主域名、子进程或 Manifest-v3 直接能力字段；变更第三方 OAuth scope 或依赖尚未合入宿主 `main` 的能力（写明平台批准与宿主 PR 合入状态；宿主已合 `main` 且有 `minCindyVersion` 隔离或旧端降级时无需等客户端正式版）；重命名/删除已发布插件或修改发布/审查规则。 -->
