@@ -83,7 +83,7 @@ import { appendTrace, scrub } from './lib/follow-trace.mjs';
 import { createHash } from 'node:crypto';
 import { BACKOFF_STEPS_MIN, baseMovedWait, checkOutcome, handledFailure, inspectWait, makeWait, setsAside, waitDueAt, waitFacts, waitIsDue, waitNotice } from './lib/follow-wait.mjs';
 import { mergeQueueFingerprint } from './lib/merge-queue.mjs';
-import { SETTLE_MAX_MS, TICK_MS, breaksSettle, expectedBots, isEmptyPass, isPendingTerminalBackoffRetry, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
+import { SETTLE_MAX_MS, TICK_MS, breaksSettle, expectedBots, isEmptyPass, isPendingTerminalBackoffRetry, pacingDue, resolvePrReviewerBots, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import { createCiRetryReceiptIO } from './lib/ci-retry-receipts.mjs';
@@ -1950,7 +1950,7 @@ async function gateMain(args, ctx) {
     // owner's deliveries, acknowledgements, pacing or suppression markers.
     // New notification fields must not silently inherit an old owner's state.
     const facts = ['headOid', 'roundCount', 'reviewersSeen', 'deferredHeadOid',
-      'initialAdditions', 'headSeenAt', 'reviewerBots', 'lastKnownConflicting',
+      'initialAdditions', 'headSeenAt', 'reviewerBots', 'reviewerBotsVersion', 'lastKnownConflicting',
       'currentFingerprint', 'fingerprintFields', 'lastChangeAt', 'inventoryFailures',
       'consecutiveSnapshotFailures', 'lastSnapshotFailureAt', 'snapshotFailureFingerprint',
       'snapshotFailureSummary', 'snapshotFailureBackoffUntil', 'snapshotWatchRetryAt'];
@@ -2259,7 +2259,10 @@ async function gateMain(args, ctx) {
     ...(typeof lastKnownConflicting === 'boolean' ? { lastKnownConflicting } : {}),
     // 节奏与收齐:新提交首次看到的时刻、本 PR 见过的 bot reviewer、收齐窗口截止、上次有变化的时刻
     ...(headSeenAt ? { headSeenAt } : {}),
-    reviewerBots: [...new Set([...(Array.isArray(previous?.reviewerBots) ? previous.reviewerBots : []), ...reviewerBotsOf(snap)])].sort(),
+    ...(() => {
+      const resolved = resolvePrReviewerBots(previous, snap);
+      return { reviewerBots: resolved.bots, reviewerBotsVersion: resolved.version };
+    })(),
     ...(settle.open && decision.reason === 'settling' ? { settleUntil: settle.until } : {}),
     lastChangeAt: decision.fingerprint !== previous?.currentFingerprint || !previous?.lastChangeAt
       ? now : previous.lastChangeAt,

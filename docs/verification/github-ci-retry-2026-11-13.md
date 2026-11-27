@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.70, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.71, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1698,3 +1698,12 @@ This does not atomically bind Git to a prior lstat or prevent another process sw
 The pre-file-guard70 full-suite/package numbers above are intermediate only; final corrected candidate needs its own checks/package. Current notes AND helper-file refusal, installed integration and all earlier acceptance gaps remain unverified live. The separate settings documentation finding remains fixed.
 
 Final corrected70 mandatory four suites plus plugin: **672 passed /42 skipped /0 failed (307.62s)**. Forge exact-content: **35 files /284192 archive bytes /806050 uncompressed bytes**, generated package removed and absence verified. These results include the helper-file exclusion and native regressions; they cover fab1b273, not subsequently moved main5d67a305. Source70 remains uninstalled.
+
+
+## Further base convergence — source1.5.71, not installed
+
+Before this round's one push, main moved fromfab1b273 to5d67a305a87a70c89681316585f3a89a3fc7f312 (GitHub1.5.49). Retain signed local69/2f3b808f and70/957c6ba8, then merge the new base normally. Only manifest/version conflicts required resolution. The inherited follow-pacing change excludes approval-only automation from required bot review settling, retains corroborated reviewer bots, and preserves unknown/older-history behavior with its existing state version. The complete pacing implementation/tests and both Antigravity plugin changes/tests match main exactly; the gate/gate-test added/removed patch matches main apart from feature line offsets. No new CI storage, lock, retry or executor was authored.
+
+Upstream Antigravity changes adapt negotiated native question/plan output and preserve remote tool restrictions; no new endpoint, credential or executable download was introduced by this inherited patch. These are inherited main changes, not this PR feature or new runtime evidence. Current source hook/target/model/timeout/cadence and all strict CI guards remain; version71 exceeds main49. Forge71 matches all35 tracked files (semantic manifest, exact other bytes): **285611 archive /811172 uncompressed bytes**; new package deleted and absence read back.
+
+Final71 mandatory four suites plus all three affected plugins: **796 passed /50 skipped /0 failed (310.89s)**. This combined batch includes the changed upstream AGY bridge code; the earlier optional50/1/4 batch remains an unreproduced initial failure, not a proven flake. The50 skips comprise the42 previously documented GitHub/environment cases plus8 upstream AGY cases; no skipped runtime behavior is claimed. Current-version real Cindy notes/helper refusal and all other runtime prerequisites remain unmet.
