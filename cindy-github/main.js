@@ -2810,6 +2810,16 @@ async function writePrSettings(change) {
   if (!r || r.ok === false) throw new Error('kv write failed');
   return next;
 }
+async function setPrAutoFollow(enabled) {
+  if (typeof enabled !== 'boolean') return fail(t('required', { fields: 'auto_follow (boolean)' }));
+  return enqueuePr(async function () {
+    var kv = await readKv(true);
+    kv.prCard = Object.assign({}, kv.prCard, { autoFollow: enabled });
+    var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
+    if (!response || response.ok === false) throw new Error('kv write failed');
+    return { ok: true, result: { settings: prSettingsForAgent(prSettingsFrom(kv), enabled) } };
+  });
+}
 function togglePrSetting(key) {
   return writePrSettings(function (next) { next[key] = !next[key]; });
 }
@@ -3213,11 +3223,11 @@ function prSettingRow(action, label, hint, on) {
 }
 
 // 手机端只看得到按钮的名字(aria-label),选中的那一段在名字里注明「当前」;电脑端显示里面的文字。
-function prSegment(action, label, active, inner) {
+function prSegment(action, label, active, inner, extraAttrs) {
   return prButton(action, active ? t('prChoiceCurrent', { name: label }) : label, 'display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:9999px;' +
     'font-size:12px;font-weight:500;white-space:nowrap;' + (active
       ? 'color:var(--text-primary);--bg:var(--surface-elevated);box-shadow:0 0 0 1px var(--border-default)'
-      : 'color:var(--text-secondary);--hover:' + PR_HOVER), inner);
+      : 'color:var(--text-secondary);--hover:' + PR_HOVER), inner, extraAttrs);
 }
 
 /** 推理档位与速度的显示名(和输入框旁的模型选择器一样跟在模型名后面)。 */
@@ -3251,7 +3261,8 @@ function prModelRow(settings) {
       prEsc(t('prFollowModelTaskHint')) + '</div>') + '</div>' +
     '<div style="display:flex;flex:none;gap:2px;padding:2px;border-radius:9999px;background:var(--surface-chip)">' +
     prSegment('prset:modelTask', t('prFollowModelTask'), !m, prEsc(t('prFollowModelTask'))) +
-    prSegment('prset:model', t('prFollowModelCustom'), !!m, prEsc(t('prFollowModelCustom'))) +
+    prSegment('prset:model', t('prFollowModelCustom'), !!m, prEsc(t('prFollowModelCustom')),
+      !m && !settings.lastFollowModel ? ' data-ghost-model-select=""' : '') +
     '</div></div>';
   var picker = m
     ? '<div style="margin-top:8px">' + prButton('prset:modelPick', t('prFollowModelChangeTo', { name: m.label }),
@@ -3422,8 +3433,13 @@ function renderPrCard(card, settings) {
     left += '<div style="margin-top:4px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
   }
   var openOnly = card.stage === 'open' ? prOpenOnly(card) : '';
-  var body = prHeader(tile, title, meta, card.pr, gear ? prGearButton(card.settingsOpen, manualFollowStop(card)) : '') +
-    prFooter(left, actions, openOnly, prArchiveButton(card, settings), persistentActions);
+  var body = prHeader(tile, title, meta, card.pr, gear ? prGearButton(card.settingsOpen, manualFollowStop(card)) : '');
+  var beforeFollow = card.stage === 'ask' ? settings.autoFollow
+    : card.stage === 'open' && !card.following && !card.pending && !card.scheduleId && (!card.pr.draft || settings.autoFollow);
+  if (beforeFollow && !card.settingsOpen && typeof cindy.pickModel === 'function') {
+    body += '<div' + openOnly + '>' + prModelRow(settings) + '</div>';
+  }
+  body += prFooter(left, actions, openOnly, prArchiveButton(card, settings), persistentActions);
   // Host copy-link accepts only HTTP(S) URLs. Keep the repair guidance and
   // command together in one panel so ordinary card clicks (e.g. settings) never
   // wipe the explanation while leaving an orphaned command box.
@@ -3552,28 +3568,49 @@ async function schedulesForPr(card) {
   return rows.filter(function (row) { return mentionsPr(row, url); });
 }
 
-async function cardFollowSkillDir() {
+async function cardFollowSkillEnv() {
   var response = await cindy.node.request({ method: 'followSkillDir' });
-  var dir = response && response.ok && response.result;
+  var raw = response && response.ok && response.result;
+  var dir = typeof raw === 'string' ? raw : raw && typeof raw.dir === 'string' ? raw.dir : null;
+  var platform = raw && typeof raw === 'object' && typeof raw.platform === 'string' ? raw.platform : null;
   // Double quoting is portable for these paths. Reject shell interpolation and
   // Windows command expansion even in host-generated directory names.
   if (typeof dir !== 'string' || /["$`%!\r\n]/.test(dir)) throw new Error('PR Skill unavailable');
-  return dir;
+  return { dir: dir, platform: platform };
 }
 
 function cardFollowCommand(dir, url) {
   return 'node "' + dir + '/scripts/pr-node.cjs" pr-heartbeat-gate.mjs ' + url;
 }
 
+// Cindy's scheduler stabilizes skill-snapshot paths with POSIX single quotes on
+// macOS/Linux (shellQuotePath), while card-created and Windows hooks use double quotes.
+function posixSingleQuoted(filePath) {
+  return "'" + filePath.replace(/'/g, "'\\''") + "'";
+}
+
 // Only exact generated commands from this approved Skill confer native
 // schedule ownership. URL owner/repo case is immaterial, not shell syntax.
-function exactFollowHook(row, card, dir) {
+function exactFollowHook(row, card, skillEnv) {
   var url = followUrl(card);
   var command = row.preRunHook.command;
   var match = typeof command === 'string' && /^(.*) (https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+)$/.exec(command);
+  var dir = typeof skillEnv === 'string' ? skillEnv : skillEnv && skillEnv.dir;
+  var platform = skillEnv && typeof skillEnv === 'object' && typeof skillEnv.platform === 'string' ? skillEnv.platform : null;
   if (!dir || !match || match[2].toLowerCase() !== url) return null;
-  var legacy = match[1] === 'node "' + dir + '/scripts/pr-heartbeat-gate.mjs"';
-  if (!legacy && match[1] !== 'node "' + dir + '/scripts/pr-node.cjs" pr-heartbeat-gate.mjs') return null;
+  // Windows schedules run under cmd.exe where POSIX single quotes are not path quotes.
+  // Fail closed when the scheduler host platform is Windows or unknown.
+  var isWin32 = platform === 'win32';
+  var allowPosixSingle = platform === 'darwin' || platform === 'linux';
+  function matchesQuoted(scriptName, suffix) {
+    var posixPath = dir + '/scripts/' + scriptName;
+    if (match[1] === 'node "' + posixPath + '"' + suffix) return true;
+    if (isWin32 && match[1] === 'node "' + dir + '\\scripts\\' + scriptName + '"' + suffix) return true;
+    if (allowPosixSingle && match[1] === 'node ' + posixSingleQuoted(posixPath) + suffix) return true;
+    return false;
+  }
+  var legacy = matchesQuoted('pr-heartbeat-gate.mjs', '');
+  if (!legacy && !matchesQuoted('pr-node.cjs', ' pr-heartbeat-gate.mjs')) return null;
   // The public scheduler API has no caller-supplied compare-and-update guard:
   // report a replacement for the old command, never write it automatically.
   return { repair: legacy ? { schedule_id: row.id, command: cardFollowCommand(dir, url) } : null };
@@ -3620,10 +3657,11 @@ async function resolveLegacyHookRepair(hook, row) {
 }
 
 async function legacyFollowRepair(row, card) {
-  if (typeof row.preRunHook.command !== 'string' || row.preRunHook.command.indexOf('/scripts/pr-heartbeat-gate.mjs" ') < 0) return null;
-  var dir;
-  try { dir = await cardFollowSkillDir(); } catch (_) { return null; }
-  return resolveLegacyHookRepair(exactFollowHook(row, card, dir), row);
+  if (typeof row.preRunHook.command !== 'string' ||
+    !/[\\/]scripts[\\/]pr-heartbeat-gate\.mjs["'] /.test(row.preRunHook.command)) return null;
+  var env;
+  try { env = await cardFollowSkillEnv(); } catch (_) { return null; }
+  return resolveLegacyHookRepair(exactFollowHook(row, card, env), row);
 }
 
 function clearCardScheduleError(card) {
@@ -3695,14 +3733,14 @@ async function reconcileLegacyFollow(card, readError, fromStop, hadClaim, clearO
       } else {
         // An unavailable approved directory is not evidence of a custom
         // command. Keep the reservation for the next ordinary refresh.
-        var dir = await cardFollowSkillDir();
+        var env = await cardFollowSkillEnv();
         var saved = await prSchedule('schedule_get', { id: candidate.id });
         if (saved) {
           if (saved.id !== candidate.id || !ownedFollowSchedule(saved, card)) {
             error = t('prOwnershipUnknown');
             errorSource = 'verify';
           } else {
-            hook = exactFollowHook(saved, card, dir);
+            hook = exactFollowHook(saved, card, env);
             if (!hook) {
               error = t('prScheduleHookUnknown');
               errorSource = 'verify';
@@ -3752,7 +3790,7 @@ async function reconcileLegacyFollow(card, readError, fromStop, hadClaim, clearO
 }
 
 async function createCardSchedule(card, settings) {
-  var dir = await cardFollowSkillDir();
+  var dir = (await cardFollowSkillEnv()).dir;
   var url = followUrl(card);
   var model = prSettingsForAgent(settings, true).follow_model;
   var input = {
@@ -3816,13 +3854,13 @@ async function syncCardSchedule(card, settings, start) {
         throw new Error(t('prOwnershipUnknown'));
       }
       errorSource = 'read';
-      var dir = await cardFollowSkillDir();
+      var env = await cardFollowSkillEnv();
       var saved = await prSchedule('schedule_get', { id: row.id });
       if (!ownedFollowSchedule(saved, card) || saved.status !== 'active' || saved.id !== row.id) {
         errorSource = 'verify';
         throw new Error('schedule_get');
       }
-      var hook = exactFollowHook(saved, card, dir);
+      var hook = exactFollowHook(saved, card, env);
       if (!hook) {
         card.pending = card.scheduleAction = null;
         errorSource = 'verify';
@@ -3835,8 +3873,8 @@ async function syncCardSchedule(card, settings, start) {
       card.scheduleStatus = null;
       card.followedEver = true;
     } else {
-      var stopDir;
-      try { stopDir = await cardFollowSkillDir(); } catch (_) {}
+      var stopEnv;
+      try { stopEnv = await cardFollowSkillEnv(); } catch (_) {}
       errorSource = 'read';
       var owned = await prSchedule('schedule_get', { id: card.scheduleId });
       if (owned) {
@@ -3844,7 +3882,7 @@ async function syncCardSchedule(card, settings, start) {
           errorSource = 'verify';
           throw new Error(t('prOwnershipUnknown'));
         }
-        if (!exactFollowHook(owned, card, stopDir)) {
+        if (!exactFollowHook(owned, card, stopEnv)) {
           errorSource = 'verify';
           throw new Error(t('prScheduleHookUnknown'));
         }
@@ -4152,12 +4190,12 @@ async function prCardTool(args, callId, fromLegacyStop) {
         clearLegacyScheduleNotice(card);
       } else {
         if (card.scheduleError || card.scheduleStatus === 'unverified') {
-          var checkDir;
-          try { checkDir = await cardFollowSkillDir(); } catch (_) {}
-          var verifiedHook = checkDir ? exactFollowHook(currentSchedule, card, checkDir) : null;
+          var checkEnv;
+          try { checkEnv = await cardFollowSkillEnv(); } catch (_) {}
+          var verifiedHook = checkEnv ? exactFollowHook(currentSchedule, card, checkEnv) : null;
           if (verifiedHook && !isBoundStopError(card)) {
             settleUnsourcedLegacyError(card);
-          } else if (checkDir && !verifiedHook) {
+          } else if (checkEnv && !verifiedHook) {
             setCardScheduleError(card, t('prScheduleHookUnknown'), 'verify');
           }
         }
@@ -4515,20 +4553,20 @@ async function prCardAction(msg) {
     } catch (e) {
       card.note = t('prSettingFailed');
     }
-  } else if (action === 'prset:model' && settings.followModel) {
-    // 已经是「指定模型」:不重复打开选择器,换模型点下面的模型名。
-  } else if (action === 'prset:model' && settings.lastFollowModel) {
-    try {
-      settings = await writePrSettings(function (next) { next.followModel = next.lastFollowModel; });
-    } catch (e) {
-      card.note = t('prSettingFailed');
-    }
-  } else if (action === 'prset:modelPick' && msg.modelSelection) {
+  } else if ((action === 'prset:model' || action === 'prset:modelPick') && msg.modelSelection) {
     // 新版宿主在卡内下拉框里已选好(并核对过可用),直接记下。
     try {
       var chosen = await savePrFollowModel(settings, msg.modelSelection);
       settings = chosen.settings;
       if (chosen.error) card.note = t('prFollowModelFailed', { detail: chosen.error });
+    } catch (e) {
+      card.note = t('prSettingFailed');
+    }
+  } else if (action === 'prset:model' && settings.followModel) {
+    // 已经是「指定模型」:不重复打开选择器,换模型点下面的模型名。
+  } else if (action === 'prset:model' && settings.lastFollowModel) {
+    try {
+      settings = await writePrSettings(function (next) { next.followModel = next.lastFollowModel; });
     } catch (e) {
       card.note = t('prSettingFailed');
     }
@@ -4639,6 +4677,18 @@ var seenTestReqs = {};
 
 bc.onmessage = function (ev) {
   var m = ev && ev.data;
+  if (m && m.type === 'pr-settings-ping') {
+    bc.postMessage({ type: 'pr-settings-ready', reqId: m.reqId });
+    return;
+  }
+  if (m && m.type === 'pr-settings-save') {
+    void setPrAutoFollow(m.enabled).then(function (r) {
+      bc.postMessage({ type: 'pr-settings-saved', reqId: m.reqId, ok: r.ok });
+    }, function () {
+      bc.postMessage({ type: 'pr-settings-saved', reqId: m.reqId, ok: false });
+    });
+    return;
+  }
   if (!m || m.type !== 'test-connection' || !m.reqId) return;
   if (seenTestReqs[m.reqId]) return;
   // 去重表只为吸收 settings 页的重发风暴,超量直接清零重来(常驻期不泄漏)。
@@ -5007,6 +5057,8 @@ cindy.onHostMessage(async function (msg) {
       r = await callTool(msg.args || {}, msg.callId);
     } else if (msg.tool === 'status_watch') {
       r = await watchTool(msg.args || {}, msg.callId);
+    } else if (msg.tool === 'set_pr_follow_settings') {
+      r = await setPrAutoFollow((msg.args || {}).auto_follow);
     } else if (msg.tool === 'pr_follow_settings') {
       var settings = await readPrSettings();
       r = settings.unreadable

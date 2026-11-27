@@ -17,6 +17,9 @@
  */
 var MESSAGES = {
   'zh-CN': {
+    followLabel: '发完自动跟进',
+    followHint: '本机任务发布正式 PR 后，自动跟进检查和评审。',
+    followPending: '已提交，等待其他 PR 操作完成后保存…',
     accountTitle: 'GitHub 账号',
     accountHint: '优先使用本机 GitHub 登录，也可以展开下方的其他连接方式。',
     otherMethods: '其他连接方式',
@@ -50,6 +53,9 @@ var MESSAGES = {
     clearFailed: '清除失败,请重试',
   },
   en: {
+    followLabel: 'Follow after opening a PR',
+    followHint: 'Automatically follow checks and reviews for new non-draft PRs published from this computer.',
+    followPending: 'Submitted. It will be saved after another PR action finishes…',
     accountTitle: 'GitHub account',
     accountHint: "This computer's GitHub login is used first. You can also expand the other connection methods below.",
     otherMethods: 'Other connection methods',
@@ -83,6 +89,9 @@ var MESSAGES = {
     clearFailed: 'Clear failed. Try again.',
   },
   ja: {
+    followLabel: 'PR 作成後に自動フォロー',
+    followHint: 'この端末から作成したドラフト以外の PR のチェックとレビューを自動でフォローします。',
+    followPending: '送信しました。ほかの PR 操作が終わると保存されます…',
     accountTitle: 'GitHub アカウント',
     accountHint: 'このコンピュータの GitHub ログインを優先して使います。下のほかの接続方法を開いて使うこともできます。',
     otherMethods: 'ほかの接続方法',
@@ -116,6 +125,9 @@ var MESSAGES = {
     clearFailed: '消去に失敗しました。再試行してください',
   },
   ko: {
+    followLabel: 'PR 생성 후 자동 팔로우',
+    followHint: '이 기기에서 새로 게시한 초안이 아닌 PR의 검사와 리뷰를 자동으로 추적합니다.',
+    followPending: '제출했습니다. 다른 PR 작업이 끝나면 저장됩니다…',
     accountTitle: 'GitHub 계정',
     accountHint: '이 컴퓨터의 GitHub 로그인을 우선 사용합니다. 아래의 다른 연결 방법을 펼쳐 사용할 수도 있습니다.',
     otherMethods: '다른 연결 방법',
@@ -321,6 +333,62 @@ var MESSAGES = {
     }
   }
 
+  var followSwitch = $('follow-after-open');
+  async function loadFollowSetting() {
+    followSwitch.disabled = true;
+    try {
+      var response = await fetch('/kv');
+      if (!response.ok) throw new Error();
+      var kv = await response.json();
+      followSwitch.checked = !!kv && !!kv.prCard && kv.prCard.autoFollow === true;
+      followSwitch.indeterminate = false;
+      followSwitch.disabled = false;
+    } catch (e) {
+      followSwitch.indeterminate = true;
+      $('follow-status').textContent = t('loadFailed');
+    }
+  }
+
+  followSwitch.addEventListener('change', async function () {
+    var enabled = followSwitch.checked;
+    followSwitch.disabled = true;
+    $('follow-status').textContent = '';
+    var reqId = crypto.randomUUID();
+    var sent = false;
+    var ping = function () { bc.postMessage({ type: 'pr-settings-ping', reqId: reqId }); };
+    var timer;
+    var timeout;
+    function finish(ok) {
+      clearInterval(timer);
+      clearTimeout(timeout);
+      bc.removeEventListener('message', onReply);
+      $('follow-status').textContent = ok ? '' : t('saveFailed');
+      void loadFollowSetting();
+    }
+    function onReply(event) {
+      var msg = event.data;
+      if (!msg || msg.reqId !== reqId) return;
+      if (msg.type === 'pr-settings-ready' && !sent) {
+        sent = true;
+        clearInterval(timer);
+        bc.postMessage({ type: 'pr-settings-save', reqId: reqId, enabled: enabled });
+      } else if (msg.type === 'pr-settings-saved') {
+        finish(msg.ok === true);
+      }
+    }
+    bc.addEventListener('message', onReply);
+    timer = setInterval(ping, 400);
+    timeout = setTimeout(function () {
+      // 未送达说明插件没醒，按失败恢复；已送达的请求仍在 PR 队列里排队（如卡片
+      // 模型选择器未关），不能当失败重读旧值，保持禁用等最终回执再刷新。
+      if (!sent) { finish(false); return; }
+      clearInterval(timer);
+      $('follow-status').textContent = t('followPending');
+    }, 15000);
+    ping();
+    void fetch('/wake').catch(function () { /* timeout reports the failure */ });
+  });
+
   var testSeq = 0;
   async function test() {
     var reqId = 'test-' + Date.now() + '-' + (++testSeq);
@@ -395,6 +463,7 @@ var MESSAGES = {
   // 先定语言再出文案:账号状态与保存提示都要用宿主语言。
   void loadLocale().then(function renderLocalized() {
     applyStaticCopy();
+    void loadFollowSetting();
     void load();
   });
 })();

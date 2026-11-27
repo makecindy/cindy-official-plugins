@@ -3,8 +3,8 @@
   "id": "cindy-antigravity-acp",
   "name": "Antigravity",
   "description": "Run Cindy tasks with the Google Antigravity CLI (agy) installed on this computer.",
-  "version": "0.5.0",
-  "releaseNotes": "Shows the current Antigravity plan and quota window lengths in supported Cindy versions. Existing sign-in and custom agy paths are retained.",
+  "version": "0.5.1",
+  "releaseNotes": "Classifies Antigravity quota exhaustion (including reset countdown warnings), sign-in expiry, and capacity overload into Cindy's standard ACP error metadata so tasks show targeted usage-limit handling and automatic reset continuation.",
   "minCindyVersion": "0.1.143",
   "icon": "icon.png",
   "locales": {
