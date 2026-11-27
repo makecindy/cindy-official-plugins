@@ -3528,10 +3528,17 @@ function clearLegacyScheduleNotice(card) {
   card.legacyScheduleNotice = null;
 }
 
+function preserveUnsourcedLegacyNotice(card) {
+  if (card.scheduleError && !card.scheduleErrorSource && !isLegacyVerificationErrorText(card.scheduleError)) {
+    card.legacyScheduleNotice = card.scheduleError;
+  }
+}
+
 function setCardScheduleError(card, detail, source) {
+  if (source === 'read') preserveUnsourcedLegacyNotice(card);
+  else card.legacyScheduleNotice = null;
   card.scheduleError = t('prScheduleFailed', { detail: detail });
   card.scheduleErrorSource = source;
-  card.legacyScheduleNotice = null;
 }
 
 function isLegacyVerificationErrorText(text) {
@@ -3553,9 +3560,7 @@ function isLegacyVerificationErrorText(text) {
 // errors to non-blocking last-operation feedback so status and claims recover
 // without erasing why the earlier create/delete failed.
 function settleUnsourcedLegacyError(card) {
-  if (card.scheduleError && !card.scheduleErrorSource && !isLegacyVerificationErrorText(card.scheduleError)) {
-    card.legacyScheduleNotice = card.scheduleError;
-  }
+  preserveUnsourcedLegacyNotice(card);
   clearCardScheduleError(card);
 }
 

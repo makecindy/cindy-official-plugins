@@ -2740,6 +2740,16 @@ test('legacy persisted errors recover after upgrade and locale switch while expl
     zh.files.set(key, JSON.stringify(legacy));
 
     const en = createPrRuntime({ github: prGraphql(), hostApi, files: zh.files, kv: { prCard: { autoFollow: true } }, locale: 'en' });
+    // Even if the first post-upgrade schedule_list transiently fails and later recovers to empty,
+    // the pre-upgrade creation failure notice must survive into legacyScheduleNotice.
+    fault.failList = true;
+    const transientReadFail = await en.tool({ card_id: opened.callId, claim_follow: true });
+    assert.equal(transientReadFail.reply.result.follow_state, 'failed');
+    assert.equal(transientReadFail.reply.result.follow_claimed, false);
+    assert.match(transientReadFail.reply.result.note, /cannot list schedules/);
+    assert.match(JSON.parse(en.files.get(key)).legacyScheduleNotice, /scheduler unavailable/);
+
+    fault.failList = false;
     for (let i = 0; i < 2; i++) {
       const refreshed = await en.tool({ card_id: opened.callId });
       const card = JSON.parse(en.files.get(key));
