@@ -1649,6 +1649,7 @@ var MESSAGES = {
     "prFastMode": "快速",
     "prUltrafastMode": "超快",
     "prFollowModelFailed": "没能打开模型选择：{detail}",
+    "prFollowModelFallback": "当前宿主不支持为绑定任务指定该插件引擎，本次跟进已沿用当前任务模型",
     "prTurnOff": "关闭「{name}」",
     "prCiPassed": "CI 通过",
     "prCiFailed": "CI 未通过",
@@ -1761,6 +1762,7 @@ var MESSAGES = {
     "prFastMode": "Fast",
     "prUltrafastMode": "Ultra fast",
     "prFollowModelFailed": "Could not open the model picker: {detail}",
+    "prFollowModelFallback": "This host does not support an explicit plugin-engine override on a bound task; follow-up started with this task's current model",
     "prTurnOff": "Turn off \"{name}\"",
     "prCiPassed": "CI passed",
     "prCiFailed": "CI failed",
@@ -1873,6 +1875,7 @@ var MESSAGES = {
     "prFastMode": "高速",
     "prUltrafastMode": "超高速",
     "prFollowModelFailed": "モデルの選択を開けませんでした：{detail}",
+    "prFollowModelFallback": "このホストは紐付け済みタスクへのプラグインエンジン指定に対応していないため、現在のタスクのモデルでフォローを開始しました",
     "prTurnOff": "「{name}」をオフ",
     "prCiPassed": "CI 成功",
     "prCiFailed": "CI 失敗",
@@ -1985,6 +1988,7 @@ var MESSAGES = {
     "prFastMode": "빠름",
     "prUltrafastMode": "초고속",
     "prFollowModelFailed": "모델 선택을 열지 못했습니다: {detail}",
+    "prFollowModelFallback": "이 호스트는 연결된 작업에 플러그인 엔진 지정을 지원하지 않아 현재 작업의 모델로 팔로우를 시작했습니다",
     "prTurnOff": "\"{name}\" 끄기",
     "prCiPassed": "CI 통과",
     "prCiFailed": "CI 실패",
@@ -2392,7 +2396,7 @@ function newPrCard(id, repo) {
     id: id, repo: repo, head: '', base: '', commits: null, files: null, filesTotal: null,
     stage: 'ask', publishingDraft: false, queued: false, pr: null,
     renamed: false, following: false, followedEver: false, pending: null,
-    settingsOpen: false, note: null, settingsApplied: false,
+    settingsOpen: false, note: null, followNotice: null, settingsApplied: false,
   };
 }
 
@@ -2920,6 +2924,9 @@ function renderPrCard(card, settings) {
       left = prContextLine(card);
     }
   }
+  if (card.followNotice && card.stage === 'open' && card.following && !card.note) {
+    left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(card.followNotice) + '</div>';
+  }
   if (card.note) {
     left += '<div style="margin-top:4px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
   }
@@ -2938,7 +2945,7 @@ function renderPrCard(card, settings) {
 /** 声明高度宁低勿高:宿主按实际内容量高只会往上调,声明偏高会在卡片下方留白。 */
 function prCardHeight(card) {
   var h = 120;
-  if (card.note) h += 22;
+  if (card.note || (card.followNotice && card.stage === 'open' && card.following)) h += 22;
   if (card.settingsOpen && prHasSettings(card)) h += 160;
   return Math.min(900, h);
 }
@@ -3085,14 +3092,14 @@ function isUnsupportedBoundPluginEngineOverride(err) {
 async function createCardSchedule(card, settings) {
   var model = prSettingsForAgent(settings, true).follow_model;
   try {
-    return await prSchedule('schedule_create', buildCardScheduleInput(card, model));
+    return { schedule: await prSchedule('schedule_create', buildCardScheduleInput(card, model)), usedTaskModelFallback: false };
   } catch (err) {
     if (!model || model.model_agent_kind !== 'acp' || !isUnsupportedBoundPluginEngineOverride(err)) throw err;
     var existing = await schedulesForPr(card);
     if (existing.length > 0) throw err;
     // Older hosts or tasks that disallow explicit bound ACP overrides still accept
     // a bound schedule without model override fields, using the task's current model.
-    return prSchedule('schedule_create', buildCardScheduleInput(card, null));
+    return { schedule: await prSchedule('schedule_create', buildCardScheduleInput(card, null)), usedTaskModelFallback: true };
   }
 }
 
@@ -3105,9 +3112,14 @@ async function syncCardSchedule(card, settings, start) {
   if (!(await savePrCard(card))) { card.note = t('prSaveFailed'); return; }
   try {
     var rows = start ? await schedulesForPr(card) : [];
+    var requestedModel = start ? prSettingsForAgent(settings, true).follow_model : null;
+    var usedTaskModelFallback = false;
     if (start && rows.length === 0) {
       var creationError;
-      try { await createCardSchedule(card, settings); } catch (err) { creationError = err; }
+      try {
+        var created = await createCardSchedule(card, settings);
+        usedTaskModelFallback = Boolean(created && created.usedTaskModelFallback);
+      } catch (err) { creationError = err; }
       rows = await schedulesForPr(card);
       if (!rows.length) throw creationError || new Error('schedule_create');
     }
@@ -3122,6 +3134,10 @@ async function syncCardSchedule(card, settings, start) {
       card.scheduleId = row.id;
       card.scheduleStatus = null;
       card.followedEver = true;
+      card.followNotice = (usedTaskModelFallback ||
+        (requestedModel && requestedModel.model_agent_kind === 'acp' && !saved.modelAgentKind && !saved.model))
+        ? t('prFollowModelFallback')
+        : null;
     } else {
       var owned = await readOwnedFollowSchedule(card);
       if (owned) {
@@ -3130,6 +3146,7 @@ async function syncCardSchedule(card, settings, start) {
       }
       card.scheduleId = null;
       card.scheduleStatus = null;
+      card.followNotice = null;
     }
     card.following = start;
     card.pending = card.scheduleAction = null;
@@ -3138,6 +3155,7 @@ async function syncCardSchedule(card, settings, start) {
   } catch (err) {
     card.note = t('prScheduleFailed', { detail: String(err.message || err).slice(0, 160) });
     card.scheduleError = card.note;
+    card.followNotice = null;
     // Stop stays pending until absence is verified, including when the delete receipt is lost.
     if (start) {
       try {
@@ -3255,6 +3273,7 @@ async function prCardTool(args, callId) {
         return fail(t('prScheduleFailed', { detail: currentSchedule.status }));
       card.following = !!currentSchedule && currentSchedule.status === 'active';
       card.scheduleStatus = currentSchedule && !card.following ? currentSchedule.status : null;
+      if (!card.following || (currentSchedule && currentSchedule.modelAgentKind)) card.followNotice = null;
       if (!currentSchedule) {
         card.scheduleId = null;
         if (a.following === true) return fail(t('prScheduleFailed', { detail: 'schedule_get' }));
@@ -3268,7 +3287,7 @@ async function prCardTool(args, callId) {
   if (!stopSchedule && typeof a.following === 'boolean') {
     card.following = a.following;
     card.scheduleAction = null;
-    if (!a.following) card.scheduleId = card.scheduleStatus = null;
+    if (!a.following) { card.scheduleId = card.scheduleStatus = null; card.followNotice = null; }
     if (a.following) card.followedEver = true;
     if (card.pending === 'follow' || card.pending === 'stop') card.pending = null;
   }
@@ -3316,6 +3335,9 @@ async function prCardTool(args, callId) {
       await syncCardSchedule(card, settings, true);
     }
   }
+  if (card.stage !== 'open') card.followNotice = null;
+  var activeFollowNotice = card.stage === 'open' && card.following ? card.followNotice : null;
+  if (activeFollowNotice && !notes.includes(activeFollowNotice)) notes.push(activeFollowNotice);
   if (card.note && !notes.includes(card.note)) notes.push(card.note);
   var movedFrom = updating && a.to_latest === true && prAnchor(card) !== callId ? await movePrCard(card, callId) : null;
   // 状态没存上时按钮点了找不到记录:不显示卡片,让 Agent 稍后重试。
@@ -3349,6 +3371,7 @@ async function prCardTool(args, callId) {
     else if (card.scheduleStatus === 'paused') result.follow_state = 'paused';
     else result.follow_state = card.scheduleError ? 'failed' : 'stopped';
   }
+  if (activeFollowNotice) result.follow_model_fallback = true;
   if (!delivered) { result.card_shown = false; notes.push(t('prCardNotShown')); }
   if (a.claim_follow === true) result.follow_claimed = a.following !== false && canFollow &&
     !card.scheduleAction && !card.scheduleId && card.pending === 'follow';

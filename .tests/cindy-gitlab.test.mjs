@@ -360,6 +360,7 @@ test('plugin-engine (acp) follow models survive card validation and reach auto-f
   assert.equal(r.schedules.get('schedule')?.effort, 'high');
   assert.equal(r.schedules.get('schedule')?.fastMode, false);
   assert.equal(r.schedules.get('schedule')?.targetSessionId, 's1');
+  assert.doesNotMatch(r.lastCard().html, /follow-up started with this task/);
 });
 
 test('malformed plugin-engine (acp) routes are dropped by card validation', async () => {
@@ -406,7 +407,10 @@ test('bound ACP follow-up falls back to the task model when the host explicitly 
       return null;
     });
     const view = await r.show({ mr: url, published: true });
-    assert.equal(view.follow_state, 'active', view.note);
+    assert.equal(view.follow_state, 'active');
+    assert.equal(view.follow_model_fallback, true);
+    assert.match(view.note ?? '', /follow-up started with this task's current model/);
+    assert.match(view.html, /follow-up started with this task&#39;s current model|follow-up started with this task's current model/);
     assert.equal(r.createAttempts.length, 2);
     assert.equal(r.createAttempts[0].modelAgentKind, 'acp');
     assert.equal(r.createAttempts[0].targetSessionId, 's1');
@@ -417,6 +421,13 @@ test('bound ACP follow-up falls back to the task model when the host explicitly 
     assert.equal(r.createAttempts[1].targetSessionId, 's1');
     assert.equal(r.schedules.size, 1);
     assert.equal(r.schedules.get('schedule')?.modelAgentKind, undefined);
+    // Refreshing while active keeps the fallback notice; stopping clears it.
+    const refreshed = await r.show({ card_id: view.card_id });
+    assert.equal(refreshed.follow_model_fallback, true);
+    assert.match(refreshed.note ?? '', /follow-up started with this task's current model/);
+    await r.click(refreshed.anchor, 'pr:stop');
+    assert.equal(r.schedules.size, 0);
+    assert.doesNotMatch(r.lastCard().html, /follow-up started with this task/);
   }
 });
 
