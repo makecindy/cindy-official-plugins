@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { resolvePluginVersion } from '../.github/scripts/resolve-plugin-version.mjs';
 import { validateGhostManifest } from './contracts/plugin-manifest.bcdea7e27f97.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -523,8 +524,8 @@ function validateReleaseDiff({ cwd = root, base = process.env.BASE_SHA, head = p
     const changed = gitAt(['diff', '--name-only', '--no-renames', base, target, '--', pluginDir]).trim();
     if (changed || sharedPackageChanged) {
       assert.ok(
-        compareStableSemver(after.version, before.version, pluginDir) > 0,
-        `${pluginDir}: packaged content changed, so ghost.json.version must be greater than ${before.version}`,
+        compareStableSemver(after.version, before.version, pluginDir) >= 0,
+        `${pluginDir}: ghost.json.version cannot be lower than ${before.version}`,
       );
       assertChangedPluginUsesManifestV3(pluginDir, after);
     }
@@ -582,14 +583,17 @@ test('migration registrations require unambiguous IDs and a traceable Server PR'
   ]) assert.throws(() => validateIdMigrations(invalid));
 });
 
-test('release diff permits a previously registered paired rename and subsequent updates', async (t) => {
-  for (const [label, before, after] of [
-    ['paired rename', { 'old-plugin': {} }, { 'new-plugin': { version: '1.0.1' } }],
+test('release diff permits a previously registered paired rename and unbumped routine updates', async (t) => {
+  for (const [label, before, after, extra = {}] of [
+    ['paired rename with bump', { 'old-plugin': {} }, { 'new-plugin': { version: '1.0.1' } }],
+    ['paired rename without manual bump', { 'old-plugin': {} }, { 'new-plugin': {} }],
     ['registration alone', { 'old-plugin': {} }, { 'old-plugin': {} }],
-    ['later update', { 'new-plugin': {} }, { 'new-plugin': { version: '1.0.1' } }],
+    ['later update with bump', { 'new-plugin': {} }, { 'new-plugin': { version: '1.0.1' } }],
+    ['ordinary update without manual bump', { 'old-plugin': {} }, { 'old-plugin': { name: 'Changed' } }],
+    ['shared package change without manual bump', { 'old-plugin': {} }, { 'old-plugin': {} }, { sharedChange: true }],
   ]) {
     await t.test(label, (t) => assert.doesNotThrow(releaseDiffFixture(t, {
-      before, after, baseMigrations: [fixtureMigration],
+      before, after, baseMigrations: [fixtureMigration], ...extra,
     })));
   }
 });
@@ -614,18 +618,87 @@ test('release diff rejects unregistered or incomplete migrations and retains pac
     ['different manifest id', { after: { 'new-plugin': { id: 'other-plugin', version: '1.0.1' } } }, /migration manifest IDs/],
     ['same-directory id change', { after: { 'old-plugin': { id: 'new-plugin', version: '1.0.1' } } }, /changing a published plugin id/],
     ['another plugin deleted alongside rename', { before: { ...before, 'unrelated-plugin': {} } }, /explicit Server migration/],
-    ['same version', { after: { 'new-plugin': {} } }, /version must be greater/],
-    ['lower version', { after: { 'new-plugin': { version: '0.9.0' } } }, /version must be greater/],
+    ['lower version on rename', { after: { 'new-plugin': { version: '0.9.0' } } }, /cannot be lower/],
+    ['lower version on update', { after: { 'old-plugin': { version: '0.9.0' } } }, /cannot be lower/],
     ['legacy replacement', { after: { 'new-plugin': { version: '1.0.1', schemaVersion: 2 } } }, /schemaVersion 3/],
     ['invalid minimum client', { after: { 'new-plugin': { version: '1.0.1', minCindyVersion: '0.0.0' } } }, /released stable Cindy version/],
-    ['ordinary update without bump', { after: { 'old-plugin': { name: 'Changed' } } }, /version must be greater/],
-    ['shared package change without bump', { after: before, sharedChange: true }, /version must be greater/],
   ];
   for (const [label, overrides, expected] of cases) {
     await t.test(label, (t) => assert.throws(releaseDiffFixture(t, {
       before, after, baseMigrations: [fixtureMigration], ...overrides,
     }), expected));
   }
+});
+
+test('packaging auto-resolves strictly monotonic patch versions without manual PR bumps', (t) => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-auto-version-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const run = (args) => git([
+    '-c', 'user.name=Version fixture',
+    '-c', 'user.email=fixture@example.test',
+    '-c', 'commit.gpgsign=false',
+    '-c', 'core.hooksPath=/dev/null',
+    ...args,
+  ], cwd).trim();
+  const write = (rel, content) => {
+    const dest = path.join(cwd, rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, content);
+  };
+  const commit = (msg) => {
+    run(['add', '.']);
+    run(['commit', '--quiet', '-m', msg]);
+    return run(['rev-parse', 'HEAD']);
+  };
+  const writePlugin = (id, version, code = '// v1') => {
+    write(`${id}/ghost.json`, JSON.stringify({ id, schemaVersion: 3, minCindyVersion: '0.1.0', version, entry: 'main.js' }, null, 2));
+    write(`${id}/main.js`, code);
+  };
+
+  run(['init', '--quiet', '-b', 'main']);
+  for (const file of ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'TRADEMARKS.zh-CN.md']) {
+    write(file, `${file} text\n`);
+  }
+  writePlugin('alpha', '1.2.3', '// initial');
+  writePlugin('beta', '0.5.0', '// initial');
+  const epoch = commit('epoch');
+  assert.equal(resolvePluginVersion('alpha', { cwd, epoch }).effective, '1.2.3');
+  assert.equal(resolvePluginVersion('alpha', { cwd, epoch }).changed, false);
+
+  // Two unbumped fixes to alpha advance patch monotonically while beta stays at 0.5.0.
+  write('alpha/main.js', '// fix 1');
+  commit('fix(alpha): 1');
+  assert.equal(resolvePluginVersion('alpha', { cwd, epoch }).effective, '1.2.4');
+  assert.equal(resolvePluginVersion('beta', { cwd, epoch }).effective, '0.5.0');
+
+  write('alpha/main.js', '// fix 2');
+  commit('fix(alpha): 2');
+  assert.equal(resolvePluginVersion('alpha', { cwd, epoch }).effective, '1.2.5');
+
+  // Stale manual bump (1.2.4 <= 1.2.5) still advances to 1.2.6 instead of colliding.
+  writePlugin('alpha', '1.2.4', '// stale manual bump');
+  commit('fix(alpha): stale manual bump');
+  assert.equal(resolvePluginVersion('alpha', { cwd, epoch }).effective, '1.2.6');
+
+  // Explicit minor jump is respected, and subsequent unbumped commits advance from it.
+  writePlugin('alpha', '1.3.0', '// minor release');
+  commit('feat(alpha): minor');
+  assert.equal(resolvePluginVersion('alpha', { cwd, epoch }).effective, '1.3.0');
+  assert.equal(resolvePluginVersion('alpha', { cwd, epoch }).changed, false);
+
+  write('LICENSE', 'updated license\n');
+  commit('chore: license');
+  assert.equal(resolvePluginVersion('alpha', { cwd, epoch }).effective, '1.3.1');
+  assert.equal(resolvePluginVersion('beta', { cwd, epoch }).effective, '0.5.1');
+
+  // End-to-end package-plugin.sh injects the resolved effective version into plugin.cindy.
+  const outPkg = path.join(cwd, 'beta.cindy');
+  execFileSync('bash', [path.join(root, '.github/scripts/package-plugin.sh'), 'beta', outPkg], {
+    cwd,
+    encoding: 'utf8',
+  });
+  const packagedManifest = JSON.parse(execFileSync('unzip', ['-p', outPkg, 'ghost.json'], { encoding: 'utf8' }));
+  assert.equal(packagedManifest.version, '0.5.1');
 });
 
 test('the pinned Cindy manifest contract rejects invalid manifest shapes', () => {

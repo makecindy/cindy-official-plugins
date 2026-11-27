@@ -81,8 +81,9 @@
    密钥/账号的按自选接受（`{ "emails": [] }`）。`author` 必须是真实作者。
 3. **开发**——在任意 coding Agent 或开发环境中按照
    [工具无关的快速路径](#工具无关的快速路径)操作，不要求 Cindy 专用制作工具。
-4. **提交 PR**——标题 `feat(<目录名>): …`；bump `ghost.json.version`；补
-   `provisioning.json` 条目；四语言 locale（`zh-CN` / `en` / `ja` / `ko`）齐全；
+4. **提交 PR**——标题 `feat(<目录名>): …`；填写初始 `ghost.json.version`
+   （存量插件日常修复不再强制手工 bump patch，打包时会自动按 `main` 历史单调递增）；
+   补 `provisioning.json` 条目；四语言 locale（`zh-CN` / `en` / `ja` / `ko`）齐全；
    每个 commit 带签名（`git commit -s`，[DCO](./DCO)）。细节见
    [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md)。
 5. **审查**——CI 在本仓校验 manifest、交付限制、本地化、provisioning、改动插件单测
@@ -131,7 +132,7 @@
 - [ ] 自主域名、`node` 入口与子进程边界最小化
 - [ ] 不可逆外部副作用失败路径区分「未执行 / 已执行 / 不确定」
 - [ ] 四语言 locale 通过 `node --test .tests/localization.test.mjs`
-- [ ] `ghost.json.version` 已 bump；涉及时同步 `provisioning.json` 与 `THIRD-PARTY-LICENSES.txt`
+- [ ] `ghost.json.version` 未降级（日常 patch 无需手工 bump）；涉及时同步 `provisioning.json` 与 `THIRD-PARTY-LICENSES.txt`
 - [ ] 若改动第三方 OAuth scope 或依赖未就绪宿主授权，已在 PR 说明写清状态
 - [ ] 每个 commit 带 DCO 签名（`git commit -s`）
 
