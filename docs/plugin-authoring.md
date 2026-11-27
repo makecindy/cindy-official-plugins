@@ -438,21 +438,12 @@ their presence in a guide does not establish stable support.
    packaging uncommitted work must use an explicit reviewed file list. Inspect
    every final archive for expected files, no outer plugin directory, and no
    credentials; verification evidence must apply to the submitted contents.
-4. Provide real runtime evidence for affected paths under the
-   [review contract](../.greptile/rules.md#运行验证与证据复用). For installation,
-   migration or tool behavior changes, exercise the relevant package in a Cindy
-   environment meeting its actual requirements, including failure paths and
-   retained capabilities. Record the tested package/source, Cindy version/channel,
-   scenarios, results and gaps. Identify development builds truthfully; they do
-   not establish compatibility with released clients without applicable evidence.
-   Reuse prior evidence only with an explanation of why the full diff from the
-   tested version to the current submission leaves those paths unaffected; an
-   older package's test is not a claim that the latest package was installed.
-   Authors or maintainers may supply evidence. The Agent performs authorized
-   operations when available; otherwise explicitly hand off unverified steps.
-   No fixed verification checkbox is required or read by CI. Green CI does not
-   collect runtime evidence, prove the minimum version correct, or compare
-   migration capabilities.
+4. Run the repository contract checks and the plugin's automated tests, and
+   record the commands/results in the PR description (see the
+   [review contract](../.greptile/rules.md)). Manual Cindy client testing is
+   encouraged for brand-new plugins or major host-capability integrations, but
+   is not a hard merge gate for routine updates — release QA happens on Global
+   Plugin Platform after merge.
 
 ## Interpreting documentation and comments
 
