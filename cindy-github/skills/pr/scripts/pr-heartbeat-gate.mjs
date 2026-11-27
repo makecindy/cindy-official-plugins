@@ -1330,8 +1330,9 @@ export function decide({
       eventKey(result.events),
       result.next,
     );
-    if (delivery.exitCode === EXIT_PASS && kinds.some((kind) => kind === 'checks-failed' || kind === 'checks-finished')) {
-      delivery.detail += '; handle the check results and notify the user (schedule_notify_current_run): report the outcome or exact blocker, even if waiting for CI or an external fix';
+    if (delivery.exitCode === EXIT_PASS && kinds.some((kind) => kind === 'checks-failed' || kind === 'checks-finished')
+      && !delivery.detail.includes('schedule_notify_current_run')) {
+      delivery.detail += '; handle the check results; stay silent if you fix and push for CI or wait on an external/baseline fix without a user decision or --wait notice';
     }
     return delivery;
   }

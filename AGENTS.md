@@ -95,9 +95,12 @@ Full definitions live in `.greptile/config.json`:
 
 ## Hard gates before commit / 提交前必查
 
-- Bump `ghost.json.version` (strictly greater `major.minor.patch` than `main`)
-  for every plugin whose packaged content changed; changed legacy v2 plugins
-  must migrate to `schemaVersion: 3` with `minCindyVersion` and no `slots`.
+- Do not lower `ghost.json.version` below `main`. Manual patch bumps are
+  optional for routine updates (`.github/scripts/package-plugin.sh`
+  auto-computes a strictly increasing patch version on `main` when unchanged;
+  bump manually only for explicit minor/major releases). Changed legacy v2
+  plugins must migrate to `schemaVersion: 3` with `minCindyVersion` and no
+  `slots`.
 - Run repo gates + changed plugin tests:
   `node --test .tests/plugin-contract.test.mjs .tests/localization.test.mjs .tests/provisioning.test.mjs .tests/publish-workflows.test.mjs`
   plus `.tests/<plugin>.test.mjs` when present.

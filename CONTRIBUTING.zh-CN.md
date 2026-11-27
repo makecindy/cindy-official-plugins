@@ -104,8 +104,11 @@ cd 163-mail && npm ci && npm run build
    `fix(qq-mail): 校验移动结果`。type 取
    `feat` / `fix` / `refactor` / `perf` / `chore` / `docs` / `test` / `revert` /
    `build` / `ci`。
-3. **改动插件内容必须在同一个 PR 里 bump `ghost.json` 的 `version`。** 新的
-   `major.minor.patch` SemVer 必须大于 `main` 上的当前版本，否则 CI 会阻止合并。
+3. **`ghost.json` 的 `version` 不得低于 `main` 上的版本。** 存量插件日常修复或
+   优化不再强制在 PR 里手工 bump patch——当 `ghost.json.version` 未变时，
+   `.github/scripts/package-plugin.sh` 会在打包阶段按 `main` 提交历史自动计算
+   严格递增的 patch 版本写入 `.cindy` 包，避免并行 PR 抢同一版本号。需要显式
+   提升 minor / major 版本时再手工修改 `ghost.json.version`。
    同一个改动还必须把现有 v2 清单迁移为 `schemaVersion: 3`：增加
    `minCindyVersion`、移除 `slots`，并用对应顶层字段表达等价能力。按
    [映射表](docs/plugin-authoring.zh-CN.md#manifest-v2-到-v3保留行为转换表达)
