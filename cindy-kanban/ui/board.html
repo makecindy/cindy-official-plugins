@@ -299,6 +299,7 @@ const I18N = {
     hideInput: 'Hide input bar', showInput: 'Show input bar', inputHidden: 'Input bar hidden',
     keyTab: 'Tab completion', keyEsc: 'Escape', keyInt: 'Ctrl+C (interrupt)', keyUp: 'Previous', keyDown: 'Next',
     sendFailedKeepDraft: 'Send failed, draft kept: {e}',
+    taskStatus: 'Task status',
     enterFailedCheck: 'Text sent but Enter failed — check the pane: {e}',
 
   },
@@ -342,6 +343,7 @@ const I18N = {
     hideInput: '隐藏输入栏', showInput: '显示输入栏', inputHidden: '输入栏已隐藏',
     keyTab: 'Tab 补全', keyEsc: 'Esc', keyInt: 'Ctrl+C 中断', keyUp: '上一条', keyDown: '下一条',
     sendFailedKeepDraft: '发送失败，草稿已保留：{e}',
+    taskStatus: '任务状态',
     enterFailedCheck: '文字已发送，但回车失败，请检查 pane：{e}',
 
   },
@@ -1042,7 +1044,10 @@ async function sendChat() {
   try {
     const r = await call('board_chat', { text, route });
     thinking.remove();
-    appendMsg('assistant', r.reply ?? r.message ?? (r.ok ? '—' : String(r.status ?? '')));
+    const replyText = r.reply && String(r.reply).trim()
+      ? r.reply
+      : `${t('taskStatus')}: ${r.status ?? (r.ok ? 'ok' : '失败')}（结果未知，请打开任务核对）`;
+    appendMsg('assistant', replyText);
   } catch (e) { thinking.textContent = t('sendFailed', { e: e?.message ?? e }); }
 }
 async function loadChat() {
