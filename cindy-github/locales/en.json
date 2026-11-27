@@ -15,6 +15,9 @@
     "pr_follow_settings": {
       "description": "Read the same auto-rename, auto-follow and follow-model preferences used by PR cards. Returns settings without showing a card, creating a task or starting follow-up; preferences are not proof that following is active. After publication use pr_card in the Cindy task on every channel, including X and IM. Read preferences here when the card call returned no settings or the user asks for preferences. A read failure means unknown, not disabled."
     },
+    "set_pr_follow_settings": {
+      "description": "Set the follow-after-opening preference on this computer. auto_follow must be a boolean. Applies to future non-draft PRs."
+    },
     "status_watch": {
       "description": "Manage local GitHub status watches; add only when asked. owner/repo, kind, ID. remove stops, list shows. Polls five targets every 5 min; notifies on changes. list returns kind, repo, id, status, problem. pr/issue status `state:draft:comments`: open/closed/merged, draft/ready, last = comments. run status `state:conclusion:attempt`: queued/requested/waiting/pending/in_progress/completed, conclusion none until completion then success/failure/cancelled/neutral/skipped/timed_out/action_required/stale/startup_failure/unknown, last = attempt. problem null when healthy; unavailable: transient failure or rate limit, clears on the next read. auth_required (401), forbidden (403), gone (404/410: target gone or inaccessible) also clear on the next read, but act first: reconnect in plugin details, check access, or confirm the target exists. account_changed: host account switched, watch paused; resumes when it matches, else remove then add. target_changed: object identity changed; never self-clears, remove then add."
     }
