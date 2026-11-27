@@ -590,6 +590,289 @@ process.exit(2);
   assert.deepEqual(calls, [['--version'], ['api', 'repos/acme/game/pulls/54']]);
 });
 
+nodeTest('ghJsonConditional handles HTTP 200 ETag and HTTP 304 Not Modified without retries or exit', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim / symlink' : false }, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-cond-etag-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const logFile = path.join(dir, 'calls.log');
+  fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + '\\n');
+const hIdx = args.indexOf('-H');
+const ifNoneMatch = hIdx >= 0 ? args[hIdx + 1] : '';
+if (ifNoneMatch === 'If-None-Match: W/"v1"') {
+  process.stdout.write('HTTP/2.0 304 Not Modified\\r\\nETag: W/"v1"\\r\\nX-RateLimit-Remaining: 4999\\r\\n\\r\\n');
+  process.stderr.write('gh: HTTP 304\\n');
+  process.exit(1);
+}
+process.stdout.write('HTTP/2.0 200 OK\\r\\nETag: W/"v1"\\r\\nContent-Type: application/json\\r\\n\\r\\n{"ok":true}');
+process.exit(0);
+`, { mode: 0o755 });
+  const moduleUrl = new URL('../../cindy-github/skills/pr/scripts/lib/gh.mjs', import.meta.url).href;
+  const run = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import { ghJsonConditional } from ${JSON.stringify(moduleUrl)};
+    const first = await ghJsonConditional('repos/acme/game/pulls/1');
+    const second = await ghJsonConditional('repos/acme/game/pulls/1', { etag: first.etag });
+    process.stdout.write(JSON.stringify({ first, second }));
+  `], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, GH_LOG: logFile },
+  });
+  assert.equal(run.status, 0, run.stderr);
+  const { first, second } = JSON.parse(run.stdout);
+  assert.equal(first.notModified, false);
+  assert.equal(first.etag, 'W/"v1"');
+  assert.deepEqual(first.data, { ok: true });
+  assert.equal(second.notModified, true);
+  assert.equal(second.etag, 'W/"v1"');
+  assert.equal(second.data, null);
+  const calls = fs.readFileSync(logFile, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(calls.length, 2, '304 must not trigger retries');
+  assert.ok(calls[1].includes('If-None-Match: W/"v1"'));
+});
+
+nodeTest('pr-snapshot --state-dir revalidates REST pulls and shared repo branch rules via live ETag 304 with minimal cached fields', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim / symlink' : false }, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-snapshot-etag-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const logFile = path.join(dir, 'gh.log');
+  const cfgFile = path.join(dir, 'cfg.json');
+  fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+const cfg = JSON.parse(fs.readFileSync(process.env.CFG_FILE, 'utf8'));
+if (args[0] === '--version') process.exit(0);
+const hIdx = args.indexOf('-H');
+const ifNoneMatch = hIdx >= 0 ? args[hIdx + 1] : '';
+const record = (kind, status) => fs.appendFileSync(process.env.GH_LOG, JSON.stringify({ kind, path: args[1] ?? '', ifNoneMatch, status }) + '\\n');
+if (args[0] === 'pr' && args[1] === 'view') {
+  record('pr-view', 200);
+  process.stdout.write(JSON.stringify({ headRefOid: cfg.headSha, statusCheckRollup: cfg.rollup }));
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1] === 'graphql') {
+  record('graphql', 200);
+  process.stdout.write(JSON.stringify({
+    data: {
+      viewer: { login: cfg.viewer },
+      repository: {
+        pullRequest: {
+          state: 'OPEN', headRefOid: cfg.headSha, mergeStateStatus: 'CLEAN', baseRefName: 'main',
+          baseRef: { target: { oid: 'base-1' }, branchProtectionRule: null },
+          reviewThreads: { nodes: [] }, mergeQueueEntry: null, timelineItems: { nodes: [] },
+        },
+      },
+    },
+  }));
+  process.exit(0);
+}
+if (args[0] === 'api' && /^repos\\/acme\\/game\\/pulls\\/\\d+$/.test(args[1])) {
+  const expected = 'If-None-Match: ' + cfg.pullEtag;
+  if (ifNoneMatch === expected) {
+    record('pull', 304);
+    process.stdout.write('HTTP/2.0 304 Not Modified\\nETag: ' + cfg.pullEtag + '\\n\\n');
+    process.stderr.write('gh: HTTP 304\\n');
+    process.exit(1);
+  }
+  record('pull', 200);
+  process.stdout.write(
+    'HTTP/2.0 200 OK\\nETag: ' + cfg.pullEtag + '\\n\\n' +
+    JSON.stringify({
+      html_url: 'https://github.com/acme/game/pull/' + args[1].split('/').pop(),
+      title: 'Private feature title',
+      body: 'CONFIDENTIAL_PRIVATE_PR_BODY_DO_NOT_PERSIST',
+      state: 'open',
+      merged: false,
+      mergeable: true,
+      mergeable_state: 'clean',
+      additions: 12,
+      deletions: 3,
+      changed_files: 2,
+      user: { login: 'author-secret' },
+      requested_reviewers: [{ login: 'reviewer-secret' }],
+      requested_teams: [{ slug: 'security-team' }],
+      base: { sha: 'base-1', repo: { full_name: 'acme/game', private: true, description: 'internal repo' } },
+      head: { sha: cfg.headSha, label: 'acme:feat', repo: { full_name: 'acme/private-fork', description: 'secret fork' } },
+    }),
+  );
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1].includes('/rules/branches/')) {
+  if (cfg.rulesError) {
+    record('rules', 500);
+    process.stderr.write(cfg.rulesError + '\\n');
+    process.exit(1);
+  }
+  const expected = 'If-None-Match: ' + cfg.rulesEtag;
+  if (ifNoneMatch === expected) {
+    record('rules', 304);
+    process.stdout.write('HTTP/2.0 304 Not Modified\\nETag: ' + cfg.rulesEtag + '\\n\\n');
+    process.stderr.write('gh: HTTP 304\\n');
+    process.exit(1);
+  }
+  record('rules', 200);
+  process.stdout.write('HTTP/2.0 200 OK\\nETag: ' + cfg.rulesEtag + '\\n\\n' + JSON.stringify(cfg.rules));
+  process.exit(0);
+}
+process.stderr.write('Unexpected gh call: ' + args.join(' ') + '\\n');
+process.exit(2);
+`, { mode: 0o755 });
+
+  const runSnap = (prNumber, cfg, extraArgs = [], expectedStatus = 0) => {
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg));
+    fs.writeFileSync(logFile, '');
+    const res = spawnSync(process.execPath, [script, `https://github.com/acme/game/pull/${prNumber}`, '--state-dir', stateDir, ...extraArgs], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, GH_LOG: logFile, CFG_FILE: cfgFile },
+    });
+    assert.equal(res.status, expectedStatus, res.stderr);
+    const calls = fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+    return { snap: JSON.parse(res.stdout), calls };
+  };
+
+  const baseCfg = {
+    viewer: 'alice',
+    headSha: 'head-1',
+    pullEtag: 'W/"pull-v1"',
+    rulesEtag: 'W/"rules-v1"',
+    rules: [
+      { type: 'pull_request', ruleset_id: 99, parameters: { required_approving_review_count: 2 } },
+      {
+        type: 'required_status_checks',
+        ruleset_source: 'internal-org-policy',
+        parameters: {
+          strict_required_status_checks_policy: true,
+          required_status_checks: [{ context: 'late-test', integration_id: 15368, extra_meta: 'drop-me' }],
+        },
+      },
+    ],
+    rollup: [{ __typename: 'CheckRun', name: 'PR check', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+  };
+
+  // 1. First snapshot of PR #54 primes both pull and shared repo rules caches (200)
+  //    and writes ONLY the minimal fields consumed by pr-snapshot.mjs.
+  const r1 = runSnap(54, baseCfg);
+  assert.equal(r1.snap.verdict, 'WAITING_CI');
+  assert.equal(r1.calls.find(c => c.kind === 'pull').status, 200);
+  assert.equal(r1.calls.find(c => c.kind === 'rules').status, 200);
+
+  const restCachePath = path.join(stateDir, 'acme__game-54.rest-cache.json');
+  const restCacheRaw = fs.readFileSync(restCachePath, 'utf8');
+  assert.doesNotMatch(restCacheRaw, /CONFIDENTIAL_PRIVATE_PR_BODY|requested_reviewers|requested_teams|private-fork|internal repo|author-secret/);
+  const restCache = JSON.parse(restCacheRaw);
+  assert.equal(restCache.schema, 2);
+  assert.deepEqual(Object.keys(restCache.data).sort(), [
+    'additions', 'changed_files', 'deletions', 'head', 'html_url',
+    'mergeable', 'mergeable_state', 'merged', 'state', 'title',
+  ]);
+  assert.deepEqual(Object.keys(restCache.data.head), ['sha']);
+
+  const rulesCachePath = path.join(stateDir, 'acme__game.rules-cache.json');
+  const rulesCacheRaw = fs.readFileSync(rulesCachePath, 'utf8');
+  assert.doesNotMatch(rulesCacheRaw, /pull_request|ruleset_id|internal-org-policy|strict_required_status_checks_policy|drop-me/);
+  const rulesCache = JSON.parse(rulesCacheRaw);
+  assert.equal(rulesCache.schema, 2);
+  assert.deepEqual(rulesCache.entries['alice:main'].rules, [
+    { type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'late-test', integration_id: 15368 }] } },
+  ]);
+
+  // 2. Second snapshot of PR #54 hits 304 for both pull and rules (including under --strict-exit live revalidation)
+  //    and yields the exact same snapshot payload as the 200 run.
+  const r2 = runSnap(54, baseCfg, ['--expect-head', 'head-1', '--strict-exit'], 10);
+  assert.equal(r2.snap.verdict, 'WAITING_CI');
+  assert.equal(r2.calls.find(c => c.kind === 'pull').status, 304);
+  assert.equal(r2.calls.find(c => c.kind === 'rules').status, 304);
+  assert.deepEqual({ ...r2.snap, fetchedAt: null }, { ...r1.snap, fetchedAt: null });
+
+  // 2b. A legacy schema:1 cache file containing full REST fields (e.g. body) is ignored and replaced by narrowed schema:2.
+  fs.writeFileSync(restCachePath, JSON.stringify({
+    schema: 1,
+    etag: baseCfg.pullEtag,
+    data: { state: 'open', head: { sha: baseCfg.headSha }, body: 'LEGACY_SECRET_BODY' },
+    updatedAt: 1000,
+  }));
+  const r2b = runSnap(54, baseCfg);
+  assert.equal(r2b.calls.find(c => c.kind === 'pull').status, 200);
+  const rewrittenRaw = fs.readFileSync(restCachePath, 'utf8');
+  assert.doesNotMatch(rewrittenRaw, /LEGACY_SECRET_BODY|CONFIDENTIAL_PRIVATE_PR_BODY/);
+  assert.equal(JSON.parse(rewrittenRaw).schema, 2);
+
+  // 3. Another PR (#55) in the same repo & viewer reuses the shared rules ETag immediately (rules 304, pull 200).
+  const r3 = runSnap(55, baseCfg);
+  assert.equal(r3.snap.verdict, 'WAITING_CI');
+  assert.equal(r3.calls.find(c => c.kind === 'pull').status, 200);
+  assert.equal(r3.calls.find(c => c.kind === 'rules').status, 304);
+
+  // 4. Different viewer does NOT reuse alice's rules cache entry (viewer isolation).
+  const r4 = runSnap(55, { ...baseCfg, viewer: 'bob' });
+  assert.equal(r4.calls.find(c => c.kind === 'rules').ifNoneMatch, '');
+  assert.equal(r4.calls.find(c => c.kind === 'rules').status, 200);
+
+  // 5. When rules change on GitHub (new ETag), live revalidation gets 200 immediately (zero staleness).
+  const r5 = runSnap(54, { ...baseCfg, rulesEtag: 'W/"rules-v2"', rules: [] });
+  assert.equal(r5.snap.verdict, 'READY');
+  assert.equal(r5.calls.find(c => c.kind === 'rules').status, 200);
+
+  // 6. When pull changes (new head & ETag), pull gets 200 and updates cache.
+  const r6 = runSnap(54, { ...baseCfg, headSha: 'head-2', pullEtag: 'W/"pull-v2"', rulesEtag: 'W/"rules-v2"', rules: [] });
+  assert.equal(r6.snap.latestCommitOid, 'head-2');
+  assert.equal(r6.calls.find(c => c.kind === 'pull').status, 200);
+  assert.equal(r6.calls.find(c => c.kind === 'rules').status, 304);
+
+  // 7. Rules error is never masked by cached rules.
+  const r7 = runSnap(54, { ...baseCfg, headSha: 'head-2', pullEtag: 'W/"pull-v2"', rulesError: 'gh: Resource not accessible (HTTP 403)' });
+  assert.equal(r7.snap.gate.requiredChecksUnavailable, true);
+  assert.notEqual(r7.snap.verdict, 'READY');
+
+  // 8. CINDY_PR_STATE_DIR env var enables ETag 304 without passing --state-dir on CLI,
+  //    and omitting both writes no cache files.
+  const envStateDir = path.join(dir, 'env-state');
+  fs.writeFileSync(cfgFile, JSON.stringify(baseCfg));
+  const envRun = (useEnv) => {
+    fs.writeFileSync(logFile, '');
+    const env = { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, GH_LOG: logFile, CFG_FILE: cfgFile };
+    if (useEnv) env.CINDY_PR_STATE_DIR = envStateDir;
+    else delete env.CINDY_PR_STATE_DIR;
+    const res = spawnSync(process.execPath, [script, 'https://github.com/acme/game/pull/54'], { encoding: 'utf8', env });
+    assert.equal(res.status, 0, res.stderr);
+    return fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  };
+  assert.equal(envRun(false).find(c => c.kind === 'pull').status, 200);
+  assert.equal(fs.existsSync(envStateDir), false);
+  assert.equal(envRun(true).find(c => c.kind === 'pull').status, 200);
+  const envSecond = envRun(true);
+  assert.equal(envSecond.find(c => c.kind === 'pull').status, 304);
+  assert.equal(envSecond.find(c => c.kind === 'rules').status, 304);
+
+  // 9. Branch-rules cache refreshes updatedAt on 304 hits so hot entries survive >20-entry eviction.
+  const seededEntries = {
+    'alice:main': { etag: 'W/"rules-v2"', rules: [], updatedAt: 1000 },
+  };
+  for (let i = 1; i <= 19; i++) {
+    seededEntries[`cold-${String(i).padStart(2, '0')}:main`] = {
+      etag: `W/"cold-${i}"`,
+      rules: [],
+      updatedAt: 1000 + i * 1000,
+    };
+  }
+  fs.writeFileSync(rulesCachePath, JSON.stringify({ schema: 2, entries: seededEntries }));
+  // Hot entry `alice:main` hits 304 (even with unchanged ETag) -> refreshes updatedAt above cold entries.
+  const hotHit = runSnap(54, { ...baseCfg, headSha: 'head-2', pullEtag: 'W/"pull-v2"', rulesEtag: 'W/"rules-v2"', rules: [] });
+  assert.equal(hotHit.calls.find(c => c.kind === 'rules').status, 304);
+  // Adding a 21st entry (`newbie:main`) triggers eviction down to 20 entries.
+  const twentyFirst = runSnap(54, { ...baseCfg, viewer: 'newbie', headSha: 'head-2', pullEtag: 'W/"pull-v2"', rulesEtag: 'W/"rules-newbie"', rules: [] });
+  assert.equal(twentyFirst.calls.find(c => c.kind === 'rules').status, 200);
+  const afterEvict = JSON.parse(fs.readFileSync(rulesCachePath, 'utf8'));
+  assert.equal(Object.keys(afterEvict.entries).length, 20);
+  assert.ok(afterEvict.entries['alice:main'], 'frequently reused entry must survive >20-entry eviction');
+  assert.ok(afterEvict.entries['alice:main'].updatedAt > 20000, '304 hit must refresh updatedAt');
+  assert.ok(afterEvict.entries['newbie:main'], 'newly added entry must be retained');
+  assert.equal(afterEvict.entries['cold-01:main'], undefined, 'oldest unused entry should be evicted');
+  // Confirm alice:main still gets 304 immediately after eviction.
+  const afterEvictHit = runSnap(54, { ...baseCfg, headSha: 'head-2', pullEtag: 'W/"pull-v2"', rulesEtag: 'W/"rules-v2"', rules: [] });
+  assert.equal(afterEvictHit.calls.find(c => c.kind === 'rules').status, 304);
+});
+
 test('full snapshot emits the same probe fingerprint as --probe when check counts agree, and omits probe on skew', (t) => {
   const run = fixture(t);
   const twoGreen = [
