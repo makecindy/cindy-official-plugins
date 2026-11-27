@@ -102,7 +102,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.47');
+  assert.equal(manifest.version, '1.5.49');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -645,6 +645,10 @@ test('settings.html ships no hardcoded copy before the host locale is known', ()
 // card HTML on desktop and projects only its text plus aria-label buttons on the phone,
 // so the visible text and the actions handed to the task's agent are the contract.
 const zhCopy = createRuntime().context.MESSAGES['zh-CN'];
+const followWorkflow = {
+  skill: 'pr', entry: 'skills/pr/SKILL.md', checker: 'skills/pr/scripts/pr-heartbeat-gate.mjs',
+  read: zhCopy.prFollowWorkflowRead, on_manual_failure: zhCopy.prFollowWorkflowFallback,
+};
 const fill = (text, vars) => text.replace(/\{(\w+)\}/g, (match, name) => (name in vars ? String(vars[name]) : match));
 
 function visibleText(html) {
@@ -771,6 +775,7 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
   assert.equal(cardId, ask.callId);
   assert.deepEqual(ask.reply.result, {
     card_id: cardId, stage: 'ask', settings: { auto_rename: false, auto_follow: false }, next: zhCopy.prNextAsk,
+    follow_workflow: followWorkflow,
   });
   const askCard = runtime.lastCard(cardId);
   assert.equal(askCard.state, 'done');
@@ -789,6 +794,7 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
     event: {
       card_id: cardId, action: 'publish', repo: 'octo/repo', head: 'feat/pr-card', base: 'main',
       settings: { auto_rename: false, auto_follow: false },
+      follow_workflow: followWorkflow,
     },
   }]);
   assert.deepEqual(visibleText(runtime.lastCard(cardId).html), [
@@ -1339,6 +1345,7 @@ test('card settings pick the auto-follow model with the host picker and hand its
 
   await runtime.tool({ card_id: cardId, pr: '7' });
   await runtime.click(cardId, 'pr:follow');
+  assert.deepEqual(runtime.agentRuns.at(-1).event.follow_workflow, followWorkflow);
   assert.deepEqual(runtime.agentRuns.at(-1).event.follow_model, {
     model_agent_kind: 'claude-code', provider_id: 'anthropic', model: 'claude-sonnet-5-5', effort: 'medium', fast_mode: false, label: 'Sonnet 5.5 · Anthropic',
   });
@@ -1697,6 +1704,15 @@ test('IM follow settings share card preferences and selected remote model withou
   const runtime = createPrRuntime({ kv: { unrelated: 'keep', prCard: { autoRename: true, autoFollow: true, followModel: model } }, github: prGraphql() });
   const read = await runtime.tool({}, 'pr_follow_settings');
   assert.equal(read.reply.ok, true);
+  assert.deepEqual(read.reply.result.follow_workflow, followWorkflow);
+  // Recover from a missing Manual using files actually shipped with this plugin,
+  // without depending on an assumed checkout or install-directory layout.
+  for (const entry of [followWorkflow.entry, followWorkflow.checker]) {
+    assert.ok(readFileSync(new URL(`../cindy-github/${entry}`, import.meta.url), 'utf8').length > 0);
+  }
+  assert.match(followWorkflow.read, /同一 namespace/);
+  assert.match(followWorkflow.on_manual_failure, /ghost_manual.*未声明手册/);
+  assert.match(followWorkflow.on_manual_failure, /不要另写、复制或内联/);
   assert.deepEqual(read.reply.result.settings, {
     auto_rename: true, auto_follow: true,
     follow_model: { model_agent_kind: 'claude-code', provider_id: 'example-provider', model: 'example-model', effort: 'high', fast_mode: false, agent_device_id: 'example-device', label: 'Example' },
@@ -4731,4 +4747,17 @@ test('every saved follow claim is timed, including the hand-off after marking a 
   // Reporting following clears the clock from the record.
   await runtime.tool({ card_id: cardId, following: true });
   assert.equal(savedCard(runtime, cardId).claimedAt, undefined);
+});
+
+test('pr Skill allows simulator/sanitized screenshots directly while gating real data and waiting for answers', () => {
+  const skill = readFileSync(new URL('../cindy-github/skills/pr/SKILL.md', import.meta.url), 'utf8');
+  const publish = readFileSync(new URL('../cindy-github/skills/pr/references/publish.md', import.meta.url), 'utf8');
+  assert.doesNotMatch(skill, /or attaches screenshots\./);
+  assert.doesNotMatch(publish, /useful, approved visuals above/);
+  assert.match(skill, /simulator\/emulator, mock, fixture, or redacted\/sanitized data[\s\S]{0,120}need no separate confirmation/);
+  assert.match(skill, /real or unredacted user, account, machine, or private\/sensitive data/);
+  assert.match(skill, /wait for the user's answer before pushing, opening or updating the PR, or posting the reply/);
+  assert.match(publish, /simulator\/emulator, mock, fixture, or redacted\/sanitized data[\s\S]{0,160}may be attached directly without asking first/);
+  assert.match(publish, /real or unredacted user, account, machine, or private\/sensitive data/);
+  assert.match(publish, /never push, open\/update the PR, or post while waiting for the answer/);
 });

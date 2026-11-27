@@ -173,10 +173,25 @@ describe('cindy-antigravity-acp account-errors', () => {
     relay.request({ jsonrpc: '2.0', id: 12, method: 'session/prompt', params: { sessionId: 's1', prompt: [] } });
     assert.deepEqual(relay.notification(warnMsg), { hold: true });
     const cancelled = { jsonrpc: '2.0', id: 12, result: { stopReason: 'cancelled' } };
-    assert.equal(relay.response(cancelled), cancelled);
+    const flushed = [];
+    assert.equal(relay.response(cancelled, message => flushed.push(message)), cancelled);
+    assert.deepEqual(flushed, [warnMsg]);
+
+    // Interleaved prompts share a sessionId on update frames. A pending quotation cannot
+    // turn either request into a quota failure when its origin is ambiguous.
+    const start = id => relay.request({ id, method: 'session/prompt', params: { sessionId: 's1' } });
+    start(13);
+    assert.deepEqual(relay.notification(warnMsg), { hold: true });
+    start(14);
+    const original = { id: 13, result: { stopReason: 'end_turn' } };
+    assert.equal(relay.response(original, message => flushed.push(message)), original);
+    assert.deepEqual(flushed, [warnMsg, warnMsg]);
+    assert.equal(relay.notification(warnMsg), null);
+    const overlapping = { id: 14, result: { stopReason: 'end_turn' } };
+    assert.equal(relay.response(overlapping), overlapping);
   });
 
-  test('agy-acp end-to-end converts agy warning chunk + end_turn into classified usage-limit error in local and remote modes', async (t) => {
+  test('local and remote bridges preserve quoted warnings and classify native quota failures', async (t) => {
     const fakeAgy = `'use strict';
 const readline = require('node:readline');
 if (process.argv.includes('--version')) { console.log('1.5.18'); process.exit(0); }
@@ -189,9 +204,17 @@ rl.on('line', (line) => {
   } else if (msg.method === 'session/new') {
     send({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'sess-1' } });
   } else if (msg.method === 'session/prompt') {
+    const scenario = msg.params.prompt[0].text;
+    if (scenario === 'quote' || scenario === 'explicit') {
+      send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'The CLI displayed this message:' } } } });
+    }
     send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\\n⚠ ${QUOTA_MSG}\\n' } } } });
     send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'usage_update', used: 200, size: 100000 } } });
-    send({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } });
+    if (scenario === 'explicit') {
+      send({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: 'Quota exhausted', data: { reason: 'QUOTA_EXHAUSTED' } } });
+    } else {
+      send({ jsonrpc: '2.0', id: msg.id, result: { stopReason: scenario === 'cancel' ? 'cancelled' : 'end_turn' } });
+    }
   }
 });
 `;
@@ -212,12 +235,38 @@ rl.on('line', (line) => {
         },
       });
       await waitFor(() => bridge.lines.find((m) => m.id === 2), 5_000, 'session/new');
-      bridge.send({ jsonrpc: '2.0', id: 3, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'hi' }] } });
-      const resp = await waitFor(() => bridge.lines.find((m) => m.id === 3), 5_000, 'prompt response');
-      assert.equal(resp.error?.message, QUOTA_MSG);
-      assert.equal(resp.error?.data?._meta?.cindy?.kind, 'usage-limit');
-      assert.equal(typeof resp.error?.data?._meta?.cindy?.resetsAt, 'number');
-      assert.equal(bridge.lines.some((m) => m.params?.update?.content?.text?.includes('⚠')), false);
+      const quotaWarning = `\n⚠ ${QUOTA_MSG}\n`;
+      let id = 2;
+      async function prompt(text) {
+        const offset = bridge.lines.length;
+        const requestId = ++id;
+        bridge.send({ jsonrpc: '2.0', id: requestId, method: 'session/prompt', params: {
+          sessionId: 'sess-1', prompt: [{ type: 'text', text }],
+        } });
+        const response = await waitFor(() => bridge.lines.find(m => m.id === requestId), 5_000, 'prompt response');
+        const slice = bridge.lines.slice(offset, bridge.lines.indexOf(response) + 1);
+        return { response, text: slice.filter(m => m.params?.update?.sessionUpdate === 'agent_message_chunk')
+          .map(m => m.params.update.content.text) };
+      }
+
+      // #411: the final chunk of an ordinary answer may reproduce the exact CLI warning.
+      const quoted = await prompt('quote');
+      assert.deepEqual(quoted.text, ['The CLI displayed this message:', quotaWarning]);
+      assert.deepEqual(quoted.response.result, { stopReason: 'end_turn' });
+
+      const quota = await prompt('quota');
+      assert.deepEqual(quota.text, []);
+      assert.equal(quota.response.error?.message, QUOTA_MSG);
+      assert.equal(quota.response.error?.data?._meta?.cindy?.kind, 'usage-limit');
+      assert.equal(typeof quota.response.error?.data?._meta?.cindy?.resetsAt, 'number');
+
+      const failed = await prompt('explicit');
+      assert.equal(failed.response.error?.data?._meta?.cindy?.kind, 'usage-limit');
+      assert.deepEqual(failed.text, quoted.text);
+
+      const cancelled = await prompt('cancel');
+      assert.deepEqual(cancelled.text, [quotaWarning]);
+      assert.deepEqual(cancelled.response.result, { stopReason: 'cancelled' });
 
       bridge.child.stdin.end();
       await bridge.closed;
