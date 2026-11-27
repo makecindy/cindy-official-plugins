@@ -78,7 +78,7 @@ function extractHash(s) {
 
 /** HTTP 状态 → 人话(401 到这里 = 该实例的 token 没填或已失效)。 */
 function classifyStatus(status, bodySnippet) {
-  if (status === 401) return 'GitLab token 未配置或已失效,请用户到主界面侧边栏「插件」→「GitLab」详情页重新填写该实例的 token(并确认实例地址无误)';
+  if (status === 401) return 'GitLab token 未配置或已失效,请到主界面侧边栏「插件」→「GitLab」详情页重新填写该实例的 token,或在本机运行 glab auth login 重新登录';
   if (status === 403) return '没有权限(HTTP 403,token scope 不够或无该项目权限):' + bodySnippet;
   if (status === 404) return '对象不存在或无访问权(HTTP 404;project_path 是否拼对?)';
   if (status === 409) return 'GitLab 资源冲突(HTTP 409):' + bodySnippet;
@@ -109,7 +109,7 @@ async function resolveInstance(a) {
   }
   var conns = (slot && Array.isArray(slot.connections)) ? slot.connections : [];
   if (!conns.length) {
-    return { err: '尚未添加任何 GitLab 实例——请用户到主界面侧边栏「插件」→「GitLab」详情页添加实例地址与 Personal Access Token' };
+    return { err: '尚未连接任何 GitLab 实例——请用户到主界面侧边栏「插件」→「GitLab」详情页添加实例地址与 Personal Access Token,或在本机用 glab auth login 登录' };
   }
   var hosts = conns.map(function (cn) { return cn.host; });
   if (a && a.instance) {
@@ -3907,6 +3907,788 @@ bc.onmessage = function (ev) {
   })();
 };
 
+/* ── 自动化事件(routineEvents) ─────────────────────────────────────────
+ *
+ * GitLab 没有推送给本机的通道,这里按自动化的订阅轮询。订阅(只有事件类型与
+ * 「只看」条件)启动时向宿主取一次(routine-request subscriptions),之后用户改
+ * 自动化时宿主主动推送(routine-subscriptions),插件不再反复询问;没有订阅时
+ * 不轮询。只去盯被选中的对象——
+ * - 条件里有 project + iid:只读这一个 MR / Issue(含流水线状态);
+ * - 只有 project:先读一次项目动态,有新动态才读有更新的 MR / Issue 和流水线;
+ *   动态不记录的改动(改标题、标签,重跑流水线等)每 5 分钟完整核对一次补上;
+ * - 都没有:读与连接账号相关的 MR / Issue(我创建的、指派给我的、请我审阅的)。
+ * 第一次看到的对象只记基线不发事件;之后按状态变化、新提交、新评论等发布事件。
+ * 匹配和要不要处理仍由宿主与自动化决定,这里不替用户丢弃(包括自己发的评论,
+ * 用 fromSelf 标出)。电脑休眠或插件停止期间的变化不补发。
+ * 旧宿主不认识 subscriptions 时整段不运行。
+ */
+
+var EVENTS_POLL_MS = 60 * 1000;
+/** 整个项目:每隔几个周期不看项目动态、完整核对一次。 */
+var EVENTS_SWEEP_EVERY = 5;
+/** 还没出结果的流水线状态:有这样的流水线时每个周期都看流水线。 */
+var EVENTS_PIPELINE_ACTIVE = { created: 1, waiting_for_resource: 1, preparing: 1, pending: 1, running: 1 };
+/** 每个周期最多发布多少条(宿主单插件 60 次/分钟),剩下的留到下个周期。 */
+var EVENTS_PUBLISH_PER_CYCLE = 40;
+var EVENTS_MAX_TARGETS = 50;
+var EVENTS_MAX_CHANGED_PER_TARGET = 20;
+var EVENTS_SNAPSHOT_LIMIT = 5000;
+/** 流水线只在出结果时发事件(排队、运行中不发,避免一次流水线叫醒多轮)。 */
+var EVENTS_PIPELINE_DONE = { success: 1, failed: 1, canceled: 1, skipped: 1 };
+var EVENTS_PIPELINE_LOOKUPS = 10;
+var EVENTS_LIST_PER_PAGE = 50;
+var EVENTS_NOTES_PER_PAGE = 100;
+var EVENTS_MAX_PAGES = 20;
+var EVENTS_MAX_NOTE_PAGES = 1000;
+var EVENTS_PENDING_LIMIT = 500;
+
+var eventsState = {
+  stopped: false, timer: null, running: false, status: null,
+  snapshots: {}, cursors: {}, pending: [], users: {},
+  subscriptions: null, wake: false, cycle: 0,
+  activity: {}, pipelinesActive: {}, rechecked: {}, targetBacklog: {},
+};
+
+function eventsTimeMs(iso) {
+  var t = iso ? Date.parse(iso) : NaN;
+  return isFinite(t) ? t : 0;
+}
+
+function eventsTextHash(text) {
+  var s = typeof text === 'string' ? text : '';
+  var h = 0;
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return s.length + ':' + h;
+}
+
+function eventsGetSnap(cursorKey, itemId) {
+  var map = eventsState.snapshots[cursorKey];
+  return map ? (map.get(String(itemId)) || null) : null;
+}
+
+function eventsRemember(cursorKey, itemId, snap, protectFromMs) {
+  var map = eventsState.snapshots[cursorKey];
+  if (!map) { map = new Map(); eventsState.snapshots[cursorKey] = map; }
+  var id = String(itemId);
+  if (map.has(id)) map.delete(id);
+  map.set(id, snap);
+  if (map.size > EVENTS_SNAPSHOT_LIMIT) {
+    var floor = typeof protectFromMs === 'number' ? protectFromMs : 0;
+    for (var it = map.entries(), st = it.next(); !st.done && map.size > EVENTS_SNAPSHOT_LIMIT; st = it.next()) {
+      var v = st.value[1];
+      if (v && (v.notesIncomplete || v.pending || eventsTimeMs(v.updatedAt) >= floor)) continue;
+      map.delete(st.value[0]);
+    }
+  }
+}
+
+/** 订阅 → 要盯的对象。只认 equals 条件里的 host / project / iid / kind。 */
+function eventsTargetsFrom(subscriptions) {
+  var byKey = {};
+  var list = [];
+  for (var i = 0; i < subscriptions.length; i++) {
+    var sub = subscriptions[i] || {};
+    var eq = {};
+    var filters = Array.isArray(sub.filters) ? sub.filters : [];
+    for (var j = 0; j < filters.length; j++) {
+      var f = filters[j];
+      if (f && f.operator === 'equals' && (f.field === 'host' || f.field === 'project' || f.field === 'iid' || f.field === 'kind')) {
+        eq[f.field] = String(f.value).trim().toLowerCase();
+      }
+    }
+    var events = Array.isArray(sub.events) ? sub.events : [];
+    var pipelines = Boolean(eq.project) && (!events.length || events.indexOf('merge_request.pipeline') >= 0);
+    var kinds = {};
+    if (eq.kind === 'mr' || eq.kind === 'issue') kinds[eq.kind] = true;
+    else if (events.length) {
+      for (var k = 0; k < events.length; k++) {
+        var ev = String(events[k]);
+        if (ev === 'merge_request.pipeline' && !eq.project) continue;
+        if (ev.indexOf('merge_request.') === 0) kinds.mr = true;
+        else if (ev.indexOf('issue.') === 0) kinds.issue = true;
+      }
+    } else { kinds.mr = true; kinds.issue = true; }
+    if (!kinds.mr && !kinds.issue) continue;
+    var iid = eq.project && /^[1-9][0-9]{0,9}$/.test(eq.iid || '') ? eq.iid : '';
+    var key = (eq.host || '*') + '|' + (eq.project || '@me') + '|' + iid;
+    var target = byKey[key];
+    if (!target) {
+      if (list.length >= EVENTS_MAX_TARGETS) continue;
+      target = { key: key, host: eq.host || '', project: eq.project || '', iid: iid, kinds: {}, pipelines: false };
+      byKey[key] = target;
+      list.push(target);
+    }
+    if (kinds.mr) target.kinds.mr = true;
+    if (kinds.issue) target.kinds.issue = true;
+    if (kinds.mr && pipelines && target.project) target.pipelines = true;
+  }
+  return list;
+}
+
+async function eventsConnections() {
+  var list = await (await fetch('/connections')).json();
+  for (var i = 0; Array.isArray(list) && i < list.length; i++) {
+    if (list[i] && list[i].key === CONNECTION_KEY && Array.isArray(list[i].connections)) return list[i].connections;
+  }
+  return [];
+}
+
+function eventsConnectionsFor(target, conns) {
+  if (target.host) return conns.filter(function (c) { return c.host === target.host; });
+  if (!target.project) return conns;
+  for (var i = 0; i < conns.length; i++) if (conns[i].isDefault) return [conns[i]];
+  return conns.length === 1 ? [conns[0]] : [];
+}
+
+async function eventsMe(conn) {
+  if (eventsState.users[conn.id]) return eventsState.users[conn.id];
+  var r = await api({ url: 'https://' + conn.host + '/api/v4/user' });
+  if (r.err) { if (/HTTP 40[134]/.test(r.err)) return null; throw new Error(r.err); }
+  if (!r.data || !r.data.username) return null;
+  eventsState.users[conn.id] = { id: r.data.id, username: String(r.data.username) };
+  return eventsState.users[conn.id];
+}
+
+function eventsPendingHas(id) {
+  for (var i = 0; i < eventsState.pending.length; i++) if (eventsState.pending[i].id === id) return true;
+  return false;
+}
+
+function eventsTryQueue(event) {
+  if (eventsPendingHas(event.id)) return true;
+  if (eventsState.pending.length >= EVENTS_PENDING_LIMIT) return false;
+  eventsState.pending.push(event);
+  return true;
+}
+
+function eventsCanQueueAll(events) {
+  var needed = 0;
+  var seen = {};
+  for (var i = 0; i < events.length; i++) {
+    var id = events[i].id;
+    if (!seen[id] && !eventsPendingHas(id)) { seen[id] = 1; needed++; }
+  }
+  return eventsState.pending.length + needed <= EVENTS_PENDING_LIMIT;
+}
+
+function eventsBase(conn, kind, item, me) {
+  var project = String((item.references && item.references.full ? item.references.full.replace(/[!#][0-9]+$/, '') : '') ||
+    (item.web_url ? item.web_url.replace(/^https?:\/\/[^/]+\//, '').replace(/\/-\/.*$/, '') : '')).toLowerCase();
+  var data = { host: conn.host, project: project, iid: Number(item.iid), kind: kind, state: String(item.state || ''), url: String(item.web_url || '') };
+  if (item.author && item.author.username) {
+    data.author = String(item.author.username);
+    if (me) data.authorIsSelf = data.author === me.username;
+  }
+  if (Array.isArray(item.labels) && item.labels.length) data.labels = item.labels.join(',').slice(0, 500);
+  if (kind === 'mr') {
+    if (item.source_branch) data.sourceBranch = String(item.source_branch);
+    if (item.target_branch) data.targetBranch = String(item.target_branch);
+    if (item.sha) data.sha = String(item.sha);
+    data.draft = Boolean(item.draft || item.work_in_progress);
+  }
+  return data;
+}
+
+function eventsRef(data) { return data.project + (data.kind === 'mr' ? '!' : '#') + data.iid; }
+
+function eventsBuildEvent(type, idSuffix, verb, item, data, extra, occurredAt) {
+  var payload = Object.assign({}, data, extra || {});
+  var title = String(item.title || '').slice(0, 120);
+  return {
+    id: data.host + '/' + eventsRef(data) + ':' + idSuffix,
+    type: (data.kind === 'mr' ? 'merge_request.' : 'issue.') + type,
+    occurredAt: occurredAt || Date.now(),
+    subject: (eventsRef(data) + ' ' + verb + (title ? ':' + title : '')).slice(0, 200),
+    data: payload,
+  };
+}
+
+function eventsItemUnchanged(prev, item) {
+  if (!prev || prev.notesIncomplete || prev.updatedAt !== String(item.updated_at || '')) return false;
+  if (item.head_pipeline && prev.pipeline !== String(item.head_pipeline.id) + ':' + String(item.head_pipeline.status)) return false;
+  return true;
+}
+
+function eventsNoteWatermark(prev, baselineAt) {
+  if (!prev) return { at: baselineAt, ids: null };
+  if (typeof prev.noteAt === 'number') return { at: prev.noteAt, ids: Array.isArray(prev.noteIds) ? prev.noteIds : null };
+  return { at: eventsTimeMs(prev.updatedAt), ids: null };
+}
+
+function eventsGetCursor(cursorKey, cycleStart) {
+  if (!Object.prototype.hasOwnProperty.call(eventsState.cursors, cursorKey)) {
+    return { firstRun: true, baselineAt: cycleStart, resumeAt: cycleStart, pages: null, verify: false };
+  }
+  var cur = eventsState.cursors[cursorKey];
+  if (typeof cur === 'number') return { firstRun: false, baselineAt: cur, resumeAt: cur, pages: null, verify: false };
+  return { firstRun: false, baselineAt: cur.baselineAt, resumeAt: cur.resumeAt, pages: cur.pages || null, verify: Boolean(cur.verify) };
+}
+
+function eventsSetCursor(cursorKey, baselineAt, resumeAt, pages, verify) {
+  eventsState.cursors[cursorKey] = { baselineAt: baselineAt, resumeAt: resumeAt, pages: pages || null, verify: Boolean(verify) };
+}
+
+function eventsPeopleKey(list, single, ids) {
+  var arr = Array.isArray(list) ? list : (single ? [single] : []);
+  var out = [];
+  for (var i = 0; i < arr.length; i++) if (arr[i]) out.push(String(arr[i].username || arr[i].id || arr[i]));
+  if (!out.length && Array.isArray(ids)) for (var j = 0; j < ids.length; j++) out.push(String(ids[j]));
+  return out.sort().join(',');
+}
+
+var EVENTS_DIFF_FIELDS = [
+  ['sha', 'commits'], ['title', 'title'], ['desc', 'description'], ['labels', 'labels'],
+  ['draft', 'draft'], ['targetBranch', 'targetBranch'], ['assignees', 'assignees'],
+  ['reviewers', 'reviewers'], ['milestone', 'milestone'], ['flags', 'options'],
+];
+
+/** 一个对象的变化 → 待入队事件(不含评论)。prev 为空时结合 baselineAt 与系统记录还原基线后的首次更新。 */
+function eventsDiff(conn, kind, item, me, prev, baselineAt, notesInfo) {
+  var data = eventsBase(conn, kind, item, me);
+  var updatedAt = eventsTimeMs(item.updated_at);
+  var snap = {
+    state: data.state,
+    updatedAt: String(item.updated_at || ''),
+    sha: data.sha || '',
+    title: String(item.title || ''),
+    desc: eventsTextHash(item.description),
+    labels: Array.isArray(item.labels) ? item.labels.slice().sort().join(',') : '',
+    draft: Boolean(data.draft),
+    targetBranch: data.targetBranch || '',
+    assignees: eventsPeopleKey(item.assignees, item.assignee, item.assignee_ids),
+    reviewers: kind === 'mr' ? eventsPeopleKey(item.reviewers, null, item.reviewer_ids) : '',
+    milestone: item.milestone ? String(item.milestone.id || item.milestone.iid || item.milestone.title || '') : String(item.milestone_id || ''),
+    flags: [item.squash, item.discussion_locked, item.force_remove_source_branch, item.confidential, item.due_date]
+      .map(function (v) { return v === undefined || v === null ? '' : String(v); }).join('|'),
+    notes: Number(item.user_notes_count) || 0,
+    pipeline: item.head_pipeline ? String(item.head_pipeline.id) + ':' + String(item.head_pipeline.status) : (prev ? prev.pipeline : ''),
+    noteAt: prev && typeof prev.noteAt === 'number' ? prev.noteAt : updatedAt,
+    noteIds: prev && Array.isArray(prev.noteIds) ? prev.noteIds.slice() : null,
+    notesIncomplete: false,
+  };
+  var staged = [];
+  var emit = function (type, idSuffix, verb, extra, occurredAt) {
+    staged.push(eventsBuildEvent(type, idSuffix, verb, item, data, extra, occurredAt));
+  };
+  var actor = function (who) {
+    var extra = {};
+    if (who && who.username) { extra.actor = String(who.username); if (me) extra.fromSelf = extra.actor === me.username; }
+    return extra;
+  };
+  if (!prev) {
+    var opened = eventsTimeMs(item.created_at) >= baselineAt;
+    if (opened) emit('opened', 'opened', '新建', actor(item.author), eventsTimeMs(item.created_at));
+    var stateHandled = false;
+    if (data.state === 'merged' && eventsTimeMs(item.merged_at) >= baselineAt) {
+      emit('merged', 'merged', '已合并', actor(item.merged_by || item.merge_user), eventsTimeMs(item.merged_at));
+      stateHandled = true;
+    } else if (data.state === 'closed' && eventsTimeMs(item.closed_at) >= baselineAt) {
+      emit('closed', 'closed:' + item.closed_at, '已关闭', actor(item.closed_by), eventsTimeMs(item.closed_at));
+      stateHandled = true;
+    } else if (!opened && data.state === 'opened' && notesInfo && notesInfo.reopenedAt >= baselineAt) {
+      emit('reopened', 'reopened:' + item.updated_at, '重新打开', {}, notesInfo.reopenedAt);
+      stateHandled = true;
+    }
+    if (!opened && !stateHandled && updatedAt >= baselineAt) {
+      var pipeFinished = kind === 'mr' && item.head_pipeline && EVENTS_PIPELINE_DONE[String(item.head_pipeline.status)] &&
+        eventsTimeMs(item.head_pipeline.updated_at || item.head_pipeline.finished_at || '') >= baselineAt;
+      if (pipeFinished) {
+        emit('pipeline', 'pipeline:' + snap.pipeline, '流水线' + String(item.head_pipeline.status), { pipelineId: Number(item.head_pipeline.id), pipelineStatus: String(item.head_pipeline.status) }, updatedAt);
+      }
+      if (!notesInfo || notesInfo.actionableCount === 0 || notesInfo.hasSystemChange) {
+        emit('updated', 'updated:' + item.updated_at, '有更新', {}, updatedAt);
+      }
+    }
+    return { snap: snap, events: staged };
+  }
+  if (prev.state !== data.state) {
+    if (data.state === 'merged') emit('merged', 'merged', '已合并', actor(item.merged_by || item.merge_user), eventsTimeMs(item.merged_at) || updatedAt);
+    else if (data.state === 'closed') emit('closed', 'closed:' + (item.closed_at || item.updated_at), '已关闭', actor(item.closed_by), eventsTimeMs(item.closed_at) || updatedAt);
+    else if (data.state === 'opened' && prev.state === 'closed') emit('reopened', 'reopened:' + item.updated_at, '重新打开', {}, updatedAt);
+  } else {
+    var changes = [];
+    for (var df = 0; df < EVENTS_DIFF_FIELDS.length; df++) {
+      if (prev[EVENTS_DIFF_FIELDS[df][0]] !== snap[EVENTS_DIFF_FIELDS[df][0]]) changes.push(EVENTS_DIFF_FIELDS[df][1]);
+    }
+    if (changes.length || (prev.updatedAt !== snap.updatedAt && notesInfo && notesInfo.hasSystemChange)) {
+      emit('updated', 'updated:' + item.updated_at, prev.sha !== snap.sha ? '有新提交' : '有更新', changes.length ? { changes: changes.join(',') } : {}, updatedAt);
+    }
+  }
+  if (kind === 'mr' && snap.pipeline && snap.pipeline !== prev.pipeline && item.head_pipeline && EVENTS_PIPELINE_DONE[String(item.head_pipeline.status)]) {
+    emit('pipeline', 'pipeline:' + snap.pipeline, '流水线' + String(item.head_pipeline.status), { pipelineId: Number(item.head_pipeline.id), pipelineStatus: String(item.head_pipeline.status) }, updatedAt);
+  }
+  return { snap: snap, events: staged };
+}
+
+/** 持续翻页读取 watermark 之后的全部评论记录(绝不中途静默截断);请求或分页异常直接抛出以保留重试位点。 */
+async function eventsNotes(conn, kind, item, me, watermark) {
+  var data = eventsBase(conn, kind, item, me);
+  var seg = kind === 'mr' ? 'merge_requests' : 'issues';
+  var collected = [];
+  var reopenedAt = 0;
+  var hasSystemChange = false;
+  var prevTailKey = '';
+  for (var page = 1; page <= EVENTS_MAX_NOTE_PAGES; page++) {
+    var notesUrl = 'https://' + conn.host + '/api/v4/projects/' + encodeURIComponent(item.project_id) + '/' + seg + '/' + item.iid + '/notes';
+    var r = await api({ url: notesUrl + qs({ sort: 'desc', order_by: 'created_at', per_page: EVENTS_NOTES_PER_PAGE, page: page }) });
+    if (r.err || !Array.isArray(r.data)) throw new Error(r.err || '读取评论失败');
+    if (!r.data.length) break;
+    var tail = r.data[r.data.length - 1];
+    var tailKey = tail ? String(tail.id) + ':' + String(tail.created_at) : '';
+    if (page > 1 && tailKey && tailKey === prevTailKey) break;
+    prevTailKey = tailKey;
+    var reachedWatermark = false;
+    for (var i = 0; i < r.data.length; i++) {
+      var raw = r.data[i];
+      if (!raw) continue;
+      var rawAt = eventsTimeMs(raw.created_at);
+      var rawId = Number(raw.id) || 0;
+      if (rawAt < watermark.at || (watermark.ids === null && rawAt <= watermark.at)) { reachedWatermark = true; break; }
+      if (rawAt === watermark.at && watermark.ids && watermark.ids.indexOf(rawId) >= 0) continue;
+      collected.push({ note: raw, at: rawAt, id: rawId });
+    }
+    if (reachedWatermark || r.data.length < EVENTS_NOTES_PER_PAGE) break;
+    if (page === EVENTS_MAX_NOTE_PAGES) throw new Error('评论分页超出单轮上限');
+  }
+  var entries = [];
+  var actionableCount = 0;
+  var mkNote = function (id, type, at, subject, extra) {
+    return { id: conn.host + ':note:' + id, type: type, occurredAt: at, subject: subject.slice(0, 200), data: Object.assign({}, data, extra) };
+  };
+  for (var j = collected.length - 1; j >= 0; j--) {
+    var note = collected[j].note;
+    var at = collected[j].at;
+    var id = collected[j].id;
+    var author = note.author && note.author.username ? String(note.author.username) : '';
+    var extra = { noteId: id, actor: author };
+    if (me) extra.fromSelf = author === me.username;
+    if (note.system) {
+      var sysBody = String(note.body || '');
+      if (kind === 'mr' && /^approved this merge request/i.test(sysBody)) {
+        actionableCount++;
+        entries.push({ at: at, id: id, event: mkNote(note.id, 'merge_request.approved', at, eventsRef(data) + ' 已批准(' + author + ')', extra) });
+      } else {
+        if (/^reopened\b/i.test(sysBody) && (!reopenedAt || at > reopenedAt)) reopenedAt = at;
+        else if (!/^(reopened|closed|merged|mentioned in)\b/i.test(sysBody)) hasSystemChange = true;
+        entries.push({ at: at, id: id, event: null });
+      }
+    } else {
+      actionableCount++;
+      extra.body = String(note.body || '').slice(0, 1000);
+      var prefix = (kind === 'mr' ? 'merge_request.' : 'issue.') + 'comment';
+      entries.push({ at: at, id: id, event: mkNote(note.id, prefix, at, eventsRef(data) + ' 新评论(' + author + '):' + String(note.body || '').replace(/\s+/g, ' '), extra) });
+    }
+  }
+  return { entries: entries, actionableCount: actionableCount, reopenedAt: reopenedAt, hasSystemChange: hasSystemChange };
+}
+
+/** 处理单个对象:返回 true 表示全部事件已入队并提交完整快照,返回 false 表示待发队列已满、保留续读位点。 */
+async function eventsHandle(conn, kind, item, me, baselineAt, cursorKey, protectFromMs) {
+  var prev = eventsGetSnap(cursorKey, item.id);
+  if (eventsItemUnchanged(prev, item)) return true;
+  var resumingNotesOnly = Boolean(prev && prev.notesIncomplete && prev.updatedAt === String(item.updated_at || '') &&
+    !(item.head_pipeline && prev.pipeline !== String(item.head_pipeline.id) + ':' + String(item.head_pipeline.status)));
+  var shouldReadNotes = !prev ? eventsTimeMs(item.updated_at) >= baselineAt : (Boolean(prev.notesIncomplete) || prev.updatedAt !== String(item.updated_at || ''));
+  var watermark = eventsNoteWatermark(prev, baselineAt);
+  var notesInfo = shouldReadNotes ? await eventsNotes(conn, kind, item, me, watermark) : null;
+  var diff = resumingNotesOnly ? { snap: Object.assign({}, prev, { notesIncomplete: false }), events: [] } : eventsDiff(conn, kind, item, me, prev, baselineAt, notesInfo);
+  if (!eventsCanQueueAll(diff.events)) return false;
+  for (var i = 0; i < diff.events.length; i++) eventsTryQueue(diff.events[i]);
+
+  var noteAt = watermark.at;
+  var noteIds = watermark.ids ? watermark.ids.slice() : null;
+  var notesIncomplete = false;
+  for (var j = 0; notesInfo && j < notesInfo.entries.length; j++) {
+    var entry = notesInfo.entries[j];
+    if (entry.event && !eventsTryQueue(entry.event)) { notesIncomplete = true; break; }
+    // 同一毫秒内保留全部已处理评论 ID(无截断);一旦推进到更新的时间戳即自然重置为单元素数组。
+    if (noteIds === null || entry.at > noteAt) { noteAt = entry.at; noteIds = entry.id ? [entry.id] : []; }
+    else if (entry.at === noteAt && entry.id && noteIds.indexOf(entry.id) < 0) noteIds.push(entry.id);
+  }
+  diff.snap.noteAt = noteAt;
+  diff.snap.noteIds = noteIds;
+  diff.snap.notesIncomplete = notesIncomplete;
+  eventsRemember(cursorKey, item.id, diff.snap, protectFromMs);
+  return !notesIncomplete;
+}
+
+async function eventsList(url) {
+  var r = await api({ url: url });
+  if (r.err) throw new Error(r.err);
+  return Array.isArray(r.data) ? r.data : [];
+}
+
+function eventsTargetStreams(base, target, kind, me) {
+  var seg = kind === 'mr' ? 'merge_requests' : 'issues';
+  if (target.project) return [{ url: base + '/projects/' + encodeURIComponent(target.project) + '/' + seg, params: { scope: 'all' } }];
+  var list = [{ url: base + '/' + seg, params: { scope: 'created_by_me' } }, { url: base + '/' + seg, params: { scope: 'assigned_to_me' } }];
+  if (kind === 'mr' && me) list.push({ url: base + '/' + seg, params: { scope: 'all', reviewer_username: me.username } });
+  return list;
+}
+
+/** 一个对象(project + iid)或一组对象(项目 / 与我相关)。返回是否仍有未处理完的对象留待下一轮继续。 */
+async function eventsPollTarget(target, conn, me) {
+  var base = 'https://' + conn.host + '/api/v4';
+  var kinds = (target.kinds.mr ? ['mr'] : []).concat(target.kinds.issue ? ['issue'] : []);
+  var anyRemaining = false;
+  for (var i = 0; i < kinds.length; i++) {
+    var kind = kinds[i];
+    var seg = kind === 'mr' ? 'merge_requests' : 'issues';
+    var cursorKey = conn.host + '|' + target.key + '|' + kind;
+    var cycleStart = Date.now();
+    var cur = eventsGetCursor(cursorKey, cycleStart);
+    var protectFromMs = cur.resumeAt - 1000;
+    if (target.iid) {
+      var one = await api({ url: base + '/projects/' + encodeURIComponent(target.project) + '/' + seg + '/' + target.iid });
+      if (one.err) {
+        if (/HTTP 404|不存在/.test(one.err)) { eventsSetCursor(cursorKey, cur.baselineAt, cycleStart); continue; }
+        throw new Error(one.err);
+      }
+      if (cur.firstRun) {
+        eventsRemember(cursorKey, one.data.id, eventsDiff(conn, kind, one.data, me, null, Infinity, null).snap, protectFromMs);
+        eventsSetCursor(cursorKey, cur.baselineAt, cycleStart);
+      } else if (await eventsHandle(conn, kind, one.data, me, cur.baselineAt, cursorKey, protectFromMs)) {
+        eventsSetCursor(cursorKey, cur.baselineAt, cycleStart);
+      } else {
+        anyRemaining = true;
+      }
+      continue;
+    }
+    var streams = eventsTargetStreams(base, target, kind, me);
+    var seen = {};
+    var items = [];
+    if (cur.firstRun) {
+      for (var is = 0; is < streams.length; is++) {
+        var initPage = await eventsList(streams[is].url + qs(Object.assign({}, streams[is].params, { order_by: 'updated_at', sort: 'desc', per_page: EVENTS_LIST_PER_PAGE })));
+        for (var ip = 0; ip < initPage.length; ip++) {
+          if (initPage[ip] && initPage[ip].id !== undefined && !seen[initPage[ip].id]) { seen[initPage[ip].id] = 1; items.push(initPage[ip]); }
+        }
+      }
+      for (var b = 0; b < items.length; b++) {
+        eventsRemember(cursorKey, items[b].id, eventsDiff(conn, kind, items[b], me, null, Infinity, null).snap, protectFromMs);
+      }
+      eventsSetCursor(cursorKey, cur.baselineAt, cycleStart);
+      continue;
+    }
+    var after = new Date(protectFromMs).toISOString();
+    var stoppedEarly = false;
+    var scopeCutoff = Infinity;
+    var nextPages = {};
+    var usedPageOffset = false;
+    for (var s = 0; s < streams.length; s++) {
+      var startPage = (cur.pages && cur.pages[s]) || 1;
+      if (startPage > 1) usedPageOffset = true;
+      var streamChanged = 0;
+      var firstChangedPage = 0;
+      var hitStreamCap = false;
+      for (var offset = 0; offset < EVENTS_MAX_PAGES; offset++) {
+        var sp = startPage + offset;
+        var sPage = await eventsList(streams[s].url + qs(Object.assign({}, streams[s].params, { updated_after: after, order_by: 'updated_at', sort: 'asc', per_page: EVENTS_LIST_PER_PAGE, page: sp })));
+        for (var p = 0; p < sPage.length; p++) {
+          var cand = sPage[p];
+          if (!cand || cand.id === undefined) continue;
+          if (!eventsItemUnchanged(eventsGetSnap(cursorKey, cand.id), cand)) {
+            if (!firstChangedPage) firstChangedPage = sp;
+            streamChanged++;
+          }
+          if (!seen[cand.id]) { seen[cand.id] = 1; items.push(cand); }
+        }
+        if (sPage.length < EVENTS_LIST_PER_PAGE) break;
+        if (streams.length === 1 && streamChanged > EVENTS_MAX_CHANGED_PER_TARGET) { stoppedEarly = true; hitStreamCap = true; break; }
+        if (offset === EVENTS_MAX_PAGES - 1) {
+          stoppedEarly = true;
+          hitStreamCap = true;
+          var tailAt = eventsTimeMs(sPage[sPage.length - 1] && sPage[sPage.length - 1].updated_at);
+          if (tailAt && tailAt < scopeCutoff) scopeCutoff = tailAt;
+        }
+      }
+      if (firstChangedPage) nextPages[s] = firstChangedPage;
+      else if (hitStreamCap) nextPages[s] = startPage + Math.floor(EVENTS_MAX_PAGES / 2);
+    }
+    if (streams.length > 1) items.sort(function (a, b) { return eventsTimeMs(a.updated_at) - eventsTimeMs(b.updated_at); });
+    var handled = 0;
+    var lastHandledAt = cur.resumeAt;
+    for (var n = 0; n < items.length; n++) {
+      var item = items[n];
+      if (eventsTimeMs(item.updated_at) > scopeCutoff) { stoppedEarly = true; break; }
+      if (eventsItemUnchanged(eventsGetSnap(cursorKey, item.id), item)) continue;
+      if (handled >= EVENTS_MAX_CHANGED_PER_TARGET || eventsState.pending.length >= EVENTS_PENDING_LIMIT) { stoppedEarly = true; break; }
+      handled++;
+      if (!(await eventsHandle(conn, kind, item, me, cur.baselineAt, cursorKey, protectFromMs))) { stoppedEarly = true; break; }
+      var itemAt = eventsTimeMs(item.updated_at);
+      if (itemAt > lastHandledAt) lastHandledAt = itemAt;
+    }
+    if (stoppedEarly) {
+      var nextResume = (!usedPageOffset && lastHandledAt > cur.resumeAt) ? lastHandledAt : cur.resumeAt;
+      var keepVerify = cur.verify && handled === 0 && nextResume === cur.resumeAt;
+      eventsSetCursor(cursorKey, cur.baselineAt, nextResume, nextResume > cur.resumeAt ? null : nextPages, keepVerify);
+      anyRemaining = true;
+    } else if (usedPageOffset && (!cur.verify || handled > 0)) {
+      eventsSetCursor(cursorKey, cur.baselineAt, cur.resumeAt, null, true);
+      anyRemaining = true;
+    } else {
+      eventsSetCursor(cursorKey, cur.baselineAt, cycleStart);
+    }
+  }
+  return anyRemaining;
+}
+
+/** 整个项目:读有更新的流水线,出结果的找到对应 MR 后发「流水线」事件。返回是否仍有未查完的流水线。 */
+async function eventsPollPipelines(target, conn, me) {
+  var base = 'https://' + conn.host + '/api/v4/projects/' + encodeURIComponent(target.project);
+  var cursorKey = conn.host + '|' + target.key + '|pipelines';
+  var cycleStart = Date.now();
+  var cur = eventsGetCursor(cursorKey, cycleStart);
+  var protectFromMs = cur.resumeAt - 1000;
+  if (cur.firstRun) {
+    var initPipes = await eventsList(base + '/pipelines' + qs({ order_by: 'updated_at', sort: 'desc', per_page: EVENTS_LIST_PER_PAGE }));
+    var initActive = false;
+    for (var ip = 0; ip < initPipes.length; ip++) {
+      if (!initPipes[ip] || initPipes[ip].id === undefined) continue;
+      var s0 = String(initPipes[ip].status || '');
+      if (EVENTS_PIPELINE_ACTIVE[s0]) initActive = true;
+      eventsRemember(cursorKey, initPipes[ip].id, { status: s0, updatedAt: String(initPipes[ip].updated_at || '') }, protectFromMs);
+    }
+    eventsState.pipelinesActive[cursorKey] = initActive;
+    eventsSetCursor(cursorKey, cur.baselineAt, cycleStart);
+    return false;
+  }
+  var after = new Date(protectFromMs).toISOString();
+  var startPage = (cur.pages && cur.pages[0]) || 1;
+  var rechecked = eventsState.rechecked[cursorKey] || (eventsState.rechecked[cursorKey] = {});
+  var unrecheckedLeft = 0, lookups = 0, recheckLookups = 0, firstPendingPage = 0;
+  var active = false, stoppedEarly = false, hasUnconfirmed = false, hitPageCap = false;
+  var unconfirmedMinAt = Infinity, lastHandledAt = cur.resumeAt;
+  var markUnconfirmed = function (at) {
+    hasUnconfirmed = true;
+    var uAt = at || cur.resumeAt;
+    if (uAt < unconfirmedMinAt) unconfirmedMinAt = uAt;
+  };
+  for (var offset = 0; offset < EVENTS_MAX_PAGES; offset++) {
+    var page = startPage + offset;
+    var pipelines = await eventsList(base + '/pipelines' + qs({ updated_after: after, order_by: 'updated_at', sort: 'asc', per_page: EVENTS_LIST_PER_PAGE, page: page }));
+    for (var i = 0; i < pipelines.length; i++) {
+      var p = pipelines[i];
+      if (!p || p.id === undefined) continue;
+      var status = String(p.status || '');
+      var prev = eventsGetSnap(cursorKey, p.id);
+      var pAt = eventsTimeMs(p.updated_at);
+      if (EVENTS_PIPELINE_ACTIVE[status]) {
+        active = true;
+        eventsRemember(cursorKey, p.id, { status: status, updatedAt: String(p.updated_at || '') }, protectFromMs);
+        if (pAt > lastHandledAt) lastHandledAt = pAt;
+        continue;
+      }
+      if ((prev && prev.status === status && !prev.pending) || !EVENTS_PIPELINE_DONE[status] || (!prev && pAt < cur.baselineAt)) {
+        if (!prev || prev.status !== status) eventsRemember(cursorKey, p.id, { status: status, updatedAt: String(p.updated_at || '') }, protectFromMs);
+        if (pAt > lastHandledAt) lastHandledAt = pAt;
+        continue;
+      }
+      var isRecheck = Boolean(prev && prev.status === status && prev.pending);
+      if (isRecheck && rechecked[p.id]) { markUnconfirmed(pAt); continue; }
+      if (!firstPendingPage) firstPendingPage = page;
+      if (eventsState.pending.length >= EVENTS_PENDING_LIMIT || (!isRecheck && lookups >= EVENTS_PIPELINE_LOOKUPS)) { stoppedEarly = true; break; }
+      if (isRecheck && recheckLookups >= EVENTS_PIPELINE_LOOKUPS) { unrecheckedLeft++; markUnconfirmed(pAt); continue; }
+      if (isRecheck) { recheckLookups++; rechecked[p.id] = 1; } else lookups++;
+      var deliveredIids = (isRecheck && prev.iids) ? Object.assign({}, prev.iids) : {};
+      var matchedMrs = [];
+      var uncertain = false;
+      var m = /^refs\/merge-requests\/([0-9]+)\//.exec(String(p.ref || ''));
+      if (m) {
+        var one = await api({ url: base + '/merge_requests/' + m[1] });
+        if (one.err && !/HTTP 404|不存在/.test(one.err)) throw new Error(one.err);
+        if (!one.err && one.data && one.data.iid !== undefined) matchedMrs.push(one.data);
+      } else if (p.ref) {
+        var pBranch = String(p.ref);
+        var pSha = String(p.sha || '').trim();
+        if (!pSha) {
+          uncertain = true;
+        } else {
+          for (var mp = 1; mp <= EVENTS_MAX_PAGES; mp++) {
+            var found = await eventsList(base + '/merge_requests' + qs({ source_branch: pBranch, state: 'opened', per_page: 100, page: mp }));
+            for (var fi = 0; fi < found.length; fi++) {
+              var cand = found[fi];
+              if (!cand || cand.iid === undefined) continue;
+              var candBranch = cand.source_branch !== undefined ? String(cand.source_branch) : '';
+              if (candBranch && candBranch !== pBranch) continue;
+              var candSha = String(cand.sha || '').trim();
+              if (candSha && candSha !== pSha) continue;
+              var targetProj = cand.target_project_id !== undefined ? cand.target_project_id : cand.project_id;
+              if (cand.source_project_id !== undefined && targetProj !== undefined && String(cand.source_project_id) !== String(targetProj)) continue;
+              if (!candBranch || !candSha || cand.source_project_id === undefined || targetProj === undefined) { uncertain = true; continue; }
+              matchedMrs.push(cand);
+            }
+            if (found.length < 100) break;
+            if (mp === EVENTS_MAX_PAGES) uncertain = true;
+          }
+        }
+      }
+      var queueBlocked = false;
+      for (var mi = 0; mi < matchedMrs.length; mi++) {
+        var mrItem = matchedMrs[mi];
+        if (deliveredIids[mrItem.iid]) continue;
+        var data = eventsBase(conn, 'mr', mrItem, me);
+        var pipeEvent = eventsBuildEvent('pipeline', 'pipeline:' + p.id + ':' + status, '流水线' + status, mrItem, data, { pipelineId: Number(p.id), pipelineStatus: status }, pAt || cycleStart);
+        if (!eventsTryQueue(pipeEvent)) { queueBlocked = true; break; }
+        deliveredIids[mrItem.iid] = 1;
+      }
+      eventsRemember(cursorKey, p.id, { status: status, updatedAt: String(p.updated_at || ''), pending: queueBlocked || uncertain, iids: deliveredIids }, protectFromMs);
+      if (queueBlocked) { stoppedEarly = true; break; }
+      if (uncertain) { markUnconfirmed(pAt); continue; }
+      if (pAt > lastHandledAt) lastHandledAt = pAt;
+    }
+    if (stoppedEarly || pipelines.length < EVENTS_LIST_PER_PAGE) break;
+    if (offset === EVENTS_MAX_PAGES - 1) { stoppedEarly = true; hitPageCap = true; }
+  }
+  var rotationReset = false;
+  if (!stoppedEarly && !hitPageCap && unrecheckedLeft === 0 && Object.keys(rechecked).length > 0) {
+    eventsState.rechecked[cursorKey] = {};
+    rotationReset = true;
+  }
+  var incomplete = stoppedEarly || hasUnconfirmed;
+  eventsState.pipelinesActive[cursorKey] = incomplete ? true : active;
+  if (incomplete) {
+    var nextPipeResume = (startPage === 1 && lastHandledAt > cur.resumeAt) ? lastHandledAt : cur.resumeAt;
+    if (unconfirmedMinAt < nextPipeResume) nextPipeResume = unconfirmedMinAt < cur.resumeAt ? cur.resumeAt : unconfirmedMinAt;
+    var nextPipePage = rotationReset ? 1 : (firstPendingPage || (hitPageCap ? startPage + Math.floor(EVENTS_MAX_PAGES / 2) : startPage));
+    var keepPipeVerify = cur.verify && lookups === 0 && recheckLookups === 0 && !rotationReset && nextPipeResume === cur.resumeAt;
+    eventsSetCursor(cursorKey, cur.baselineAt, nextPipeResume, (nextPipeResume > cur.resumeAt || nextPipePage <= 1) ? null : { 0: nextPipePage }, keepPipeVerify);
+    return true;
+  }
+  if (startPage > 1 && (!cur.verify || lookups > 0 || recheckLookups > 0 || rotationReset)) {
+    eventsSetCursor(cursorKey, cur.baselineAt, cur.resumeAt, null, true);
+    eventsState.pipelinesActive[cursorKey] = true;
+    return true;
+  }
+  eventsSetCursor(cursorKey, cur.baselineAt, cycleStart);
+  return false;
+}
+
+/** 项目动态最新一条有没有变;仅在整轮处理完且无积压时提交新动态 ID,避免中途报错或限额截断后不再续跑。 */
+async function eventsProjectProbe(target, conn) {
+  var key = conn.host + '|' + target.key;
+  var r = await api({ url: 'https://' + conn.host + '/api/v4/projects/' + encodeURIComponent(target.project) + '/events' + qs({ per_page: 1 }) });
+  if (r.err) throw new Error(r.err);
+  var top = Array.isArray(r.data) && r.data[0] ? String(r.data[0].id) : '';
+  var known = Object.prototype.hasOwnProperty.call(eventsState.activity, key);
+  return {
+    changed: !known || eventsState.activity[key] !== top,
+    commit: function () { eventsState.activity[key] = top; },
+  };
+}
+
+async function eventsReport(status) {
+  if (eventsState.status === status) return;
+  var r = await cindy.send({ type: 'routine-request', action: 'status', status: status });
+  if (r && r.ok) eventsState.status = status;
+}
+
+async function eventsFlush(budget) {
+  while (eventsState.pending.length && budget.left > 0) {
+    var r = await cindy.send({ type: 'routine-request', action: 'publish', event: eventsState.pending[0] });
+    if (!r || !r.ok) return false; // 保留投递 ID,下个周期重试
+    eventsState.pending.shift();
+    budget.left--;
+  }
+  return true;
+}
+
+/**
+ * 一个轮询周期;返回下次间隔。null:宿主不支持订阅,停止;'idle':没有订阅,
+ * 等宿主推送新订阅再开始。
+ */
+async function eventsCycle() {
+  var budget = { left: EVENTS_PUBLISH_PER_CYCLE };
+  if (eventsState.subscriptions === null) {
+    var res = await cindy.send({ type: 'routine-request', action: 'subscriptions' });
+    if (!res || !res.ok) {
+      if (res && /Unknown routine operation|not declared/.test(String(res.message || ''))) return null;
+      return EVENTS_POLL_MS;
+    }
+    // 宿主在这之后推送的订阅更新,优先于这次取到的(异步期间可能已经到了)。
+    if (eventsState.subscriptions === null) eventsState.subscriptions = Array.isArray(res.subscriptions) ? res.subscriptions : [];
+  }
+  var targets = eventsTargetsFrom(eventsState.subscriptions);
+  if (!targets.length) {
+    await eventsFlush(budget);
+    return eventsState.pending.length ? EVENTS_POLL_MS : 'idle';
+  }
+  if (eventsState.pending.length) {
+    var flushed = await eventsFlush(budget);
+    if (!flushed || eventsState.pending.length >= EVENTS_PENDING_LIMIT) {
+      if (!flushed) await eventsReport('error');
+      return EVENTS_POLL_MS;
+    }
+  }
+  var sweep = eventsState.cycle++ % EVENTS_SWEEP_EVERY === 0;
+  var conns = await eventsConnections();
+  if (!conns.length) {
+    await eventsReport('disconnected');
+    return EVENTS_POLL_MS;
+  }
+  var failed = 0;
+  var attempted = 0;
+  for (var i = 0; i < targets.length; i++) {
+    var picked = eventsConnectionsFor(targets[i], conns);
+    for (var j = 0; j < picked.length; j++) {
+      attempted++;
+      try {
+        var me = await eventsMe(picked[j]);
+        var target = targets[i];
+        var whole = Boolean(target.project && !target.iid);
+        var probe = whole ? await eventsProjectProbe(target, picked[j]) : { changed: true, commit: null };
+        var backlogKey = picked[j].host + '|' + target.key;
+        var targetHasMore = false;
+        if (probe.changed || sweep || eventsState.targetBacklog[backlogKey]) {
+          targetHasMore = await eventsPollTarget(target, picked[j], me);
+          eventsState.targetBacklog[backlogKey] = targetHasMore;
+        }
+        var pipelineKey = picked[j].host + '|' + target.key + '|pipelines';
+        var pipeHasMore = false;
+        if (whole && target.pipelines && (probe.changed || sweep || eventsState.pipelinesActive[pipelineKey])) {
+          pipeHasMore = await eventsPollPipelines(target, picked[j], me);
+        }
+        if (probe.commit && !targetHasMore && !pipeHasMore) probe.commit();
+      } catch (e) {
+        failed++;
+      }
+    }
+  }
+  var flushOk = await eventsFlush(budget);
+  await eventsReport(attempted === 0 ? 'disconnected' : (failed > 0 || !flushOk) ? 'error' : 'listening');
+  return EVENTS_POLL_MS;
+}
+
+function eventsSchedule(delay) {
+  if (eventsState.stopped) return;
+  if (eventsState.timer) clearTimeout(eventsState.timer);
+  eventsState.timer = setTimeout(function () {
+    eventsState.timer = null;
+    if (eventsState.running) { eventsState.wake = true; return; }
+    eventsState.running = true;
+    eventsState.wake = false;
+    var done = function (next) {
+      eventsState.running = false;
+      if (next === null) { eventsState.stopped = true; return; }
+      // 运行期间宿主推来了新订阅:马上按新订阅再跑一轮。
+      if (eventsState.wake) return eventsSchedule(0);
+      if (next !== 'idle') eventsSchedule(next);
+    };
+    eventsCycle().then(done, function () { done(EVENTS_POLL_MS); });
+  }, delay);
+  if (eventsState.timer && typeof eventsState.timer.unref === 'function') eventsState.timer.unref();
+}
+
+/** 宿主推送的订阅(用户新建、修改、暂停或删除了相关自动化)。 */
+function eventsSubscriptionsChanged(subscriptions) {
+  eventsState.subscriptions = subscriptions;
+  if (eventsState.running) eventsState.wake = true;
+  else eventsSchedule(0);
+}
+
+if (typeof cindy !== 'undefined' && cindy && typeof cindy.send === 'function' && typeof setTimeout === 'function') eventsSchedule(3000);
+
+
 /* ── 派单 ──────────────────────────────────────────────────────────── */
 
 cindy.onHostMessage(async function (msg) {
@@ -3921,6 +4703,10 @@ cindy.onHostMessage(async function (msg) {
     } catch (e) {
       // 点击没有回执通道;卡片保持上一版,宿主的「运行中」由超时兜底收口。
     }
+    return;
+  }
+  if (msg && msg.type === 'routine-subscriptions' && Array.isArray(msg.subscriptions)) {
+    eventsSubscriptionsChanged(msg.subscriptions);
     return;
   }
   if (!msg || msg.type !== 'tool-call') return;
