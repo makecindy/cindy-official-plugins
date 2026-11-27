@@ -343,9 +343,13 @@ function startRemoteWorkspace(agyPath, host) {
       errorRelay.request(message);
       const handled = steering.handleClientMessage(message);
       if (handled) {
-        if (handled.toClient) toClient(handled.toClient);
-        if (handled.toAgent) toAgent(handled.toAgent);
-        return;
+        if (handled.toClient) {
+          for (const item of handled.toClient) toClient(item);
+        }
+        if (handled.toAgent) {
+          for (const item of handled.toAgent) toAgent(item);
+        }
+        if (!handled.forward) return;
       }
     }
     toAgentLine(line);
@@ -601,9 +605,12 @@ function startRemoteWorkspace(agyPath, host) {
     if (message.method === undefined && message.id !== undefined) {
       const flushHeld = (item) => toClient(item, agent.stdout);
       const handled = steering.handleAgentResponse(message);
-      if (handled.action === 'drop') return;
-      if (handled.action === 'reply') {
-        toClient(errorRelay.response(handled.message, flushHeld), agent.stdout);
+      if (handled.action === 'handled') {
+        for (const item of handled.toClient) toClient(item, agent.stdout);
+        for (const item of handled.toAgent) toAgent(item);
+        if (handled.turnResponse) {
+          toClient(errorRelay.response(handled.turnResponse, flushHeld), agent.stdout);
+        }
         return;
       }
       const classified = errorRelay.response(message, flushHeld);
@@ -619,6 +626,7 @@ function startRemoteWorkspace(agyPath, host) {
     const update = message.method === 'session/update' && params && isObject(params.update) ? params.update : null;
     const isToolUpdate = Boolean(update) && (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update');
     if (!params || (!isPermission && !isToolUpdate)) {
+      if (message.method && message.id !== undefined) steering.handleAgentRequest(message);
       if (update) {
         const action = errorRelay.notification(message);
         if (action) {
@@ -644,6 +652,7 @@ function startRemoteWorkspace(agyPath, host) {
       );
       return;
     }
+    if (isPermission) steering.handleAgentRequest(message);
     let outgoing = message;
     let adapted = null;
     if (verdict.type === 'mcp') {
@@ -686,6 +695,7 @@ function startRemoteWorkspace(agyPath, host) {
     }
     if (phase === 'opening' || phase === 'warming' || phase === 'opening-session') {
       if (message && message.method === undefined && message.id !== undefined) {
+        steering.handleClientMessage(message);
         toAgentLine(line);
         return;
       }

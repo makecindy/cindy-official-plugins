@@ -2756,7 +2756,7 @@ async function localRelay(t, checkAccount) {
     source.end();
     child.stdout.end();
   });
-  return { server, client, request, response, send: (message) => write(child.stdout, message) };
+  return { server, client, request, response, send: (message) => write(child.stdout, message), sendClient: (message) => write(source, message) };
 }
 
 describe('Antigravity local ACP relay', () => {
@@ -2870,20 +2870,203 @@ describe('Antigravity local ACP relay', () => {
     const firstSteer = server.at(-1);
     assert.equal(firstSteer.method, 'session/prompt');
     assert.deepEqual(firstSteer.params, { sessionId: 'one', prompt });
-    assert.equal(client.at(-1).result.outcome, 'injected');
-    response(2, { stopReason: 'end_turn' });
+    assert.equal(client.some((message) => message.id === 3), false, 'injected waits for previous prompt handoff');
+    response(2, { stopReason: 'end_turn', usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 } });
+    assert.deepEqual(client.at(-1), { jsonrpc: '2.0', id: 3, result: { outcome: 'injected' } });
     assert.equal(client.some((message) => message.id === 2), false);
     request(4, '_session/steering', { prompt });
     const lastSteer = server.at(-1);
     assert.notEqual(firstSteer.id, lastSteer.id);
-    response(firstSteer.id, { stopReason: 'end_turn' });
+    response(firstSteer.id, { stopReason: 'end_turn', usage: { inputTokens: 40, outputTokens: 10, totalTokens: 50 } });
+    assert.deepEqual(client.at(-1), { jsonrpc: '2.0', id: 4, result: { outcome: 'injected' } });
     send({ method: 'session/update', params: { sessionId: 'one', update: { sessionUpdate: 'agent_message_chunk' } } });
     assert.equal(client.at(-1).method, 'session/update');
-    response(lastSteer.id, { stopReason: 'end_turn', usage: { outputTokens: 7 } });
-    assert.deepEqual(client.at(-1), { jsonrpc: '2.0', id: 2, result: { stopReason: 'end_turn', usage: { outputTokens: 7 } } });
+    response(lastSteer.id, { stopReason: 'end_turn', usage: { inputTokens: 10, outputTokens: 7, totalTokens: 17 } });
+    assert.deepEqual(client.at(-1), {
+      jsonrpc: '2.0',
+      id: 2,
+      result: { stopReason: 'end_turn', usage: { inputTokens: 150, outputTokens: 37, totalTokens: 187 } },
+    });
     request(5, '_session/steering', { prompt });
     assert.equal(client.at(-1).result.outcome, 'promptRequired');
     assert.equal(server.at(-1).id, lastSteer.id);
+  });
+
+  test('serializes back-to-back steering requests in order', async (t) => {
+    const { server, client, request, response } = await localRelay(t);
+    request(1, 'initialize');
+    response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+    server.length = 0;
+    client.length = 0;
+
+    request(2, 'session/prompt', { prompt: [{ type: 'text', text: 'p1' }] });
+    request(3, '_session/steering', { prompt: [{ type: 'text', text: 'p2' }] });
+    request(4, '_session/steering', { prompt: [{ type: 'text', text: 'p3' }] });
+
+    assert.equal(server.length, 2, 'second steering waits in queue until first handoff finishes');
+    const p2Id = server[1].id;
+
+    response(2, { stopReason: 'end_turn', usage: { outputTokens: 5 } });
+    assert.deepEqual(client[0], { jsonrpc: '2.0', id: 3, result: { outcome: 'injected' } });
+    assert.equal(server.length, 3, 'queued steering dispatches immediately after handoff');
+    const p3Id = server[2].id;
+    assert.deepEqual(server[2].params.prompt, [{ type: 'text', text: 'p3' }]);
+
+    response(p2Id, { stopReason: 'end_turn', usage: { outputTokens: 6 } });
+    assert.deepEqual(client[1], { jsonrpc: '2.0', id: 4, result: { outcome: 'injected' } });
+
+    response(p3Id, { stopReason: 'end_turn', usage: { outputTokens: 7 } });
+    assert.deepEqual(client[2], { jsonrpc: '2.0', id: 2, result: { stopReason: 'end_turn', usage: { outputTokens: 18 } } });
+  });
+
+  test('rejects steering while a permission request is pending, allows it once answered, and relays session/cancel races', async (t) => {
+    const { server, client, request, response, send, sendClient } = await localRelay(t);
+    request(1, 'initialize');
+    response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+    request(2, 'session/prompt', { prompt: [{ type: 'text', text: 'work' }] });
+    server.length = 0;
+    client.length = 0;
+
+    send({
+      id: 'perm-1',
+      method: 'session/request_permission',
+      params: {
+        sessionId: 'one',
+        toolCall: { toolCallId: 't1', name: 'run_command', title: 'Run', kind: 'execute' },
+        options: [{ optionId: 'allow', kind: 'allow_once' }],
+      },
+    });
+
+    request(3, '_session/steering', { prompt: [{ type: 'text', text: 'interrupt' }] });
+    assert.equal(server.length, 0, 'steering is blocked while waiting for permission reply');
+    assert.equal(client.at(-1).id, 3);
+    assert.equal(client.at(-1).error.code, -32603);
+
+    // Host answers the pending permission request; steering is allowed again.
+    sendClient({ id: 'perm-1', result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
+    server.length = 0;
+    client.length = 0;
+
+    request(4, '_session/steering', { prompt: [{ type: 'text', text: 'switch' }] });
+    assert.equal(server.length, 1);
+    const steerId = server[0].id;
+    assert.equal(server[0].method, 'session/prompt');
+
+    // session/cancel notification (no id) during in-flight steering triggers follow-up cancel and settles cleanly.
+    sendClient({ method: 'session/cancel', params: { sessionId: 'one' } });
+    assert.equal(server.at(-1).method, 'session/cancel');
+
+    response(2, { stopReason: 'end_turn' });
+    assert.equal(client.length, 0);
+    assert.equal(server.at(-1).method, 'session/cancel', 'follow-up cancel sent for replacement prompt');
+
+    response(steerId, { stopReason: 'cancelled' });
+    assert.equal(client.length, 2);
+    assert.equal(client[0].id, 4);
+    assert.equal(client[0].error.code, -32603);
+    assert.deepEqual(client[1], { jsonrpc: '2.0', id: 2, result: { stopReason: 'cancelled' } });
+  });
+
+  test('steering state machine guards rejections, out-of-order replies, cancellations, previous errors, and native passthrough', async () => {
+    const { createSteeringRelay, supportsSteering } = (await import(pathToFileURL(path.join(root, 'agy-steering.js')).href)).default;
+    assert.equal(supportsSteering('1.5.0'), true);
+    assert.equal(supportsSteering('2.0.0'), true);
+    assert.equal(supportsSteering('1.4.9'), false);
+    assert.equal(supportsSteering('1.5.14-beta.1'), false);
+
+    // 1. Agent rejecting steering prompt preserves active turn and sanitizes -32601.
+    {
+      const relay = createSteeringRelay();
+      relay.completeInitializeResult({ agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+      assert.equal(relay.handleClientMessage({ jsonrpc: '2.0', id: 1, method: 'session/prompt', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'work' }] } }), null);
+      const steerAct = relay.handleClientMessage({ jsonrpc: '2.0', id: 2, method: '_session/steering', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'steer' }] } });
+      const steerId = steerAct.toAgent[0].id;
+      const rej = relay.handleAgentResponse({ jsonrpc: '2.0', id: steerId, error: { code: -32601, message: 'busy' } });
+      assert.equal(rej.action, 'handled');
+      assert.deepEqual(rej.toClient, [{ jsonrpc: '2.0', id: 2, error: { code: -32603, message: 'busy' } }]);
+      assert.equal(rej.turnResponse, null);
+      const done = relay.handleAgentResponse({ jsonrpc: '2.0', id: 1, result: { stopReason: 'end_turn' } });
+      assert.deepEqual(done.turnResponse, { jsonrpc: '2.0', id: 1, result: { stopReason: 'end_turn' } });
+    }
+
+    // 2. Out-of-order replacement resolving before previous confirms injected first and merges usage.
+    {
+      const relay = createSteeringRelay();
+      relay.completeInitializeResult({ agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+      relay.handleClientMessage({ jsonrpc: '2.0', id: 1, method: 'session/prompt', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'work' }] } });
+      const steerId = relay.handleClientMessage({ jsonrpc: '2.0', id: 2, method: '_session/steering', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'steer' }] } }).toAgent[0].id;
+      const early = relay.handleAgentResponse({ jsonrpc: '2.0', id: steerId, result: { stopReason: 'end_turn', usage: { inputTokens: 10, outputTokens: 5 } } });
+      assert.deepEqual(early.toClient, []);
+      assert.equal(early.turnResponse, null);
+      const settled = relay.handleAgentResponse({ jsonrpc: '2.0', id: 1, result: { stopReason: 'end_turn', usage: { inputTokens: 20, outputTokens: 15 } } });
+      assert.deepEqual(settled.toClient, [{ jsonrpc: '2.0', id: 2, result: { outcome: 'injected' } }]);
+      assert.deepEqual(settled.turnResponse, { jsonrpc: '2.0', id: 1, result: { stopReason: 'end_turn', usage: { inputTokens: 30, outputTokens: 20 } } });
+    }
+
+    // 3. session/cancel notification during in-flight steering sends follow-up cancel and settles cleanly.
+    {
+      const relay = createSteeringRelay();
+      relay.completeInitializeResult({ agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+      relay.handleClientMessage({ jsonrpc: '2.0', id: 1, method: 'session/prompt', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'work' }] } });
+      const steerId = relay.handleClientMessage({ jsonrpc: '2.0', id: 2, method: '_session/steering', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'steer 1' }] } }).toAgent[0].id;
+      const queued = relay.handleClientMessage({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'steer 2' }] } });
+      assert.deepEqual(queued.toAgent, []);
+      const cancelAct = relay.handleClientMessage({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId: 's1' } });
+      assert.equal(cancelAct.forward, true);
+      assert.equal(cancelAct.toClient.length, 1);
+      assert.equal(cancelAct.toClient[0].id, 3);
+      assert.equal(cancelAct.toClient[0].error.code, -32603);
+
+      const prevDone = relay.handleAgentResponse({ jsonrpc: '2.0', id: 1, result: { stopReason: 'end_turn' } });
+      assert.deepEqual(prevDone.toAgent, [{ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId: 's1' } }]);
+      assert.equal(prevDone.turnResponse, null);
+
+      const replDone = relay.handleAgentResponse({ jsonrpc: '2.0', id: steerId, result: { stopReason: 'cancelled' } });
+      assert.equal(replDone.toClient.length, 1);
+      assert.equal(replDone.toClient[0].id, 2);
+      assert.equal(replDone.toClient[0].error.code, -32603);
+      assert.deepEqual(replDone.turnResponse, { jsonrpc: '2.0', id: 1, result: { stopReason: 'cancelled' } });
+    }
+
+    // 4. Previous prompt error during steering cancels replacement and preserves classified error data.
+    {
+      const relay = createSteeringRelay();
+      relay.completeInitializeResult({ agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+      relay.handleClientMessage({ jsonrpc: '2.0', id: 1, method: 'session/prompt', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'work' }] } });
+      const steerId = relay.handleClientMessage({ jsonrpc: '2.0', id: 2, method: '_session/steering', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'steer' }] } }).toAgent[0].id;
+      const classifiedErr = { code: -32000, message: 'usage limit', data: { _meta: { cindy: { kind: 'usage-limit' } } } };
+      const prevErr = relay.handleAgentResponse({ jsonrpc: '2.0', id: 1, error: classifiedErr });
+      assert.deepEqual(prevErr.toAgent, [{ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId: 's1' } }]);
+      assert.equal(prevErr.turnResponse, null);
+      const replCancelled = relay.handleAgentResponse({ jsonrpc: '2.0', id: steerId, result: { stopReason: 'cancelled' } });
+      assert.equal(replCancelled.toClient[0].id, 2);
+      assert.equal(replCancelled.toClient[0].error.code, -32603);
+      assert.deepEqual(replCancelled.turnResponse, { jsonrpc: '2.0', id: 1, error: classifiedErr });
+    }
+
+    // 5. Pending agent request blocks steering until host replies, and native steering passes through.
+    {
+      const relay = createSteeringRelay();
+      relay.completeInitializeResult({ agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+      relay.handleClientMessage({ jsonrpc: '2.0', id: 1, method: 'session/prompt', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'work' }] } });
+      relay.handleAgentRequest({ jsonrpc: '2.0', id: 'perm-1', method: 'session/request_permission', params: { sessionId: 's1' } });
+      const blocked = relay.handleClientMessage({ jsonrpc: '2.0', id: 2, method: '_session/steering', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'steer' }] } });
+      assert.equal(blocked.toClient[0].id, 2);
+      assert.equal(blocked.toClient[0].error.code, -32603);
+      assert.equal(relay.handleClientMessage({ jsonrpc: '2.0', id: 'perm-1', result: { outcome: { outcome: 'selected', optionId: 'allow' } } }), null);
+      const allowed = relay.handleClientMessage({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'steer' }] } });
+      assert.equal(allowed.toAgent.length, 1);
+      assert.equal(allowed.toAgent[0].method, 'session/prompt');
+    }
+
+    {
+      const relay = createSteeringRelay();
+      const res = relay.completeInitializeResult({ agentInfo: { name: 'Antigravity ACP Server', version: '1.6.0' }, _meta: { steering: { supported: true } } });
+      assert.equal(relay.offered, true);
+      assert.equal(relay.nativeSteering, true);
+      assert.equal(res._meta.steering.supported, true);
+      assert.equal(relay.handleClientMessage({ jsonrpc: '2.0', id: 9, method: '_session/steering', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'native' }] } }), null);
+    }
   });
 
   /**
@@ -3573,6 +3756,11 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
     assert.deepEqual({ title: perm.params.toolCall.title, kind: perm.params.toolCall.kind, rawInput: perm.params.toolCall.rawInput },
       { title: 'Bash', kind: 'execute', rawInput: { command: 'pwd' } });
     assert.equal(messages().some((m) => m.id === 2 && !m.method), false, 'original prompt stays open after first prompt settles');
+
+    // Steering is blocked while a permission request is awaiting a host reply, then resumes once answered.
+    send({ jsonrpc: '2.0', id: 'steer-blocked', method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'blocked' }] } });
+    assert.equal((await reply('steer-blocked', 'blocked steer during permission')).error.code, -32603);
+    send({ jsonrpc: '2.0', id: perm.id, result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
 
     send({ jsonrpc: '2.0', id: 4, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'steer 2' }] } });
     assert.deepEqual((await reply(4, 'second steer ack')).result, { outcome: 'injected' });

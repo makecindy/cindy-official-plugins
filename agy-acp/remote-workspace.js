@@ -322,9 +322,13 @@ function startRemoteWorkspace(agyPath, host) {
     if (message) {
       const handled = steering.handleClientMessage(message);
       if (handled) {
-        if (handled.toClient) toClient(handled.toClient);
-        if (handled.toAgent) toAgent(handled.toAgent);
-        return;
+        if (handled.toClient) {
+          for (const item of handled.toClient) toClient(item);
+        }
+        if (handled.toAgent) {
+          for (const item of handled.toAgent) toAgent(item);
+        }
+        if (!handled.forward) return;
       }
     }
     toAgentLine(line);
@@ -546,9 +550,12 @@ function startRemoteWorkspace(agyPath, host) {
     }
     if (message.method === undefined && message.id !== undefined) {
       const handled = steering.handleAgentResponse(message);
-      if (handled.action === 'drop') return;
-      if (handled.action === 'reply') {
-        toClient(handled.message, agent.stdout);
+      if (handled.action === 'handled') {
+        for (const item of handled.toClient) toClient(item, agent.stdout);
+        for (const item of handled.toAgent) toAgent(item);
+        if (handled.turnResponse) {
+          toClient(handled.turnResponse, agent.stdout);
+        }
         return;
       }
       toClientLine(line, agent.stdout);
@@ -559,6 +566,7 @@ function startRemoteWorkspace(agyPath, host) {
     const update = message.method === 'session/update' && params && isObject(params.update) ? params.update : null;
     const isToolUpdate = Boolean(update) && (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update');
     if (!params || (!isPermission && !isToolUpdate)) {
+      if (message.method && message.id !== undefined) steering.handleAgentRequest(message);
       toClientLine(line, agent.stdout);
       return;
     }
@@ -575,6 +583,7 @@ function startRemoteWorkspace(agyPath, host) {
       );
       return;
     }
+    if (isPermission) steering.handleAgentRequest(message);
     if (verdict.type === 'mcp') {
       toClient({ ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }, agent.stdout);
       return;
@@ -608,6 +617,7 @@ function startRemoteWorkspace(agyPath, host) {
     }
     if (phase === 'opening' || phase === 'opening-session') {
       if (message && message.method === undefined && message.id !== undefined) {
+        steering.handleClientMessage(message);
         toAgentLine(line);
         return;
       }
