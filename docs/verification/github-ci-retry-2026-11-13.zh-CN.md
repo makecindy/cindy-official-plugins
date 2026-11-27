@@ -1202,3 +1202,5 @@ Windows10.0.26100/Node22.22.3/Git2.54.0.windows.1原生夹具覆盖普通/linked
 Forge73完整内容35个tracked文件 /294483包字节 /843065解压字节，manifest语义及其它逐字节匹配。新包已删除并回读不存在；无新验证副本、编号诊断文件、受阻清理重试或残留。最终规定套件和实际提交树契约另记。
 
 规定四套+GitHub/GitLab批次：**727通过 /1失败 /42跳过（292.39秒）**。唯一失败是原发布契约trackedFiles读取旧HEAD146：新继承cindy-gitlab/skills/mr/SKILL.md已stage0/index跟踪，但不在父提交中。插件功能及其它规定用例均通过。不修改断言/生产逻辑，不使用其它checkout或验证副本。核对index文件等于已记录7b基线后，正常完成获准merge，再在实际提交树运行原契约/本地化，推送前完成验证。不称初批全绿或已证实基础设施flake。之后0f8a2447仅改GitLab，不在本73/7b验证范围；较早逐字节main比较指当时的7b。
+
+实际签署merge2c378770c2630f1d7e365b58dff76579c0ce2abf（父146+7b）已在不改测试的情况下消除HEAD枚举约束：BASE_SHA7b/HEAD_SHA2c的原发布契约加本地化**52通过 /0失败 /0跳过（32.86秒）**。stage0 GitLab Skill blob/模式与7b一致，候选树8f7eea0e7cfddd39861790b9e6f2187b68f2ec40；没有合成checkout或谓词覆盖。本次成对结果记录提交保持全部打包内容/测试代码逐字节等于2c，复用实际树通过证据及Forge73核对；初批727/1/42继续分别报告，不倒改成整批全绿。当时最新0f仅GitLab改动未纳入；与0f的Git merge-tree无冲突，不冒充runtime/CI验收。
