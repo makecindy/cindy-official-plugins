@@ -162,31 +162,19 @@ function hasCompleteBotHistory(snap) {
   return true;
 }
 
-const PENDING_CHECK_STATUSES = new Set(['IN_PROGRESS', 'QUEUED', 'PENDING', 'WAITING', 'REQUESTED']);
-
-function currentHeadEvidenceSettled(snap, { headSeenAt, now } = {}) {
-  if (!Number.isFinite(now)) return false;
-  if (Number.isFinite(headSeenAt)) return now >= headSeenAt + SETTLE_MAX_MS;
-  const createdAt = timeOf(snap?.createdAt);
-  if (createdAt !== null && now < createdAt + SETTLE_MAX_MS) return false;
-  const checksPending = (snap?.checks ?? []).some(
-    (c) => c?.outcome === 'pending' || PENDING_CHECK_STATUSES.has(String(c?.status ?? '').toUpperCase()),
-  );
-  return !checksPending;
-}
-
 /**
  * Carry forward this PR's known reviewer bots onto `snap`.
  * - v2 state (`previous.reviewerBotsVersion === REVIEWER_BOTS_VERSION`) already contains only vetted
  *   reviewer bots, so they stay even before a new commit's checks register.
  * - Legacy state (pre-v2) may contain approval-only auto-merge bots recorded before filtering: when
  *   `snap` carries the PR's complete review, reaction, thread and check history, drop legacy bots
- *   whose current-head approval lacks a dedicated reviewer App check (or that have no reviews on
- *   `snap`). For legacy bots whose only review on `snap` is an APPROVED/DISMISSED on an older
- *   commit, temporarily retain them at v1 until either current-head review evidence arrives or the
- *   current head's settle window completes — without extra historical-commit GraphQL queries.
+ *   only when distinguishable current-head evidence rules them out (an APPROVED/DISMISSED on
+ *   `latestCommitOid` without a dedicated reviewer App check, or no reviews on `snap`). Legacy bots
+ *   whose only review is an older-head APPROVED/DISMISSED stay retained at v1 across settle-window
+ *   expiries and subsequent pushes until distinguishable current-head evidence arrives (no extra
+ *   historical-commit GraphQL queries).
  */
-export function resolvePrReviewerBots(previous, snap, { headSeenAt, now } = {}) {
+export function resolvePrReviewerBots(previous, snap) {
   const current = reviewerBotsOf(snap);
   const prevList = Array.isArray(previous?.reviewerBots) ? previous.reviewerBots.map(botKey).filter(Boolean) : [];
   if (previous?.reviewerBotsVersion === REVIEWER_BOTS_VERSION || prevList.length === 0) {
@@ -196,7 +184,6 @@ export function resolvePrReviewerBots(previous, snap, { headSeenAt, now } = {}) 
     return { bots: [...new Set([...prevList, ...current])].sort(), version: previous?.reviewerBotsVersion ?? 1 };
   }
   const head = snap?.latestCommitOid ?? null;
-  const settled = currentHeadEvidenceSettled(snap, { headSeenAt, now });
   const unconfirmedLegacy = [];
   for (const bot of prevList) {
     if (current.has(bot)) continue;
@@ -209,7 +196,7 @@ export function resolvePrReviewerBots(previous, snap, { headSeenAt, now } = {}) 
       const state = String(r.state ?? '').toUpperCase();
       return (state === 'APPROVED' || state === 'DISMISSED') && (!head || r.commitOid !== head);
     });
-    if (!hasCurrentHeadApproval && hasOlderApproval && !settled) {
+    if (!hasCurrentHeadApproval && hasOlderApproval) {
       unconfirmedLegacy.push(bot);
     }
   }
@@ -220,8 +207,8 @@ export function resolvePrReviewerBots(previous, snap, { headSeenAt, now } = {}) 
 }
 
 /** Bots to wait for on a new commit: this PR's reviewer bots plus the repository's recent ones. */
-export function expectedBots({ snap, previous, repoBots, viewer, headSeenAt, now }) {
-  const bots = new Set(resolvePrReviewerBots(previous, snap, { headSeenAt, now }).bots);
+export function expectedBots({ snap, previous, repoBots, viewer }) {
+  const bots = new Set(resolvePrReviewerBots(previous, snap).bots);
   for (const bot of Object.keys(repoBots ?? {})) bots.add(botKey(bot));
   if (viewer) bots.delete(botKey(viewer));
   bots.delete('');

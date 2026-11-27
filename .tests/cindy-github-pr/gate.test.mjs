@@ -1818,7 +1818,7 @@ test('只提交 APPROVED 的自动合并 bot 不写入仓库评审名单,也不�
   assert.match(r.json().detail, /events=\[checks-failed,remarks\]/);
 });
 
-test('升级路径:旧 head 有 App 佐证、新 head 暂无检查时暂留旧 App 等待证据到齐,收齐后保留真实评审并清掉自动审批 bot 迁至 v2', async (t) => {
+test('升级路径:窗口到期与迁移解耦,整轮无当前证据时跨两次推送仍保留旧评审,待可区分证据到达再迁移 v2', async (t) => {
   const fx = createFixture(t);
   const autoMergeReview = {
     id: 'R-auto',
@@ -1841,7 +1841,7 @@ test('升级路径:旧 head 有 App 佐证、新 head 暂无检查时暂留旧 A
     commitOid: 'aaa1111',
   };
   const first = snap({
-    reviews: [autoMergeReview, oldGreptileApproved],
+    reviews: [oldGreptileApproved],
     reviewerChecks: [
       { name: 'Greptile Review', appSlug: 'greptile-apps', appId: 99, headSha: 'aaa1111', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: iso(T0 - 20 * 24 * 60 * MIN), completedAt: iso(T0 - 20 * 24 * 60 * MIN) },
     ],
@@ -1852,84 +1852,59 @@ test('升级路径:旧 head 有 App 佐证、新 head 暂无检查时暂留旧 A
 
   // 模拟旧版留下的单 PR 状态(无 reviewerBotsVersion)且仓库 14 天缓存已过期。
   fx.writeRepoState({ reviewerBots: {} });
-  fx.writeState({ reviewerBots: ['cindy-auto-merge-bot', 'greptile-apps'], reviewerBotsVersion: undefined });
+  fx.writeState({ reviewerBots: ['greptile-apps'], reviewerBotsVersion: undefined });
 
-  // 1) 新 head bbb2222 刚推送、Greptile 的 App 检查尚未注册:暂留未确认的旧 App(v1),不提前结束收齐等待。
+  // 1) 第一次推送 bbb2222:整轮收齐窗口内 Greptile 都没有注册当前 head 检查。
+  //    窗口内保持 settling;到期后本轮正常结束等待并放行,但不移除未确认的旧评审、不提前迁至 v2。
   fx.advance(2);
-  const red = { latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], reviewerChecks: [], verdict: 'NEEDS_WORK' };
-  fx.setSnapshot(snap({ ...first, ...red }));
+  const redPush1 = { latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], reviewerChecks: [], verdict: 'NEEDS_WORK' };
+  fx.setSnapshot(snap({ ...first, ...redPush1 }));
   let r = await fx.run(['--json']);
   assert.equal(r.code, 2, r.stdout);
   assert.equal(r.json().reason, 'settling');
-  assert.match(r.json().detail, /greptile-apps/);
-  assert.deepEqual(fx.readState().reviewerBots, ['cindy-auto-merge-bot', 'greptile-apps']);
+  assert.match(r.json().detail, /held until greptile-apps answer/);
+  assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
   assert.equal(fx.readState().reviewerBotsVersion, 1);
 
-  // 2) Greptile 在新 head 注册自有 App 检查并批准,等本轮收齐窗口结束:
-  //    Greptile 凭当前 head 证据保留,纯自动审批 bot 清掉,单 PR 状态迁至 v2 并放行。
   fx.advance(20);
-  const greptileOnNewHead = {
+  r = await fx.run(['--json']);
+  assert.equal(r.code, 0, r.stdout);
+  assert.match(r.json().detail, /events=\[checks-failed\]/);
+  assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
+  assert.equal(fx.readState().reviewerBotsVersion, 1);
+  assert.equal((await fx.run(['--resume', 'pushed fix'])).code, 0);
+
+  // 2) 第二次推送 ccc3333:Greptile 尚未登记检查前仍保留在名单中继续等待,不会在意见到达前提前启动跟进。
+  fx.advance(5);
+  const redPush2 = { latestCommitOid: 'ccc3333', checks: [check('lint', 'failed', { required: true })], reviewerChecks: [], verdict: 'NEEDS_WORK' };
+  fx.setSnapshot(snap({ ...first, ...redPush2 }));
+  r = await fx.run(['--json']);
+  assert.equal(r.code, 2, r.stdout);
+  assert.equal(r.json().reason, 'settling');
+  assert.match(r.json().detail, /held until greptile-apps answer/);
+  assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
+  assert.equal(fx.readState().reviewerBotsVersion, 1);
+
+  // 3) Greptile 在 ccc3333 注册自有 App 检查并批准后,凭可区分当前证据立刻迁至 v2 并放行。
+  fx.advance(3);
+  const greptileOnPush2 = {
     ...first,
-    ...red,
+    ...redPush2,
     reviews: [
-      ...first.reviews,
-      { id: 'R-grep-2', author: 'greptile-apps', authorIsBot: true, state: 'APPROVED', body: 'LGTM', submittedAt: iso(fx.now() - 15 * MIN), url: 'https://gh/R-grep-2', commitOid: 'bbb2222' },
+      oldGreptileApproved,
+      { id: 'R-grep-2', author: 'greptile-apps', authorIsBot: true, state: 'APPROVED', body: 'LGTM', submittedAt: iso(fx.now()), url: 'https://gh/R-grep-2', commitOid: 'ccc3333' },
     ],
     reviewerChecks: [
-      { name: 'Greptile Review', appSlug: 'greptile-apps', appId: 99, headSha: 'bbb2222', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: iso(fx.now() - 16 * MIN), completedAt: iso(fx.now() - 15 * MIN) },
+      { name: 'Greptile Review', appSlug: 'greptile-apps', appId: 99, headSha: 'ccc3333', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: iso(fx.now() - MIN), completedAt: iso(fx.now()) },
     ],
   };
-  fx.setSnapshot(snap(greptileOnNewHead));
+  fx.setSnapshot(snap(greptileOnPush2));
   r = await fx.run(['--json']);
   assert.equal(r.code, 0, r.stdout);
   assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
   assert.equal(fx.readState().reviewerBotsVersion, 2);
-  assert.equal((await fx.run(['--resume', 'pushed fix'])).code, 0);
 
-  // 3) 迁至 v2 后再推 ccc3333:即使 ccc3333 尚无检查,仍保留 Greptile、不再等待 cindy-auto-merge-bot。
-  fx.advance(5);
-  fx.setSnapshot(snap({ ...greptileOnNewHead, latestCommitOid: 'ccc3333', checks: [check('lint', 'failed', { required: true })], reviewerChecks: [] }));
-  r = await fx.run(['--json']);
-  assert.equal(r.code, 2, r.stdout);
-  assert.equal(r.json().reason, 'settling');
-  assert.match(r.json().detail, /held until greptile-apps answer/);
-  assert.doesNotMatch(r.json().detail, /cindy-auto-merge-bot/);
-
-  // 4) 仅剩旧版纯真实评审 Greptile(旧 head 有 App 佐证、新 head 暂无检查):
-  //    新 head 刚推时暂留等待;一旦 Greptile 在新 head 注册检查并答复,无需等满 20 分钟立刻迁至 v2 并放行。
-  const grepOnly = createFixture(t);
-  const grepFirst = snap({ reviews: [oldGreptileApproved], reviewerChecks: first.reviewerChecks });
-  grepOnly.setSnapshot(grepFirst);
-  await grepOnly.run();
-  assert.equal((await grepOnly.run(['--ack'])).code, 0);
-  grepOnly.writeRepoState({ reviewerBots: {} });
-  grepOnly.writeState({ reviewerBots: ['greptile-apps'], reviewerBotsVersion: undefined });
-  grepOnly.advance(2);
-  grepOnly.setSnapshot(snap({ ...grepFirst, ...red }));
-  r = await grepOnly.run(['--json']);
-  assert.equal(r.code, 2, r.stdout);
-  assert.equal(r.json().reason, 'settling');
-  assert.match(r.json().detail, /held until greptile-apps answer/);
-  assert.equal(grepOnly.readState().reviewerBotsVersion, 1);
-
-  grepOnly.advance(3);
-  grepOnly.setSnapshot(snap({
-    ...grepFirst,
-    ...red,
-    reviews: [
-      oldGreptileApproved,
-      { id: 'R-grep-b', author: 'greptile-apps', authorIsBot: true, state: 'APPROVED', body: 'LGTM', submittedAt: iso(grepOnly.now()), url: 'https://gh/R-grep-b', commitOid: 'bbb2222' },
-    ],
-    reviewerChecks: [
-      { name: 'Greptile Review', appSlug: 'greptile-apps', appId: 99, headSha: 'bbb2222', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: iso(grepOnly.now() - MIN), completedAt: iso(grepOnly.now()) },
-    ],
-  }));
-  r = await grepOnly.run(['--json']);
-  assert.equal(r.code, 0, r.stdout);
-  assert.deepEqual(grepOnly.readState().reviewerBots, ['greptile-apps']);
-  assert.equal(grepOnly.readState().reviewerBotsVersion, 2);
-
-  // 5) 仅剩旧版自动合并 bot 且其在当前 head 上提交了无 App 佐证的 APPROVED:无需等满 20 分钟直接清掉迁至 v2 并放行。
+  // 4) 可区分的当前证据证明自动审批 bot 无自有 App 检查(当前 head APPROVED):立刻移除并迁至 v2,不再等满 20 分钟。
   const autoCurrent = createFixture(t);
   const autoCurrentReview = { ...autoMergeReview, commitOid: 'bbb2222' };
   const autoCurrentSnap = snap({ reviews: [autoCurrentReview] });
@@ -1939,14 +1914,14 @@ test('升级路径:旧 head 有 App 佐证、新 head 暂无检查时暂留旧 A
   autoCurrent.writeRepoState({ reviewerBots: {} });
   autoCurrent.writeState({ reviewerBots: ['cindy-auto-merge-bot'], reviewerBotsVersion: undefined });
   autoCurrent.advance(2);
-  autoCurrent.setSnapshot(snap({ ...autoCurrentSnap, ...red }));
+  autoCurrent.setSnapshot(snap({ ...autoCurrentSnap, ...redPush1 }));
   r = await autoCurrent.run(['--json']);
   assert.equal(r.code, 0, r.stdout);
   assert.match(r.json().detail, /events=\[checks-failed\]/);
   assert.deepEqual(autoCurrent.readState().reviewerBots, []);
   assert.equal(autoCurrent.readState().reviewerBotsVersion, 2);
 
-  // 6) 快照不完整(如 reviewThreads.truncated)时即使已过收齐窗口也保守保留旧名单且暂不升至 v2。
+  // 5) 快照不完整(如 reviewThreads.truncated)时保守保留旧名单且暂不升至 v2。
   const incomplete = createFixture(t);
   incomplete.setSnapshot(autoCurrentSnap);
   await incomplete.run();
@@ -1954,7 +1929,7 @@ test('升级路径:旧 head 有 App 佐证、新 head 暂无检查时暂留旧 A
   incomplete.writeRepoState({ reviewerBots: {} });
   incomplete.writeState({ reviewerBots: ['greptile-apps'], reviewerBotsVersion: undefined });
   incomplete.advance(2);
-  incomplete.setSnapshot(snap({ ...autoCurrentSnap, ...red, reviewThreads: { totalCount: 1, fetchedCount: 0, unresolvedCount: 0, activeUnresolvedCount: 0, outdatedUnresolvedCount: 0, truncated: true, nodes: [] } }));
+  incomplete.setSnapshot(snap({ ...autoCurrentSnap, ...redPush1, reviewThreads: { totalCount: 1, fetchedCount: 0, unresolvedCount: 0, activeUnresolvedCount: 0, outdatedUnresolvedCount: 0, truncated: true, nodes: [] } }));
   r = await incomplete.run(['--json']);
   assert.equal(r.code, 2, r.stdout);
   assert.equal(r.json().reason, 'settling');
