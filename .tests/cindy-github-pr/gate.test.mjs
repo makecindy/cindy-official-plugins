@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -128,14 +128,15 @@ function createFixture(t) {
       return { code, stdout, stderr, json: () => JSON.parse(stdout) };
     },
     /** 真实子进程调用指定路径的脚本:只给软链入口用例用,验证 CLI 入口判据本身。 */
-    runVia(scriptPath, extraArgs = []) {
+    runVia(scriptPath, extraArgs = [], hookPayload) {
       return new Promise((resolve) => {
-        execFile(process.execPath, [scriptPath, ...gateArgs(extraArgs)], {
+        const child = execFile(process.execPath, [scriptPath, ...gateArgs(extraArgs)], {
           encoding: 'utf8',
           env: { ...process.env, FAKE_SNAPSHOT_OUT: outFile },
         }, (err, stdout, stderr) => {
           resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout: stdout ?? '', stderr: stderr ?? '' });
         });
+        if (hookPayload) child.stdin.end(JSON.stringify(hookPayload));
       });
     },
   };
@@ -227,6 +228,53 @@ test('normalizeConflicting:两套字段域都认,未知窗口 carry-forward', ()
 
 // ── 事件:检查 ──────────────────────────────────────────────────────────────
 
+test('PR launcher selects a supported Node from PATH and preserves hook stdin, exit codes and child snapshot runtime', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-node-launcher-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const launcher = path.join(path.dirname(gatePath), 'pr-node.cjs');
+  const stateDir = path.join(dir, 'state');
+  const fakeSnapshot = path.join(dir, 'fake-snapshot.mjs');
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fs.writeFileSync(fakeSnapshot, `if (Number(process.versions.node.split('.')[0]) < 18) process.exit(9);
+    if (process.argv.includes('--probe')) process.exit(1);
+    process.stdout.write(${JSON.stringify(JSON.stringify(red))});`);
+  // CI need not have an ancient Node installed. Simulate its reported version
+  // and executable identity, while selecting and actually running a modern
+  // executable from PATH. The real old binary is exercised by the dev-app test.
+  const simulateOld = `Object.defineProperty(process.versions,'node',{value:'8.12.0'});
+    Object.defineProperty(process,'execPath',{value:${JSON.stringify(path.join(dir, 'obsolete-node'))}});
+    const file=process.argv[1]; process.argv=[process.execPath,file,...process.argv.slice(2)]; require(file);`;
+  const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'path'));
+  const invoke = (extra = [], payload, modernPath = path.dirname(process.execPath)) => spawnSync(process.execPath,
+    ['-e', simulateOld, launcher, 'pr-heartbeat-gate.mjs', PR_URL,
+      '--state-dir', stateDir, '--snapshot', fakeSnapshot, '--no-pacing', ...extra], {
+      encoding: 'utf8', input: payload ? JSON.stringify(payload) : '', timeout: 15000,
+      env: { ...cleanEnv, PATH: modernPath, CINDY_PR_TRACE: '0' },
+    });
+  const payload = { event: 'schedule-pre-run', scheduleId: 'first-schedule', runId: 'first', firedAt: T0 };
+  const first = invoke([], payload);
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, /events=\[checks-failed\]/);
+  const saved = () => JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'));
+  assert.equal(saved().followStartId, 'first-schedule', 'real hook stdin must reach the modern child');
+  assert.equal(invoke(['--resume', 'Inspected the failed fixture check.']).status, 0);
+  const skipped = invoke([], { ...payload, runId: 'second', lastFinishedAt: T0 });
+  assert.equal(skipped.status, 2, skipped.stderr);
+  assert.match(skipped.stdout, /SKIP/);
+  const before = fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8');
+  const unsupported = invoke([], payload, dir);
+  assert.equal(unsupported.status, 1);
+  assert.match(unsupported.stderr, /needs Node\.js 18 or newer/);
+  assert.equal(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'), before);
+  // A modern Node already running the launcher does not need PATH probing.
+  const current = spawnSync(process.execPath, [launcher, 'pr-heartbeat-gate.mjs', '--help'], {
+    encoding: 'utf8', env: { ...cleanEnv, PATH: dir }, timeout: 15000,
+  });
+  assert.equal(current.status, 0, current.stderr);
+  assert.match(current.stderr, /Usage: node pr-heartbeat-gate/);
+});
+
 test('检查失败按名字每个 head 只报一次;换 head 后再失败会再报', () => {
   const red = snap({ checks: [check('build', 'failed', { required: true }), check('lint')] });
   const first = evaluateWatch(seenWatch(snap()), red, T0);
@@ -271,6 +319,218 @@ test('必需检查全部通过报一次;还在跑的其它检查结束时再报�
   assert.deepEqual(r.events, [{ kind: 'checks-passed', count: 2, required: false }], '欠的那一次');
   r = evaluateWatch(r.next, pushed([check('build', 'passed', { required: true }), check('codeql'), check('late', 'pending')]), T0 + 30 * MIN);
   assert.deepEqual(kinds(r), [], '后来冒出的非必需检查不唤起');
+});
+
+test('host test and self-test preview an existing wait and unacknowledged event without writing any follow state', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', checks: [{ name: 'build' }], threads: [] });
+  fx.advance(5);
+  fx.setSnapshot({ ...red, checks: [...red.checks, check('lint', 'failed')] });
+  assert.equal((await fx.run()).code, 0);
+  assert.ok(fx.readState().wait && fx.readState().pendingWatch);
+  const dir = path.dirname(fx.stateFile());
+  const files = () => Object.fromEntries(fs.readdirSync(dir).sort().map(name =>
+    [name, fs.readFileSync(path.join(dir, name), 'utf8')]));
+  const before = files();
+  // The actual Host uses these two pairs of IDs without lastFinishedAt.
+  // A preview which sees new work must still not change the production state.
+  fx.setSnapshot({ ...red, checks: [...red.checks, check('lint', 'failed'), check('package', 'failed')] });
+  for (const id of ['test', 'self-test']) {
+    const result = await fx.runVia(gatePath, [], { event: 'schedule-pre-run',
+      scheduleId: id, scheduleName: 'PR #42', runId: id, firedAt: Date.now() });
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /diagnostic only, follow-up state unchanged/);
+    assert.deepEqual(files(), before, 'PR state, repository state and trace stay byte-identical');
+  }
+  const production = await fx.run();
+  assert.equal(production.code, 0, 'the real schedule can still deliver its pending event');
+  const first = createFixture(t);
+  first.setSnapshot(red);
+  assert.equal((await first.runVia(gatePath, [], { event: 'schedule-pre-run',
+    scheduleId: 'test', runId: 'test', firedAt: Date.now() })).code, 0);
+  assert.equal(fs.existsSync(first.stateFile()), false, 'diagnostics do not create a new follower');
+});
+
+test('a partially failed batch reports its final result once even with no new failure', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing', 'pending_checks'],
+    checks: [check('build', 'failed', { required: true }), check('lint', 'pending'), check('package', 'pending')] });
+  fx.setSnapshot(red);
+  let first = await fx.run();
+  assert.equal(first.code, 0);
+  assert.match(first.stdout, /checks-failed/);
+  assert.match(first.stdout, /notify the user \(schedule_notify_current_run\)/);
+  assert.equal((await fx.run(['--resume', 'Inspected the initial failure.'])).code, 0);
+  fx.advance(5);
+  fx.setSnapshot({ ...red, checks: [red.checks[0], check('lint'), red.checks[2]] });
+  assert.equal((await fx.run()).code, 2);
+  fx.advance(5);
+  const finished = { ...red, blockers: ['ci_failing'], checks: [red.checks[0], check('lint'), check('package')] };
+  fx.setSnapshot(finished);
+  const final = await fx.run();
+  assert.equal(final.code, 0);
+  assert.match(final.stdout, /checks-finished/);
+  assert.match(final.stdout, /All 3 checks finished.*1 still failed/);
+  assert.match(final.stdout, /notify the user \(schedule_notify_current_run\)/);
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /retry-unacked/);
+  assert.equal((await fx.run(['--resume', 'Reported the final failure.'])).code, 0);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
+  // A new follower's first snapshot is already final: exactly the failure event.
+  const fresh = createFixture(t);
+  fresh.setSnapshot(finished);
+  assert.match((await fresh.run()).stdout, /events=\[checks-failed\]/);
+  assert.equal((await fresh.run(['--resume', 'Reported the failure.'])).code, 0);
+  fresh.advance(5);
+  assert.equal((await fresh.run()).code, 2);
+});
+
+test('a new schedule observes an existing failure even if a stopped follower had acknowledged it', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', reason: 'Previous follower investigated.', checks: [{ name: 'build' }], threads: [] });
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2, 'reusing a schedule preserves its recorded wait');
+  fx.setTrigger({ firstScheduleId: 'new-schedule' });
+  fx.advance(5);
+  assert.match((await fx.run(['--pacing'])).stdout, /events=\[checks-failed\]/);
+  assert.equal(fx.readState().wait, undefined, 'stopped follower wait must not suppress the initial failure');
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /retry-unacked/, 'repeated first hook does not reset pending watch');
+  assert.equal((await fx.run(['--resume', 'Reported the existing failure.'])).code, 0);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
+});
+
+test('a new follower reports green checks even when the old owner was waiting only for approval', async t => {
+  const fx = createFixture(t);
+  const approval = snap({
+    verdict: 'NEEDS_WORK', blockers: ['unresolved_review_threads', 'branch_protection_blocked'],
+    reviewThreads: { totalCount: 1, unresolvedCount: 1, activeUnresolvedCount: 1, truncated: false,
+      nodes: [{ id: 'approval', isResolved: false, isOutdated: false,
+        comments: [comment('A1', 'lead', '2026-10-20T09:00:00Z', 'This needs explicit approval from a designated maintainer.')] }] },
+  });
+  fx.setSnapshot(approval);
+  assert.equal((await fx.run()).code, 0);
+  assert.equal((await fx.run(['--resume', 'Old owner reported the approval blocker.'])).code, 0);
+  const old = fx.readState();
+  assert.equal(old.humanOnlyPending, true);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2, 'same owner remains quiet');
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  fx.advance(5);
+  const first = await fx.run(['--pacing']);
+  assert.equal(first.code, 0, first.stdout);
+  assert.match(first.stdout, /events=\[checks-passed\]/);
+  const next = fx.readState();
+  assert.equal(next.headOid, old.headOid);
+  assert.equal(next.roundCount, old.roundCount);
+  assert.equal(next.lastAckAt, undefined, 'old confirmation must not constitute new owner acknowledgement');
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /retry-unacked/);
+  assert.equal((await fx.run(['--resume', 'New owner reported the approval blocker.'])).code, 0);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2, 'confirmed result is deduplicated again');
+});
+
+test('new follower retains actual CI registration history and the same-head deadline', async t => {
+  for (const mode of ['same-head', 'new-head', 'previously-reminded', 'unacknowledged', 'unavailable', 'registered', 'never-had-checks']) {
+    const fx = createFixture(t);
+    const green = snap();
+    const missing = snap({ latestCommitOid: 'bbb2222', verdict: 'NOT_READY', blockers: ['pending_checks'],
+      checks: [], checksSummary: { total: 0, pending: 0, failed: 0, unavailable: false, truncated: false } });
+    fx.setSnapshot(mode === 'never-had-checks' ? { ...missing, latestCommitOid: green.latestCommitOid } : green);
+    await fx.run();
+    await fx.run(['--resume', 'old owner observed']);
+    fx.advance(5);
+    fx.setSnapshot(missing);
+    assert.equal((await fx.run()).code, 2);
+    const started = fx.readState().watch.checksAwaitedSince;
+    if (mode !== 'never-had-checks') assert.ok(started);
+    if (mode === 'previously-reminded' || mode === 'unacknowledged') {
+      fx.advance(15);
+      assert.match((await fx.run()).stdout, /no-checks/);
+      if (mode === 'previously-reminded') await fx.run(['--resume', 'old owner reported absent checks']);
+    }
+    if (mode === 'new-head') fx.setSnapshot({ ...missing, latestCommitOid: 'ccc3333' });
+    if (mode === 'unavailable') fx.setSnapshot({ ...missing, checksSummary: { unavailable: true } });
+    if (mode === 'registered') fx.setSnapshot({ ...missing, checks: [check('build', 'pending')] });
+    fx.setTrigger({ firstScheduleId: 'new-follower' });
+    fx.advance(15);
+    const first = await fx.run();
+    if (['same-head', 'unacknowledged'].includes(mode)) {
+      assert.equal(first.code, 0, mode + ': ' + first.stdout);
+      assert.match(first.stdout, /no-checks/);
+      await fx.run(['--resume', 'new owner reported absent checks']);
+    } else {
+      assert.equal(first.code, 2, mode + ': ' + first.stdout);
+      if (mode === 'unavailable') {
+        assert.equal(fx.readState().watch.checksAwaitedSince, started);
+        fx.setSnapshot(missing);
+        fx.advance(5);
+        assert.match((await fx.run()).stdout, /no-checks/);
+        await fx.run(['--resume', 'new owner reported absent checks']);
+      } else if (mode === 'registered') {
+        assert.equal(fx.readState().watch.checksAwaitedSince, null);
+      } else if (mode !== 'never-had-checks') {
+        assert.equal(fx.readState().watch.checksAwaitedSince, iso(fx.now()), mode);
+        fx.advance(15);
+        assert.match((await fx.run()).stdout, /no-checks/);
+        await fx.run(['--resume', 'new owner reported absent checks']);
+      }
+    }
+    fx.advance(20);
+    assert.equal((await fx.run()).code, 2, mode + ': no repeated reminder');
+  }
+});
+
+test('first hook reads the actual scheduler stdin and re-observes a stopped follower\'s red check', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', checks: [{ name: 'build' }], threads: [] });
+  const payload = { event: 'schedule-pre-run', scheduleId: 'new-follow', runId: 'first', firedAt: Date.now() };
+  const first = await fx.runVia(gatePath, [], payload);
+  assert.equal(first.code, 0, first.stderr);
+  assert.match(first.stdout, /events=\[checks-failed\]/);
+  assert.equal((await fx.runVia(gatePath, ['--resume', 'Reported the red result.'])).code, 0);
+  const later = await fx.runVia(gatePath, [], { ...payload, runId: 'second', lastFinishedAt: Date.now() });
+  assert.equal(later.code, 2, later.stderr);
+});
+
+test('a pre-upgrade partially failing watch still reports completion after unavailable data', () => {
+  const red = snap({ checks: [check('build', 'failed', { required: true }), check('lint', 'pending')] });
+  const old = seenWatch(red);
+  delete old.failureCompletionOwed;
+  const unavailable = evaluateWatch(old, snap({ checks: [], checksSummary: { unavailable: true } }), T0 + MIN);
+  assert.deepEqual(kinds(unavailable), []);
+  const done = evaluateWatch(unavailable.next, snap({ checks: [red.checks[0], check('lint')] }), T0 + 2 * MIN);
+  assert.deepEqual(kinds(done), ['checks-finished']);
+});
+
+test('a timed baseline wait still reports a partial batch becoming final without extending its deadline', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing', 'pending_checks'],
+    checks: [check('build', 'failed', { required: true }), check('lint', 'pending')] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', checks: [{ name: 'build' }], threads: [] });
+  const deadline = fx.readState().wait.until;
+  fx.advance(5);
+  fx.setSnapshot({ ...red, blockers: ['ci_failing'], checks: [red.checks[0], check('lint')] });
+  const result = await fx.run();
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /events=\[checks-finished\]/);
+  assert.equal(fx.readState().wait.until, deadline);
+  // A new commit must not carry this old completion obligation.
+  const nextHead = evaluateWatch(seenWatch(red), snap({ latestCommitOid: 'new-head', checks: [red.checks[0], check('lint')] }), T0 + MIN);
+  assert.deepEqual(kinds(nextHead), ['checks-failed']);
 });
 
 test('读不到检查时保留原状态,不把「没读到」当成「全部通过」或「没有检查」', () => {
@@ -654,7 +914,115 @@ test('低成本探测:与上次完整读取一致时不做完整快照;有理由
   assert.equal(probeAllowsSkip(settled, previous.probe, now + 31 * MIN), false, '30 分钟完整读一次');
   assert.equal(probeAllowsSkip(settled, { ...previous.probe, status: 'x' }, now + MIN), false);
   assert.equal(probeAllowsSkip(settled, null, now + MIN), false, '探测失败');
-  assert.equal(probeAllowsSkip({ ...settled, lastPassAt: now - 24 * 60 * MIN }, previous.probe, now + MIN), false, '保底巡检到点');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['ci_failing'], lastPassAt: now - 24 * 60 * MIN }, previous.probe, now + MIN), false, '保底巡检到点');
+  // 当保底巡检在 decide() 中被人工等待/活跃 wait/defer 抑制时，探测一致不应丢弃结果强拉完整快照。
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'READY', lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, 'READY 等合并超过 24 小时仍可走探测');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'BLOCKED_HUMAN', blockers: ['approval_required'], lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, '仅等人工审批超过 24 小时仍可走探测');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['approval_required'], humanOnlyPending: true, lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, 'humanOnlyPending 超过 24 小时仍可走探测');
+  const activeHumanWait = { kind: 'human', headSha: 'aaa1111', reason: 'wait merge', createdAt: now - 48 * 60 * MIN, until: null, checks: [], threads: [] };
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['ci_failing'], wait: activeHumanWait, lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, '未到点的 wait 不应被静默门禁强拉完整快照');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['ci_failing'], nextAllowAt: now + 30 * MIN, lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, '未到点的 defer 不应被静默门禁强拉完整快照');
+});
+
+test('超过 24 小时的人工等待在探测一致时跳过完整快照；首次 gh api 未登录报错仍诊断为 auth', async (t) => {
+  const fx = createFixture(t);
+  const probe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' };
+  fx.setProbe(probe);
+  fx.setSnapshot(snap({ verdict: 'READY' }));
+  await fx.run();
+  const wait = { kind: 'human', headSha: 'aaa1111', reason: 'waiting for maintainer merge', afterMinutes: null, checks: [], threads: [] };
+  assert.equal((await fx.run(['--wait', fx.writeWait(wait)])).code, 0);
+  // 模拟静默超过 48 小时，但最近刚做过一次完整读取（10 分钟前）
+  fx.advance(10);
+  fx.writeState({ lastPassAt: fx.now() - 48 * 60 * MIN });
+  const reads = fx.snapshotRuns();
+  const skipped = await fx.run(['--json']);
+  assert.equal(skipped.code, 2);
+  assert.equal(skipped.json().reason, 'unchanged');
+  assert.equal(fx.snapshotRuns(), reads, '探测匹配时不应强跑完整快照');
+
+  const noCredsPlan = snapshotFailurePlan(
+    { code: 1, stderr: '[gh] fatal on repos/acme/widgets/pulls/42: To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.\n' },
+    null,
+    fx.now(),
+    1,
+  );
+  assert.equal(noCredsPlan.diagnosis.kind, 'auth');
+  const badCredsPlan = snapshotFailurePlan(
+    { code: 1, stderr: '[gh] fatal on repos/acme/widgets/pulls/42: gh: Bad credentials (HTTP 401)\n' },
+    null,
+    fx.now(),
+    1,
+  );
+  assert.equal(badCredsPlan.diagnosis.kind, 'auth');
+});
+
+test('探针收到明确限流时直接进入退避、保留 retryAt，且零次调用完整快照', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-probe-rate-limit-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const fakeSnapshot = path.join(dir, 'fake-snapshot.mjs');
+  fs.writeFileSync(fakeSnapshot, '// placeholder for existsSync check\n', 'utf8');
+
+  let clock = T0;
+  let probeCalls = 0;
+  let snapshotCalls = 0;
+  let probeReply = { code: 0, stdout: JSON.stringify({ status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' }), stderr: '' };
+  const currentSnap = snap({ verdict: 'READY' });
+  const run = async (extra = []) => {
+    let stdout = '';
+    let stderr = '';
+    const code = await runGate([PR_URL, '--state-dir', stateDir, '--snapshot', fakeSnapshot, '--min-pass-spacing-minutes', '0', '--no-pacing', ...extra], {
+      now: () => clock,
+      runProbe: async () => { probeCalls += 1; return probeReply; },
+      runSnapshot: async () => { snapshotCalls += 1; return { code: 0, stdout: JSON.stringify(currentSnap), stderr: '' }; },
+      readTrigger: async () => null,
+      out: (text) => { stdout += text; },
+      err: (text) => { stderr += text; },
+    });
+    return { code, stdout, stderr };
+  };
+
+  // Seed baseline and acknowledge so the next tick uses probe first.
+  assert.equal((await run()).code, 0);
+  assert.equal((await run(['--ack'])).code, 0);
+  const readsBefore = snapshotCalls;
+
+  // Probe receives explicit rate limit with retryAt: must enter backoff directly with 0 full snapshots.
+  clock += 5 * MIN;
+  const resetAt = clock + 45 * MIN;
+  probeReply = {
+    code: 1,
+    stdout: '',
+    stderr: `[gh-rate-limit] retryAt=${resetAt}\n[gh] fatal on graphql: gh: API rate limit already exceeded (HTTP 403)\n`,
+  };
+  const blocked = await run();
+  assert.equal(blocked.code, 1, 'first rate-limit failure notifies once');
+  assert.match(blocked.stderr, /GitHub API rate limit reached/);
+  assert.equal(snapshotCalls, readsBefore, 'probe rate limit must not trigger a full snapshot');
+  const diagMatch = /CINDY_PR_CHECK_DIAGNOSIS (\{[^\n]+\})/.exec(blocked.stdout);
+  assert.ok(diagMatch, blocked.stdout);
+  assert.deepEqual(JSON.parse(diagMatch[1]), { kind: 'rate-limit', failures: 1, retryAt: resetAt + 1000 });
+  const saved = JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'));
+  assert.equal(saved.snapshotFailureBackoffUntil, resetAt + 1000);
+  assert.equal(saved.consecutiveSnapshotFailures, 1);
+
+  // Before retryAt, scheduled ticks skip immediately with 0 probes and 0 snapshots.
+  const probesBeforeBackoff = probeCalls;
+  clock += 10 * MIN;
+  const skipped = await run(['--json']);
+  assert.equal(skipped.code, 2);
+  assert.equal(JSON.parse(skipped.stdout).reason, 'snapshot-failure-backoff');
+  assert.equal(probeCalls, probesBeforeBackoff);
+  assert.equal(snapshotCalls, readsBefore);
+
+  // After retryAt passes, gate recovers via full snapshot and clears failure state.
+  clock = resetAt + 2000;
+  probeReply = { code: 0, stdout: JSON.stringify({ status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' }), stderr: '' };
+  const recovered = await run(['--json']);
+  assert.equal(recovered.code, 2);
+  assert.equal(snapshotCalls, readsBefore + 1);
+  assert.equal(JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8')).consecutiveSnapshotFailures, 0);
 });
 
 test('从未放行过的跟进也能数满静默时长:起点固定在首次检查,不随每轮刷新', async (t) => {
@@ -743,6 +1111,47 @@ test('blocked snapshot reports its underlying cause and scheduled probe', async 
     assert.ok(!result.stderr.split('\n')[0].includes('gh auth refresh'));
     assert.ok(result.stderr.includes(stderr));
   }
+});
+
+test('new follower reports an inherited snapshot outage once without bypassing its retry deadline', async (t) => {
+  const fx = createFixture(t);
+  const fail = { FAKE_SNAPSHOT_EXIT: '1', FAKE_SNAPSHOT_STDERR: 'HTTP 429' };
+  const args = ['--max-snapshot-failures', '1'];
+  assert.equal((await fx.run(args, fail)).code, 1);
+  const deadline = fx.readState().snapshotFailureBackoffUntil;
+  const reads = fx.snapshotRuns();
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  const next = await fx.run(args, fail);
+  assert.equal(next.code, 1);
+  assert.match(next.stderr, /rate limit/i);
+  assert.equal(fx.snapshotRuns(), reads);
+  assert.equal(fx.readState().snapshotFailureBackoffUntil, deadline);
+  assert.equal((await fx.run(args, fail)).code, 2);
+  assert.equal(fx.snapshotRuns(), reads);
+  fx.advance(31);
+  assert.equal((await fx.run(args, fail)).code, 2);
+  assert.equal(fx.snapshotRuns(), reads+1);
+});
+
+test('new follower reads the 1.5.35 failure state and deduplicates it through expiry', async (t) => {
+  const fx = createFixture(t);
+  const fail = { FAKE_SNAPSHOT_EXIT: '1', FAKE_SNAPSHOT_STDERR: 'HTTP 429' };
+  const args = ['--max-snapshot-failures', '1'];
+  assert.equal((await fx.run(args, fail)).code, 1);
+  const old = fx.readState();
+  fx.writeState({ snapshotFailureSummary: undefined });
+  assert.equal(Object.hasOwn(fx.readState(), 'snapshotFailureSummary'), false);
+  const reads = fx.snapshotRuns();
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  const result = await fx.run(args, fail);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /rate limit/i);
+  assert.equal(fx.snapshotRuns(), reads);
+  assert.equal(fx.readState().snapshotFailureBackoffUntil, old.snapshotFailureBackoffUntil);
+  assert.ok(fx.readState().snapshotFailureReports[old.snapshotFailureFingerprint]);
+  fx.advance(31);
+  assert.equal((await fx.run(args, fail)).code, 2);
+  assert.equal(fx.snapshotRuns(), reads + 1);
 });
 
 test('a change to the watched PR retries a network failure without moving the scheduled retry', async (t) => {
@@ -1997,6 +2406,25 @@ test('inventory failure survives resume; new CI failures still wake', async t =>
   for(let n=0;n<12;n++){fx.advance(5);assert.equal((await fx.run()).code,2);}
   fx.setSnapshot({...s,checks:[check('new-failure','failed')]});fx.advance(5);
   assert.equal((await fx.run()).code,0);
+});
+
+test('new follower gets the persistent inventory failure without inheriting the old notice window', async t => {
+  const fx = createFixture(t);
+  fx.setSnapshot(snap({ verdict: 'NEEDS_WORK', blockers: ['required_checks_unavailable'],
+    gate: { requiredChecksUnavailable: true }, checks: [] }));
+  await fx.run();
+  await fx.run(['--resume', 'observed']);
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /required-checks-unavailable/);
+  await fx.run(['--resume', 'noted persistent outage']);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /required-checks-unavailable/);
+  await fx.run(['--resume', 'new owner informed']);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
 });
 
 test('trace records continuous decisions and receipts without comment or resume text', async t => {

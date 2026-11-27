@@ -6,7 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import nodeTest from 'node:test';
 
-import { runGate, decide, isHumanOnlyReviewPending, watchFromSnapshot, evaluateWatch } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
+import { runGate, decide, isHumanOnlyReviewPending, watchFromSnapshot, evaluateWatch, snapshotFailurePlan } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
 import { splitHttpResponse, rateLimitRetryAt } from '../../cindy-github/skills/pr/scripts/lib/gh.mjs';
 import {
   parseGitHubRemote,
@@ -18,6 +18,7 @@ import {
 const test = (name, fn) => nodeTest(name, { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim / symlink' : false }, fn);
 
 const script = fileURLToPath(new URL('../../cindy-github/skills/pr/scripts/pr-snapshot.mjs', import.meta.url));
+const cleanupScript = fileURLToPath(new URL('../../cindy-github/skills/pr/scripts/pr-cleanup-plan.mjs', import.meta.url));
 const group = (conclusion = 'FAILURE', truncated = false) => ({
   oid: 'group-sha',
   statusCheckRollup: { contexts: {
@@ -39,7 +40,10 @@ for a in "$@"; do
     --method|-X|*mutation*) echo "Snapshot must not mutate GitHub" >&2; exit 1 ;;
   esac
 done
-case "$1" in --version|auth) exit 0 ;; esac
+case "$1" in
+  --version) exit 0 ;;
+  auth) echo "Snapshot must not run gh auth precheck" >&2; exit 1 ;;
+esac
 if [ "$1" = pr ] && [ "$2" = view ]; then cat "$d/resp-prview.json"; exit 0; fi
 if [ "$1" = api ] && [ "$2" = graphql ]; then
   q=""
@@ -433,4 +437,152 @@ test('two policies for the same absent name produce one wait target',t=>{
  const rules=[{type:'required_status_checks',parameters:{required_status_checks:[{context:'late',integration_id:42},{context:'late'}]}}];
  const s=run({timelineItems:{nodes:[]}},'ahead',{rules});
  assert.equal(s.checks.filter(c=>c.name==='late').length,1);
+});
+
+nodeTest('probe and full snapshot skip gh auth prechecks and classify auth, rate-limit, and network errors from the first real request', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim / symlink' : false }, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-first-req-errors-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const logFile = path.join(dir, 'argv.log');
+  const now = Date.now();
+  const resetSec = Math.floor(now / 1000) + 600;
+  fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.GH_ARGV_LOG, JSON.stringify(args) + '\\n');
+if (args[0] === '--version') process.exit(0);
+if (args[0] === 'auth') {
+  process.stderr.write('unexpected gh auth precheck\\n');
+  process.exit(9);
+}
+const mode = process.env.FAKE_GH_MODE;
+if (mode === 'no-creds') {
+  process.stderr.write('To get started with GitHub CLI, please run:  gh auth login\\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.\\n');
+  process.exit(4);
+}
+if (mode === 'bad-creds') {
+  process.stdout.write('HTTP/2.0 401 Unauthorized\\n\\n{"message":"Bad credentials"}');
+  process.stderr.write('gh: Bad credentials (HTTP 401)\\n');
+  process.exit(1);
+}
+if (mode === 'rate-limit') {
+  process.stdout.write('HTTP/2.0 403 Forbidden\\nX-RateLimit-Remaining: 0\\nX-RateLimit-Reset: ${resetSec}\\n\\n{"message":"API rate limit exceeded"}');
+  process.stderr.write('gh: API rate limit already exceeded for user ID 123 (HTTP 403)\\n');
+  process.exit(1);
+}
+if (mode === 'dns') {
+  process.stderr.write('Post "https://api.github.com/graphql": dial tcp: lookup api.github.com: no such host\\n');
+  process.exit(1);
+}
+if (mode === 'timeout') {
+  process.stderr.write('Get "https://api.github.com/repos/acme/game/pulls/54": dial tcp 140.82.121.6:443: i/o timeout\\n');
+  process.exit(1);
+}
+process.exit(2);
+`, { mode: 0o755 });
+
+  const runCase = (mode, extraArgs = []) => {
+    fs.writeFileSync(logFile, '');
+    const res = spawnSync(process.execPath, [script, 'https://github.com/acme/game/pull/54', ...extraArgs], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, GH_ARGV_LOG: logFile, FAKE_GH_MODE: mode },
+    });
+    const calls = fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+    assert.equal(calls.some(argv => argv[0] === 'auth'), false, `must never invoke gh auth (${mode})`);
+    return { res, calls };
+  };
+
+  for (const extraArgs of [['--probe'], []]) {
+    const label = extraArgs.length ? 'probe' : 'full';
+    for (const mode of ['no-creds', 'bad-creds']) {
+      const { res, calls } = runCase(mode, extraArgs);
+      assert.equal(res.status, 1, `${label}/${mode}`);
+      assert.equal(calls.filter(argv => argv[0] === 'api').length, 1, `${label}/${mode} fails fast without retry`);
+      const plan = snapshotFailurePlan({ code: res.status, stderr: res.stderr }, null, now, 1);
+      assert.equal(plan.diagnosis.kind, 'auth', `${label}/${mode}: ${res.stderr}`);
+    }
+
+    const rl = runCase('rate-limit', extraArgs);
+    assert.equal(rl.res.status, 1, `${label}/rate-limit`);
+    assert.equal(rl.calls.filter(argv => argv[0] === 'api').length, 1, `${label}/rate-limit fails fast without retry`);
+    assert.match(rl.res.stderr, new RegExp(`\\[gh-rate-limit\\] retryAt=${resetSec * 1000}`));
+    const rlPlan = snapshotFailurePlan({ code: rl.res.status, stderr: rl.res.stderr }, null, now, 1);
+    assert.equal(rlPlan.diagnosis.kind, 'rate-limit', `${label}/rate-limit`);
+    assert.equal(rlPlan.until, resetSec * 1000 + 1000);
+  }
+
+  // Network errors: verify DNS on probe and timeout on full snapshot classify as dns / timeout (never auth or rate-limit).
+  const dnsRun = runCase('dns', ['--probe']);
+  assert.notEqual(dnsRun.res.status, 0);
+  assert.equal(snapshotFailurePlan({ code: dnsRun.res.status, stderr: dnsRun.res.stderr }, null, now, 1).diagnosis.kind, 'dns');
+
+  const timeoutRun = runCase('timeout', []);
+  assert.notEqual(timeoutRun.res.status, 0);
+  assert.equal(snapshotFailurePlan({ code: timeoutRun.res.status, stderr: timeoutRun.res.stderr }, null, now, 1).diagnosis.kind, 'timeout');
+});
+
+nodeTest('pr-cleanup-plan stays read-only and skips gh auth prechecks', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim / symlink' : false }, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-cleanup-readonly-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const binDir = path.join(dir, 'bin');
+  const repoDir = path.join(dir, 'repo');
+  const logFile = path.join(dir, 'gh.log');
+  fs.mkdirSync(binDir);
+  fs.mkdirSync(repoDir);
+
+  execFileSync('git', ['init', '-q', '-b', 'main', repoDir]);
+  execFileSync('git', ['-C', repoDir, 'config', 'user.email', 'test@example.com']);
+  execFileSync('git', ['-C', repoDir, 'config', 'user.name', 'Test']);
+  fs.writeFileSync(path.join(repoDir, 'README.md'), 'hi\n');
+  execFileSync('git', ['-C', repoDir, 'add', 'README.md']);
+  execFileSync('git', ['-C', repoDir, 'commit', '-q', '-m', 'init']);
+  execFileSync('git', ['-C', repoDir, 'remote', 'add', 'origin', 'https://github.com/acme/game.git']);
+  execFileSync('git', ['-C', repoDir, 'checkout', '-q', '-b', 'feat/demo']);
+  const headSha = execFileSync('git', ['-C', repoDir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  execFileSync('git', ['-C', repoDir, 'checkout', '-q', 'main']);
+
+  fs.writeFileSync(path.join(binDir, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + '\\n');
+for (const a of args) {
+  if (a === '--method' || a === '-X' || /mutation/i.test(a)) {
+    process.stderr.write('cleanup planner must not mutate GitHub\\n');
+    process.exit(8);
+  }
+}
+if (args[0] === '--version') process.exit(0);
+if (args[0] === 'auth') {
+  process.stderr.write('cleanup planner must not run gh auth precheck\\n');
+  process.exit(9);
+}
+if (args[0] === 'api' && args[1] === 'repos/acme/game/pulls/54') {
+  process.stdout.write(JSON.stringify({
+    html_url: 'https://github.com/acme/game/pull/54',
+    state: 'closed',
+    merged: true,
+    merged_at: '2026-11-26T00:00:00Z',
+    closed_at: '2026-11-26T00:00:00Z',
+    merge_commit_sha: ${JSON.stringify(headSha)},
+    head: { ref: 'feat/demo', sha: ${JSON.stringify(headSha)}, repo: { full_name: 'acme/game', default_branch: 'main' } },
+    base: { ref: 'main', repo: { full_name: 'acme/game', default_branch: 'main' } },
+  }));
+  process.exit(0);
+}
+process.exit(2);
+`, { mode: 0o755 });
+
+  const res = spawnSync(process.execPath, [cleanupScript, 'https://github.com/acme/game/pull/54', '--worktree', repoDir], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${binDir}${path.delimiter}${process.env.PATH}`, GH_LOG: logFile },
+  });
+  assert.equal(res.status, 0, res.stderr);
+  const plan = JSON.parse(res.stdout);
+  assert.equal(plan.dryRun, true);
+  assert.equal(plan.fetched, false);
+  assert.equal(plan.merged, true);
+  // Confirm local branch still exists (read-only planner did not delete it) and gh auth was never called.
+  const branches = execFileSync('git', ['-C', repoDir, 'branch', '--list', 'feat/demo'], { encoding: 'utf8' });
+  assert.match(branches, /feat\/demo/);
+  const calls = fs.readFileSync(logFile, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.deepEqual(calls, [['--version'], ['api', 'repos/acme/game/pulls/54']]);
 });
