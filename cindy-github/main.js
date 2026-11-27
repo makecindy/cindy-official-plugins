@@ -224,6 +224,8 @@ var MESSAGES = {
     prNextAsk: '卡片已显示。等用户点击或在对话里明确说要发，不要再用文字重复询问；点击会以本插件代发的消息送达。创建 PR 后用 card_id 和 pr 再调用 pr_card，renamed / following 只填已经完成的动作。',
     prNextApply: '卡片设置要求发完后做 todo 里的事。做完还没做的，再用 card_id 调用 pr_card，带上 renamed / following。',
     prNextUpdated: '卡片已更新。',
+    prNextClaimed: '已为本任务认领跟进，但后台跟进还没有开启（auto_follow 只是偏好）。现在按 pr 技能创建定时任务，确认运行后用 card_id 和 following=true 回报；决定不跟进时用 following=false 释放认领。回报或释放之前，认领一直保留，卡片显示正在开启跟进。',
+    prClaimExpired: '认领后 {minutes} 分钟内没有开启跟进，已恢复为未跟进',
     prTodoRename: '根据「{title}」提炼简短主题，用 cindy_helper 的 set_current_session_title 把当前任务改名为「#编号 简短主题」；保留编号和核心含义，去掉 PR、跟进等流程前缀及冗余描述，不照搬完整 PR 标题',
     prTodoFollow: '按 pr 技能开始后台跟进 {url}',
     prClickPublish: '用户在 PR 卡片上点了「发 PR」。按 pr 技能现在提交、推送并创建这个 PR；创建后按事件里的 settings 处理改名和跟进，再用 card_id 调用 pr_card 更新卡片。',
@@ -378,6 +380,8 @@ var MESSAGES = {
     prNextAsk: 'The card is shown. Wait for the user to click or explicitly ask to open it, and do not ask again in text; clicks arrive as messages sent by this plugin. After creating the PR, call pr_card again with card_id and pr; set renamed / following only for actions already done.',
     prNextApply: 'The card settings ask for the todo items after opening. Do any not done yet, then call pr_card with card_id, renamed and following.',
     prNextUpdated: 'Card updated.',
+    prNextClaimed: 'Follow-up is claimed for this task but not running yet (auto_follow is only a preference). Create the schedule with the pr skill now, confirm it is running, then report following=true with card_id; if you decide not to follow, release the claim with following=false. Until you report or release it, the claim stays and the card shows that following is starting.',
+    prClaimExpired: 'Follow-up was not started within {minutes} minutes of the claim, so the card is back to not following',
     prTodoRename: 'Condense "{title}" into "#number short topic" and rename the current task with cindy_helper set_current_session_title; preserve the number and core meaning, omit workflow prefixes such as PR or Follow and redundant wording, and do not copy the full PR title',
     prTodoFollow: 'Start following {url} in the background with the pr Skill',
     prClickPublish: 'The user clicked "Open PR" on the PR card. Commit, push and open this pull request now with the pr Skill; afterwards handle renaming and following as the event settings say, then call pr_card with card_id to update the card.',
@@ -532,6 +536,8 @@ var MESSAGES = {
     prNextAsk: 'カードを表示しました。ユーザーのクリックか会話での明確な依頼を待ち、テキストで重ねて確認しないでください。クリックはこのプラグインが送るメッセージとして届きます。PR を作成したら card_id と pr を付けて pr_card を再度呼び、renamed / following には完了済みの操作だけを指定してください。',
     prNextApply: 'カード設定により、作成後に todo の操作が必要です。未完了のものを済ませてから、card_id・renamed・following を付けて pr_card を呼んでください。',
     prNextUpdated: 'カードを更新しました。',
+    prNextClaimed: 'このタスクでフォローを確保しましたが、バックグラウンドフォローはまだ開始していません（auto_follow は設定値にすぎません）。pr スキルでスケジュールを作成し、実行中であることを確認してから card_id と following=true で報告してください。フォローしない場合は following=false で確保を解除してください。報告または解除するまで確保は維持され、カードはフォロー開始中と表示されます。',
+    prClaimExpired: '確保から {minutes} 分以内にフォローが開始されなかったため、未フォローに戻しました',
     prTodoRename: '「{title}」から短いテーマをまとめ、cindy_helper の set_current_session_title で現在のタスク名を「#番号 短いテーマ」に変更する。番号と核心を保ち、PR・フォローなどの手順の接頭辞や冗長な説明を省き、PR タイトル全体をそのまま使わない',
     prTodoFollow: 'pr スキルで {url} のバックグラウンドフォローを開始する',
     prClickPublish: 'ユーザーが PR カードの「PR を作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、この PR をレビュー可能な状態で作成してください。作成後はイベントの settings に従って改名とフォローを処理し、card_id を付けて pr_card でカードを更新してください。',
@@ -686,6 +692,8 @@ var MESSAGES = {
     prNextAsk: '카드를 표시했습니다. 사용자가 클릭하거나 대화에서 분명히 요청할 때까지 기다리고, 텍스트로 다시 묻지 마세요. 클릭은 이 플러그인이 보낸 메시지로 도착합니다. PR을 만든 뒤 card_id와 pr로 pr_card를 다시 호출하고, renamed / following에는 이미 완료한 작업만 넣으세요.',
     prNextApply: '카드 설정에 따라 PR을 만든 뒤 todo 항목을 처리해야 합니다. 아직 하지 않은 항목을 마친 뒤 card_id, renamed, following으로 pr_card를 호출하세요.',
     prNextUpdated: '카드를 업데이트했습니다.',
+    prNextClaimed: '이 작업에서 팔로우를 확보했지만 백그라운드 팔로우는 아직 시작되지 않았습니다(auto_follow는 설정값일 뿐입니다). pr 스킬로 예약 작업을 만들고 실행 중인지 확인한 뒤 card_id와 following=true로 보고하세요. 팔로우하지 않기로 했다면 following=false로 확보를 해제하세요. 보고하거나 해제할 때까지 확보가 유지되며 카드에는 팔로우 시작 중으로 표시됩니다.',
+    prClaimExpired: '확보 후 {minutes}분 안에 팔로우가 시작되지 않아 팔로우하지 않는 상태로 되돌렸습니다',
     prTodoRename: '"{title}"을 "#번호 짧은 주제"로 요약하고 cindy_helper의 set_current_session_title로 현재 작업 이름을 변경하세요. 번호와 핵심 의미를 유지하고 PR·팔로우 등의 절차 접두사와 중복 설명은 빼며 전체 PR 제목을 그대로 복사하지 마세요',
     prTodoFollow: 'pr 스킬로 {url} 백그라운드 팔로우 시작',
     prClickPublish: '사용자가 PR 카드에서 "PR 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 이 PR을 리뷰 가능한 상태로 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경과 팔로우를 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
@@ -2608,11 +2616,16 @@ function prAnchor(card) {
 }
 
 async function savePrCard(card) {
+  // The claim clock lives with the record, so no path that saves a claim can leave it untimed.
+  if (!prClaimWaiting(card)) { delete card.claimedAt; delete card.claimKind; }
+  else if (typeof card.claimedAt !== 'number') card.claimedAt = Date.now();
   var r = await cindy.send({
     type: 'fs-request', root: 'data', op: 'write',
     path: prCardPath(card.id), content: JSON.stringify(card),
   });
-  return Boolean(r && r.ok);
+  var saved = Boolean(r && r.ok);
+  if (saved && prClaimWaiting(card) && !prClaimTimers[card.id] && prClaimRearm(card)) armPrClaimTimer(card.id, prClaimDelay(card));
+  return saved;
 }
 
 /** The record must stop saying "following is starting" once the handoff clearly failed: try a few times. */
@@ -3873,6 +3886,130 @@ async function syncCardSchedule(card, settings, start) {
   await savePrCardRetry(card);
 }
 
+/* ── Unconfirmed follow claims ──
+ * A follow click handed to the agent waits for it to claim; a claim (claim_follow) grants it permission to create
+ * the schedule and report following=true. A hand-off nobody answers must not spin "starting to follow" forever or
+ * keep other tasks out, so it is released after the deadline when no schedule exists. A granted claim is never
+ * released by time (the generic scheduler cannot check who holds it); a running schedule is adopted for both.
+ * Card-managed starts (scheduleAction) are reconciled by syncCardSchedule instead. */
+var PR_CLAIM_TTL = 10 * 60 * 1000;
+var PR_CLAIM_RETRY = 5 * 60 * 1000;
+var prClaimTimers = Object.create(null);
+
+function prClaimWaiting(card) {
+  return !!card && !card.alias && card.pending === 'follow' && !card.scheduleAction && !card.following && !card.scheduleId;
+}
+
+/** Listing schedules needs only the host tool bridge (creating one also needs the node worker). */
+function hasSchedulerQuery() {
+  return !!(cindy.host && typeof cindy.host.call === 'function');
+}
+
+function prClaimExpired(card) {
+  return typeof card.claimedAt === 'number' && Date.now() - card.claimedAt >= PR_CLAIM_TTL;
+}
+
+function prClaimMinutes() {
+  return { minutes: Math.round(PR_CLAIM_TTL / 60000) };
+}
+
+/** Starts (or restarts) the claim clock. Call wherever a claim sets or re-asserts pending 'follow'. */
+function stampPrClaim(card) {
+  if (prClaimWaiting(card)) card.claimedAt = Date.now();
+}
+
+/**
+ * Settle an expired, unconfirmed claim. Returns 'following' when a running schedule of this task was found and
+ * reconciled (it may still need a repair or stay unverified); 'kept' when such a schedule could not be confirmed
+ * (the claim stays, with the reason on the card); 'released' for an unanswered hand-off when the scheduler
+ * confirmed there is no schedule; 'stamped' for a record saved before claims were timed; or null when nothing
+ * changed: not yet expired, the scheduler cannot be queried or failed, a schedule exists that is not running, or
+ * the wait is a granted (or legacy) claim that only the task can end.
+ */
+async function expirePrClaim(card, now) {
+  if (!prClaimWaiting(card)) return null;
+  if (typeof card.claimedAt !== 'number') { card.claimedAt = now; return 'stamped'; }
+  if (now - card.claimedAt < PR_CLAIM_TTL) return null;
+  // Only a hand-off the task never answered may be released: no permission was granted, so any later claim is
+  // checked again. A granted claim (or a record from before claims were marked, whose permission is unknown) lets
+  // the task call the generic scheduler at any time, which no release can revoke: it stays until the task reports
+  // or returns it, and a running schedule is still adopted.
+  var mayRelease = prClaimReleasable(card);
+  if (card.stage === 'open' && card.pr) {
+    if (!hasSchedulerQuery()) return null;
+    var rows;
+    try { rows = await schedulesForPr(card); } catch (_) { return null; }
+    var mine = rows.filter(function (row) { return row.targetSessionId === card.sessionId; });
+    if (mine.some(function (row) { return ownedFollowSchedule(row, card) && row.status === 'active'; })) {
+      // Adopt it through the same verification as any unreported follow-up (ownership, the exact hook, the repair
+      // hint for an old launch command), tried on a copy. Only a result that still reserves the PR is taken: a
+      // running schedule that cannot be confirmed (another Skill directory, several schedules) keeps the claim,
+      // so no other task can start a second follow-up while it runs.
+      var probe = JSON.parse(JSON.stringify(card));
+      probe.pending = null;
+      delete probe.claimedAt;
+      await reconcileLegacyFollow(probe, null);
+      if (!prFollowActive(probe)) {
+        var reason = probe.scheduleError || null;
+        if (card.note === reason) return null;
+        card.note = reason;
+        return 'kept';
+      }
+      Object.keys(card).forEach(function (key) { if (!(key in probe)) delete card[key]; });
+      Object.assign(card, probe);
+      return 'following';
+    }
+    // A paused or unrecognised schedule for this task is not ours to judge: keep the reservation.
+    if (mine.length) return null;
+  }
+  if (!mayRelease) return null;
+  card.pending = null;
+  delete card.claimedAt;
+  delete card.claimKind;
+  card.note = t('prClaimExpired', prClaimMinutes());
+  return 'released';
+}
+
+/** Runs inside enqueuePr. Saves and redraws a settled claim; keeps the clock running while it still waits. */
+async function settlePrClaim(card) {
+  var outcome = await expirePrClaim(card, Date.now());
+  if (outcome && !(await savePrCardRetry(card))) {
+    armPrClaimTimer(card.id, PR_CLAIM_RETRY);
+    return null;
+  }
+  // A granted claim stays until the task reports; one check at the deadline is enough (ordinary refreshes still
+  // adopt a schedule). An unanswered hand-off keeps being checked until it can be released.
+  if (prClaimWaiting(card) && prClaimRearm(card)) armPrClaimTimer(card.id, prClaimDelay(card));
+  if (outcome) await sendPrCard(card, await readPrSettings(), null);
+  return outcome;
+}
+
+function prClaimReleasable(card) {
+  return card.claimKind === 'handoff';
+}
+
+function prClaimRearm(card) {
+  return (prClaimReleasable(card) && hasSchedulerQuery()) || !prClaimExpired(card);
+}
+
+function prClaimDelay(card) {
+  if (typeof card.claimedAt !== 'number') return 0;
+  var remaining = card.claimedAt + PR_CLAIM_TTL - Date.now();
+  return remaining > 0 ? remaining : PR_CLAIM_RETRY;
+}
+
+function armPrClaimTimer(id, delay) {
+  if (prClaimTimers[id]) clearTimeout(prClaimTimers[id]);
+  prClaimTimers[id] = setTimeout(function () {
+    delete prClaimTimers[id];
+    enqueuePr(async function () {
+      await ensureLocale();
+      var current = await readPrCard(id);
+      if (current && current.id === id && prClaimWaiting(current)) await settlePrClaim(current);
+    }).catch(function () {});
+  }, delay);
+}
+
 async function prCardTool(args, callId, fromLegacyStop) {
   var a = args && typeof args === 'object' ? args : {};
   var sessionId = a.session_context && a.session_context.session_id;
@@ -3908,9 +4045,18 @@ async function prCardTool(args, callId, fromLegacyStop) {
     card = null;
     updating = false;
   }
-  var owner = await findPrCardOwner(ref ? ref.repo : repo || (card && card.repo) || '',
+  if (card && ref && card.pr && (card.repo.toLowerCase() !== ref.repo.toLowerCase() || card.pr.number !== ref.number)) {
+    return fail(t('prBadCardId'));
+  }
+  var ownerArgs = [ref ? ref.repo : repo || (card && card.repo) || '',
     ref ? ref.number : card && card.pr ? card.pr.number : null,
-    prText(a.head) || (card && card.head), card && card.id, sessionId);
+    prText(a.head) || (card && card.head), card && card.id, sessionId];
+  var owner = await findPrCardOwner.apply(null, ownerArgs);
+  // Another task's claim that was never confirmed must not keep this task out.
+  if (owner && owner.sessionId && owner.sessionId !== sessionId && prClaimWaiting(owner) &&
+      await settlePrClaim(owner) && !prFollowActive(owner)) {
+    owner = await findPrCardOwner.apply(null, ownerArgs);
+  }
   if (owner) {
     if (!owner.sessionId && (!card || card.id !== owner.id)) return fail(t('prOwnershipUnknown'));
     if (owner.sessionId && owner.sessionId !== sessionId) {
@@ -4051,6 +4197,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
   }
   card.legacyHookRepair = null;
   card.note = deriveCardNote(card, showManualStop ? t('prManualStop', { id: card.scheduleId }) : null);
+  if (a.claim_follow !== true && typeof a.following !== 'boolean') await expirePrClaim(card, Date.now());
 
   // A blocked old Node cannot start the agent that would inspect its hook.
   // The owning task's card can identify the exact old command and report the
@@ -4073,6 +4220,9 @@ async function prCardTool(args, callId, fromLegacyStop) {
     card.pending = 'follow';
     clearLegacyScheduleNotice(card);
     card.note = deriveCardNote(card, showManualStop ? t('prManualStop', { id: card.scheduleId }) : null);
+    stampPrClaim(card);
+    // A granted permission: the task may call the generic scheduler at any time, so no deadline can revoke it.
+    card.claimKind = 'granted';
   }
 
   var settings = await readPrSettings();
@@ -4150,6 +4300,9 @@ async function prCardTool(args, callId, fromLegacyStop) {
   if (todo.length) {
     result.todo = todo;
     result.next = t('prNextApply');
+  } else if (!result.follow_state && prClaimWaiting(card)) {
+    // Say plainly that the claim is not a running follow-up, and what finishes it.
+    result.next = t('prNextClaimed', prClaimMinutes());
   } else {
     result.next = card.stage === 'ask' ? t('prNextAsk') : t('prNextUpdated');
   }
@@ -4283,6 +4436,8 @@ async function markPrReadyInner(card, settings, msg, progress) {
     // Record "following is starting" before handing it to the agent, as the first step does for "ready":
     // if that cannot be saved, nothing is sent, so a later click can never send it a second time.
     card.pending = 'follow';
+    stampPrClaim(card);
+    card.claimKind = 'handoff';
     if (!(await savePrCard(card))) {
       card.pending = null;
       card.note = t('prSaveFailed');
@@ -4348,6 +4503,8 @@ async function prCardAction(msg) {
   }
   var hadManualStopNote = !!(manualFollowStop(card) && card.note === t('prManualStop', { id: card.scheduleId }));
   card.note = null;
+  // Any click on a card stuck on an abandoned claim also settles it (the click itself then sees the real state).
+  await expirePrClaim(card, Date.now());
   var handedOff = false;
   var nextUpdateAt = 0;
   if (action === 'prui:settings' && prHasSettings(card)) {
@@ -4422,6 +4579,9 @@ async function prCardAction(msg) {
         card.settingsOpen = false;
       } else {
         card.pending = action === 'pr:follow' ? 'follow' : 'stop';
+        stampPrClaim(card);
+        // Handed to the task, no permission granted yet: the only kind of wait a deadline may release.
+        if (card.pending === 'follow') card.claimKind = 'handoff';
       }
       if (!(await savePrCard(card))) {
         restoreCard();
@@ -4871,6 +5031,22 @@ cindy.onHostMessage(async function (msg) {
     });
   }
 });
+
+// On wake, restart the clock of every follow claim still waiting for its schedule.
+void enqueuePr(async function () {
+  var listing = await cindy.send({ type: 'fs-request', root: 'data', op: 'list', path: PR_CARD_DIR });
+  if (!listing || !listing.ok || !Array.isArray(listing.entries)) return;
+  for (var i = 0; i < listing.entries.length; i++) {
+    var match = /^pr-cards\/([A-Za-z0-9_-]{1,64})\.json$/.exec(listing.entries[i].path);
+    if (!match) continue;
+    var saved = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: listing.entries[i].path });
+    var record = null;
+    try { record = saved && saved.ok ? JSON.parse(saved.content) : null; } catch (_) {}
+    if (record && record.id === match[1] && prClaimWaiting(record) && prClaimRearm(record)) {
+      armPrClaimTimer(record.id, prClaimDelay(record));
+    }
+  }
+}).catch(function () {});
 
 // On wake, restore only explicit watches. Empty installations make no GitHub requests.
 void readKv(true).then(function (kv) {
