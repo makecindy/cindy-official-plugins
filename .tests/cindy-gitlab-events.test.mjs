@@ -293,20 +293,37 @@ test('drains >20 changed items across cycles without letting unchanged items con
   assert.deepEqual(h.published().map((e) => e.data.iid), Array.from({ length: 25 }, (_, i) => 101 + i));
 });
 
-test('retains finished pipelines across lookup errors/caps, verifies branch MR project+sha, and scopes pipeline polling to project targets', async () => {
+test('retains finished pipelines across lookup errors/caps, fans out to all matching branch MRs, and holds unconfirmed SHA/project state', async () => {
   const unscoped = harness({ subscriptions: [{ events: ['merge_request.pipeline'] }] });
   assert.equal(await unscoped.cycle(), 'idle', 'pipeline-only subscription without project stays idle rather than N+1 polling');
 
   let failMrLookup = true;
+  let confirmPending = false;
   const h = harness({
     subscriptions: [{ events: ['merge_request.pipeline'], filters: [{ field: 'project', operator: 'equals', value: 'group/app' }] }],
     routes: {
       '/api/v4/user': { id: 1, username: 'me' },
       '/projects/group%2Fapp/events': [{ id: 1 }],
       '/projects/group%2Fapp/pipelines?': [],
-      '/projects/group%2Fapp/merge_requests?': (url) => json(url.includes('source_branch=main')
-        ? [mr({ iid: 88, source_branch: 'main', source_project_id: 99, target_project_id: 42, sha: 'fork-sha' }), mr({ iid: 89, source_branch: 'main', source_project_id: 42, target_project_id: 42, sha: 'old-sha' })]
-        : [mr({ iid: 90, source_branch: 'feat', source_project_id: 42, target_project_id: 42, sha: 'feat-sha', references: { full: 'group/app!90' } })]),
+      '/projects/group%2Fapp/merge_requests?': (url) => {
+        if (url.includes('source_branch=main')) {
+          return json([
+            mr({ iid: 88, source_branch: 'main', source_project_id: 99, target_project_id: 42, sha: 'fork-sha' }),
+            mr({ iid: 89, source_branch: 'main', source_project_id: 42, target_project_id: 42, sha: 'old-sha' }),
+          ]);
+        }
+        if (url.includes('source_branch=pending-br')) {
+          return json([mr({
+            id: 892, iid: 92, source_branch: 'pending-br',
+            ...(confirmPending ? { source_project_id: 42, target_project_id: 42, sha: 'pend-sha' } : { sha: '' }),
+            references: { full: 'group/app!92' },
+          })]);
+        }
+        return json([
+          mr({ id: 890, iid: 90, source_branch: 'feat', target_branch: 'main', source_project_id: 42, target_project_id: 42, sha: 'feat-sha', references: { full: 'group/app!90' } }),
+          mr({ id: 891, iid: 91, source_branch: 'feat', target_branch: 'release', source_project_id: 42, target_project_id: 42, sha: 'feat-sha', references: { full: 'group/app!91' } }),
+        ]);
+      },
       '/projects/group%2Fapp/merge_requests/': (url) => {
         if (failMrLookup) return json({ message: 'server error' }, 500);
         const iid = Number(url.split('/').pop());
@@ -317,19 +334,23 @@ test('retains finished pipelines across lookup errors/caps, verifies branch MR p
   await h.cycle();
   const baseMs = Date.now() + 1000;
   const mrPipes = Array.from({ length: 11 }, (_, i) => ({ id: 900 + i, status: 'success', ref: `refs/merge-requests/${i + 1}/head`, updated_at: new Date(baseMs + i * 10).toISOString() }));
-  const branchPipes = [
+  const branchPipes = () => [
     { id: 950, status: 'success', ref: 'main', sha: 'upstream-main-sha', updated_at: new Date(baseMs + 200).toISOString() },
     { id: 951, status: 'success', ref: 'feat', sha: 'feat-sha', updated_at: new Date(baseMs + 210).toISOString() },
+    { id: 952, status: 'success', ref: 'pending-br', sha: confirmPending ? 'pend-sha' : '', updated_at: new Date(baseMs + 220).toISOString() },
   ];
   h.state.routes['/projects/group%2Fapp/events'] = [{ id: 2 }];
-  h.state.routes['/projects/group%2Fapp/pipelines?'] = [...mrPipes, ...branchPipes];
+  h.state.routes['/projects/group%2Fapp/pipelines?'] = () => json([...mrPipes, ...branchPipes()]);
   await h.cycle();
   assert.deepEqual(h.statuses(), ['listening', 'error']);
   failMrLookup = false;
   await h.cycle();
   assert.equal(h.published().length, 10);
   await h.cycle();
-  assert.deepEqual(h.published().map((e) => e.data.iid), [...Array.from({ length: 11 }, (_, i) => i + 1), 90]);
+  assert.deepEqual(h.published().map((e) => e.data.iid), [...Array.from({ length: 11 }, (_, i) => i + 1), 90, 91]);
+  confirmPending = true;
+  await h.cycle();
+  assert.deepEqual(h.published().map((e) => e.data.iid), [...Array.from({ length: 11 }, (_, i) => i + 1), 90, 91, 92]);
 });
 
 test('delivers >550 same-timestamp notes with backpressure, <=40 publishes per cycle, and separate baselineAt', async () => {
@@ -410,4 +431,75 @@ test('delivers >550 same-timestamp notes with backpressure, <=40 publishes per c
   await multi.cycle();
   await multi.cycle();
   assert.deepEqual(multi.published().filter((e) => e.data.iid === 299).map((e) => e.type).sort(), ['merge_request.comment', 'merge_request.opened']);
+});
+
+test('delivers all 900 objects across 3 overlapping targets (>5000 snapshots) and all 1001 same-timestamp objects past page 20', async () => {
+  const paginate = (list, url) => {
+    const u = new URL(url);
+    const page = Number(u.searchParams.get('page') || 1);
+    const per = Number(u.searchParams.get('per_page') || 50);
+    const after = u.searchParams.get('updated_after');
+    const filtered = after ? list.filter((it) => Date.parse(it.updated_at) >= Date.parse(after)) : [...list].reverse();
+    return json(filtered.slice((page - 1) * per, page * per));
+  };
+  let overlapItems = [];
+  let fillerItems = [];
+  const overlap = harness({
+    subscriptions: [
+      { events: ['merge_request.opened'], filters: [{ field: 'project', operator: 'equals', value: 'group/app' }] },
+      { events: ['merge_request.opened'], filters: [{ field: 'host', operator: 'equals', value: HOST }, { field: 'project', operator: 'equals', value: 'group/app' }] },
+      { events: ['merge_request.opened'] },
+      { events: ['merge_request.opened'], filters: [{ field: 'project', operator: 'equals', value: 'group/filler' }] },
+    ],
+    routes: {
+      '/api/v4/user': { id: 1, username: 'me' },
+      '/projects/group%2Fapp/events': [{ id: 1 }],
+      '/projects/group%2Ffiller/events': [{ id: 1 }],
+      '/projects/group%2Fapp/merge_requests?': (url) => paginate(overlapItems, url),
+      '/projects/group%2Ffiller/merge_requests?': (url) => paginate(fillerItems, url),
+      '/api/v4/merge_requests?': (url) => (url.includes('scope=created_by_me') ? paginate(overlapItems, url) : json([])),
+      '/notes': [],
+    },
+  });
+  await overlap.cycle();
+  const t0 = Date.now() + 1000;
+  overlapItems = Array.from({ length: 900 }, (_, i) => {
+    const ts = new Date(t0 + Math.floor(i / 3) * 10).toISOString();
+    return mr({ id: 10_000 + i, iid: i + 1, created_at: ts, updated_at: ts, references: { full: `group/app!${i + 1}` } });
+  });
+  fillerItems = Array.from({ length: 3000 }, (_, i) => {
+    const ts = new Date(t0 + i).toISOString();
+    return mr({ id: 30_000 + i, iid: i + 1, created_at: ts, updated_at: ts, references: { full: `group/filler!${i + 1}` } });
+  });
+  overlap.state.routes['/projects/group%2Fapp/events'] = [{ id: 2 }];
+  overlap.state.routes['/projects/group%2Ffiller/events'] = [{ id: 2 }];
+  for (let c = 0; c < 160; c += 1) {
+    await overlap.cycle();
+    if (new Set(overlap.published().filter((e) => e.data.project === 'group/app').map((e) => e.data.iid)).size === 900) break;
+  }
+  const deliveredApp = new Set(overlap.published().filter((e) => e.data.project === 'group/app').map((e) => e.data.iid));
+  assert.equal(deliveredApp.size, 900, 'all 900 overlapping objects must be delivered without cross-target snapshot eviction');
+
+  let sameTsItems = [];
+  const sameTs = harness({
+    subscriptions: [{ events: ['merge_request.opened'], filters: [{ field: 'project', operator: 'equals', value: 'group/same' }] }],
+    routes: {
+      '/api/v4/user': { id: 1, username: 'me' },
+      '/projects/group%2Fsame/events': [{ id: 1 }],
+      '/projects/group%2Fsame/merge_requests?': (url) => paginate(sameTsItems, url),
+      '/notes': [],
+    },
+  });
+  await sameTs.cycle();
+  const stamp = new Date(Date.now() + 2000).toISOString();
+  sameTsItems = Array.from({ length: 1001 }, (_, i) =>
+    mr({ id: 50_000 + i, iid: i + 1, created_at: stamp, updated_at: stamp, references: { full: `group/same!${i + 1}` } }));
+  sameTs.state.routes['/projects/group%2Fsame/events'] = [{ id: 2 }];
+  for (let c = 0; c < 60 && sameTs.published().length < 1001; c += 1) await sameTs.cycle();
+  assert.equal(sameTs.published().length, 1001);
+  assert.equal(new Set(sameTs.published().map((e) => e.data.iid)).size, 1001);
+  await sameTs.cycle();
+  await sameTs.cycle();
+  await sameTs.cycle();
+  assert.equal(sameTs.published().length, 1001, 'verification sweep settles cleanly without re-emitting');
 });

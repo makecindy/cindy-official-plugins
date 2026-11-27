@@ -1614,7 +1614,6 @@ var eventsState = {
   running: false,
   status: null,
   snapshots: {},
-  snapshotKeys: [],
   cursors: {},
   pending: [],
   users: {},
@@ -1639,14 +1638,25 @@ function eventsTextHash(text) {
   return s.length + ':' + h;
 }
 
-function eventsRemember(key, snap) {
-  if (!Object.prototype.hasOwnProperty.call(eventsState.snapshots, key)) {
-    eventsState.snapshotKeys.push(key);
-    if (eventsState.snapshotKeys.length > EVENTS_SNAPSHOT_LIMIT) {
-      delete eventsState.snapshots[eventsState.snapshotKeys.shift()];
+function eventsGetSnap(cursorKey, itemId) {
+  var map = eventsState.snapshots[cursorKey];
+  return map ? (map.get(String(itemId)) || null) : null;
+}
+
+function eventsRemember(cursorKey, itemId, snap, protectFromMs) {
+  var map = eventsState.snapshots[cursorKey];
+  if (!map) { map = new Map(); eventsState.snapshots[cursorKey] = map; }
+  var id = String(itemId);
+  if (map.has(id)) map.delete(id);
+  map.set(id, snap);
+  if (map.size > EVENTS_SNAPSHOT_LIMIT) {
+    var floor = typeof protectFromMs === 'number' ? protectFromMs : 0;
+    for (var it = map.entries(), st = it.next(); !st.done && map.size > EVENTS_SNAPSHOT_LIMIT; st = it.next()) {
+      var v = st.value[1];
+      if (v && (v.notesIncomplete || v.pending || eventsTimeMs(v.updatedAt) >= floor)) continue;
+      map.delete(st.value[0]);
     }
   }
-  eventsState.snapshots[key] = snap;
 }
 
 /** 订阅 → 要盯的对象。只认 equals 条件里的 host / project / iid / kind。 */
@@ -1811,15 +1821,15 @@ function eventsNoteWatermark(prev, baselineAt) {
 
 function eventsGetCursor(cursorKey, cycleStart) {
   if (!Object.prototype.hasOwnProperty.call(eventsState.cursors, cursorKey)) {
-    return { firstRun: true, baselineAt: cycleStart, resumeAt: cycleStart };
+    return { firstRun: true, baselineAt: cycleStart, resumeAt: cycleStart, pages: null, verify: false };
   }
   var cur = eventsState.cursors[cursorKey];
-  if (typeof cur === 'number') return { firstRun: false, baselineAt: cur, resumeAt: cur };
-  return { firstRun: false, baselineAt: cur.baselineAt, resumeAt: cur.resumeAt };
+  if (typeof cur === 'number') return { firstRun: false, baselineAt: cur, resumeAt: cur, pages: null, verify: false };
+  return { firstRun: false, baselineAt: cur.baselineAt, resumeAt: cur.resumeAt, pages: cur.pages || null, verify: Boolean(cur.verify) };
 }
 
-function eventsSetCursor(cursorKey, baselineAt, resumeAt) {
-  eventsState.cursors[cursorKey] = { baselineAt: baselineAt, resumeAt: resumeAt };
+function eventsSetCursor(cursorKey, baselineAt, resumeAt, pages, verify) {
+  eventsState.cursors[cursorKey] = { baselineAt: baselineAt, resumeAt: resumeAt, pages: pages || null, verify: Boolean(verify) };
 }
 
 /** 一个对象的变化 → 待入队事件(不含评论)。prev 为空时结合 baselineAt 与系统记录还原基线后的首次更新。 */
@@ -1969,9 +1979,8 @@ async function eventsNotes(conn, kind, item, me, watermark) {
 }
 
 /** 处理单个对象:返回 true 表示全部事件已入队并提交完整快照,返回 false 表示待发队列已满、保留续读位点。 */
-async function eventsHandle(conn, kind, item, me, baselineAt, cursorKey) {
-  var key = cursorKey + '|' + item.id;
-  var prev = eventsState.snapshots[key] || null;
+async function eventsHandle(conn, kind, item, me, baselineAt, cursorKey, protectFromMs) {
+  var prev = eventsGetSnap(cursorKey, item.id);
   if (eventsItemUnchanged(prev, item)) return true;
   var resumingNotesOnly = Boolean(prev && prev.notesIncomplete && prev.updatedAt === String(item.updated_at || '') &&
     !(item.head_pipeline && prev.pipeline !== String(item.head_pipeline.id) + ':' + String(item.head_pipeline.status)));
@@ -1995,7 +2004,7 @@ async function eventsHandle(conn, kind, item, me, baselineAt, cursorKey) {
   diff.snap.noteAt = noteAt;
   diff.snap.noteIds = noteIds;
   diff.snap.notesIncomplete = notesIncomplete;
-  eventsRemember(key, diff.snap);
+  eventsRemember(cursorKey, item.id, diff.snap, protectFromMs);
   return !notesIncomplete;
 }
 
@@ -2024,6 +2033,7 @@ async function eventsPollTarget(target, conn, me) {
     var cursorKey = conn.host + '|' + target.key + '|' + kind;
     var cycleStart = Date.now();
     var cur = eventsGetCursor(cursorKey, cycleStart);
+    var protectFromMs = cur.resumeAt - 1000;
     if (target.iid) {
       var one = await api({ url: base + '/projects/' + encodeURIComponent(target.project) + '/' + seg + '/' + target.iid });
       if (one.err) {
@@ -2031,9 +2041,9 @@ async function eventsPollTarget(target, conn, me) {
         throw new Error(one.err);
       }
       if (cur.firstRun) {
-        eventsRemember(cursorKey + '|' + one.data.id, eventsDiff(conn, kind, one.data, me, null, Infinity, null).snap);
+        eventsRemember(cursorKey, one.data.id, eventsDiff(conn, kind, one.data, me, null, Infinity, null).snap, protectFromMs);
         eventsSetCursor(cursorKey, cur.baselineAt, cycleStart);
-      } else if (await eventsHandle(conn, kind, one.data, me, cur.baselineAt, cursorKey)) {
+      } else if (await eventsHandle(conn, kind, one.data, me, cur.baselineAt, cursorKey, protectFromMs)) {
         eventsSetCursor(cursorKey, cur.baselineAt, cycleStart);
       } else {
         anyRemaining = true;
@@ -2051,33 +2061,45 @@ async function eventsPollTarget(target, conn, me) {
         }
       }
       for (var b = 0; b < items.length; b++) {
-        eventsRemember(cursorKey + '|' + items[b].id, eventsDiff(conn, kind, items[b], me, null, Infinity, null).snap);
+        eventsRemember(cursorKey, items[b].id, eventsDiff(conn, kind, items[b], me, null, Infinity, null).snap, protectFromMs);
       }
       eventsSetCursor(cursorKey, cur.baselineAt, cycleStart);
       continue;
     }
-    var after = new Date(cur.resumeAt - 1000).toISOString();
+    var after = new Date(protectFromMs).toISOString();
     var stoppedEarly = false;
     var scopeCutoff = Infinity;
+    var nextPages = {};
+    var usedPageOffset = false;
     for (var s = 0; s < streams.length; s++) {
+      var startPage = (cur.pages && cur.pages[s]) || 1;
+      if (startPage > 1) usedPageOffset = true;
       var streamChanged = 0;
-      for (var sp = 1; sp <= EVENTS_MAX_PAGES; sp++) {
+      var firstChangedPage = 0;
+      var hitStreamCap = false;
+      for (var offset = 0; offset < EVENTS_MAX_PAGES; offset++) {
+        var sp = startPage + offset;
         var sPage = await eventsList(streams[s].url + qs(Object.assign({}, streams[s].params, { updated_after: after, order_by: 'updated_at', sort: 'asc', per_page: EVENTS_LIST_PER_PAGE, page: sp })));
         for (var p = 0; p < sPage.length; p++) {
           var cand = sPage[p];
-          if (!cand || cand.id === undefined || seen[cand.id]) continue;
-          seen[cand.id] = 1;
-          items.push(cand);
-          if (!eventsItemUnchanged(eventsState.snapshots[cursorKey + '|' + cand.id], cand)) streamChanged++;
+          if (!cand || cand.id === undefined) continue;
+          if (!eventsItemUnchanged(eventsGetSnap(cursorKey, cand.id), cand)) {
+            if (!firstChangedPage) firstChangedPage = sp;
+            streamChanged++;
+          }
+          if (!seen[cand.id]) { seen[cand.id] = 1; items.push(cand); }
         }
         if (sPage.length < EVENTS_LIST_PER_PAGE) break;
-        if (streams.length === 1 && streamChanged > EVENTS_MAX_CHANGED_PER_TARGET) { stoppedEarly = true; break; }
-        if (sp === EVENTS_MAX_PAGES) {
+        if (streams.length === 1 && streamChanged > EVENTS_MAX_CHANGED_PER_TARGET) { stoppedEarly = true; hitStreamCap = true; break; }
+        if (offset === EVENTS_MAX_PAGES - 1) {
           stoppedEarly = true;
+          hitStreamCap = true;
           var tailAt = eventsTimeMs(sPage[sPage.length - 1] && sPage[sPage.length - 1].updated_at);
           if (tailAt && tailAt < scopeCutoff) scopeCutoff = tailAt;
         }
       }
+      if (firstChangedPage) nextPages[s] = firstChangedPage;
+      else if (hitStreamCap) nextPages[s] = startPage + Math.floor(EVENTS_MAX_PAGES / 2);
     }
     if (streams.length > 1) items.sort(function (a, b) { return eventsTimeMs(a.updated_at) - eventsTimeMs(b.updated_at); });
     var handled = 0;
@@ -2085,15 +2107,20 @@ async function eventsPollTarget(target, conn, me) {
     for (var n = 0; n < items.length; n++) {
       var item = items[n];
       if (eventsTimeMs(item.updated_at) > scopeCutoff) { stoppedEarly = true; break; }
-      if (eventsItemUnchanged(eventsState.snapshots[cursorKey + '|' + item.id], item)) continue;
+      if (eventsItemUnchanged(eventsGetSnap(cursorKey, item.id), item)) continue;
       if (handled >= EVENTS_MAX_CHANGED_PER_TARGET || eventsState.pending.length >= EVENTS_PENDING_LIMIT) { stoppedEarly = true; break; }
       handled++;
-      if (!(await eventsHandle(conn, kind, item, me, cur.baselineAt, cursorKey))) { stoppedEarly = true; break; }
+      if (!(await eventsHandle(conn, kind, item, me, cur.baselineAt, cursorKey, protectFromMs))) { stoppedEarly = true; break; }
       var itemAt = eventsTimeMs(item.updated_at);
       if (itemAt > lastHandledAt) lastHandledAt = itemAt;
     }
     if (stoppedEarly) {
-      eventsSetCursor(cursorKey, cur.baselineAt, lastHandledAt > cur.resumeAt ? lastHandledAt : cur.resumeAt);
+      var nextResume = lastHandledAt > cur.resumeAt ? lastHandledAt : cur.resumeAt;
+      var keepVerify = cur.verify && handled === 0 && nextResume === cur.resumeAt;
+      eventsSetCursor(cursorKey, cur.baselineAt, nextResume, nextResume > cur.resumeAt ? null : nextPages, keepVerify);
+      anyRemaining = true;
+    } else if (usedPageOffset && (!cur.verify || handled > 0)) {
+      eventsSetCursor(cursorKey, cur.baselineAt, cur.resumeAt, null, true);
       anyRemaining = true;
     } else {
       eventsSetCursor(cursorKey, cur.baselineAt, cycleStart);
@@ -2108,6 +2135,7 @@ async function eventsPollPipelines(target, conn, me) {
   var cursorKey = conn.host + '|' + target.key + '|pipelines';
   var cycleStart = Date.now();
   var cur = eventsGetCursor(cursorKey, cycleStart);
+  var protectFromMs = cur.resumeAt - 1000;
   if (cur.firstRun) {
     var initPipes = await eventsList(base + '/pipelines' + qs({ order_by: 'updated_at', sort: 'desc', per_page: EVENTS_LIST_PER_PAGE }));
     var initActive = false;
@@ -2115,73 +2143,128 @@ async function eventsPollPipelines(target, conn, me) {
       if (!initPipes[ip] || initPipes[ip].id === undefined) continue;
       var s0 = String(initPipes[ip].status || '');
       if (EVENTS_PIPELINE_ACTIVE[s0]) initActive = true;
-      eventsRemember(cursorKey + '|' + initPipes[ip].id, { status: s0 });
+      eventsRemember(cursorKey, initPipes[ip].id, { status: s0, updatedAt: String(initPipes[ip].updated_at || '') }, protectFromMs);
     }
     eventsState.pipelinesActive[cursorKey] = initActive;
     eventsSetCursor(cursorKey, cur.baselineAt, cycleStart);
     return false;
   }
-  var after = new Date(cur.resumeAt - 1000).toISOString();
+  var after = new Date(protectFromMs).toISOString();
+  var startPage = (cur.pages && cur.pages[0]) || 1;
   var lookups = 0;
+  var recheckLookups = 0;
   var active = false;
   var stoppedEarly = false;
+  var hasUnconfirmed = false;
+  var unconfirmedMinAt = Infinity;
+  var firstPendingPage = 0;
+  var hitPageCap = false;
   var lastHandledAt = cur.resumeAt;
-  for (var page = 1; page <= EVENTS_MAX_PAGES; page++) {
+  for (var offset = 0; offset < EVENTS_MAX_PAGES; offset++) {
+    var page = startPage + offset;
     var pipelines = await eventsList(base + '/pipelines' + qs({ updated_after: after, order_by: 'updated_at', sort: 'asc', per_page: EVENTS_LIST_PER_PAGE, page: page }));
     for (var i = 0; i < pipelines.length; i++) {
       var p = pipelines[i];
       if (!p || p.id === undefined) continue;
       var status = String(p.status || '');
-      var key = cursorKey + '|' + p.id;
-      var prev = eventsState.snapshots[key];
+      var prev = eventsGetSnap(cursorKey, p.id);
       var pAt = eventsTimeMs(p.updated_at);
       if (EVENTS_PIPELINE_ACTIVE[status]) {
         active = true;
-        eventsRemember(key, { status: status });
+        eventsRemember(cursorKey, p.id, { status: status, updatedAt: String(p.updated_at || '') }, protectFromMs);
         if (pAt > lastHandledAt) lastHandledAt = pAt;
         continue;
       }
-      if ((prev && prev.status === status) || !EVENTS_PIPELINE_DONE[status] || (!prev && pAt < cur.baselineAt)) {
-        eventsRemember(key, { status: status });
+      if ((prev && prev.status === status && !prev.pending) || !EVENTS_PIPELINE_DONE[status] || (!prev && pAt < cur.baselineAt)) {
+        if (!prev || prev.status !== status) eventsRemember(cursorKey, p.id, { status: status, updatedAt: String(p.updated_at || '') }, protectFromMs);
         if (pAt > lastHandledAt) lastHandledAt = pAt;
         continue;
       }
-      if (lookups >= EVENTS_PIPELINE_LOOKUPS || eventsState.pending.length >= EVENTS_PENDING_LIMIT) { stoppedEarly = true; break; }
-      lookups++;
+      if (!firstPendingPage) firstPendingPage = page;
+      var isRecheck = Boolean(prev && prev.status === status && prev.pending);
+      if (eventsState.pending.length >= EVENTS_PENDING_LIMIT || (!isRecheck && lookups >= EVENTS_PIPELINE_LOOKUPS)) { stoppedEarly = true; break; }
+      if (isRecheck && recheckLookups >= EVENTS_PIPELINE_LOOKUPS) {
+        hasUnconfirmed = true;
+        var holdAt = pAt || cur.resumeAt;
+        if (holdAt < unconfirmedMinAt) unconfirmedMinAt = holdAt;
+        continue;
+      }
+      if (isRecheck) recheckLookups++; else lookups++;
+      var deliveredIids = (isRecheck && prev.iids) ? Object.assign({}, prev.iids) : {};
+      var matchedMrs = [];
+      var uncertain = false;
       var m = /^refs\/merge-requests\/([0-9]+)\//.exec(String(p.ref || ''));
-      var item = null;
       if (m) {
         var one = await api({ url: base + '/merge_requests/' + m[1] });
         if (one.err && !/HTTP 404|不存在/.test(one.err)) throw new Error(one.err);
-        item = one.err ? null : one.data;
+        if (!one.err && one.data && one.data.iid !== undefined) matchedMrs.push(one.data);
       } else if (p.ref) {
-        var found = await eventsList(base + '/merge_requests' + qs({ source_branch: p.ref, state: 'opened', per_page: 20 }));
-        for (var fi = 0; fi < found.length; fi++) {
-          var cand = found[fi];
-          if (!cand) continue;
-          if (cand.source_project_id !== undefined && cand.target_project_id !== undefined && cand.source_project_id !== cand.target_project_id) continue;
-          if (p.sha && cand.sha && String(p.sha) !== String(cand.sha)) continue;
-          item = cand;
-          break;
+        var pBranch = String(p.ref);
+        var pSha = String(p.sha || '').trim();
+        if (!pSha) {
+          uncertain = true;
+        } else {
+          for (var mp = 1; mp <= EVENTS_MAX_PAGES; mp++) {
+            var found = await eventsList(base + '/merge_requests' + qs({ source_branch: pBranch, state: 'opened', per_page: 100, page: mp }));
+            for (var fi = 0; fi < found.length; fi++) {
+              var cand = found[fi];
+              if (!cand || cand.iid === undefined) continue;
+              var candBranch = cand.source_branch !== undefined ? String(cand.source_branch) : '';
+              if (candBranch && candBranch !== pBranch) continue;
+              var candSha = String(cand.sha || '').trim();
+              if (candSha && candSha !== pSha) continue;
+              var targetProj = cand.target_project_id !== undefined ? cand.target_project_id : cand.project_id;
+              if (cand.source_project_id !== undefined && targetProj !== undefined && String(cand.source_project_id) !== String(targetProj)) continue;
+              if (!candBranch || !candSha || cand.source_project_id === undefined || targetProj === undefined) { uncertain = true; continue; }
+              matchedMrs.push(cand);
+            }
+            if (found.length < 100) break;
+            if (mp === EVENTS_MAX_PAGES) uncertain = true;
+          }
         }
       }
-      if (item && item.iid !== undefined) {
-        var data = eventsBase(conn, 'mr', item, me);
-        var pipeEvent = eventsBuildEvent('pipeline', 'pipeline:' + p.id + ':' + status, '流水线' + status, item, data, {
+      var queueBlocked = false;
+      for (var mi = 0; mi < matchedMrs.length; mi++) {
+        var mrItem = matchedMrs[mi];
+        if (deliveredIids[mrItem.iid]) continue;
+        var data = eventsBase(conn, 'mr', mrItem, me);
+        var pipeEvent = eventsBuildEvent('pipeline', 'pipeline:' + p.id + ':' + status, '流水线' + status, mrItem, data, {
           pipelineId: Number(p.id),
           pipelineStatus: status,
         }, pAt || cycleStart);
-        if (!eventsTryQueue(pipeEvent)) { stoppedEarly = true; break; }
+        if (!eventsTryQueue(pipeEvent)) { queueBlocked = true; break; }
+        deliveredIids[mrItem.iid] = 1;
       }
-      eventsRemember(key, { status: status });
+      eventsRemember(cursorKey, p.id, { status: status, updatedAt: String(p.updated_at || ''), pending: queueBlocked || uncertain, iids: deliveredIids }, protectFromMs);
+      if (queueBlocked) { stoppedEarly = true; break; }
+      if (uncertain) {
+        hasUnconfirmed = true;
+        var uAt = pAt || cur.resumeAt;
+        if (uAt < unconfirmedMinAt) unconfirmedMinAt = uAt;
+        continue;
+      }
       if (pAt > lastHandledAt) lastHandledAt = pAt;
     }
     if (stoppedEarly || pipelines.length < EVENTS_LIST_PER_PAGE) break;
-    if (page === EVENTS_MAX_PAGES) stoppedEarly = true;
+    if (offset === EVENTS_MAX_PAGES - 1) { stoppedEarly = true; hitPageCap = true; }
   }
-  eventsState.pipelinesActive[cursorKey] = stoppedEarly ? true : active;
-  eventsSetCursor(cursorKey, cur.baselineAt, stoppedEarly ? (lastHandledAt > cur.resumeAt ? lastHandledAt : cur.resumeAt) : cycleStart);
-  return stoppedEarly;
+  var incomplete = stoppedEarly || hasUnconfirmed;
+  eventsState.pipelinesActive[cursorKey] = incomplete ? true : active;
+  if (incomplete) {
+    var nextPipeResume = lastHandledAt > cur.resumeAt ? lastHandledAt : cur.resumeAt;
+    if (unconfirmedMinAt < nextPipeResume) nextPipeResume = unconfirmedMinAt < cur.resumeAt ? cur.resumeAt : unconfirmedMinAt;
+    var nextPipePage = firstPendingPage || (hitPageCap ? startPage + Math.floor(EVENTS_MAX_PAGES / 2) : startPage);
+    var keepPipeVerify = cur.verify && lookups === 0 && recheckLookups === 0 && nextPipeResume === cur.resumeAt;
+    eventsSetCursor(cursorKey, cur.baselineAt, nextPipeResume, nextPipeResume > cur.resumeAt ? null : { 0: nextPipePage }, keepPipeVerify);
+    return true;
+  }
+  if (startPage > 1 && (!cur.verify || lookups > 0 || recheckLookups > 0)) {
+    eventsSetCursor(cursorKey, cur.baselineAt, cur.resumeAt, null, true);
+    eventsState.pipelinesActive[cursorKey] = true;
+    return true;
+  }
+  eventsSetCursor(cursorKey, cur.baselineAt, cycleStart);
+  return false;
 }
 
 /** 项目动态最新一条有没有变;仅在整轮处理完且无积压时提交新动态 ID,避免中途报错或限额截断后不再续跑。 */
