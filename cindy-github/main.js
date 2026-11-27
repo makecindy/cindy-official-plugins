@@ -2826,6 +2826,16 @@ async function writePrSettings(change) {
   if (!r || r.ok === false) throw new Error('kv write failed');
   return next;
 }
+async function setPrAutoFollow(enabled) {
+  if (typeof enabled !== 'boolean') return fail(t('required', { fields: 'auto_follow (boolean)' }));
+  return enqueuePr(async function () {
+    var kv = await readKv(true);
+    kv.prCard = Object.assign({}, kv.prCard, { autoFollow: enabled });
+    var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
+    if (!response || response.ok === false) throw new Error('kv write failed');
+    return { ok: true, result: { settings: prSettingsForAgent(prSettingsFrom(kv), enabled) } };
+  });
+}
 function togglePrSetting(key) {
   return writePrSettings(function (next) { next[key] = !next[key]; });
 }
@@ -3231,11 +3241,11 @@ function prSettingRow(action, label, hint, on, scope) {
 }
 
 // 手机端只看得到按钮的名字(aria-label),选中的那一段在名字里注明「当前」;电脑端显示里面的文字。
-function prSegment(action, label, active, inner) {
+function prSegment(action, label, active, inner, extraAttrs) {
   return prButton(action, active ? t('prChoiceCurrent', { name: label }) : label, 'display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:9999px;' +
     'font-size:12px;font-weight:500;white-space:nowrap;' + (active
       ? 'color:var(--text-primary);--bg:var(--surface-elevated);box-shadow:0 0 0 1px var(--border-default)'
-      : 'color:var(--text-secondary);--hover:' + PR_HOVER), inner);
+      : 'color:var(--text-secondary);--hover:' + PR_HOVER), inner, extraAttrs);
 }
 
 /** 推理档位与速度的显示名(和输入框旁的模型选择器一样跟在模型名后面)。 */
@@ -3269,7 +3279,8 @@ function prModelRow(settings) {
       prEsc(t('prFollowModelTaskHint')) + '</div>') + '</div>' +
     '<div style="display:flex;flex:none;gap:2px;padding:2px;border-radius:9999px;background:var(--surface-chip)">' +
     prSegment('prset:modelTask', t('prFollowModelTask'), !m, prEsc(t('prFollowModelTask'))) +
-    prSegment('prset:model', t('prFollowModelCustom'), !!m, prEsc(t('prFollowModelCustom'))) +
+    prSegment('prset:model', t('prFollowModelCustom'), !!m, prEsc(t('prFollowModelCustom')),
+      !m && !settings.lastFollowModel ? ' data-ghost-model-select=""' : '') +
     '</div></div>';
   var picker = m
     ? '<div style="margin-top:8px">' + prButton('prset:modelPick', t('prFollowModelChangeTo', { name: m.label }),
@@ -3455,8 +3466,13 @@ function renderPrCard(card, settings) {
     left += '<div style="margin-top:4px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
   }
   var openOnly = card.stage === 'open' ? prOpenOnly(card) : '';
-  var body = prHeader(tile, title, meta, card.pr, gear ? prGearButton(card.settingsOpen, manualFollowStop(card)) : '') +
-    prFooter(left, actions, openOnly, prArchiveButton(card, settings), persistentActions);
+  var body = prHeader(tile, title, meta, card.pr, gear ? prGearButton(card.settingsOpen, manualFollowStop(card)) : '');
+  var beforeFollow = card.stage === 'ask' ? settings.autoFollow
+    : card.stage === 'open' && !card.following && !card.pending && !card.scheduleId && (!card.pr.draft || settings.autoFollow);
+  if (beforeFollow && !card.settingsOpen && typeof cindy.pickModel === 'function') {
+    body += '<div' + openOnly + '>' + prModelRow(settings) + '</div>';
+  }
+  body += prFooter(left, actions, openOnly, prArchiveButton(card, settings), persistentActions);
   // Host copy-link accepts only HTTP(S) URLs. Keep the repair guidance and
   // command together in one panel so ordinary card clicks (e.g. settings) never
   // wipe the explanation while leaving an orphaned command box.
@@ -4459,20 +4475,20 @@ async function prCardAction(msg) {
     } catch (e) {
       card.note = t('prSettingFailed');
     }
-  } else if (action === 'prset:model' && settings.followModel) {
-    // 已经是「指定模型」:不重复打开选择器,换模型点下面的模型名。
-  } else if (action === 'prset:model' && settings.lastFollowModel) {
-    try {
-      settings = await writePrSettings(function (next) { next.followModel = next.lastFollowModel; });
-    } catch (e) {
-      card.note = t('prSettingFailed');
-    }
-  } else if (action === 'prset:modelPick' && msg.modelSelection) {
+  } else if ((action === 'prset:model' || action === 'prset:modelPick') && msg.modelSelection) {
     // 新版宿主在卡内下拉框里已选好(并核对过可用),直接记下。
     try {
       var chosen = await savePrFollowModel(settings, msg.modelSelection);
       settings = chosen.settings;
       if (chosen.error) card.note = t('prFollowModelFailed', { detail: chosen.error });
+    } catch (e) {
+      card.note = t('prSettingFailed');
+    }
+  } else if (action === 'prset:model' && settings.followModel) {
+    // 已经是「指定模型」:不重复打开选择器,换模型点下面的模型名。
+  } else if (action === 'prset:model' && settings.lastFollowModel) {
+    try {
+      settings = await writePrSettings(function (next) { next.followModel = next.lastFollowModel; });
     } catch (e) {
       card.note = t('prSettingFailed');
     }
@@ -4586,6 +4602,18 @@ var seenTestReqs = {};
 
 bc.onmessage = function (ev) {
   var m = ev && ev.data;
+  if (m && m.type === 'pr-settings-ping') {
+    bc.postMessage({ type: 'pr-settings-ready', reqId: m.reqId });
+    return;
+  }
+  if (m && m.type === 'pr-settings-save') {
+    void setPrAutoFollow(m.enabled).then(function (r) {
+      bc.postMessage({ type: 'pr-settings-saved', reqId: m.reqId, ok: r.ok });
+    }, function () {
+      bc.postMessage({ type: 'pr-settings-saved', reqId: m.reqId, ok: false });
+    });
+    return;
+  }
   if (!m || m.type !== 'test-connection' || !m.reqId) return;
   if (seenTestReqs[m.reqId]) return;
   // 去重表只为吸收 settings 页的重发风暴,超量直接清零重来(常驻期不泄漏)。
@@ -4953,6 +4981,8 @@ cindy.onHostMessage(async function (msg) {
       r = await callTool(msg.args || {}, msg.callId);
     } else if (msg.tool === 'status_watch') {
       r = await watchTool(msg.args || {}, msg.callId);
+    } else if (msg.tool === 'set_pr_follow_settings') {
+      r = await setPrAutoFollow((msg.args || {}).auto_follow);
     } else if (msg.tool === 'pr_follow_settings') {
       var settings = await enqueuePr(readPrSettings);
       r = settings.unreadable

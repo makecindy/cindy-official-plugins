@@ -15,6 +15,9 @@
     "pr_follow_settings": {
       "description": "只读获取与 PR 卡片共用的自动改名、自动跟进和跟进模型偏好。不显示卡片、不创建任务、不启动跟进；返回 settings，不代表跟进已经开启。IM 发 PR 后也用此入口读取偏好，再按 pr 流程创建并核验跟进。读取失败时设置未知，不当作关闭。 返回 ci_retry_repush：本机插件用户所有 PR 跟进共用的默认关闭偏好，不同步其他电脑；开启仅允许按 pr Skill 条件改写独占分支提交 SHA 并受限重推，同一故障最多一次，每个 PR 累计最多两次，到上限停止并报告，不授权合并。每轮及重写/推送前重新读取，失败或缺失不得重写。 回执须同步文件及完整父目录链；不支持即停止，包括 Windows。任何有效 hook（含标准 LFS/DCO）都在消耗次数、改写前停止。"
     },
+    "set_pr_follow_settings": {
+      "description": "设置本机「发完自动跟进」默认值。auto_follow 必须是布尔值；只影响以后发布的非草稿 PR。"
+    },
     "status_watch": {
       "description": "管理本机 GitHub 状态关注。仅在用户明确要求时 add。指定 owner/repo、pr / issue / run 和 PR 号、Issue 号或 Actions run ID。remove 停止关注，list 查看。最多 5 个对象，每 5 分钟轮询；仅提示状态变化。list 每项返回 kind、repo、id、status、problem。pr 与 issue 的 status 为 `状态:草稿:评论数`：状态取 open/closed/merged（PR 合并后为 merged），草稿取 draft/ready，末段是评论数。run 的 status 为 `状态:结果:第几次`：状态取 queued/requested/waiting/pending/in_progress/completed，未完成时结果为 none，完成后取 success/failure/cancelled/neutral/skipped/timed_out/action_required/stale/startup_failure/unknown，末段是第几次运行。problem 为 null 表示正常；unavailable 表示临时读取失败或限流，下轮读取成功后自动清除，期间继续轮询；auth_required 表示凭证失效（HTTP 401），forbidden 表示无权限（HTTP 403），gone 表示目标已删除或失去访问权限（HTTP 404/410），三者同样在读取成功后自动清除，但应先提示用户到插件详情页重新连接账号、检查访问权限或确认目标仍存在；account_changed 表示宿主 GitHub 账号已切换、此关注已暂停，切回原账号后自动恢复，要在新账号下关注须先 remove 再 add；target_changed 表示对象身份已变，不会自动恢复，必须先 remove 再 add。"
     }

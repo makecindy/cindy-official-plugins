@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.63, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.66, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1634,3 +1634,14 @@ Native isolated Windows/Node22/Git2.54 fixtures reproduce local/included multi-g
 Current notes/config refusal, inherited claim/quote handling, current UI/read-order/disable/shared-consumer/signed-head/causal recovery remain unverified live. Source65 is not installed; green tests or resolved code threads do not waive these prerequisites. All previous blocked cleanup residuals remain untouched; temporary native fixtures clean themselves up.
 
 Intermediate65 mandatory four suites plus plugin: **652 passed / 42 skipped / 0 failed (294.51 s)**. Inherited antigravity account-error unit/integration suite:4/4 passed (1.91s), with its source exactly matching main175. Forge65 exact-content: **35 files, 277066 archive bytes, 780810 uncompressed bytes**; new package deleted and absence verified. These results precede the later mainf0bb5b2f preference change and are not final combined validation.
+
+
+## Final combined follow-preference baseline — source1.5.66, not installed
+
+Before the single round push, main moved to f0bb5b2fecf93faff13d219e7900404c8088c43f (GitHub1.5.44). Signed intermediate65/3fb899dd was kept locally, then this same branch incorporated f0. Final66 retains upstream's set_pr_follow_settings(auto_follow) tool, account-page auto-follow switch, pre-follow model selection and all four locale entries. These are inherited main features, not new CI authorization UI: CI recovery still uses only PR cards; the new writer preserves ciRetryRepush and cannot set it via extra request fields. No live preference or installation changed.
+
+Only version/notes and version-assertion/settings-test adapter conflicts required resolution. The test adapter supports both channel option names, crypto and original injected timers. Old account-page no-KV assertion was updated to prohibit authorization writes while allowing main's new auto-follow read; retired CI message rejection remains tested. Unknown/reference height, revocation and queue-read guards remain. Focused integration12/12 passed (.36s), plus new missing/false/true CI preference-preservation coverage. settings.js/settings.html/node follow worker match main exactly, JSON locale changes are inherited; host/credential grants are unchanged. Main/UI/pref write routing is not byte-identical to65 and requires real Cindy validation, which was not performed.
+
+The strict receipt owner/gate, caps and Git argv are byte-identical to65; only its shared Agent notes exclusion is new versus public63. Both signed and unsigned paths use that same exclusion, not a separate executor. Prior source64/65 results are intermediate evidence only; final combined checks/package follow below. All blocked cleanup residuals, retired resources and #12846 follower remain untouched.
+
+Intermediate combined66 mandatory four suites plus plugin: **657 passed / 42 skipped / 0 failed (290.13 s)**. Forge66: **35 files, 278975 archive bytes, 787744 uncompressed bytes**, exact content and deletion/absence verified. A later main3a3e9270 source-card handoff change is not covered by this intermediate validation.
