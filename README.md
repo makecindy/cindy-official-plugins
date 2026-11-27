@@ -93,10 +93,12 @@ The full path from idea to marketplace:
 3. **Build** — follow the [harness-independent quick path](#harness-independent-quick-path)
    with any coding Agent or development environment. No Cindy-specific authoring
    tool is required.
-4. **Open a PR** — title `feat(<directory>): …`; bump `ghost.json.version`;
-   add the `provisioning.json` entry; complete four-language locales
-   (`zh-CN` / `en` / `ja` / `ko`); sign off every commit (`git commit -s`,
-   [DCO](./DCO)). Details in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+4. **Open a PR** — title `feat(<directory>): …`; set initial
+   `ghost.json.version` (for updates to existing plugins, manual patch bumps
+   are optional — packaging auto-increments patch versions on `main`); add the
+   `provisioning.json` entry; complete four-language locales (`zh-CN` / `en` /
+   `ja` / `ko`); sign off every commit (`git commit -s`, [DCO](./DCO)). Details
+   in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 5. **Review** — CI validates manifests, delivery limits, localization,
    provisioning, changed-plugin tests, and dry-run packaging; automated review
    (Greptile + Codex) guards security redlines and confirmed P0/P1 defects.
@@ -156,7 +158,7 @@ Four security & design principles:
 - [ ] Autonomous network hosts, `node` entry, and child-process bounds are minimal
 - [ ] Irreversible side-effect failures distinguish `not_executed / executed / unknown`
 - [ ] Four-language locales pass `node --test .tests/localization.test.mjs`
-- [ ] `ghost.json.version` bumped; `provisioning.json` entry and `THIRD-PARTY-LICENSES.txt` updated if applicable
+- [ ] `ghost.json.version` not downgraded (manual patch bump optional); `provisioning.json` entry and `THIRD-PARTY-LICENSES.txt` updated if applicable
 - [ ] Changed OAuth scopes or unready Cindy host grants disclosed if applicable
 - [ ] Every commit signed off (`git commit -s`)
 
@@ -221,9 +223,11 @@ After approval, compatible clients receive that release; clients below its
 one exists. Desktop trusts this Server projection and does not add a second
 version-confirmation step.
 
-When changing plugin content you must bump `ghost.json.version` in the same
-change. The new `major.minor.patch` SemVer must be greater than the version on
-`main`; otherwise CI blocks the pull request before Server submission.
+When changing plugin content, do not lower `ghost.json.version` below `main`.
+Manual patch bumps are optional for routine updates — `.github/scripts/package-plugin.sh`
+auto-computes a strictly increasing `major.minor.patch` SemVer on `main` when
+`ghost.json.version` is unchanged; bump manually only for explicit minor/major
+releases.
 
 ## Local development
 
@@ -471,9 +475,9 @@ and returns bounded summaries for large reports with links to the full evidence.
 ## Community
 
 Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before opening a PR — it covers
-the PR title convention, the mandatory `ghost.json` version bump, the
-localization check, how to rebuild the bundled Node Workers, and the
-[DCO](./DCO) sign-off required on every commit (`git commit -s`).
+the PR title convention, versioning (auto-incremented patches on `main` without
+manual PR bumps), the localization check, how to rebuild the bundled Node
+Workers, and the [DCO](./DCO) sign-off required on every commit (`git commit -s`).
 
 Participation is governed by
 [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md). For usage questions and what
