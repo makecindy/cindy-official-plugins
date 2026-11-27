@@ -3297,3 +3297,26 @@ test('every saved follow claim is timed, including the hand-off after marking a 
   await runtime.tool({ card_id: cardId, following: true });
   assert.equal(JSON.parse(runtime.files.get(`pr-cards/${cardId}.json`)).claimedAt, undefined);
 });
+
+test('an expired claim keeps its reservation when a running schedule of this task cannot be confirmed', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  const elsewhere = { command: 'node "/elsewhere/skills/pr/scripts/pr-node.cjs" pr-heartbeat-gate.mjs ' + url, timeoutMs: 180000 };
+  const base = { prompt: 'Follow ' + url, targetSessionId: 's1', recurring: true, status: 'active' };
+  for (const [label, schedules] of [
+    ['other directory', [{ ...base, id: 'a', preRunHook: elsewhere }]],
+    ['several', [{ ...base, id: 'a', preRunHook: oldFollowHook(url) }, { ...base, id: 'b', preRunHook: oldFollowHook(url) }]],
+  ]) {
+    const { hostApi, rows, calls } = followScheduler();
+    const runtime = createPrRuntime({ github: prGraphql(), hostApi });
+    const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+    for (const row of schedules) rows.set(row.id, row);
+    ageClaim(runtime, claimed.callId);
+    const refreshed = (await runtime.tool({ card_id: claimed.callId })).reply.result;
+    assert.match(refreshed.note, new RegExp(zhCopy.prScheduleFailed.split('{')[0]), label);
+    const saved = JSON.parse(runtime.files.get(`pr-cards/${claimed.callId}.json`));
+    assert.equal(saved.pending, 'follow', label);
+    const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+    assert.equal(other.reply.result.disposition, 'existing_task', label);
+    assert.equal(calls.some((c) => ['schedule_create', 'schedule_update', 'schedule_delete'].includes(c)), false, label);
+  }
+});

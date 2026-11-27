@@ -3719,11 +3719,20 @@ async function expirePrClaim(card, now) {
     try { rows = await schedulesForPr(card); } catch (_) { return null; }
     var mine = rows.filter(function (row) { return row.targetSessionId === card.sessionId; });
     if (mine.some(function (row) { return ownedFollowSchedule(row, card) && row.status === 'active'; })) {
-      // Adopt it through the same verification as any unreported follow-up: ownership, the exact hook, and the
-      // repair hint for an old launch command. An unconfirmed hook keeps the reservation as unverified.
-      card.pending = null;
-      delete card.claimedAt;
-      await reconcileLegacyFollow(card, null);
+      // Adopt it through the same verification as any unreported follow-up (ownership, the exact hook, the repair
+      // hint for an old launch command), tried on a copy. Only a result that still reserves the PR is taken: a
+      // running schedule that cannot be confirmed (another Skill directory, several schedules) keeps the claim,
+      // so no other task can start a second follow-up while it runs.
+      var probe = JSON.parse(JSON.stringify(card));
+      probe.pending = null;
+      delete probe.claimedAt;
+      await reconcileLegacyFollow(probe, null);
+      if (!prFollowActive(probe)) {
+        card.note = probe.scheduleError || null;
+        return null;
+      }
+      Object.keys(card).forEach(function (key) { if (!(key in probe)) delete card[key]; });
+      Object.assign(card, probe);
       return 'following';
     }
     // A paused or unrecognised schedule for this task is not ours to judge: keep the reservation.
