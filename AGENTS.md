@@ -77,13 +77,19 @@ Every AI reviewer (including **Codex** and **Greptile**) MUST follow these rules
     - **Registered maintainers** (`maintainers` in `.github/plugin-owners.json`):
       opening a Ready PR already constitutes maintainer boundary confirmation.
       **Required CI green + approval gate satisfied + no unresolved confirmed
-      P0/P1 → auto-merge directly** (unless waiting on an unready host release
-      or unapproved third-party OAuth grant).
+      P0/P1 → auto-merge directly** (unless waiting on an unmerged Cindy host PR
+      or an unapproved third-party OAuth grant).
     - **Non-maintainers** (plugin owners or external contributors): **Required
       CI green + no unresolved confirmed P0/P1 + registered maintainer
       `Approve`** on the current head.
-  - **Unready OAuth / host grants** (even without editing `ghost.json`): hold
-    until the required host version or third-party OAuth approval is live.
+  - **Unready third-party OAuth / unmerged host capabilities** (even without
+    editing `ghost.json`): hold when a required third-party OAuth scope is not
+    yet approved by the provider, or when the required Cindy host capability has
+    not yet merged to `makecindy/cindy` `main`. Once the host PR is merged to
+    `main`, plugins that isolate older clients via `minCindyVersion` (the plugin
+    platform filters releases by `minCindyVersion` and falls back for older
+    clients) or degrade safely on older hosts do **not** need to wait for a
+    stable Cindy client release.
 - **L3 Repository governance & publish trust**: `.github/workflows/**`,
   `.greptile/**`, `AGENTS.md`, `.github/plugin-owners.json`, weakening `.tests/`
   gates, or renaming/deleting a published plugin. **Required CI green + no
