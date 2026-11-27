@@ -20,13 +20,14 @@
  * draft changes are never held. Checks are not waited for: the agent looks at them again before it
  * pushes, so a failure that lands while it works joins the same round.
  */
-import { waitIsDue } from './follow-wait.mjs';
+import { isSettledBaselineWait, waitIsDue } from './follow-wait.mjs';
 
 export const TICK_MS = 5 * 60_000;
 export const PACE_MS = {
   fast: 0,
   active: 5 * 60_000,
   idle: 10 * 60_000,
+  backoff: 15 * 60_000,
   waiting: 30 * 60_000,
   quiet: 60 * 60_000,
 };
@@ -328,6 +329,10 @@ export function pacingDue(previous, now, { triggered = false, minPassSpacingMs =
     && !isPendingTerminalBackoffRetry(previous, now, minPassSpacingMs)) {
     return { due: false, pace: 'terminal-backoff', reason: 'terminal-backoff', nextAt: terminalBackoffUntil };
   }
+  const retryBackoffUntil = Number(previous.retryBackoffUntil) || 0;
+  if (previous.pendingWatch && retryBackoffUntil > now) {
+    return { due: false, pace: 'retry-backoff', reason: 'retry-backoff', nextAt: retryBackoffUntil };
+  }
   const watch = previous.watch;
   const lastLook = Math.max(
     Number(previous.lastFullReadAt) || 0,
@@ -342,20 +347,27 @@ export function pacingDue(previous, now, { triggered = false, minPassSpacingMs =
     || waitIsDue(previous.wait, now)
     || (awaited !== null && now - awaited >= 15 * 60_000)
     || (Number(previous.settleUntil) || 0) > 0
-    || Number(previous.retryBackoffUntil) > 0
+    || (retryBackoffUntil > 0 && now >= retryBackoffUntil)
     || (terminalBackoffUntil > 0 && now >= terminalBackoffUntil);
   if (fast) return { due: true, pace: 'fast', reason: 'fast' };
   const recent = (value) => Number.isFinite(Number(value)) && Number(value) > 0 && now - Number(value) < ACTIVE_WINDOW_MS;
   let pace;
-  // A non-human wait (checks/baseline/retry) delays model work, not detection of new work.
-  // A human wait explicitly parks the PR on a human decision or merge (and accounts for any
-  // set-aside failures/threads), so once recent activity cools down it paces at `waiting`.
+  // Checks/retry waits (and unsettled baseline waits with running checks or threads) stay active (5m).
+  // A settled baseline wait (all failed checks finished, no named threads) waits on an external
+  // base fix with an explicit backoff deadline (`waitIsDue` is already in `fast`), so scheduled
+  // polls slow to `backoff` (15m) while host triggers still wake immediately.
+  // A human wait explicitly parks the PR on a human decision or merge, so once recent activity
+  // cools down it paces at `waiting` (30m).
   const humanWait = previous.wait?.kind === 'human';
-  const activeWait = Boolean(previous.wait) && !humanWait;
-  const unhandledFailedChecks = !humanWait && (watch.failedChecks ?? []).length > 0;
+  const settledBaseline = isSettledBaselineWait(previous);
+  const activeWait = Boolean(previous.wait) && !humanWait && !settledBaseline;
+  const unhandledFailedChecks = !humanWait && !settledBaseline && (watch.failedChecks ?? []).length > 0;
   if (activeWait || previous.inFlight || unhandledFailedChecks || watch.conflicting
-    || (watch.queueProblems ?? []).length > 0 || recent(previous.headSeenAt) || recent(previous.lastPassAt)) {
+    || (watch.queueProblems ?? []).length > 0
+    || (!settledBaseline && (recent(previous.headSeenAt) || recent(previous.lastPassAt)))) {
     pace = 'active';
+  } else if (settledBaseline) {
+    pace = 'backoff';
   } else if (humanWait || previous.humanOnlyPending || WAITING_VERDICTS.has(previous.verdict)) {
     pace = 'waiting';
   } else if (watch.isDraft || (Number(previous.lastChangeAt) > 0 && now - Number(previous.lastChangeAt) >= QUIET_AFTER_MS)) {

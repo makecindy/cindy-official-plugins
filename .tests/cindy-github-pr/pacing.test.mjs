@@ -35,7 +35,7 @@ test('pacing: each stage looks at its own interval; fast reasons look every tick
   assert.equal(at(looked({ verdict: 'BLOCKED_HUMAN' }), 29).due, true);
   assert.equal(at(looked({ humanOnlyPending: true }), 28).pace, 'waiting');
   // Explicit human waits (plain merge/approval wait or set-aside failure) cool down to waiting (30m),
-  // whereas technical waits (checks/baseline/retry) stay active (5m) and due waits wake immediately.
+  // checks/retry waits stay active (5m), settled baseline waits slow to backoff (15m), and due waits wake immediately.
   const humanWait = { kind: 'human', headSha: 'aaa', reason: 'waiting for merge', createdAt: T0 - 2 * 60 * MIN, until: null, checks: [], threads: [] };
   assert.equal(at(looked({ verdict: 'READY', wait: humanWait }), 28).due, false);
   assert.equal(at(looked({ verdict: 'READY', wait: humanWait }), 28).pace, 'waiting');
@@ -43,9 +43,42 @@ test('pacing: each stage looks at its own interval; fast reasons look every tick
   const setAsideHumanWait = { ...humanWait, until: T0 + 20 * 60 * MIN, checks: [{ name: 'CodeQL', workflowName: '', outcome: 'failed' }] };
   assert.equal(at(looked({ verdict: 'NEEDS_WORK', watch: { failedChecks: ['CodeQL'] }, wait: setAsideHumanWait }), 28).pace, 'waiting');
   assert.equal(at(looked({ verdict: 'NEEDS_WORK', watch: { failedChecks: ['CodeQL'] }, wait: { ...setAsideHumanWait, until: T0 } }), 1).pace, 'fast');
-  for (const kind of ['checks', 'baseline', 'retry']) {
+  for (const kind of ['checks', 'retry']) {
     const techWait = { kind, headSha: 'aaa', reason: 'waiting', createdAt: T0 - 2 * 60 * MIN, until: T0 + 60 * MIN, checks: [], threads: [] };
     assert.equal(at(looked({ verdict: 'READY', wait: techWait }), 5).pace, 'active', kind);
+  }
+  const failedCheck = { name: 'build', workflowName: '', outcome: 'failed', attempt: '["u","t0","t1"]' };
+  const baselineWatch = {
+    headSha: 'aaa',
+    failedChecks: ['build'],
+    waitFacts: { headSha: 'aaa', complete: true, checks: [failedCheck], threads: [], reviewDecision: null, blockers: ['ci_failing'] },
+  };
+  const settledBaselineWait = {
+    kind: 'baseline', headSha: 'aaa', reason: 'waiting on main fix',
+    createdAt: T0, until: T0 + 60 * MIN, checks: [failedCheck], threads: [],
+  };
+  const settledBaselineState = looked({
+    verdict: 'NEEDS_WORK', headSeenAt: T0 - 10 * MIN, lastPassAt: T0,
+    watch: baselineWatch, wait: settledBaselineWait,
+  });
+  assert.equal(at(settledBaselineState, 5).due, false, 'settled baseline skips 5m tick even right after round');
+  assert.equal(at(settledBaselineState, 5).pace, 'backoff');
+  assert.equal(at(settledBaselineState, 10).due, false);
+  assert.equal(at(settledBaselineState, 14).due, true, 'settled baseline due at 15m with 1m slack');
+  assert.equal(at(settledBaselineState, 14).pace, 'backoff');
+  assert.equal(at({ ...settledBaselineState, wait: { ...settledBaselineWait, until: T0 + 5 * MIN } }, 5).pace, 'fast', 'due baseline wait wakes immediately');
+  assert.equal(pacingDue(settledBaselineState, T0 + 2 * MIN, { triggered: true }).reason, 'host-trigger');
+  // Unsettled baseline waits stay active (5m): running checks, named threads, unlisted failures, conflicts, or incomplete facts.
+  for (const [label, patch] of [
+    ['inFlight', { inFlight: true }],
+    ['pending check', { wait: { ...settledBaselineWait, checks: [{ ...failedCheck, outcome: 'pending' }] } }],
+    ['named thread', { wait: { ...settledBaselineWait, threads: [{ id: 't1', resolved: false, outdated: false }] } }],
+    ['unlisted failure', { watch: { ...baselineWatch, failedChecks: ['build', 'lint'], waitFacts: { ...baselineWatch.waitFacts, checks: [failedCheck, { name: 'lint', workflowName: '', outcome: 'failed', attempt: '["u2","",""]' }] } } }],
+    ['conflicting', { watch: { ...baselineWatch, conflicting: true } }],
+    ['queue problem', { watch: { ...baselineWatch, queueProblems: ['merge_queue_removed'] } }],
+    ['incomplete facts', { watch: { ...baselineWatch, waitFacts: { ...baselineWatch.waitFacts, complete: false } } }],
+  ]) {
+    assert.equal(at(looked({ ...settledBaselineState, ...patch }), 5).pace, 'active', `unsettled baseline (${label})`);
   }
   // quiet: drafts, or nothing changed for six hours
   assert.equal(at(looked({ watch: { isDraft: true } }), 58).due, false);
@@ -69,6 +102,22 @@ test('pacing: each stage looks at its own interval; fast reasons look every tick
   assert.equal(pacingDue(terminalAttempt, T0 + 5 * MIN).due, false, '超过空放行窗口后恢复退避');
   assert.equal(pacingDue({ ...terminalAttempt, pendingWatch: undefined }, T0 + 1.5 * MIN).due, false, '已 --ack 确认后即使在 5 分钟内也不再重复放行');
   assert.equal(pacingDue({ ...terminalAttempt, lastDecisionReason: 'terminal-backoff' }, T0 + 1.5 * MIN).due, false, '普通退避跳过态保持零调用');
+
+  // retry-backoff: unacknowledged updates waiting for their next retry window skip with zero API calls,
+  // while host triggers still break in immediately and expiry resumes at fast pace.
+  const retryBackedOff = looked({
+    pendingWatch: watch(),
+    retryBackoffUntil: T0 + 30 * MIN,
+  });
+  assert.deepEqual(pacingDue(retryBackedOff, T0 + 5 * MIN), {
+    due: false,
+    pace: 'retry-backoff',
+    reason: 'retry-backoff',
+    nextAt: T0 + 30 * MIN,
+  });
+  assert.equal(pacingDue(retryBackedOff, T0 + 5 * MIN, { triggered: true }).due, true, '宿主事件触发仍可穿透 retry-backoff');
+  assert.equal(pacingDue(retryBackedOff, T0 + 30 * MIN).due, true, '到达 retryBackoffUntil 后恢复 fast 立即重试');
+  assert.equal(pacingDue(retryBackedOff, T0 + 30 * MIN).pace, 'fast');
 });
 
 test('settle: expected bots answer by a submitted review on the head or a thumbs-up reaction', () => {

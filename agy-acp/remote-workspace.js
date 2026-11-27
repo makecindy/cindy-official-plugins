@@ -11,8 +11,8 @@
  *
  * How (checked against agy 1.5.13):
  *  - agy's permission rules do not stop its own tools over ACP, so they are not used. The agent
- *    definition's `tools` allow-list does: with only `search_web`, `ask_question`, and
- *    `update_steps` allowed, the file and command tools do not exist in the session.
+ *    definition's `tools` allow-list does: with only `search_web` allowed, the file and command
+ *    tools do not exist in the session.
  *  - A restricted agent can use an MCP server only when the server is named in its definition
  *    AND passed in `session/new`. The definition names the servers; their addresses and the task
  *    token stay in the `session/new` request and never reach a file.
@@ -21,9 +21,6 @@
  *    `--agent` after the definition has been written.
  *  - agy does not declare HTTP MCP support although it has it; the `initialize` answer is
  *    completed so Cindy hands its tools over.
- *  - agy gives the session's MCP servers five seconds to connect, and a server late for that is
- *    not declared to the model. Every handshake request here crosses the device link, so the
- *    handshakes are done before `session/new` reaches agy (mcp-warmup.js).
  *  - agy reports an MCP call in its own way: through a generic caller (`MCP Tool Bash`, arguments
  *    nested) in a new session, as a tool named `mcp_<server>_<tool>` in a resumed one. Both are
  *    passed to Cindy as the tool they are, so Cindy shows and checks its own Bash, Read, Write….
@@ -49,7 +46,6 @@ const {
   normalizeMcpToolCall,
 } = require('./agy-mcp.js');
 const { createSteeringRelay } = require('./agy-steering.js');
-const { CLOSE_BUDGET_MS, warmMcpServers } = require('./mcp-warmup.js');
 
 const REMOTE_WORKSPACE_ARG = '--cindy-remote-workspace';
 const GUEST_WORKSPACE_ARG = '--cindy-guest-workspace';
@@ -64,11 +60,6 @@ const MAX_SERVERS = 64;
 /** Remote-workspace mode could not be established, or was broken by the agent; agy is not left running. */
 const REMOTE_WORKSPACE_EXIT_CODE = 78;
 const LAUNCH_DIR_PREFIX = 'cindy-agy-remote-';
-/**
- * How long ending the task waits for unhanded warmed MCP sessions (including an initialize already
- * in flight) to confirm ownership and be deleted: covers the warm-up's full close budget.
- */
-const WARMUP_CLOSE_GRACE_MS = CLOSE_BUDGET_MS + 250;
 /** A launch directory this old belongs to a task that ended without cleaning up (a crash, a hard kill). */
 const STALE_LAUNCH_DIR_MS = 24 * 60 * 60 * 1000;
 
@@ -271,15 +262,13 @@ function startRemoteWorkspace(agyPath, host) {
     return;
   }
 
-  /** `handshake` → `ready` → `opening` (child init) → `warming` (MCP handshakes) → `opening-session` (session open) → `session` (or terminal `failed`). */
+  /** `handshake` → `ready` → `opening` (child init) → `opening-session` (session open) → `session` (or terminal `failed`). */
   let phase = 'handshake';
   let initRequest = null;
   let probe = null;
   let agent = null;
   let agentExited = false;
   let sessionRequest = null;
-  let warmup = null;
-  const warmupCleanups = new Set();
   let finished = false;
   let stopCode = null;
   let forceTimer = null;
@@ -341,48 +330,15 @@ function startRemoteWorkspace(agyPath, host) {
     toAgentLine(line);
   };
 
-  const closeWarmup = () => {
-    if (!warmup) return;
-    const current = warmup;
-    warmup = null;
-    const done = Promise.resolve(current.close()).catch(() => {}).finally(() => warmupCleanups.delete(done));
-    warmupCleanups.add(done);
-  };
-
   const finish = (code) => {
     if (finished) return;
     finished = true;
-    closeWarmup();
     clearTimeout(forceTimer);
     clearTimeout(agentCloseTimer);
-    let exiting = false;
-    let exitTimer = null;
-    const done = () => {
-      if (exiting) return;
-      exiting = true;
-      clearTimeout(exitTimer);
-      process.exit(code);
-    };
-    const pending = [];
-    let budget = 0;
+    const done = () => process.exit(code);
     if (process.stdout.writableLength > 0) {
-      pending.push(new Promise((resolve) => {
-        const flushTimer = setTimeout(resolve, timings.flush);
-        flushTimer.unref();
-        process.stdout.once('drain', () => {
-          clearTimeout(flushTimer);
-          resolve();
-        });
-      }));
-      budget = Math.max(budget, timings.flush);
-    }
-    if (warmupCleanups.size > 0) {
-      pending.push(Promise.all([...warmupCleanups]));
-      budget = Math.max(budget, WARMUP_CLOSE_GRACE_MS);
-    }
-    if (pending.length) {
-      Promise.all(pending).then(done, done);
-      exitTimer = setTimeout(done, budget);
+      process.stdout.once('drain', done);
+      setTimeout(done, timings.flush);
     } else {
       done();
     }
@@ -403,7 +359,6 @@ function startRemoteWorkspace(agyPath, host) {
   const stop = (signal) => {
     if (stopCode !== null) return;
     stopCode = 128 + (os.constants.signals[signal] || os.constants.signals.SIGTERM);
-    closeWarmup();
     terminate();
     if (!running(probe) && !running(agent)) {
       finish(stopCode);
@@ -416,7 +371,6 @@ function startRemoteWorkspace(agyPath, host) {
   const abandon = (line, sessionId) => {
     if (stopCode !== null || finished) return;
     stopCode = REMOTE_WORKSPACE_EXIT_CODE;
-    closeWarmup();
     if (sessionId) {
       toClient({
         jsonrpc: '2.0',
@@ -501,11 +455,8 @@ function startRemoteWorkspace(agyPath, host) {
     }
     try {
       writeAgentDefinition(dir, servers.map((server) => server.name));
-      // Warms while agy starts; session open waits for it (see onAgentLine).
-      warmup = warmMcpServers(servers, { log: (text) => process.stderr.write(`[agy-acp] ${text}\n`) });
       agent = launch([...acpArgs, '--agent', AGENT_NAME]);
     } catch (error) {
-      closeWarmup();
       refuse(request.id, -32603, `Antigravity could not be started for a task on another computer (${describe(error)}).`);
       return;
     }
@@ -517,13 +468,8 @@ function startRemoteWorkspace(agyPath, host) {
       if (phase === 'failed') return;
       if (current.pid === undefined) {
         agentExited = true;
-        closeWarmup();
-        try {
-          process.stderr.write(`[agy-acp] Could not start Antigravity at ${agyPath} (${describe(error)}).\n`);
-        } catch {
-          // ignore
-        }
-        finish(host.notFoundExitCode);
+        finished = true;
+        exitAfterStderr(`[agy-acp] Could not start Antigravity at ${agyPath} (${describe(error)}).`, host.notFoundExitCode);
         return;
       }
       process.stderr.write(`[agy-acp] Antigravity process error: ${describe(error)}\n`);
@@ -555,7 +501,6 @@ function startRemoteWorkspace(agyPath, host) {
     seenCalls.clear();
     seenSteps.clear();
     seenSafeTools.clear();
-    closeWarmup();
     clearTimeout(forceTimer);
     forceTimer = null;
     clearTimeout(agentCloseTimer);
@@ -583,15 +528,9 @@ function startRemoteWorkspace(agyPath, host) {
         failOpen(message.error);
         return;
       }
-      if (finished || stopCode !== null || stdinEnded || !warmup) return;
-      phase = 'warming';
-      const currentWarmup = warmup;
-      const sendSessionOpen = (mcpServers) => {
-        if (finished || stopCode !== null || stdinEnded || agentExited || phase !== 'warming') return;
-        toAgent({ ...sessionRequest, params: { ...sessionRequest.params, mcpServers } });
-        phase = 'opening-session';
-      };
-      currentWarmup.ready.then(sendSessionOpen, () => sendSessionOpen(sessionRequest.params.mcpServers));
+      if (finished || stopCode !== null || stdinEnded || agentExited) return;
+      toAgent(sessionRequest);
+      phase = 'opening-session';
       return;
     }
     if (phase === 'opening-session' && message.id === sessionRequest.id && message.method === undefined) {
@@ -623,8 +562,6 @@ function startRemoteWorkspace(agyPath, host) {
       toClientLine(line, agent.stdout);
       return;
     }
-    // Always verify tool ownership (MCP vs native vs local) BEFORE adapting native UI cards
-    // so an external MCP tool named `ask_question` or `update_steps` keeps its MCP origin.
     const verdict = inspectToolCall(isPermission ? params.toolCall : update, seenCalls, serverNames, seenSafeTools);
     if (verdict.type === 'local') {
       if (isPermission) {
@@ -669,7 +606,7 @@ function startRemoteWorkspace(agyPath, host) {
       forwardClientLine(line, message);
       return;
     }
-    if (phase === 'opening' || phase === 'warming' || phase === 'opening-session') {
+    if (phase === 'opening' || phase === 'opening-session') {
       if (message && message.method === undefined && message.id !== undefined) {
         toAgentLine(line);
         return;
@@ -701,7 +638,6 @@ function startRemoteWorkspace(agyPath, host) {
   process.stdin.on('data', lineSplitter(onClientLine));
   process.stdin.on('end', () => {
     stdinEnded = true;
-    if (phase === 'opening' || phase === 'warming') closeWarmup();
     if (agent && phase !== 'failed') {
       endAgentInput();
       return;
@@ -726,7 +662,6 @@ function startRemoteWorkspace(agyPath, host) {
   });
   // Last line of defence for any exit path: never leave agy running, never leave the directory.
   process.on('exit', () => {
-    closeWarmup();
     for (const child of [probe, agent]) if (running(child)) killTree(child, 'SIGKILL');
     removeLaunchDir(dir);
   });

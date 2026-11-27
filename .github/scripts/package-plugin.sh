@@ -17,6 +17,14 @@ set -euo pipefail
 
 plugin_directory="${1:?usage: package-plugin.sh <plugin-directory> <output-file>}"
 output_file="${2:?usage: package-plugin.sh <plugin-directory> <output-file>}"
+stage=""
+ver_stage=""
+cleanup() {
+  [[ -n "${stage}" ]] && rm -rf "${stage}"
+  [[ -n "${ver_stage}" ]] && rm -rf "${ver_stage}"
+}
+trap cleanup EXIT
+
 # Opt-in only. Legacy plugins keep the original toolchain and archive bytes.
 if git cat-file -e "HEAD:${plugin_directory}/binary-dependencies.json" 2>/dev/null; then
   python3 "$(dirname "$0")/binary-dependencies.py" "${plugin_directory}" "${output_file}"
@@ -38,7 +46,6 @@ fi
 # points at native-host/bin, and a package without it cannot connect.
 if [[ "$plugin_directory" == "my-browser" ]] && git cat-file -e "HEAD:my-browser/native-host/go.mod" 2>/dev/null; then
   stage=$(mktemp -d)
-  trap 'rm -rf "$stage"' EXIT
   git archive HEAD:my-browser/native-host | tar -x -C "$stage"
   node scripts/build-browser-native.mjs "$stage" "$stage/package/native-host/bin"
   absolute_output=$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$output_file")
@@ -58,6 +65,17 @@ fi
 # packages have the same shape as published packages. The package cap applies
 # to the complete archive, including the required legal records.
 zip -q -d "${output_file}" '*/' >/dev/null 2>&1 || true
+
+# Resolve the strictly monotonic effective version for the packaged archive.
+# When a PR updates plugin files without bumping ghost.json.version, inject the
+# auto-incremented patch version into the archive's ghost.json so parallel PRs
+# never collide on version numbers.
+ver_stage="$(mktemp -d)"
+effective_version="$(node "$(dirname "$0")/resolve-plugin-version.mjs" "${plugin_directory}" --write-manifest "${ver_stage}/ghost.json")"
+if [[ -f "${ver_stage}/ghost.json" ]]; then
+  echo "Resolved effective version for ${plugin_directory}: ${effective_version}" >&2
+  zip -q -j "${output_file}" "${ver_stage}/ghost.json"
+fi
 
 # Enforce the intersection of the Server acceptance limits and Desktop install
 # limits on the exact archive that will be uploaded. Regular sandbox packages

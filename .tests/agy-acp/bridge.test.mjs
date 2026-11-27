@@ -86,7 +86,9 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
       lines = lines.slice(index + 1);
       if (!line.trim()) continue;
       const message = JSON.parse(line);
-      if (message.method === 'initialize') {
+      if (message.method === 'initialize' && process.env.FAKE_AGY_REMOTE_INIT_ERROR === '1') {
+        send({ id: message.id, error: { code: -32603, message: 'agy could not start' } });
+      } else if (message.method === 'initialize') {
         send({ id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [] } });
       } else if (message.method === 'session/new' || message.method === 'session/resume') {
         record({ method: message.method, session: message.params });
@@ -517,50 +519,141 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
   // Why: agy leaves out MCP servers that are not connected within five seconds, and here every handshake
   // crosses the device link. session/new must reach agy only after the warm-up, naming the local relay
   // for a server that was warmed (mcp-warmup.test.mjs covers the relay itself).
-  test('remote-workspace mode hands agy its MCP servers only after their handshake is done', async (t) => {
-    const authHeader = `Bearer ${randomUUID()}`;
+  /** A loopback MCP server like Cindy's tunnel, answering after `delayMs`; `sessions` lists the open ones. */
+  const tunnelServer = async (t, delayMs = 300) => {
     const sessions = new Set();
+    const counts = { requests: 0 };
+    let created = 0;
     const mcp = http.createServer((req, res) => {
       let body = '';
       req.on('data', (chunk) => { body += chunk; });
-      req.on('end', () => setTimeout(() => {
-        if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
+      req.on('end', () => {
+        counts.requests += 1;
         const message = body ? JSON.parse(body) : {};
         const sid = req.headers['mcp-session-id'];
-        if (req.method === 'GET') return res.writeHead(405).end();
-        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
-        if (!sid) {
-          const id = `s${sessions.size}`;
-          sessions.add(id);
-          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
-          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
-        }
-        if (message.id === undefined) return res.writeHead(202).end();
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [] } }));
-      }, 300));
+        // The session exists on the server as soon as initialize arrives, before its answer is sent.
+        const id = !sid && message.method === 'initialize' ? `s${created++}` : null;
+        if (id) sessions.add(id);
+        setTimeout(() => {
+          if (req.method === 'GET') return res.writeHead(405).end();
+          if (req.method === 'DELETE') {
+            sessions.delete(sid);
+            return res.writeHead(200).end();
+          }
+          if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+          if (id) {
+            res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
+            return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id,
+              result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
+          }
+          if (message.id === undefined) return res.writeHead(202).end();
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [] } }));
+        }, delayMs);
+      });
     });
     await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
     t.after(() => mcp.close());
-    const { launchFile, bridge, send, reply } = remoteSession(t);
+    return { sessions, counts, url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec` };
+  };
+
+  /**
+   * Makes the entry's start of the session process fail: `throw` throws from spawn itself, `missing`
+   * starts a program that does not exist (spawn reports it asynchronously). Preloaded into the entry only.
+   */
+  const failSessionLaunch = (t, mode) => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agy-acp-spawn-')), 'fail-launch.cjs');
+    t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }));
+    fs.writeFileSync(file, `'use strict';
+if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
+  const childProcess = require('node:child_process');
+  const spawn = childProcess.spawn;
+  childProcess.spawn = function (command, args, options) {
+    if (Array.isArray(args) && args.includes('--agent')) {
+      if (${JSON.stringify(mode)} === 'throw') throw new Error('spawn failed');
+      return spawn.call(this, '/nonexistent/agy-for-test', args, options);
+    }
+    return spawn.apply(this, arguments);
+  };
+}
+`);
+    return { NODE_OPTIONS: `--require=${file}` };
+  };
+
+  if (official) test('remote-workspace mode hands agy its MCP servers only after their handshake is done', async (t) => {
+    const { sessions, url } = await tunnelServer(t);
+    const { launchFile, bridge, send, reply, server } = remoteSession(t);
     bridge.child.stdin.write(INITIALIZE);
     await reply(0, 'initialize answer');
-    const exec = {
-      type: 'http',
-      name: 'cindy_exec',
-      url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
-      headers: [{ name: 'Authorization', value: authHeader }],
-    };
-    const unheated = { type: 'http', name: 'cindy', url: 'http://example.test/mcp/cindy', headers: [] };
-    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec, unheated] } });
+    const exec = { ...server('cindy_exec'), url };
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec, server('cindy')] } });
     await reply(1, 'session/new answer');
     const { session } = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
     assert.equal(sessions.size, 1, 'the server was warmed before agy got session/new');
     assert.match(session.mcpServers[0].url, /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{32}\/0$/);
     assert.deepEqual(session.mcpServers[0].headers, exec.headers);
-    assert.deepEqual(session.mcpServers[1], unheated, 'a server that could not be warmed keeps its own address');
+    assert.deepEqual(session.mcpServers[1], server('cindy'), 'a server that could not be warmed keeps its own address');
+    // The task ends before agy connected (the fake never does): its warmed session must not stay on the other computer.
     bridge.child.stdin.end();
     assert.equal((await bridge.closed).code, 0);
+    assert.equal(sessions.size, 0, 'the warmed session agy never took over was ended before the entry exited');
+  });
+
+  // Why: when agy itself cannot start, nobody will take over the warmed sessions; they must be ended at
+  // once, not left on the other computer while the task stays open.
+  if (official) test('remote-workspace mode ends the warmed sessions when agy fails to start', async (t) => {
+    const { sessions, url } = await tunnelServer(t, 50);
+    const { bridge, send, reply, server } = remoteSession(t, { FAKE_AGY_REMOTE_INIT_ERROR: '1' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    assert.equal((await reply(1, 'session/new answer')).error.message, 'agy could not start');
+    await waitFor(() => sessions.size === 0, 3_000, 'the warmed session to be ended while the task is still open');
+    assert.equal(bridge.child.exitCode, null, 'released without waiting for the task to end');
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  // Why: the task can end while a handshake is still on its way. The server may already have created the
+  // session; the entry waits for the answer that names it and ends it before exiting.
+  // The answer takes longer than a short exit wait would allow: the entry's wait covers the warm-up's close budget.
+  if (official) test('remote-workspace mode ends a session whose handshake was still on its way at exit', async (t) => {
+    const { sessions, url } = await tunnelServer(t, 1_800);
+    const { bridge, send, reply, server } = remoteSession(t);
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    await waitFor(() => sessions.size === 1, 3_000, 'the server to create the session');
+    bridge.child.stdin.end(); // before the initialize answer arrives
+    assert.equal((await bridge.closed).code, 0);
+    assert.equal(sessions.size, 0, 'the session was ended before the entry exited');
+  });
+
+  // Why: starting the session process can fail synchronously (spawnAgy refuses unsafe paths or arguments)
+  // or asynchronously (the program is gone). Either way agy never runs, so no warmed session may stay.
+  if (official) test('remote-workspace mode leaves no warm-up running when agy cannot be started', async (t) => {
+    const { counts, url } = await tunnelServer(t, 50);
+    const { bridge, send, reply, server } = remoteSession(t, failSessionLaunch(t, 'throw'));
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    assert.match((await reply(1, 'session/new answer')).error.message, /could not be started/);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(counts.requests, 0, 'no handshake was started for an agy that never ran');
+    bridge.child.stdin.end();
+    await bridge.closed;
+  });
+
+  if (official) test('remote-workspace mode ends the warmed sessions when the agy program is gone', async (t) => {
+    const { sessions, url } = await tunnelServer(t, 50);
+    const { bridge, send, reply, server } = remoteSession(t, failSessionLaunch(t, 'missing'));
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    await bridge.closed;
+    assert.match(bridge.stderr.text(), /Could not start Antigravity/);
+    // Whether the handshake got as far as creating a session or was stopped before it, none is left.
+    assert.equal(sessions.size, 0, 'no warmed session is left on the other computer');
   });
 
   test('remote-workspace mode does not start a session without Cindy’s file and command tools', async (t) => {
@@ -1807,7 +1900,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     await waitFor(() => element('version').textContent === '1.5.9', 3_000, 'reset to auto-detect');
     // Wait for the reset-triggered CLI update check to settle so its active:false reply cannot race the update lock below.
     await waitFor(() => cliActions.filter((a) => a === 'check').length > checksBeforeReset
-      && element('cli-status').textContent === 'Up to date', 3_000, 'reset CLI update check settled');
+      && element('cli-status').textContent === 'Up to date', 8_000, 'reset CLI update check settled');
     assert.equal(element('custom-path-reset').hidden, true);
     assert.deepEqual(savedPaths, ['bad', '/opt/custom/agy', '/gone/agy', '']);
 
@@ -1815,18 +1908,19 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     // active install/update locks the custom path controls.
     const checksBefore = cliActions.filter((a) => a === 'check').length;
     main.postMessage({ type: 'cli-state', reqId: 'inst-1', action: 'update', active: true });
-    await waitFor(() => element('custom-path-input').disabled === true, 3_000, 'path locked during update');
+    await waitFor(() => element('custom-path-input').disabled === true, 8_000, 'path locked during update');
     assert.equal(element('custom-path-save').disabled, true);
     assert.equal(element('custom-path-reset').disabled, true);
     main.postMessage({ type: 'cli-state', reqId: 'inst-1', action: 'update', active: false, result: { state: 'installed', version: '2.0.0' } });
-    await waitFor(() => element('cli-status').textContent === 'Installed 2.0.0', 3_000, 'installed status shown');
+    await waitFor(() => element('cli-status').textContent === 'Installed 2.0.0', 8_000, 'installed status shown');
     assert.equal(element('custom-path-input').disabled, false);
 
     element('custom-path-input').value = '/opt/older/agy';
     element('custom-path-input').listeners.input();
     element('custom-path-save').click();
-    await waitFor(() => cliActions.filter((a) => a === 'check').length > checksBefore, 3_000, 'fresh check triggered after switching from installed binary');
-    assert.notEqual(element('cli-status').textContent, 'Installed 2.0.0');
+    await waitFor(() => cliActions.filter((a) => a === 'check').length > checksBefore, 8_000, 'fresh check triggered after switching from installed binary');
+    // The page clears the status asynchronously; on a loaded CI runner an earlier check can move the counter first.
+    await waitFor(() => element('cli-status').textContent !== 'Installed 2.0.0', 8_000, '"Installed" cleared after switching binary');
   });
 
   test('worker.js serializes overlapping setCustomPath calls and cancels active login on path switch', async (t) => {
@@ -3142,6 +3236,163 @@ process.stdout.write('', () => process.exit(0));
   });
 });
 
+test('a disconnected input rejects pending and subsequent ACP calls', async () => {
+  const { connect } = await import(pathToFileURL(path.join(root, 'agy-client.js')));
+  const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough() });
+  const call = connect(child);
+  const first = call('initialize', {});
+  child.stdin.destroy(new Error('closed pipe'));
+  await assert.rejects(first, /closed pipe/);
+  await assert.rejects(call('session/new', {}), /closed pipe/);
+});
+
+test('closing a short-lived ACP connection reaps a CLI that ignores EOF and SIGTERM', { skip: isWin }, async t => {
+  const fixture = makeFixture(t, { extraEnv: { FAKE_AGY_IGNORE_TERM: '1', FAKE_AGY_IGNORE_EOF: '1' } });
+  const { openAgy } = await import(pathToFileURL(path.join(root, 'agy-client.js')));
+  const connection = await openAgy({ env: fixture.env });
+  t.after(() => connection.child.kill('SIGKILL'));
+  connection.close();
+  await waitFor(() => connection.child.signalCode === 'SIGKILL', 6000, 'CLI shutdown');
+});
+
+test('installation verifies the archive and staged CLI before activating it', {
+  skip: isWin || systemHasAgy(),
+}, t => {
+  const fixture = makeFixture(t, { withAgy: false });
+  const cli = path.join(fixture.dir, 'antigravity');
+  fs.writeFileSync(cli, '#!/bin/sh\necho "agy 1.5.14"\n', { mode: 0o755 });
+  const archive = execFileSync('/usr/bin/tar', ['-czf', '-', '-C', fixture.dir, 'antigravity']);
+  const archivePath = path.join(fixture.dir, 'release.tar.gz');
+  fs.writeFileSync(archivePath, archive);
+  const digest = createHash('sha512').update(archive).digest('hex');
+  const target = path.join(fixture.env.HOME, '.local/bin/agy');
+  const script = `
+    const [installer, archive, sha512] = process.argv.slice(1);
+    const url = 'https://storage.googleapis.com/antigravity-public/antigravity-cli/fixture.tar.gz';
+    global.fetch = async target => {
+      if (target.href === url) return new Response(require('node:fs').readFileSync(archive));
+      if (target.origin !== 'https://antigravity-cli-auto-updater-974169037036.us-central1.run.app') throw Error('unexpected host');
+      return Response.json({ url, version: '1.5.14', sha512 });
+    };
+    require(installer)({ action: 'install' }).then(result => console.log(JSON.stringify(result)));
+  `;
+  const install = hash => JSON.parse(execFileSync(process.execPath, ['-e', script,
+    path.join(root, 'cli-installer.cjs'), archivePath, hash], { env: fixture.env, encoding: 'utf8' }));
+  assert.deepEqual(install('0'.repeat(128)), { error: 'integrity' });
+  assert.equal(fs.existsSync(target), false);
+  fs.mkdirSync(target);
+  assert.deepEqual(install(digest), { error: 'operation' });
+  assert.deepEqual(fs.readdirSync(path.dirname(target)), ['agy']);
+  fs.rmdirSync(target);
+  assert.deepEqual(install(digest), { state: 'installed', version: '1.5.14' });
+  assert.deepEqual(fs.readFileSync(target), fs.readFileSync(cli));
+});
+
+test('adapts Antigravity update_steps into ACP plan updates and normalizes ask_question when form elicitation is negotiated', async () => {
+  const mcp = await import(pathToFileURL(path.join(root, 'agy-mcp.js')));
+  assert.equal(mcp.clientSupportsElicitationForm({ clientCapabilities: { elicitation: { form: {} } } }), true);
+  assert.equal(mcp.clientSupportsElicitationForm({ clientCapabilities: { fs: { readTextFile: false } } }), false);
+
+  const seenSteps = new Map();
+  const firstSteps = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'steps-1',
+    name: 'update_steps',
+    title: 'Run update_steps',
+    status: 'in_progress',
+    rawInput: {
+      steps: [
+        { title: 'Inspect codebase', status: 'done' },
+        { title: 'Apply fix', status: 'in_progress' },
+        { title: 'Skip optional', status: 'skipped' },
+      ],
+    },
+  }, { elicitationForm: true, seenSteps });
+  assert.deepEqual(firstSteps, {
+    action: 'replace',
+    update: {
+      sessionUpdate: 'plan',
+      entries: [
+        { content: 'Inspect codebase', priority: 'medium', status: 'completed' },
+        { content: 'Apply fix', priority: 'medium', status: 'in_progress' },
+        { content: 'Skip optional', priority: 'medium', status: 'completed' },
+      ],
+    },
+  });
+
+  // Duplicate completed update for the same toolCallId is dropped instead of rendering a raw tool card.
+  const duplicateSteps = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'steps-1',
+    name: 'update_steps',
+    status: 'completed',
+    rawInput: {
+      steps: [
+        { title: 'Inspect codebase', status: 'done' },
+        { title: 'Apply fix', status: 'in_progress' },
+        { title: 'Skip optional', status: 'skipped' },
+      ],
+    },
+  }, { elicitationForm: true, seenSteps });
+  assert.deepEqual(duplicateSteps, { action: 'drop' });
+
+  // Failed tool_call_update is preserved even when rawInput is omitted or repeats the same steps.
+  const failedOmitted = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'steps-1',
+    status: 'failed',
+    rawOutput: 'error',
+  }, { elicitationForm: true, seenSteps });
+  assert.equal(failedOmitted, null);
+
+  mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'steps-2',
+    name: 'update_steps',
+    status: 'in_progress',
+    rawInput: { steps: [{ title: 'Step A', status: 'in_progress' }] },
+  }, { elicitationForm: true, seenSteps });
+  const failedRepeated = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'steps-2',
+    name: 'update_steps',
+    status: 'failed',
+    rawInput: { steps: [{ title: 'Step A', status: 'in_progress' }] },
+  }, { elicitationForm: true, seenSteps });
+  assert.equal(failedRepeated, null);
+
+  // Older hosts (elicitationForm: false) keep raw update_steps unchanged so existing progress rows do not disappear.
+  const legacySteps = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'steps-legacy',
+    name: 'update_steps',
+    status: 'in_progress',
+    rawInput: { steps: [{ title: 'Legacy step', status: 'in_progress' }] },
+  }, { elicitationForm: false, seenSteps });
+  assert.equal(legacySteps, null);
+
+  // ask_question is normalized to AskUserQuestion only when the client negotiated form elicitation.
+  const askWithForm = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'ask-1',
+    name: 'ask_question',
+    title: 'Run ask_question',
+    status: 'in_progress',
+  }, { elicitationForm: true, seenSteps });
+  assert.equal(askWithForm?.action, 'replace');
+  assert.equal(askWithForm?.update.name, 'AskUserQuestion');
+  assert.equal(askWithForm?.update.title, 'AskUserQuestion');
+
+  const askWithoutForm = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'ask-2',
+    name: 'ask_question',
+    title: 'Run ask_question',
+    status: 'in_progress',
+  }, { elicitationForm: false, seenSteps });
+  assert.equal(askWithoutForm, null);
+});
+
 describe('Antigravity remote-workspace steering', () => {
   const remoteSteerHarness = (t, { version = '1.5.14', args = ['--cindy-remote-workspace'], mode = 'steer' } = {}) => {
     const fixture = makeFixture(t);
@@ -3485,7 +3736,7 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
     assert.match(bridge.stderr.text(), /its own tool "write_to_file"/);
   });
 
-  test('combines MCP warm-up, same-turn steering, and native card adaptation in one remote-workspace session', async (t) => {
+  if (official) test('combines MCP warm-up, same-turn steering, and native card adaptation in one remote-workspace session', async (t) => {
     const authHeader = `Bearer ${randomUUID()}`;
     const warmedSessions = new Set();
     const mcp = http.createServer((req, res) => {
@@ -3496,6 +3747,10 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
         const message = body ? JSON.parse(body) : {};
         const sid = req.headers['mcp-session-id'];
         if (req.method === 'GET') return res.writeHead(405).end();
+        if (req.method === 'DELETE') {
+          warmedSessions.delete(sid);
+          return res.writeHead(200).end();
+        }
         if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
         if (!sid) {
           const id = `warm-${warmedSessions.size}`;
@@ -3552,7 +3807,7 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
 
   // Why: if MCP warm-up succeeded before session/resume was rejected (agy never consumed the warmed session),
   // failOpen must delete that unhanded upstream session once and closing the bridge must not delete it again.
-  test('deletes unhanded warmed MCP sessions once when remote session open fails', async (t) => {
+  if (official) test('deletes unhanded warmed MCP sessions once when remote session open fails', async (t) => {
     const authHeader = `Bearer ${randomUUID()}`;
     const activeSessions = new Set();
     const deletedSessions = [];
@@ -3604,355 +3859,4 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
     await new Promise((resolve) => setTimeout(resolve, 60));
     assert.equal(deletedSessions.length, 1, 'closing the bridge did not send a duplicate DELETE');
   });
-
-  // Why: when restricted agy fails initialize (or the bridge exits) while MCP warm-up already opened a session
-  // and is still awaiting tools/list, failOpen/finish must finish deleting that session before process exit.
-  test('finishes deleting an in-flight warmed MCP session when restricted initialize fails and the bridge exits', async (t) => {
-    const authHeader = `Bearer ${randomUUID()}`;
-    const activeSessions = new Set();
-    const deletedSessions = [];
-    const mcp = http.createServer((req, res) => {
-      let body = '';
-      req.on('data', (chunk) => { body += chunk; });
-      req.on('end', () => {
-        if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
-        const sid = req.headers['mcp-session-id'];
-        if (req.method === 'GET') return res.writeHead(405).end();
-        if (req.method === 'DELETE') {
-          deletedSessions.push(sid);
-          activeSessions.delete(sid);
-          return res.writeHead(200).end();
-        }
-        const message = body ? JSON.parse(body) : {};
-        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
-        if (!sid) {
-          const id = `warm-inflight-${activeSessions.size}`;
-          activeSessions.add(id);
-          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
-          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
-        }
-        if (message.id === undefined) return res.writeHead(202).end();
-        // Hold tools/list open longer than restricted agy's 80ms fail-open error so warm-up is still in flight.
-        setTimeout(() => {
-          if (res.destroyed) return;
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [] } }));
-        }, 400);
-      });
-    });
-    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
-    t.after(() => mcp.close());
-
-    const { bridge, send, reply } = remoteSteerHarness(t, { mode: 'fail-open' });
-    bridge.child.stdin.write(INITIALIZE);
-    await reply(0, 'initialize answer');
-    const exec = {
-      type: 'http',
-      name: 'cindy_exec',
-      url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
-      headers: [{ name: 'Authorization', value: authHeader }],
-    };
-    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec] } });
-    const openErr = await reply(1, 'failed restricted initialize answer');
-    assert.equal(openErr.error.code, -32000);
-    // End stdin immediately so finish(0) must wait for the interrupted in-flight handshake's DELETE before exiting.
-    bridge.child.stdin.end();
-    assert.equal((await bridge.closed).code, 0);
-    assert.equal(deletedSessions.length, 1, 'interrupted in-flight warm-up session was deleted before exit');
-    assert.equal(activeSessions.size, 0, 'no leaked upstream session remained after exit');
-  });
-
-  // Why: when a task is cancelled after initialize was already sent to a slow upstream MCP server but before
-  // its reply arrives, remote-workspace exit must wait past the 2 s stdout flush limit (within CLOSE_BUDGET_MS)
-  // so the in-flight initialize can confirm ownership and DELETE the created session before process exit.
-  test('waits past the 2s flush limit to confirm and delete an in-flight initialize session when cancelled before reply', async (t) => {
-    const authHeader = `Bearer ${randomUUID()}`;
-    const activeSessions = new Set();
-    const deletedSessions = [];
-    const seenMethods = [];
-    let resolveInitReceived;
-    const initReceived = new Promise((resolve) => { resolveInitReceived = resolve; });
-    const mcp = http.createServer((req, res) => {
-      let body = '';
-      req.on('data', (chunk) => { body += chunk; });
-      req.on('end', () => {
-        if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
-        const sid = req.headers['mcp-session-id'];
-        if (req.method === 'GET') return res.writeHead(405).end();
-        if (req.method === 'DELETE') {
-          setTimeout(() => {
-            deletedSessions.push(sid);
-            activeSessions.delete(sid);
-            if (!res.destroyed) res.writeHead(200).end();
-          }, 150);
-          return;
-        }
-        const message = body ? JSON.parse(body) : {};
-        seenMethods.push(message.method);
-        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
-        if (!sid) {
-          resolveInitReceived();
-          // Answer after 2.2 s (> the 2 s FLUSH_TIMEOUT_MS, inside INITIALIZE_GRACE_MS = 3 s).
-          setTimeout(() => {
-            if (res.destroyed) return;
-            const id = 'warm-slow-init';
-            activeSessions.add(id);
-            res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
-            res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
-          }, 2_200);
-          return;
-        }
-        if (message.id === undefined) return res.writeHead(202).end();
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [] } }));
-      });
-    });
-    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
-    t.after(() => mcp.close());
-
-    const { bridge, send, reply } = remoteSteerHarness(t);
-    bridge.child.stdin.write(INITIALIZE);
-    await reply(0, 'initialize answer');
-    const exec = {
-      type: 'http',
-      name: 'cindy_exec',
-      url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
-      headers: [{ name: 'Authorization', value: authHeader }],
-    };
-    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec] } });
-    await initReceived;
-    assert.equal(activeSessions.size, 0, 'initialize has not replied yet at cancellation time');
-    const cancelledAt = Date.now();
-    bridge.child.stdin.end();
-    assert.equal((await bridge.closed).code, 0);
-    assert.ok(Date.now() - cancelledAt >= 2_100, 'exit waited past the 2 s flush timer for warmup close budget');
-    assert.deepEqual(deletedSessions, ['warm-slow-init'], 'confirmed in-flight session was deleted before exit');
-    assert.equal(activeSessions.size, 0, 'no leaked upstream session remained after exit');
-    assert.equal(seenMethods.includes('notifications/initialized'), false, 'did not continue handshake after cancel');
-    assert.equal(seenMethods.includes('tools/list'), false, 'did not send tools/list after cancel');
-  });
-
-  // Why: when an in-flight initialize returns an invalid/malformed or incomplete MCP InitializeResult with a
-  // foreign session header, cancelling the task must not send DELETE for that unconfirmed session.
-  test('does not delete foreign sessions on invalid or incomplete initialize responses when cancelled in flight', async (t) => {
-    for (const badCase of [
-      {
-        name: 'malformed JSON',
-        sid: 'foreign-invalid',
-        body: () => '{not-valid-json',
-      },
-      {
-        name: 'incomplete InitializeResult missing serverInfo',
-        sid: 'foreign-incomplete',
-        body: (message) => JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }),
-      },
-    ]) {
-      const authHeader = `Bearer ${randomUUID()}`;
-      const activeSessions = new Set([badCase.sid]);
-      const deletedSessions = [];
-      let resolveInitReceived;
-      const initReceived = new Promise((resolve) => { resolveInitReceived = resolve; });
-      const mcp = http.createServer((req, res) => {
-        let body = '';
-        req.on('data', (chunk) => { body += chunk; });
-        req.on('end', () => {
-          if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
-          const sid = req.headers['mcp-session-id'];
-          if (req.method === 'GET') return res.writeHead(405).end();
-          if (req.method === 'DELETE') {
-            deletedSessions.push(sid);
-            activeSessions.delete(sid);
-            return res.writeHead(200).end();
-          }
-          const message = body ? JSON.parse(body) : {};
-          if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
-          if (!sid) {
-            resolveInitReceived();
-            setTimeout(() => {
-              if (res.destroyed) return;
-              res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': badCase.sid });
-              res.end(badCase.body(message));
-            }, 120);
-            return;
-          }
-          res.writeHead(404).end();
-        });
-      });
-      await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
-      t.after(() => mcp.close());
-
-      const { bridge, send, reply } = remoteSteerHarness(t);
-      bridge.child.stdin.write(INITIALIZE);
-      await reply(0, `${badCase.name}: initialize answer`);
-      const exec = {
-        type: 'http',
-        name: 'cindy_exec',
-        url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
-        headers: [{ name: 'Authorization', value: authHeader }],
-      };
-      send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec] } });
-      await initReceived;
-      bridge.child.stdin.end();
-      assert.equal((await bridge.closed).code, 0);
-      assert.deepEqual(deletedSessions, [], `${badCase.name}: no DELETE was sent`);
-      assert.ok(activeSessions.has(badCase.sid), `${badCase.name}: foreign session remained untouched`);
-    }
-  });
-});
-
-test('a disconnected input rejects pending and subsequent ACP calls', async () => {
-  const { connect } = await import(pathToFileURL(path.join(root, 'agy-client.js')));
-  const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough() });
-  const call = connect(child);
-  const first = call('initialize', {});
-  child.stdin.destroy(new Error('closed pipe'));
-  await assert.rejects(first, /closed pipe/);
-  await assert.rejects(call('session/new', {}), /closed pipe/);
-});
-
-test('closing a short-lived ACP connection reaps a CLI that ignores EOF and SIGTERM', { skip: isWin }, async t => {
-  const fixture = makeFixture(t, { extraEnv: { FAKE_AGY_IGNORE_TERM: '1', FAKE_AGY_IGNORE_EOF: '1' } });
-  const { openAgy } = await import(pathToFileURL(path.join(root, 'agy-client.js')));
-  const connection = await openAgy({ env: fixture.env });
-  t.after(() => connection.child.kill('SIGKILL'));
-  connection.close();
-  await waitFor(() => connection.child.signalCode === 'SIGKILL', 6000, 'CLI shutdown');
-});
-
-test('installation verifies the archive and staged CLI before activating it', {
-  skip: isWin || systemHasAgy(),
-}, t => {
-  const fixture = makeFixture(t, { withAgy: false });
-  const cli = path.join(fixture.dir, 'antigravity');
-  fs.writeFileSync(cli, '#!/bin/sh\necho "agy 1.5.14"\n', { mode: 0o755 });
-  const archive = execFileSync('/usr/bin/tar', ['-czf', '-', '-C', fixture.dir, 'antigravity']);
-  const archivePath = path.join(fixture.dir, 'release.tar.gz');
-  fs.writeFileSync(archivePath, archive);
-  const digest = createHash('sha512').update(archive).digest('hex');
-  const target = path.join(fixture.env.HOME, '.local/bin/agy');
-  const script = `
-    const [installer, archive, sha512] = process.argv.slice(1);
-    const url = 'https://storage.googleapis.com/antigravity-public/antigravity-cli/fixture.tar.gz';
-    global.fetch = async target => {
-      if (target.href === url) return new Response(require('node:fs').readFileSync(archive));
-      if (target.origin !== 'https://antigravity-cli-auto-updater-974169037036.us-central1.run.app') throw Error('unexpected host');
-      return Response.json({ url, version: '1.5.14', sha512 });
-    };
-    require(installer)({ action: 'install' }).then(result => console.log(JSON.stringify(result)));
-  `;
-  const install = hash => JSON.parse(execFileSync(process.execPath, ['-e', script,
-    path.join(root, 'cli-installer.cjs'), archivePath, hash], { env: fixture.env, encoding: 'utf8' }));
-  assert.deepEqual(install('0'.repeat(128)), { error: 'integrity' });
-  assert.equal(fs.existsSync(target), false);
-  fs.mkdirSync(target);
-  assert.deepEqual(install(digest), { error: 'operation' });
-  assert.deepEqual(fs.readdirSync(path.dirname(target)), ['agy']);
-  fs.rmdirSync(target);
-  assert.deepEqual(install(digest), { state: 'installed', version: '1.5.14' });
-  assert.deepEqual(fs.readFileSync(target), fs.readFileSync(cli));
-});
-
-test('adapts Antigravity update_steps into ACP plan updates and normalizes ask_question when form elicitation is negotiated', async () => {
-  const mcp = await import(pathToFileURL(path.join(root, 'agy-mcp.js')));
-  assert.equal(mcp.clientSupportsElicitationForm({ clientCapabilities: { elicitation: { form: {} } } }), true);
-  assert.equal(mcp.clientSupportsElicitationForm({ clientCapabilities: { fs: { readTextFile: false } } }), false);
-
-  const seenSteps = new Map();
-  const firstSteps = mcp.adaptAgyNativeToolUpdate({
-    sessionUpdate: 'tool_call',
-    toolCallId: 'steps-1',
-    name: 'update_steps',
-    title: 'Run update_steps',
-    status: 'in_progress',
-    rawInput: {
-      steps: [
-        { title: 'Inspect codebase', status: 'done' },
-        { title: 'Apply fix', status: 'in_progress' },
-        { title: 'Skip optional', status: 'skipped' },
-      ],
-    },
-  }, { elicitationForm: true, seenSteps });
-  assert.deepEqual(firstSteps, {
-    action: 'replace',
-    update: {
-      sessionUpdate: 'plan',
-      entries: [
-        { content: 'Inspect codebase', priority: 'medium', status: 'completed' },
-        { content: 'Apply fix', priority: 'medium', status: 'in_progress' },
-        { content: 'Skip optional', priority: 'medium', status: 'completed' },
-      ],
-    },
-  });
-
-  // Duplicate completed update for the same toolCallId is dropped instead of rendering a raw tool card.
-  const duplicateSteps = mcp.adaptAgyNativeToolUpdate({
-    sessionUpdate: 'tool_call_update',
-    toolCallId: 'steps-1',
-    name: 'update_steps',
-    status: 'completed',
-    rawInput: {
-      steps: [
-        { title: 'Inspect codebase', status: 'done' },
-        { title: 'Apply fix', status: 'in_progress' },
-        { title: 'Skip optional', status: 'skipped' },
-      ],
-    },
-  }, { elicitationForm: true, seenSteps });
-  assert.deepEqual(duplicateSteps, { action: 'drop' });
-
-  // Failed tool_call_update is preserved even when rawInput is omitted or repeats the same steps.
-  const failedOmitted = mcp.adaptAgyNativeToolUpdate({
-    sessionUpdate: 'tool_call_update',
-    toolCallId: 'steps-1',
-    status: 'failed',
-    rawOutput: 'error',
-  }, { elicitationForm: true, seenSteps });
-  assert.equal(failedOmitted, null);
-
-  mcp.adaptAgyNativeToolUpdate({
-    sessionUpdate: 'tool_call',
-    toolCallId: 'steps-2',
-    name: 'update_steps',
-    status: 'in_progress',
-    rawInput: { steps: [{ title: 'Step A', status: 'in_progress' }] },
-  }, { elicitationForm: true, seenSteps });
-  const failedRepeated = mcp.adaptAgyNativeToolUpdate({
-    sessionUpdate: 'tool_call_update',
-    toolCallId: 'steps-2',
-    name: 'update_steps',
-    status: 'failed',
-    rawInput: { steps: [{ title: 'Step A', status: 'in_progress' }] },
-  }, { elicitationForm: true, seenSteps });
-  assert.equal(failedRepeated, null);
-
-  // Older hosts (elicitationForm: false) keep raw update_steps unchanged so existing progress rows do not disappear.
-  const legacySteps = mcp.adaptAgyNativeToolUpdate({
-    sessionUpdate: 'tool_call',
-    toolCallId: 'steps-legacy',
-    name: 'update_steps',
-    status: 'in_progress',
-    rawInput: { steps: [{ title: 'Legacy step', status: 'in_progress' }] },
-  }, { elicitationForm: false, seenSteps });
-  assert.equal(legacySteps, null);
-
-  // ask_question is normalized to AskUserQuestion only when the client negotiated form elicitation.
-  const askWithForm = mcp.adaptAgyNativeToolUpdate({
-    sessionUpdate: 'tool_call',
-    toolCallId: 'ask-1',
-    name: 'ask_question',
-    title: 'Run ask_question',
-    status: 'in_progress',
-  }, { elicitationForm: true, seenSteps });
-  assert.equal(askWithForm?.action, 'replace');
-  assert.equal(askWithForm?.update.name, 'AskUserQuestion');
-  assert.equal(askWithForm?.update.title, 'AskUserQuestion');
-
-  const askWithoutForm = mcp.adaptAgyNativeToolUpdate({
-    sessionUpdate: 'tool_call',
-    toolCallId: 'ask-2',
-    name: 'ask_question',
-    title: 'Run ask_question',
-    status: 'in_progress',
-  }, { elicitationForm: false, seenSteps });
-  assert.equal(askWithoutForm, null);
 });

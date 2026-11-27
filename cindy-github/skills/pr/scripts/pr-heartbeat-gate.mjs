@@ -77,7 +77,7 @@
 
 import { appendTrace, scrub } from './lib/follow-trace.mjs';
 import { createHash } from 'node:crypto';
-import { BACKOFF_STEPS_MIN, baseMovedWait, checkOutcome, handledFailure, inspectWait, makeWait, setsAside, waitDueAt, waitFacts, waitIsDue, waitNotice } from './lib/follow-wait.mjs';
+import { BACKOFF_STEPS_MIN, baseMovedWait, checkOutcome, handledFailure, inspectWait, isSettledBaselineWait, makeWait, setsAside, waitAbsorbsBase, waitDueAt, waitFacts, waitIsDue, waitNotice } from './lib/follow-wait.mjs';
 import { mergeQueueFingerprint } from './lib/merge-queue.mjs';
 import { SETTLE_MAX_MS, TICK_MS, breaksSettle, expectedBots, isEmptyPass, isPendingTerminalBackoffRetry, pacingDue, resolvePrReviewerBots, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
 import { execFile } from 'node:child_process';
@@ -538,6 +538,85 @@ export function stateFilePath(stateDir, repo, number) {
 /** 仓库级状态(近期见过的 bot reviewer),与各 PR 的状态文件放在同一目录。 */
 export function repoStateFilePath(stateDir, repo) {
   return path.join(stateDir, `${repo.replace('/', '__')}.repo.json`);
+}
+
+/** 共享 GitHub 限流退避文件的最大可信跨度:主限流窗口为 1 小时,超过 2 小时视作异常时钟并截断。 */
+const MAX_SHARED_RATE_LIMIT_MS = 2 * 60 * 60_000;
+
+/** 账号级共享 GitHub 限流退避文件:同 stateDir 下所有 PR 心跳共用,避免限流时重复消耗配额与并发刷屏。 */
+export function rateLimitFilePath(stateDir) {
+  return path.join(stateDir, '.rate-limit.json');
+}
+
+export function readSharedRateLimit(stateDir, now = Date.now()) {
+  const parsed = readState(rateLimitFilePath(stateDir));
+  const until = Number(parsed?.until);
+  if (!Number.isFinite(until) || until <= now) return null;
+  return {
+    until: Math.min(until, now + MAX_SHARED_RATE_LIMIT_MS),
+    reportedAt: Number(parsed?.reportedAt) || 0,
+    reportedBy: typeof parsed?.reportedBy === 'string' ? parsed.reportedBy : null,
+    summary: typeof parsed?.summary === 'string' ? parsed.summary : 'GitHub API rate limit reached',
+  };
+}
+
+function tryAtomicCreateFile(file, content) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+  try {
+    fs.writeFileSync(tmp, content, 'utf8');
+    try {
+      fs.linkSync(tmp, file);
+      return true;
+    } catch (err) {
+      if (err?.code === 'EEXIST') return false;
+      // Fallback for filesystems without hard links.
+      try {
+        fs.writeFileSync(file, content, { encoding: 'utf8', flag: 'wx' });
+        return true;
+      } catch (wxErr) {
+        if (wxErr?.code === 'EEXIST') return false;
+        throw wxErr;
+      }
+    }
+  } finally {
+    try { fs.unlinkSync(tmp); } catch { /* best-effort temp cleanup */ }
+  }
+}
+
+/**
+ * 跨 PR 共享 GitHub 限流退避:同一限流窗口内只有第一个原子创建 .rate-limit.json 的 PR
+ * 负责 fail-closed 提醒一次,其余并发或后续 PR 直接静默退避并零额外 API 调用。
+ */
+function claimSharedRateLimit(stateDir, { until, reportedBy, summary }, now) {
+  const file = rateLimitFilePath(stateDir);
+  const clampedUntil = Math.min(Math.max(Number(until) || 0, now + TICK_MS), now + MAX_SHARED_RATE_LIMIT_MS);
+  const entry = { until: clampedUntil, reportedAt: now, reportedBy, summary, updatedAt: now };
+  const payload = `${JSON.stringify(entry, null, 2)}\n`;
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (tryAtomicCreateFile(file, payload)) {
+        return { claimed: true, until: clampedUntil, existing: null };
+      }
+      const existing = readSharedRateLimit(stateDir, now);
+      if (existing) {
+        const mergedUntil = Math.max(existing.until, clampedUntil);
+        if (mergedUntil > existing.until) {
+          try {
+            writeState(file, { ...existing, until: mergedUntil, updatedAt: now });
+          } catch { /* best-effort extension */ }
+        }
+        return { claimed: false, until: mergedUntil, existing };
+      }
+      if (attempt === 0) {
+        try { fs.unlinkSync(file); } catch { /* another process may have removed or replaced it */ }
+      }
+    }
+    writeState(file, entry);
+    return { claimed: true, until: clampedUntil, existing: null };
+  } catch {
+    return { claimed: true, until: clampedUntil, existing: null };
+  }
 }
 
 export function adoptLegacyStateFile(stateDir, repo, number, file) {
@@ -1251,8 +1330,9 @@ export function decide({
       eventKey(result.events),
       result.next,
     );
-    if (delivery.exitCode === EXIT_PASS && kinds.some((kind) => kind === 'checks-failed' || kind === 'checks-finished')) {
-      delivery.detail += '; handle the check results and notify the user (schedule_notify_current_run): report the outcome or exact blocker, even if waiting for CI or an external fix';
+    if (delivery.exitCode === EXIT_PASS && kinds.some((kind) => kind === 'checks-failed' || kind === 'checks-finished')
+      && !delivery.detail.includes('schedule_notify_current_run')) {
+      delivery.detail += '; handle the check results; stay silent if you fix and push for CI or wait on an external/baseline fix without a user decision or --wait notice';
     }
     return delivery;
   }
@@ -1433,7 +1513,8 @@ function runProbe(snapshotPath, repo, number) {
 
 function parseProbeValue(value) {
   return typeof value?.status === 'string' && typeof value?.remarks === 'string'
-    ? { status: value.status, remarks: value.remarks, ...(typeof value.base === 'string' ? { base: value.base } : {}) } : null;
+    ? { status: value.status, remarks: value.remarks, ...(typeof value.base === 'string' ? { base: value.base } : {}) }
+    : null;
 }
 
 function parseProbe(run) {
@@ -1463,30 +1544,47 @@ function probeStatusMatches(previousStatus, currentStatus) {
 }
 
 /**
+ * 仅凭上次状态与当前时间即可确定必须做完整快照的场景:此时不必白跑一次 --probe。
+ * 包括未确认放行、检查在跑/合并态未知、终态、收齐窗口未闭、defer/wait/无检查/保底巡检已到点。
+ */
+export function mustFullReadBeforeProbe(previous, now, maxSilenceMs = DEFAULT_MAX_SILENCE_HOURS * 3_600_000) {
+  if (!previous?.watch) return false;
+  if (previous.pendingWatch || previous.inFlight || previous.merged || previous.closed) return true;
+  // News is being held until the bots answer: read in full each time so the hold ends at its deadline.
+  if ((Number(previous.settleUntil) || 0) > 0) return true;
+  if ((Number(previous.nextAllowAt) || 0) > 0 && now >= Number(previous.nextAllowAt)) return true;
+  if (waitIsDue(previous.wait, now)) return true;
+  const awaited = previous.watch.checksAwaitedSince ? Date.parse(previous.watch.checksAwaitedSince) : NaN;
+  if (Number.isFinite(awaited) && now - awaited >= NO_CHECKS_MS) return true;
+  // Mirror decide(): when silence-guard is suppressed (active non-due wait/defer or human-only wait),
+  // do not discard a matching probe and force a full snapshot on every tick.
+  if (previous.wait || (Number(previous.nextAllowAt) || 0) > now || previous.humanOnlyPending === true || waitingOnHumans(previous)) {
+    return false;
+  }
+  const silenceAnchor = silenceAnchorOf(previous);
+  return silenceAnchor > 0 && now - silenceAnchor >= maxSilenceMs;
+}
+
+/** 本轮是否存在走 --probe 跳过完整快照的可能(未检查实际 probe 结果前)。 */
+export function canSkipWithProbe(previous, now, maxSilenceMs = DEFAULT_MAX_SILENCE_HOURS * 3_600_000) {
+  if (!previous?.watch || !previous.probe) return false;
+  if (mustFullReadBeforeProbe(previous, now, maxSilenceMs)) return false;
+  if (!(now - (Number(previous.lastFullReadAt) || 0) < FULL_REREAD_MS)) return false;
+  return true;
+}
+
+/**
  * 探测结果与上次完整读取时一致、且没有必须完整读取的理由时,本轮直接跳过。必须完整读取:
  * 还有未确认的放行、上次读到检查在跑或合并态未知、已合并/关闭、超过 30 分钟没完整读过、
  * 新 head 等检查的期限到了、保底巡检到点。
  */
 export function probeAllowsSkip(previous, probe, now, maxSilenceMs = DEFAULT_MAX_SILENCE_HOURS * 3_600_000) {
-  if (!probe || !previous?.watch || !previous.probe) return false;
+  if (!probe || !canSkipWithProbe(previous, now, maxSilenceMs)) return false;
   if (!probeStatusMatches(previous.probe.status, probe.status) || probe.remarks !== previous.probe.remarks) return false;
-  // 检查失败期间 base 前进要报,探测看到 base 变了就完整读取。
-  if (previous.watch.baseSha && probe.base && probe.base !== previous.watch.baseSha) return false;
-  if (previous.pendingWatch || previous.inFlight || previous.merged || previous.closed) return false;
-  // News is being held until the bots answer: read in full each time so the hold ends at its deadline.
-  if ((Number(previous.settleUntil) || 0) > 0) return false;
-  if ((Number(previous.nextAllowAt) || 0) > 0 && now >= Number(previous.nextAllowAt)) return false;
-  if (waitIsDue(previous.wait, now)) return false;
-  if (!(now - (Number(previous.lastFullReadAt) || 0) < FULL_REREAD_MS)) return false;
-  const awaited = previous.watch.checksAwaitedSince ? Date.parse(previous.watch.checksAwaitedSince) : NaN;
-  if (Number.isFinite(awaited) && now - awaited >= NO_CHECKS_MS) return false;
-  // Mirror decide(): when silence-guard is suppressed (active non-due wait/defer or human-only wait),
-  // do not discard a matching probe and force a full snapshot on every tick.
-  if (previous.wait || (Number(previous.nextAllowAt) || 0) > now || previous.humanOnlyPending === true || waitingOnHumans(previous)) {
-    return true;
-  }
-  const silenceAnchor = silenceAnchorOf(previous);
-  return !(silenceAnchor > 0 && now - silenceAnchor >= maxSilenceMs);
+  // 检查失败期间 base 前进要报,探测看到 base 变了就完整读取;
+  // 但若显式 wait 已覆盖全部失败检查(且 baseline wait 已记录首次基线移动),后续 base 前进会被吸收。
+  if (previous.watch.baseSha && probe.base && probe.base !== previous.watch.baseSha && !waitAbsorbsBase(previous)) return false;
+  return true;
 }
 
 const FINISH_HINT = 'Finish: blocked → --wait <plan.json>; handled/pushed → --resume <reason>; clear → --ack. See references/follow-up.md.';
@@ -1746,8 +1844,21 @@ async function gateMain(argv, ctx) {
     emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
     return EXIT_SKIP;
   }
+  // 同一账号下任一 PR 触发 GitHub 限流后,其余 PR(含 pr-status 提前触发)在重置前直接静默跳过,
+  // 不消耗剩余配额也不重复抛 exit 1 报警。
+  const sharedRateLimit = diagnostic ? null : readSharedRateLimit(args.stateDir, now);
+  if (sharedRateLimit) {
+    const detail = `shared GitHub rate limit; nextProbeAt=${isoAt(sharedRateLimit.until)}`;
+    const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'snapshot-failure-backoff', detail, checkedAt: now };
+    persist(file, { ...(previous ?? {}), lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
+    emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
+    return EXIT_SKIP;
+  }
   const isReconcileWatch = hookTrigger?.kind === 'watch' && hookTrigger?.reason === 'reconcile';
-  const targetedWait = Boolean(previous?.wait && (previous.wait.checks.length > 0 || previous.wait.threads.length > 0));
+  const settledBaseline = isSettledBaselineWait(previous);
+  const targetedWait = Boolean(previous?.wait)
+    && ((previous.wait.threads?.length ?? 0) > 0
+      || ((previous.wait.checks?.length ?? 0) > 0 && !settledBaseline));
   // 宿主看到这个 PR 的状态变了而提前触发的一轮:不看节奏;明确状态变化直接完整读取,
   // 但 overflow/重连补查 (reason='reconcile') 先走轻量 --probe 验证是否真有评论或状态变化,
   // 避免未变化的 PR 在补查扫表时反复拉全量快照。
@@ -1773,9 +1884,15 @@ async function gateMain(argv, ctx) {
   // 先问一句「有没有变」:一个很小的查询,与上次完整读取时一致就不做三四个接口的完整读取。
   // Counts alone cannot reveal a named check's rerun or a thread being resolved/replied to.
   // While explicitly waiting on those items, inspect them each tick rather than waiting 30 minutes.
+  // Settled baseline waits (all failed checks finished, no named threads) wait on a base-branch fix
+  // rather than a rerun on the old head, so they can use the lightweight probe between 30m full reads.
+  // Also skip the probe whenever state already forces a full snapshot (except when a legacy snapshot
+  // without embedded `snap.probe` still needs the probe solely to refresh the probe baseline).
   const skipProbe = args.triggered || newFollow || diagnostic
     || (hookTrigger?.kind === 'watch' && !isReconcileWatch)
-    || targetedWait || recovering;
+    || targetedWait || recovering
+    || mustFullReadBeforeProbe(previous, now, args.maxSilenceMs)
+    || (Boolean(previous?.snapshotProvidesProbe) && !canSkipWithProbe(previous, now, args.maxSilenceMs));
   const probeRun = skipProbe ? null : await ctx.runProbe(args.snapshot, args.repo, args.number);
   const probe = parseProbe(probeRun);
   if (!skipProbe && probeAllowsSkip(previous, probe, now, args.maxSilenceMs)) {
@@ -1812,35 +1929,53 @@ async function gateMain(argv, ctx) {
     const plan = snapshotFailurePlan(run, previous, now, args.maxSnapshotFailures);
     const { failures } = plan;
     const { summary, ...cause } = plan.diagnosis;
-    const detail = `${summary}; snapshotExit=${run.code} failures=${failures}/${args.maxSnapshotFailures}`;
+    let effectiveUntil = plan.until;
+    let shouldBlock = plan.block;
+    let sharedSuppressed = false;
+    if (plan.rateLimited && !diagnostic) {
+      const sharedClaim = claimSharedRateLimit(
+        args.stateDir,
+        { until: plan.until, reportedBy: `${args.repo}#${args.number}`, summary },
+        now,
+      );
+      effectiveUntil = Math.max(plan.until, sharedClaim.until);
+      if (!sharedClaim.claimed) {
+        shouldBlock = false;
+        sharedSuppressed = true;
+      }
+    }
+    const reports = shouldBlock ? plan.reports : (previous?.snapshotFailureReports ?? {});
+    const detail = sharedSuppressed
+      ? `${summary}; shared rate-limit backoff already active, nextProbeAt=${isoAt(effectiveUntil)}`
+      : `${summary}; snapshotExit=${run.code} failures=${failures}/${args.maxSnapshotFailures}`;
     persist(file, {
       ...(previous ?? {}),
       consecutiveSnapshotFailures: failures,
       lastSnapshotFailureAt: now,
       snapshotFailureFingerprint: plan.fingerprint,
       snapshotFailureSummary: summary,
-      snapshotFailureBackoffUntil: plan.until,
+      snapshotFailureBackoffUntil: effectiveUntil,
       snapshotWatchRetryAt: plan.watchRetryAt,
-      snapshotFailureReports: plan.reports,
-      lastDecision: plan.block ? 'block' : 'skip',
-      lastDecisionReason: 'snapshot-failed',
+      snapshotFailureReports: reports,
+      lastDecision: shouldBlock ? 'block' : 'skip',
+      lastDecisionReason: sharedSuppressed ? 'snapshot-failure-backoff' : 'snapshot-failed',
       lastResult: {
-        decision: plan.block ? 'block' : 'skip',
-        exitCode: plan.block ? EXIT_BLOCK : EXIT_SKIP,
-        reason: 'snapshot-failed',
+        decision: shouldBlock ? 'block' : 'skip',
+        exitCode: shouldBlock ? EXIT_BLOCK : EXIT_SKIP,
+        reason: sharedSuppressed ? 'snapshot-failure-backoff' : 'snapshot-failed',
         detail,
         checkedAt: now,
       },
     }, out);
-    if (plan.block) {
-      out(`CINDY_PR_CHECK_DIAGNOSIS ${JSON.stringify({ ...cause, failures, retryAt: plan.until })}\n`);
-      throw new Error(`${summary}; PR snapshot failed ${failures} consecutive rounds. Scheduled checks may retry from ${new Date(plan.until).toISOString()}\n${run.stderr.trim()}`);
+    if (shouldBlock) {
+      out(`CINDY_PR_CHECK_DIAGNOSIS ${JSON.stringify({ ...cause, failures, retryAt: effectiveUntil })}\n`);
+      throw new Error(`${summary}; PR snapshot failed ${failures} consecutive rounds. Scheduled checks may retry from ${new Date(effectiveUntil).toISOString()}\n${run.stderr.trim()}`);
     }
     emit(args, {
       exitCode: EXIT_SKIP,
       repo: args.repo,
       number: args.number,
-      reason: 'snapshot-failed',
+      reason: sharedSuppressed ? 'snapshot-failure-backoff' : 'snapshot-failed',
       detail,
     }, out);
     return EXIT_SKIP;
@@ -1929,7 +2064,7 @@ async function gateMain(argv, ctx) {
   // 上次读到检查在跑、合并态还没算出、或快照内检查列表与探测计数发生时间错位:
   // 下一轮不靠探测跳过，按活跃节奏直接完整读取。
   const checksTrustworthy = !snap.checksSummary?.unavailable && !snap.checksSummary?.truncated;
-  const snapshotHasProbe = snap && Object.hasOwn(snap, 'probe');
+  const snapshotHasProbe = Boolean(snap && Object.hasOwn(snap, 'probe'));
   const snapProbe = snapshotHasProbe ? parseProbeValue(snap.probe) : null;
   const probeSkewed = !snap.merged && !snap.closed && checksTrustworthy && snapshotHasProbe && !snapProbe;
   const inFlight = !mergeSignalKnown(snap)
@@ -1969,6 +2104,7 @@ async function gateMain(argv, ctx) {
     closed: Boolean(snap.closed),
     url: snap.url ?? null,
     ...(savedProbe ? { probe: savedProbe } : {}),
+    ...(snapshotHasProbe ? { snapshotProvidesProbe: true } : {}),
     inFlight,
     lastFullReadAt: now,
     consecutiveSnapshotFailures: !checkSucceeded

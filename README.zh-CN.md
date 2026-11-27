@@ -71,100 +71,72 @@
 
 从想法到上架的完整路径：
 
-1. **想法**——先对照上表确认不重叠。官方插件避免场景重复；同一服务商的产品
-   家族（Gmail / Drive / Calendar）、同一协议的不同服务商（163 / iCloud / QQ
-   邮箱）属合理共存，但「又一个通用网页搜索」不是。
-2. **对照标准**——新插件和 audience 按
-   [插件准入与受众标准](.greptile/rules.md#插件准入与受众标准)直接判定。
-   符合标准不另要维护者批准，也不必先开提案。
-   [提案 issue](https://github.com/makecindy/cindy-official-plugins/issues/new?template=new_plugin_proposal.yml)
-   或 Draft PR 可以写下场景、边界和所需能力（网络域名、凭证类型、是否需要 Node
-   Runtime），但不是批准门禁。`all` 只给多数用户受益、开箱即用且无需自备第三方
-   密钥或账号、不绑定某一个人或某一个团队的流程、质量稳定的插件。热度或投稿数量
-   本身不能作为 `all` 的理由。有用但小众，或需要用户自己的密钥或账号，按自选接受
-   （`{ "emails": [] }`，用户在市场自行选择）。非常个人的插件、纯演示（改放
-   `docs/`），以及 Agent 不装插件就能直接完成的事，不予接受。`author` 必须是
-   真实作者。
+1. **想法**——先对照上表确认不重叠。同一服务商的产品家族（Gmail / Drive /
+   Calendar）、同一协议的不同服务商（163 / iCloud / QQ 邮箱）属合理共存，但重复的
+   通用能力（如又一个通用网页搜索）不予接受。
+2. **对照标准**——准入与受众见
+   [`.greptile/rules.md`](.greptile/rules.md#4-新插件准入受众与查重)。符合标准无需
+   事先批准，[提案 issue](https://github.com/makecindy/cindy-official-plugins/issues/new?template=new_plugin_proposal.yml)
+   纯属可选。`all` 只给多数用户受益且无需自备密钥/账号的插件；有用但小众或需自备
+   密钥/账号的按自选接受（`{ "emails": [] }`）。`author` 必须是真实作者。
 3. **开发**——在任意 coding Agent 或开发环境中按照
-   [工具无关的快速路径](#工具无关的快速路径)操作。文件格式、运行时消息、校验命令和
-   打包格式都由本仓库说明，不要求 Cindy 专用的插件制作工具。
-4. **提交 PR**——标题 `feat(<目录名>): …`；bump `ghost.json.version`；补
-   `provisioning.json` 条目；四语言 locale（`zh-CN` / `en` / `ja` / `ko`）
-   齐全；每个 commit 带签名（`git commit -s`，[DCO](./DCO)）。细节见
+   [工具无关的快速路径](#工具无关的快速路径)操作，不要求 Cindy 专用制作工具。
+4. **提交 PR**——标题 `feat(<目录名>): …`；填写初始 `ghost.json.version`
+   （存量插件日常修复不再强制手工 bump patch，打包时会自动按 `main` 历史单调递增）；
+   补 `provisioning.json` 条目；四语言 locale（`zh-CN` / `en` / `ja` / `ko`）齐全；
+   每个 commit 带签名（`git commit -s`，[DCO](./DCO)）。细节见
    [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md)。
-5. **审查**——CI 在本仓校验 manifest、Server / Desktop 交付限制、本地化 /
-   provisioning 门禁，并对真实包做 dry-run；
-   自动 review 按
-   [`.greptile/rules.md`](./.greptile/rules.md) 的完整规则执行；维护者按同一套
-   [审查标准](#审查标准)核对真实风险与验证证据。必要检查、有效 review 与必要验收
-   满足后，已有授权的合并程序可执行，无需为普通维护再请求确认。符合标准的准入
-   不另等决定。插件用到或依赖的 Cindy 本体授权有变化或未就绪时仍先不合，见
-   [审查标准](#审查标准)。
-6. **提交并上架**——合入 `main` 后，变更包会提交到海外 Plugin Platform，审核通过
-   后才会下发给兼容客户端；拒绝不会影响此前已批准的版本。国内推包逻辑保持移除。
+5. **审查**——CI 在本仓校验 manifest、交付限制、本地化、provisioning、改动插件单测
+   与试打包；自动审查（Greptile + Codex）负责守住安全红线与确认的 P0/P1 缺陷。
+   已有插件的常规迭代（L1）在 CI 全绿且自动审查通过后即可直接合并，不把人工实机测试
+   作为合并门禁。
+6. **提交并上架**——合入 `main` 后，变更包会提交到海外 Plugin Platform 生成待审版本，
+   审核通过后才会下发给兼容客户端；拒绝不会影响此前已批准的版本。国内推包逻辑保持移除。
 
 ## 审查标准
 
 已发布插件的 ID 变更需要先单独审查
-[迁移登记](./docs/plugin-id-migrations.zh-CN.md)，并在改名包发布前完成 Server
-与客户端的配套上线。
+[迁移登记](./docs/plugin-id-migrations.zh-CN.md)，并在改名包发布前完成 Server 与客户端
+配套上线。
 
-每个官方插件都会被真实用户安装，审查按实际行为、影响与证据判断。普通打包修复、
-依赖维护、可追溯生成物与静态图片不因路径转人工。符合标准的准入与受众不另要
-维护者批准；与标准不符是具体审查意见。实际扩大权限、凭证或发布信任，未声明的
-网络访问，以及重命名或删除已发布插件，仍需维护者的明确决定。审插件时，除插件
-自己申请的 scope，还要核对它用到或依赖的 Cindy 本体（宿主）授权：依赖哪项、平台
-是否已批准、宿主是否已发布。本体授权有变化或未就绪先不合，并把需要申请的范围
-一起规划，用不上的不要申请。其它符合现有标准的改动仍直接判定。细则见
-[第三方平台授权](.greptile/rules.md#第三方平台授权)。
-代码缺陷、验收待办、边界决定与平台批准分别列出。
-四条硬原则：
+审查按风险分级执行（完整契约见 [`.greptile/rules.md`](./.greptile/rules.md) 与
+[`AGENTS.md`](./AGENTS.md)）：
+- **L1 常规迭代（快车道）**：已有插件的 bugfix、性能优化、小功能增强、多语言/图标、
+  测试与可追溯依赖维护（尤其由 [`.github/plugin-owners.json`](./.github/plugin-owners.json)
+  登记的维护者或插件 Owner 提交且未扩大边界），在 CI 全绿 + Greptile APPROVED +
+  Codex 无 P0/P1 时直接合并。
+- **L2 边界变更**：新插件入仓、`provisioning.json` 扩大到 `all`、新增/扩大权限、
+  凭证、自主域名或子进程，或变更第三方 OAuth scope / 依赖未就绪的宿主授权，需核对边界
+  （涉及未获批 OAuth 授权时待平台批准后合并）。
+- **L3 仓库基座**：`.github/workflows/**`、`.greptile/**`、`AGENTS.md`、
+  `.github/plugin-owners.json`、放宽 `.tests/` 门禁，以及重命名/删除已发布插件，需
+  维护者 Approve。
 
-1. **默认纯沙箱，授权跟随执行者**：普通插件运行在 Cindy 的隔离沙箱中。插件工具
-   是否执行由当前 `ghost_call` 的既有 Agent 授权决定；普通 HTTPS 与 workdir 文件操作
-   使用 Host 下发且严格在途的 `callId`，随包代码与 CLI 继续走已有 Node 工作进程。
-   不要仅为了预登记具体命令、域名或路径新增 Slot 或 Manifest 字段。插件若要从
-   Panel、订阅、scheduler 或常驻进程中自主使用 Host
-   能力，才在 `ghost.json` 声明对应直接字段。所有随包 Node Runtime，包括当前
-   Agent 工具调用中使用的，也必须显式声明顶层
-   `node` 字段、固定入口和最小子进程边界。
-2. **密钥归属明确**：普通 API token 通过主机的 `/secrets` 只写通道保存；Node
-   插件需明文凭证时，用 `node.secretBindings` 将其限制到指定 Worker 方法并由
-   宿主临时注入，不经过浏览器 `main.js`、Agent 参数或日志。若官方第三方
-   Runtime 自己管理账号凭证（如 TapTap Maker），插件只负责把凭证交给
-   Runtime，不复制到 Cindy KV/Secret，也不在日志或页面状态中保留明文。
-3. **工具描述即契约**：`ghost.json` 里每个 tool 的 `description` 是给 Agent
-   看的使用说明，必须准确描述行为边界（做什么、不做什么、返回什么、有何
-   副作用）。
-4. **错误信息说人话**：面向用户的报错要可行动（例如 401 → 提示去哪里填
-   token），不要裸抛 HTTP 状态码。
+四条安全与设计原则：
 
-### 请求 review 前的自查清单
+1. **默认纯沙箱，授权跟随执行者**：普通插件运行在隔离沙箱中。当前 Agent 工具调用内的
+   普通 HTTPS 与 workdir 操作经在途 `callId` 复用既有 Agent 授权，CLI 走已有 Node
+   工作进程。仅脱离当前调用的自主 Host 能力（Panel/订阅/scheduler/常驻进程）与随包
+   Node Runtime（顶层 `node` 字段、固定入口、最小子进程边界）在 `ghost.json` 声明。
+2. **密钥归属明确**：API token 通过宿主 `/secrets` 只写通道保存；Node 插件通过
+   `node.secretBindings` 由宿主临时注入，不经过 `main.js`、Agent 参数、日志或 KV。
+   已批准的第三方运行时（如 TapTap Maker）可自管凭证，不得复制到 Cindy KV/Secret。
+3. **工具描述即契约**：`ghost.json` 中 tool `description` 须与能力、限制、返回值及
+   不可逆副作用一致；不可逆外部副作用的失败路径须区分「确定未执行 / 确定已执行 /
+   不确定」，不确定态不建议盲目重试。
+4. **错误信息说人话**：面向用户的报错要可行动（如 401 提示去哪里填 token），避免裸堆栈。
 
-- [ ] 已分清执行者：插件工具调用由现有 Agent 授权，HTTPS／workdir 操作用当前
-      `callId`；CLI 走已有 Node 工作进程，`ghost.json` 不预登记具体命令
-- [ ] Node 插件：显式 `node` 字段、固定入口、最小子进程边界；`node/worker.cjs`
-      等生成产物按对应源码和构建步骤重建
-- [ ] 任何地方无明文凭证：token 走 `/secrets` 只写通道或 `node.secretBindings`；
-      不经过 `main.js`、Agent 参数、日志、KV、页面状态
-- [ ] 有不可逆外发副作用的工具（发送 / 发帖 / 删除）在每条失败路径上区分
-      「确定未执行 / 确定已执行 / 不确定」三态，不确定态不提示盲目重试
-- [ ] 每个 tool 的 `description` 与实际行为一致——能力、限制、返回值、副作用
-- [ ] 面向用户的报错可行动；无裸状态码、无英文堆栈
-- [ ] 四语言 locale 齐全；`node --test .tests/localization.test.mjs` 通过
-- [ ] 已提供受影响场景的真实运行证据，或链接仍适用的已有记录并说明完整差异；
-      环境、版本、结果与未测项如实标明。无需固定的 PR 验收勾选项，CI 绿灯不代表实测
-- [ ] `ghost.json.version` 已 bump；`provisioning.json` 的 audience 符合标准
-      （`all`，或自选 `{ "emails": [] }`）；`author` 是真实作者
-- [ ] 插件自己申请的 scope 无变化，也不依赖有变化或未就绪的 Cindy 本体授权；
-      否则说明已列出这些 scope，以及每项本体授权的平台批准和宿主发布状态
-- [ ] diff 中无凭证、真实用户数据、`node_modules` 或无关生成文件；fixture 用
-      `example.test` 类占位域名
-- [ ] 内嵌依赖有增减或升级的已同步 `THIRD-PARTY-LICENSES.txt`
+### 提交 PR 前快速自查
+
+- [ ] 无硬编码密钥；凭证只走 `/secrets` 或 `node.secretBindings`
+- [ ] 自主域名、`node` 入口与子进程边界最小化
+- [ ] 不可逆外部副作用失败路径区分「未执行 / 已执行 / 不确定」
+- [ ] 四语言 locale 通过 `node --test .tests/localization.test.mjs`
+- [ ] `ghost.json.version` 未降级（日常 patch 无需手工 bump）；涉及时同步 `provisioning.json` 与 `THIRD-PARTY-LICENSES.txt`
+- [ ] 若改动第三方 OAuth scope 或依赖未就绪宿主授权，已在 PR 说明写清状态
 - [ ] 每个 commit 带 DCO 签名（`git commit -s`）
 
-机器与人工共用的完整审查契约见 [`.greptile/rules.md`](./.greptile/rules.md)
-——自动 review 会在每个 PR 上执行，维护者按同一标准把关。
+完整审查与防熔断契约见 [`.greptile/rules.md`](./.greptile/rules.md)。
 
 ## 仓库结构
 
@@ -214,8 +186,9 @@ Plugin Server；Platform 创建待审核 release。
 审核通过后，兼容客户端会收到该 release；低于 `minCindyVersion` 的客户端会继续收到
 已有的最新兼容旧 release（如果存在）。Desktop 信任该 Server 投影，不再追加版本确认。
 
-修改插件内容时必须同步更新 `ghost.json.version`。新的 `major.minor.patch` SemVer 必须
-大于 `main` 上的当前版本，否则 CI 会在提交 Server 前阻止合并。
+修改插件内容时不得降低 `ghost.json.version`。日常修复或优化无需手工 bump patch——
+`.github/scripts/package-plugin.sh` 会在打包时按 `main` 提交历史自动计算严格递增的
+`major.minor.patch` 版本写入 `.cindy` 包；仅需显式提升 minor/major 时再手工修改。
 
 ## 本地开发
 
@@ -363,9 +336,9 @@ unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 
 提交到官方仓库前，还必须补充 `provisioning.json` 条目，并在 Manifest 中声明恰好
 `zh-CN`、`en`、`ja`、`ko` 四份 locale 文件，完整覆盖插件文案和全部工具描述；随后
-按 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md) 自查。可以先开 PR 取得验证包；
-合并前按实际影响提供运行与兼容性证据，作者或维护者均可验证。未受影响路径可
-沿用有效记录，不要求每次改措辞都重新安装整个插件。
+按 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md) 自查。可以先开 PR 从 CI 取得
+测试包；自动化测试与 CI 试打包是合并门禁，人工实机测试推荐用于全新插件首发或重大
+宿主能力接入，不再作为常规更新的合并硬门禁。
 
 `taptap-maker/vendor/taptap-maker/` 固定随插件分发官方
 `@taptap/maker@0.0.40`。升级时应整体替换 npm 包发布内容并同步更新插件版本，
@@ -410,9 +383,9 @@ unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 
 ## 社区
 
-提 PR 前请读 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md)：其中包含 PR 标题规范、必须同步
-bump `ghost.json.version` 的要求、本地化检查、内嵌 Node Worker 的重新构建方式，以及
-每个 commit 都需要的 [DCO](./DCO) 签名（`git commit -s`）。
+提 PR 前请读 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md)：其中包含 PR 标题规范、版本
+号策略（日常 patch 打包自动递增，无需手工 bump）、本地化检查、内嵌 Node Worker 的重新
+构建方式，以及每个 commit 都需要的 [DCO](./DCO) 签名（`git commit -s`）。
 
 参与社区请遵守 [`CODE_OF_CONDUCT.zh-CN.md`](./CODE_OF_CONDUCT.zh-CN.md)。使用问题以及提 issue
 需要附上的信息见 [`SUPPORT.zh-CN.md`](./SUPPORT.zh-CN.md)。

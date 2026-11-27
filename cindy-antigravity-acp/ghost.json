@@ -4,7 +4,7 @@
   "name": "Antigravity",
   "description": "Run Cindy tasks with the Google Antigravity CLI (agy) installed on this computer.",
   "version": "0.5.4",
-  "releaseNotes": "Supports same-turn steering in remote and shared workspaces on Antigravity CLI 1.5.x and warms remote MCP handshakes before agy's preload timeout. Existing sign-in, account verification, native cards, and custom agy paths are retained.",
+  "releaseNotes": "Tasks whose files are on another computer no longer start without Cindy's file and command tools when the connection between the computers is slow.",
   "minCindyVersion": "0.1.143",
   "icon": "icon.png",
   "locales": {

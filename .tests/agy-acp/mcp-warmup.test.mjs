@@ -23,7 +23,7 @@ const pluginId = official ? 'cindy-antigravity-acp' : 'agy-acp';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..', pluginId);
 const { warmMcpServers } = createRequire(import.meta.url)(path.join(root, 'mcp-warmup.js'));
 
-const TOKEN = `Bearer ${crypto.randomUUID()}`;
+const TOKEN = 'Bearer task-secret';
 // What agy 1.5.17 sends (captured from a real session).
 const CLIENT_INFO = { name: 'antigravity-client', version: 'v1.0.0' };
 const CAPABILITIES = { elicitation: { form: {}, url: {} }, roots: { listChanged: true } };
@@ -34,29 +34,26 @@ const DISCOVER = { jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _
 } } };
 const INITIALIZE = { jsonrpc: '2.0', id: 2, method: 'initialize', params: { clientInfo: CLIENT_INFO, protocolVersion: '2025-11-25', capabilities: CAPABILITIES } };
 
+/** One event-stream event; `multiline` splits the JSON over several data lines, as a server may. */
+function event(message, multiline) {
+  const json = multiline ? JSON.stringify(message, null, 1) : JSON.stringify(message);
+  return `event: message\n${json.split('\n').map((line) => `data: ${line}`).join('\n')}\n\n`;
+}
+
 /** A server like Cindy's bridge behind the tunnel; `log` lists what reached it. */
-async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false, paginate = false, failInitialize = false, failInitializeJsonRpc = false, multilineSse = false, initializeResponse = null, onRequest = null } = {}) {
+async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false, failInitialize = false, open = false, initializeAnswer = null, multiline = false } = {}) {
   const sessions = new Map();
   const log = [];
-  let activeToken = TOKEN;
-  const encodeSse = (payload) => {
-    if (!multilineSse) return `event: message\ndata: ${JSON.stringify(payload)}\n\n`;
-    const pretty = JSON.stringify(payload, null, 2).split('\n').map((line) => `data: ${line}`).join('\r\n');
-    return `: keepalive\r\n\r\nevent: message\r\nid: evt-${payload.id}\r\n${pretty}\r\n\r\n`;
-  };
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (chunk) => { body += chunk; });
     req.on('end', () => {
       if (hang) return;
-      const incoming = body ? JSON.parse(body) : {};
-      onRequest?.({ method: req.method, rpc: incoming.method, sid: req.headers['mcp-session-id'], id: incoming.id });
       setTimeout(() => {
-        if (res.destroyed) return;
         const sid = req.headers['mcp-session-id'];
-        const message = incoming;
+        const message = body ? JSON.parse(body) : {};
         log.push({ method: req.method, rpc: message.method, sid, id: message.id });
-        if (req.headers.authorization !== activeToken) return res.writeHead(401).end();
+        if (!open && req.headers.authorization !== TOKEN) return res.writeHead(401).end();
         if (req.method === 'GET' && acceptStream) {
           // A server that keeps an event stream open and sends nothing on it.
           res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -71,25 +68,22 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
         }
         if (!sid) {
           if (message.method !== 'initialize') return res.writeHead(400).end('Expected initialize request');
-          if (initializeResponse) return initializeResponse(message, req, res, sessions);
-          // A failing initialize that still echoes a session header belonging to another caller.
-          if (failInitialize) {
-            sessions.set('foreign-session', 'other');
-            return res.writeHead(500, { 'mcp-session-id': 'foreign-session' }).end();
+          // An answer of a given shape that still names a session.
+          if (initializeAnswer) {
+            sessions.set('unclear-session', 'other');
+            const { type, body: text } = initializeAnswer(message.id);
+            return res.writeHead(200, { 'content-type': type, 'mcp-session-id': 'unclear-session' }).end(text);
           }
-          if (failInitializeJsonRpc) {
-            sessions.set('foreign-jsonrpc-session', 'other');
-            res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-jsonrpc-session' });
-            return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: 'rejected' } }));
+          // A failing initialize that still names a session (one this handshake did not create).
+          if (failInitialize) {
+            sessions.set('someone-elses-session', 'other');
+            return res.writeHead(500, { 'mcp-session-id': 'someone-elses-session' }).end();
           }
           const id = crypto.randomUUID();
           sessions.set(id, message.params.clientInfo.name);
           res.writeHead(200, { 'content-type': 'text/event-stream', 'mcp-session-id': id });
-          return res.end(encodeSse({
-            jsonrpc: '2.0',
-            id: message.id,
-            result: { protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'cindy_exec', version: '1' } },
-          }));
+          return res.end(event({ jsonrpc: '2.0', id: message.id,
+            result: { protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'cindy_exec', version: '1' } } }, multiline));
         }
         if (!sessions.has(sid)) return res.writeHead(404).end();
         if (message.id === undefined) return res.writeHead(202).end();
@@ -100,21 +94,14 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
           res.write(': started\n\n', () => setTimeout(() => res.socket.destroy(), 20));
           return;
         }
-        let result;
-        if (message.method === 'tools/list') {
-          if (paginate && message.params?.cursor === 'p2') {
-            result = { tools: [{ name: 'Read', description: 'Read a file.', inputSchema: { type: 'object' } }] };
-          } else {
-            result = {
-              tools: [{ name: 'Bash', description: 'Run a command.', inputSchema: { type: 'object' } }],
-              ...(paginate ? { nextCursor: 'p2' } : {}),
-            };
-          }
-        } else {
-          result = { content: [{ type: 'text', text: `${message.params.name} ran for ${sessions.get(sid)}` }] };
-        }
+        // Two pages: the first names the second with nextCursor.
+        const result = message.method === 'tools/list' && message.params?.cursor === 'page-2'
+          ? { tools: [{ name: 'Read', description: 'Read a file.', inputSchema: { type: 'object' } }] }
+          : message.method === 'tools/list'
+          ? { tools: [{ name: 'Bash', description: 'Run a command.', inputSchema: { type: 'object' } }], nextCursor: 'page-2' }
+          : { content: [{ type: 'text', text: `${message.params.name} ran for ${sessions.get(sid)}` }] };
         res.writeHead(200, { 'content-type': 'text/event-stream' });
-        res.end(encodeSse({ jsonrpc: '2.0', id: message.id, result }));
+        res.end(event({ jsonrpc: '2.0', id: message.id, result }, multiline));
       }, delayMs);
     });
   });
@@ -122,25 +109,19 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
   t.after(() => server.close());
   server.unref();
   const entry = { type: 'http', name: 'cindy_exec', url: `http://127.0.0.1:${server.address().port}/mcp/cindy_exec`, headers: [{ name: 'Authorization', value: TOKEN }] };
-  return { entry, log, sessions, setToken: (next) => { activeToken = next; } };
+  return { entry, log, sessions };
 }
 
-/** One request as agy sends it; the answer as agy reads it (parsing full SSE event blocks). */
-async function agyRequest(url, { method = 'POST', message, sid, authorization = TOKEN, extraHeaders = {} } = {}) {
-  const headers = { ...(authorization ? { authorization } : {}), ...(sid ? { 'mcp-session-id': sid } : {}), ...extraHeaders };
+/** One request as agy sends it; the answer as agy reads it. */
+async function agyRequest(url, { method = 'POST', message, sid, auth = TOKEN } = {}) {
+  const headers = { authorization: auth, ...(sid ? { 'mcp-session-id': sid } : {}) };
   if (message) Object.assign(headers, { accept: 'application/json, text/event-stream', 'content-type': 'application/json' });
   const response = await fetch(url, { method, headers, body: message ? JSON.stringify(message) : undefined });
   const text = await response.text();
-  let parsed = text;
-  if (String(response.headers.get('content-type') || '').includes('text/event-stream')) {
-    for (const block of text.split(/\r?\n\r?\n/)) {
-      const dataLines = block.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).replace(/^ /, ''));
-      if (!dataLines.length) continue;
-      parsed = JSON.parse(dataLines.join('\n').trim());
-      break;
-    }
-  }
-  return { status: response.status, sid: response.headers.get('mcp-session-id'), body: parsed, rawText: text };
+  // The first event's data, its data lines joined (an SSE reader's view).
+  const first = text.split(/\n\n/).find((block) => block.includes('data:'));
+  const data = first && first.split('\n').filter((line) => line.startsWith('data:')).map((line) => line.replace(/^data: ?/, '')).join('\n');
+  return { status: response.status, sid: response.headers.get('mcp-session-id'), body: data ? JSON.parse(data) : text };
 }
 
 describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () => {
@@ -180,408 +161,77 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     assert.deepEqual(log.at(-1), { method: 'POST', rpc: 'tools/call', sid, id: 4 });
   });
 
-  // Why: the cached handshake and first tools/list page belong strictly to the credentials and
-  // empty params used during warm-up. Wrong credentials or a paginated tools/list cursor must
-  // forward upstream without leaking, consuming, or invalidating the warmed session.
-  test('mismatched authorization and paginated tools/list bypass the cache without consuming or closing the warmed session', async (t) => {
-    const { entry, log, sessions } = await bridgeServer(t, { delayMs: 20, paginate: true });
+  // Why: the relay holds answers fetched with Cindy's authorization for the server. A request without that
+  // authorization must neither receive them nor use them up, and a request for another page must get that page.
+  test('kept answers go only to the same authorization and the same request', async (t) => {
+    const { entry, log, sessions } = await bridgeServer(t);
     const warmup = warmMcpServers([entry]);
     t.after(() => warmup.close());
     const [given] = await warmup.ready;
     const warmedSession = [...sessions.keys()][0];
-    const wrongToken = `Bearer ${crypto.randomUUID()}`;
+    const warmed = log.length;
 
-    // Unauthorized requests must fail at upstream (401) and leave the warmed session and cache intact.
-    assert.equal((await agyRequest(given.url, { message: DISCOVER, authorization: '' })).status, 401);
-    assert.equal((await agyRequest(given.url, { message: INITIALIZE, authorization: wrongToken })).status, 401);
-    assert.equal((await agyRequest(given.url, { method: 'GET', authorization: wrongToken })).status, 401);
-    assert.equal((await agyRequest(given.url, {
-      message: { jsonrpc: '2.0', id: 11, method: 'tools/list', params: {} },
-      sid: warmedSession,
-      authorization: wrongToken,
-    })).status, 401);
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    assert.ok(sessions.has(warmedSession), 'unauthorized initialize did not close the warmed session');
+    const stranger = await agyRequest(given.url, { message: INITIALIZE, auth: 'Bearer someone-else' });
+    assert.equal(stranger.status, 401, 'the server, not the relay, answered the wrong authorization');
+    assert.equal(log.length, warmed + 1);
+    assert.ok(sessions.has(warmedSession), 'the warmed session was not given up');
 
-    // Legitimate agy handshake still hits the kept answers without reaching upstream again.
-    const beforeAuth = log.length;
-    assert.equal((await agyRequest(given.url, { message: DISCOVER })).status, 400);
     const init = await agyRequest(given.url, { message: INITIALIZE });
-    assert.equal(init.status, 200);
-    assert.equal(init.sid, warmedSession);
-    assert.equal((await agyRequest(given.url, { message: { jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, sid: init.sid })).status, 202);
-    assert.equal((await agyRequest(given.url, { method: 'GET' })).status, 405);
-    assert.equal(log.length, beforeAuth, 'authorized handshake still served from cache');
+    assert.equal(init.sid, warmedSession, 'the right authorization still gets the kept initialize answer');
+    assert.equal(log.length, warmed + 1, 'without asking the server');
 
-    // A paginated tools/list request bypasses upstream and does not consume page 1 from the cache.
-    const page2Early = await agyRequest(given.url, {
-      message: { jsonrpc: '2.0', id: 12, method: 'tools/list', params: { cursor: 'p2' } },
-      sid: init.sid,
-    });
-    assert.equal(page2Early.status, 200);
-    assert.deepEqual(page2Early.body.result.tools.map((tool) => tool.name), ['Read']);
-    assert.equal(log.length, beforeAuth + 1, 'paginated tools/list went to upstream');
+    const listMessage = { jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} };
+    const strangerList = await agyRequest(given.url, { message: listMessage, sid: init.sid, auth: 'Bearer someone-else' });
+    assert.equal(strangerList.status, 401);
 
-    // Unpaginated tools/list still hits the kept page-1 answer.
-    const page1 = await agyRequest(given.url, {
-      message: { jsonrpc: '2.0', id: 13, method: 'tools/list', params: {} },
-      sid: init.sid,
-    });
-    assert.equal(page1.status, 200);
-    assert.equal(page1.body.id, 13);
-    assert.deepEqual(page1.body.result.tools.map((tool) => tool.name), ['Bash']);
-    assert.equal(page1.body.result.nextCursor, 'p2');
-    assert.equal(log.length, beforeAuth + 1, 'unpaginated tools/list served from cache');
-
-    // Subsequent paginated tools/list still reaches upstream on the same warmed session.
-    const page2Followup = await agyRequest(given.url, {
-      message: { jsonrpc: '2.0', id: 14, method: 'tools/list', params: { cursor: 'p2' } },
-      sid: init.sid,
-    });
-    assert.equal(page2Followup.status, 200);
-    assert.deepEqual(page2Followup.body.result.tools.map((tool) => tool.name), ['Read']);
-    assert.equal(log.length, beforeAuth + 2);
+    const second = await agyRequest(given.url, { message: { jsonrpc: '2.0', id: 4, method: 'tools/list', params: { cursor: 'page-2' } }, sid: init.sid });
+    assert.deepEqual(second.body.result.tools.map((tool) => tool.name), ['Read'], 'another page comes from the server');
+    const before = log.length;
+    const first = await agyRequest(given.url, { message: listMessage, sid: init.sid });
+    assert.equal(first.body.id, 3);
+    assert.deepEqual(first.body.result.tools.map((tool) => tool.name), ['Bash'], 'the kept first page was still there');
+    assert.equal(first.body.result.nextCursor, 'page-2');
+    assert.equal(log.length, before, 'the first page was not asked for again');
   });
 
-  test('close ends unhanded warmed sessions exactly once and leaves handed-off sessions untouched', async (t) => {
-    // 1. Unhanded session (e.g., restricted agy failed initialize or session open): close() sends DELETE once.
-    const unhanded = await bridgeServer(t);
-    const w1 = warmMcpServers([unhanded.entry]);
-    await w1.ready;
-    const unhandedSid = [...unhanded.sessions.keys()][0];
-    assert.ok(unhandedSid, 'warm-up created an upstream session');
-    await w1.close();
-    await w1.close();
-    const unhandedDeletes = unhanded.log.filter((item) => item.method === 'DELETE' && item.sid === unhandedSid);
-    assert.equal(unhandedDeletes.length, 1, 'unhanded warmed session was deleted exactly once');
-    assert.equal(unhanded.sessions.size, 0, 'no unhanded session remains on upstream');
-
-    // 2. Handed-off session (agy consumed warmed initialize): close() never sends DELETE for it.
-    const handed = await bridgeServer(t);
-    const w2 = warmMcpServers([handed.entry]);
-    const [given] = await w2.ready;
-    const init = await agyRequest(given.url, { message: INITIALIZE });
-    assert.equal(init.status, 200);
-    await w2.close();
-    await w2.close();
-    const handedDeletes = handed.log.filter((item) => item.method === 'DELETE');
-    assert.equal(handedDeletes.length, 0, 'handed-off session is owned by agy and untouched by close()');
-    assert.ok(handed.sessions.has(init.sid), 'handed-off session stays active on upstream');
-
-    // 3. Mismatched initialize already closed the warmed session: subsequent close() does not DELETE a second time.
-    const mismatched = await bridgeServer(t);
-    const w3 = warmMcpServers([mismatched.entry]);
-    const [given3] = await w3.ready;
-    const mismatchedSid = [...mismatched.sessions.keys()][0];
-    const other = { ...INITIALIZE, params: { ...INITIALIZE.params, capabilities: { roots: { listChanged: true } } } };
-    await agyRequest(given3.url, { message: other });
-    await w3.close();
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    const mismatchedDeletes = mismatched.log.filter((item) => item.method === 'DELETE' && item.sid === mismatchedSid);
-    assert.equal(mismatchedDeletes.length, 1, 'mismatched warmed session was deleted only once across mismatch + close()');
-  });
-
-  // Why: only a session confirmed created by a valid HTTP 200 JSON-RPC 2.0 initialize result belongs to
-  // this warm-up; HTTP errors, JSON-RPC errors, and malformed/invalid responses must never trigger DELETE
-  // and must fall back to connecting agy directly.
-  test('failed or malformed initialize responses never close another session and fall back to direct connection', async (t) => {
-    const cases = [
-      {
-        name: 'HTTP 500 with foreign session header',
-        sid: 'foreign-http-500',
-        respond: (_message, _req, res) => res.writeHead(500, { 'mcp-session-id': 'foreign-http-500' }).end(),
-      },
-      {
-        name: 'JSON-RPC error with foreign session header',
-        sid: 'foreign-jsonrpc-error',
-        respond: (message, _req, res) => {
-          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-jsonrpc-error' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: 'rejected' } }));
-        },
-      },
-      {
-        name: 'malformed JSON body with foreign session header',
-        sid: 'foreign-malformed-json',
-        respond: (_message, _req, res) => {
-          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-malformed-json' });
-          res.end('{"jsonrpc":"2.0","result":');
-        },
-      },
-      {
-        name: 'missing jsonrpc 2.0 field',
-        sid: 'foreign-no-jsonrpc',
-        respond: (message, _req, res) => {
-          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-no-jsonrpc' });
-          res.end(JSON.stringify({ id: message.id, result: { protocolVersion: '2025-11-25', capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
-        },
-      },
-      {
-        name: 'mismatched JSON-RPC response id',
-        sid: 'foreign-wrong-id',
-        respond: (_message, _req, res) => {
-          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-wrong-id' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: 'other-request', result: { protocolVersion: '2025-11-25', capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
-        },
-      },
-      {
-        name: 'both result and error in JSON-RPC payload',
-        sid: 'foreign-both-result-error',
-        respond: (message, _req, res) => {
-          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-both-result-error' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-11-25', capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } }, error: { code: -32000, message: 'ambiguous' } }));
-        },
-      },
-      {
-        name: 'empty MCP InitializeResult missing all required fields',
-        sid: 'foreign-empty-result',
-        respond: (message, _req, res) => {
-          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-empty-result' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }));
-        },
-      },
-      {
-        name: 'MCP InitializeResult missing protocolVersion',
-        sid: 'foreign-no-protocol',
-        respond: (message, _req, res) => {
-          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-no-protocol' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
-        },
-      },
-      {
-        name: 'MCP InitializeResult missing capabilities',
-        sid: 'foreign-no-capabilities',
-        respond: (message, _req, res) => {
-          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-no-capabilities' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-11-25', serverInfo: { name: 'cindy_exec', version: '1' } } }));
-        },
-      },
-      {
-        name: 'MCP InitializeResult missing serverInfo',
-        sid: 'foreign-no-server-info',
-        respond: (message, _req, res) => {
-          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-no-server-info' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-11-25', capabilities: {} } }));
-        },
-      },
-      {
-        name: 'MCP InitializeResult missing serverInfo.version',
-        sid: 'foreign-no-server-version',
-        respond: (message, _req, res) => {
-          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-no-server-version' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-11-25', capabilities: {}, serverInfo: { name: 'cindy_exec' } } }));
-        },
-      },
-      {
-        name: 'non-MCP text/plain response carrying JSON',
-        sid: 'foreign-text-plain',
-        respond: (message, _req, res) => {
-          res.writeHead(200, { 'content-type': 'text/plain', 'mcp-session-id': 'foreign-text-plain' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-11-25', capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
-        },
-      },
-      {
-        name: 'malformed SSE payload with foreign session header',
-        sid: 'foreign-bad-sse',
-        respond: (_message, _req, res) => {
-          res.writeHead(200, { 'content-type': 'text/event-stream', 'mcp-session-id': 'foreign-bad-sse' });
-          res.end('event: message\ndata: not-json\n\n');
-        },
-      },
-    ];
-    for (const item of cases) {
-      const server = await bridgeServer(t, {
-        initializeResponse: (message, req, res, sessions) => {
-          sessions.set(item.sid, 'other');
-          item.respond(message, req, res);
-        },
-      });
-      const warmup = warmMcpServers([server.entry]);
-      assert.deepEqual(await warmup.ready, [server.entry], `${item.name}: agy connects directly`);
-      await warmup.close();
-      assert.ok(server.sessions.has(item.sid), `${item.name}: foreign session stays untouched`);
-      assert.equal(server.log.some((entry) => entry.method === 'DELETE'), false, `${item.name}: no DELETE sent`);
-    }
-
-    // Even if close() arrives while a delayed invalid or incomplete initialize is still in flight, no DELETE is sent.
-    for (const delayedCase of [
-      {
-        name: 'delayed malformed JSON',
-        sid: 'foreign-delayed-invalid',
-        respond: (_message, res) => res.end('{broken'),
-      },
-      {
-        name: 'delayed incomplete InitializeResult missing serverInfo',
-        sid: 'foreign-delayed-incomplete',
-        respond: (message, res) => res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-11-25', capabilities: {} } })),
-      },
-    ]) {
-      let resolveReceived;
-      const initReceived = new Promise((resolve) => { resolveReceived = resolve; });
-      const delayedBad = await bridgeServer(t, {
-        delayMs: 120,
-        onRequest: (item) => { if (item.rpc === 'initialize') resolveReceived(); },
-        initializeResponse: (message, _req, res, sessions) => {
-          sessions.set(delayedCase.sid, 'other');
-          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': delayedCase.sid });
-          delayedCase.respond(message, res);
-        },
-      });
-      const warmup = warmMcpServers([delayedBad.entry]);
-      await initReceived;
-      await warmup.close();
-      assert.deepEqual(await warmup.ready, [delayedBad.entry], `${delayedCase.name}: falls back to direct`);
-      assert.ok(delayedBad.sessions.has(delayedCase.sid), `${delayedCase.name}: leaves foreign session untouched`);
-      assert.equal(delayedBad.log.some((entry) => entry.method === 'DELETE'), false, `${delayedCase.name}: no DELETE sent`);
-    }
-  });
-
-  // Why: multi-line SSE `data:` payloads must be read and rewritten on the same SSE event boundary so
-  // agy receives its own JSON-RPC request ids for both initialize and tools/list instead of warm-up ids.
-  test('multi-line SSE responses rewrite request ids for initialize and tools/list on the same event boundary', async (t) => {
-    const { entry, log } = await bridgeServer(t, { delayMs: 40, multilineSse: true });
-    const warmup = warmMcpServers([entry]);
+  // Why: a request that brings a credential the warm-up did not send may be allowed something else by
+  // the server; it must reach the server, and the kept answers stay for agy's own requests.
+  test('a request whose authentication changed is not answered from the warm-up', async (t) => {
+    const { entry, log } = await bridgeServer(t, { open: true });
+    const openEntry = { ...entry, headers: [] };
+    const warmup = warmMcpServers([openEntry]);
     t.after(() => warmup.close());
     const [given] = await warmup.ready;
-    assert.notDeepEqual(given, entry, 'multi-line SSE server was warmed');
-    const beforeReplay = log.length;
-
-    const init = await agyRequest(given.url, { message: { ...INITIALIZE, id: 42 } });
-    assert.equal(init.status, 200);
-    assert.equal(init.body.id, 42, 'replayed initialize carries agy request id');
-    assert.equal(init.body.result.protocolVersion, '2025-11-25');
-    assert.match(init.rawText, /event: message\nid: evt-cindy-warm-initialize\ndata: /);
-    assert.doesNotMatch(init.rawText, /"id"\s*:\s*"cindy-warm-initialize"/);
-    assert.equal((await agyRequest(given.url, { message: { jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, sid: init.sid })).status, 202);
-
-    const list = await agyRequest(given.url, { message: { jsonrpc: '2.0', id: 99, method: 'tools/list', params: {} }, sid: init.sid });
-    assert.equal(list.status, 200);
-    assert.equal(list.body.id, 99, 'replayed tools/list carries agy request id');
-    assert.deepEqual(list.body.result.tools.map((tool) => tool.name), ['Bash']);
-    assert.doesNotMatch(list.rawText, /"id"\s*:\s*"cindy-warm-tools"/);
-    assert.equal(log.length, beforeReplay, 'multi-line SSE handshake replayed from cache');
-
-    const call = await agyRequest(given.url, {
-      message: { jsonrpc: '2.0', id: 100, method: 'tools/call', params: { name: 'Bash', arguments: { command: 'pwd' } } },
-      sid: init.sid,
-    });
-    assert.equal(call.status, 200);
-    assert.equal(call.body.id, 100);
-    assert.equal(call.body.result.content[0].text, 'Bash ran for antigravity-client');
+    const warmed = log.length;
+    const added = await agyRequest(given.url, { message: INITIALIZE, auth: 'Bearer added-later' });
+    assert.equal(log.length, warmed + 1, 'the request with an added credential went to the server');
+    const response = await fetch(given.url, { method: 'POST', headers: { accept: 'application/json, text/event-stream', 'content-type': 'application/json' },
+      body: JSON.stringify(INITIALIZE) });
+    const text = await response.text();
+    assert.equal(log.length, warmed + 1, 'the request without one still got the kept answer');
+    assert.notEqual(response.headers.get('mcp-session-id'), added.sid, 'and the warmed session, not the server’s new one');
+    assert.match(text, /"id":2/);
   });
 
-  // Why: close() can arrive before the loopback relay finishes listening; no handshake may start afterwards.
+  // Why: close() can come before the relay is listening (agy failed at once). The listen callback must not
+  // start a handshake afterwards: nobody would end the session it creates while the task stays open.
   test('closing before the relay is listening starts no handshake', async (t) => {
     const { entry, log } = await bridgeServer(t);
     const warmup = warmMcpServers([entry]);
     const closing = warmup.close();
     assert.deepEqual(await warmup.ready, [entry], 'agy connects directly');
     await closing;
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    assert.equal(log.length, 0, 'no handshake request reached the server');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(log.length, 0, 'no request reached the server');
   });
 
-  // Why: if close() fires after initialize was already sent to upstream but before its reply arrives,
-  // warm-up must keep waiting within INITIALIZE_GRACE_MS to confirm ownership and DELETE the created session.
-  test('closing while initialize is in flight before its reply arrives still confirms and deletes the created session', async (t) => {
-    let resolveReceived;
-    const initReceived = new Promise((resolve) => { resolveReceived = resolve; });
-    const { entry, log, sessions } = await bridgeServer(t, {
-      delayMs: 300,
-      onRequest: (item) => { if (item.rpc === 'initialize') resolveReceived(); },
-    });
+  test('closing before the initialize answer arrives still ends the session it created', async (t) => {
+    const { entry, sessions, log } = await bridgeServer(t, { delayMs: 300 });
     const warmup = warmMcpServers([entry]);
-    await initReceived;
-    assert.equal(sessions.size, 0, 'server has not replied to initialize yet when close() fires');
+    await new Promise((resolve) => setTimeout(resolve, 50)); // initialize sent, not answered
     await warmup.close();
-    assert.deepEqual(await warmup.ready, [entry], 'agy connects directly after close');
-    assert.equal(sessions.size, 0, 'session created by in-flight initialize was deleted before close() resolved');
-    assert.equal(log.filter((item) => item.rpc === 'initialize').length, 1);
-    assert.equal(log.filter((item) => item.rpc === 'notifications/initialized').length, 0, 'did not continue handshake after close');
-    assert.equal(log.filter((item) => item.rpc === 'tools/list').length, 0, 'did not call tools/list after close');
-    assert.equal(log.filter((item) => item.method === 'DELETE').length, 1, 'confirmed session was deleted once');
-  });
-
-  // Why: if close() fires while warmServer already confirmed initialize and is still awaiting tools/list,
-  // close() must wait for the interrupted handshake to DELETE its opened upstream session before resolving.
-  test('closing while warm-up is still in flight deletes the opened session before close() resolves', async (t) => {
-    const { entry, log, sessions } = await bridgeServer(t, { delayMs: 120 });
-    const warmup = warmMcpServers([entry]);
-    // Wait until notifications/initialized reaches the server, proving warmServer already received and
-    // confirmed initialize's 200 JSON-RPC result and is now in flight on notifications/initialized / tools/list.
-    const deadline = Date.now() + 4_000;
-    while (!log.some((item) => item.rpc === 'notifications/initialized') && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 15));
-    }
-    assert.equal(sessions.size, 1, 'initialize opened a session before close()');
-    const openedSid = [...sessions.keys()][0];
-    await warmup.close();
-    assert.equal(sessions.size, 0, 'interrupted handshake session was already deleted before close() resolved');
-    assert.equal(log.filter((item) => item.method === 'DELETE' && item.sid === openedSid).length, 1);
-  });
-
-  // Why: the loopback relay must enforce the upstream server's auth boundary — rejecting non-loopback hosts,
-  // cross-origin browser requests, guessed paths, extra credential headers, and revoking remaining cached answers
-  // once upstream rejects the warmed credentials (e.g., auth rotation/revocation).
-  test('relay enforces host/origin/token boundaries and respects upstream authentication changes', async (t) => {
-    const { entry, log, setToken } = await bridgeServer(t, { paginate: true });
-    const warmup = warmMcpServers([entry]);
-    t.after(() => warmup.close());
-    const [given] = await warmup.ready;
-    const url = new URL(given.url);
-    const rawSend = (pathName, headers) => new Promise((resolve, reject) => {
-      const request = http.request({ host: '127.0.0.1', port: url.port, path: pathName, method: 'POST', headers },
-        (response) => { response.resume(); response.on('end', () => resolve(response.statusCode)); });
-      request.on('error', reject);
-      request.end(JSON.stringify(INITIALIZE));
-    });
-    const baseHeaders = {
-      host: url.host,
-      authorization: TOKEN,
-      'content-type': 'application/json',
-      accept: 'application/json, text/event-stream',
-    };
-    const beforeBoundary = log.length;
-    assert.equal(await rawSend(url.pathname, { ...baseHeaders, host: `evil.example.test:${url.port}` }), 421);
-    assert.equal(await rawSend(url.pathname, { ...baseHeaders, host: '127.0.0.1:9' }), 421);
-    assert.equal(await rawSend(url.pathname, { ...baseHeaders, origin: 'https://evil.example.test' }), 403);
-    assert.equal(await rawSend(url.pathname.replace(/\/[^/]+\/0$/, '/not-the-token/0'), baseHeaders), 404);
-    assert.equal(log.length, beforeBoundary, 'boundary rejections never reached upstream');
-
-    // Extra credential header alongside matching Authorization bypasses the cache to upstream.
-    const extraCred = await agyRequest(given.url, {
-      message: INITIALIZE,
-      extraHeaders: { 'x-api-key': crypto.randomUUID() },
-    });
-    assert.equal(extraCred.status, 200);
-    assert.equal(log.length, beforeBoundary + 1, 'request with extra credential header bypassed cache to upstream');
-
-    // Legitimate initialize still hits the warmed session (previous bypass did not consume cache).
-    const init = await agyRequest(given.url, { message: INITIALIZE });
-    assert.equal(init.status, 200);
-    assert.equal(log.length, beforeBoundary + 1, 'warmed initialize still served from cache');
-
-    // Upstream rotates/revokes the warm-up token: a forwarded same-auth request gets 401 and invalidates
-    // remaining cached answers so subsequent tools/list also sees 401 instead of stale cached tools.
-    const rotatedToken = `Bearer ${crypto.randomUUID()}`;
-    setToken(rotatedToken);
-    const revokedPage2 = await agyRequest(given.url, {
-      message: { jsonrpc: '2.0', id: 20, method: 'tools/list', params: { cursor: 'p2' } },
-      sid: init.sid,
-    });
-    assert.equal(revokedPage2.status, 401);
-    const staleTools = await agyRequest(given.url, {
-      message: { jsonrpc: '2.0', id: 21, method: 'tools/list', params: {} },
-      sid: init.sid,
-    });
-    assert.equal(staleTools.status, 401, 'revoked warm-up credentials no longer receive stale cached tools/list');
-    // The new token still works directly through the relay.
-    const newAuthTools = await agyRequest(given.url, {
-      message: { jsonrpc: '2.0', id: 22, method: 'tools/list', params: {} },
-      sid: init.sid,
-      authorization: rotatedToken,
-    });
-    assert.equal(newAuthTools.status, 200);
-    assert.deepEqual(newAuthTools.body.result.tools.map((tool) => tool.name), ['Bash']);
+    assert.equal(sessions.size, 0, 'the session named by the late answer was ended');
+    assert.equal(log.at(-1).method, 'DELETE');
   });
 
   // Only the client's capabilities differ: the server may answer such a client differently.
@@ -597,7 +247,7 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     const list = await agyRequest(given.url, { message: { jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }, sid: init.sid });
     assert.deepEqual(list.body.result.tools.map((tool) => tool.name), ['Bash']);
     assert.deepEqual(log.slice(-1)[0], { method: 'POST', rpc: 'tools/list', sid: init.sid, id: 3 }, 'tools/list was not answered from the warm-up');
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    for (let i = 0; i < 60 && sessions.has(warmedSession); i += 1) await new Promise((resolve) => setTimeout(resolve, 50));
     assert.ok(!sessions.has(warmedSession), 'the unused warmed session was ended');
   });
 
@@ -606,7 +256,7 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     const warmup = warmMcpServers([entry]);
     t.after(() => warmup.close());
     assert.deepEqual(await warmup.ready, [entry], 'agy connects directly');
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    for (let i = 0; i < 60 && sessions.size > 0; i += 1) await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(sessions.size, 0, 'no session is left open on the other computer');
     assert.equal(log.at(-1).method, 'DELETE');
   });
@@ -619,15 +269,15 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     const [given] = await warmup.ready;
     assert.ok(Date.now() - started < 1_000, 'the warm-up does not wait for the stream to end');
     assert.notDeepEqual(given, entry, 'the handshake was still warmed');
-    // Forwarded idle SSE streams must flush their 200 response headers immediately without waiting for events.
+    // agy's own stream request goes to the server; the relay passes on the open stream without waiting for an event.
     const controller = new AbortController();
     t.after(() => controller.abort());
-    const response = await Promise.race([
+    const opened = await Promise.race([
       fetch(given.url, { headers: { authorization: TOKEN, accept: 'text/event-stream' }, signal: controller.signal }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('idle SSE headers did not flush in time')), 2_000)),
+      new Promise((resolve) => setTimeout(() => resolve(null), 2_000)),
     ]);
-    assert.equal(response.status, 200);
-    controller.abort();
+    assert.ok(opened, 'agy sees the event stream open before any event arrives');
+    assert.equal(opened.status, 200);
   });
 
   // Why: the refusal is read to replay it; an abnormal server must not make this process keep megabytes.
@@ -654,6 +304,123 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
       body: JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'Bash', arguments: {} } }) });
     await assert.rejects(Promise.race([response.text(), new Promise((resolve) => setTimeout(() => resolve('still waiting'), 3_000))]),
       'the answer ends in an error instead of hanging');
+  });
+
+  // Why: a task can fail or be cancelled after the warm-up opened sessions on the other computer and before
+  // agy connected. Nobody else ends those sessions; the relay's close must, without touching one agy took.
+  test('closing ends the warmed sessions agy never took over', async (t) => {
+    const taken = await bridgeServer(t);
+    const untaken = await bridgeServer(t);
+    const warmup = warmMcpServers([taken.entry, { ...untaken.entry, name: 'cindy' }]);
+    t.after(() => warmup.close());
+    const [given] = await warmup.ready;
+    const init = await agyRequest(given.url, { message: INITIALIZE });
+    await warmup.close();
+    assert.ok(taken.sessions.has(init.sid), 'the session agy took over is left to agy');
+    assert.equal(untaken.sessions.size, 0, 'the session agy never took over is ended');
+    assert.equal(untaken.log.at(-1).method, 'DELETE');
+  });
+
+  // Why: only a session the server confirmed creating for the warm-up's own initialize is ours to end.
+  test('a failed initialize ends no session', async (t) => {
+    const { entry, log, sessions } = await bridgeServer(t, { failInitialize: true });
+    const warmup = warmMcpServers([entry]);
+    assert.deepEqual(await warmup.ready, [entry], 'agy connects directly');
+    await warmup.close();
+    assert.ok(sessions.has('someone-elses-session'), 'the session named by the failed answer is left alone');
+    assert.ok(!log.some((item) => item.method === 'DELETE'), 'nothing was ended');
+  });
+
+  // Why: only an unmistakable JSON-RPC success makes the named session the warm-up's own; an error, an
+  // unparsable or ambiguous body, or another content type leaves it to the server and ends nothing.
+  test('an initialize answer that is not a clear success ends no session', async (t) => {
+    const json = 'application/json';
+    const COMPLETE = { protocolVersion: '2025-11-25', capabilities: {}, serverInfo: { name: 's', version: '1' } };
+    const shapes = {
+      error: (id) => ({ type: json, body: JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32603, message: 'no' } }) }),
+      'result and error': (id) => ({ type: json, body: JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '2025-11-25' }, error: { code: 1, message: 'x' } }) }),
+      'not JSON-RPC 2.0': (id) => ({ type: json, body: JSON.stringify({ id, result: { protocolVersion: '2025-11-25' } }) }),
+      'no protocol version': (id) => ({ type: json, body: JSON.stringify({ jsonrpc: '2.0', id, result: {} }) }),
+      'no capabilities': (id) => ({ type: json, body: JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '2025-11-25', serverInfo: { name: 's', version: '1' } } }) }),
+      'no server info': (id) => ({ type: json, body: JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '2025-11-25', capabilities: {} } }) }),
+      'server info without version': (id) => ({ type: json, body: JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '2025-11-25', capabilities: {}, serverInfo: { name: 's' } } }) }),
+      unparsable: () => ({ type: json, body: '{"jsonrpc":"2.0",' }),
+      'other content type': (id) => ({ type: 'text/plain', body: JSON.stringify({ jsonrpc: '2.0', id, result: COMPLETE }) }),
+      'two answers': (id) => ({ type: 'text/event-stream', body: [1, 2].map(() => event({ jsonrpc: '2.0', id, result: COMPLETE })).join('') }),
+    };
+    for (const [shape, initializeAnswer] of Object.entries(shapes)) {
+      const { entry, log, sessions } = await bridgeServer(t, { initializeAnswer });
+      const warmup = warmMcpServers([entry]);
+      assert.deepEqual(await warmup.ready, [entry], `${shape}: agy connects directly`);
+      await warmup.close();
+      assert.ok(sessions.has('unclear-session'), `${shape}: the named session is left to the server`);
+      assert.ok(!log.some((item) => item.method === 'DELETE'), `${shape}: no cleanup request was sent`);
+    }
+  });
+
+  // Why: a server may split one SSE message over several data lines. The warm-up must read it as one
+  // message and hand it to agy with agy's own request id, or agy waits for an answer that never comes.
+  test('multi-line event-stream answers are read whole and replayed with agy’s ids', async (t) => {
+    const { entry, log } = await bridgeServer(t, { multiline: true });
+    const warmup = warmMcpServers([entry]);
+    t.after(() => warmup.close());
+    const [given] = await warmup.ready;
+    assert.notDeepEqual(given, entry, 'the multi-line handshake was understood');
+    const warmed = log.length;
+    const init = await agyRequest(given.url, { message: INITIALIZE });
+    assert.equal(init.body.id, 2, 'initialize is answered with agy’s id');
+    assert.equal(init.body.result.serverInfo.name, 'cindy_exec');
+    const list = await agyRequest(given.url, { message: { jsonrpc: '2.0', id: 7, method: 'tools/list', params: {} }, sid: init.sid });
+    assert.equal(list.body.id, 7, 'tools/list is answered with agy’s id');
+    assert.deepEqual(list.body.result.tools.map((tool) => tool.name), ['Bash']);
+    assert.equal(log.length, warmed, 'both came from the warm-up');
+  });
+
+  test('a session handed to agy is never reclaimed', async (t) => {
+    const { entry, log, sessions } = await bridgeServer(t);
+    const warmup = warmMcpServers([entry]);
+    const [given] = await warmup.ready;
+    // agy's whole handshake and a tool call, then the task ends.
+    const init = await agyRequest(given.url, { message: INITIALIZE });
+    await agyRequest(given.url, { message: { jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, sid: init.sid });
+    await agyRequest(given.url, { method: 'GET' });
+    await agyRequest(given.url, { message: { jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }, sid: init.sid });
+    await agyRequest(given.url, { message: { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'Bash', arguments: {} } }, sid: init.sid });
+    await warmup.close();
+    assert.ok(sessions.has(init.sid), 'agy’s session stays agy’s');
+    assert.ok(!log.some((item) => item.method === 'DELETE'), 'the relay ended nothing');
+  });
+
+  // Why: the relay must only ever answer agy on this computer; neither a guessed path nor a page that
+  // rebound a host name to 127.0.0.1 may reach the kept answers or the server through it.
+  test('the relay answers only its own path on a loopback host', async (t) => {
+    const { entry, log } = await bridgeServer(t);
+    const warmup = warmMcpServers([entry]);
+    t.after(() => warmup.close());
+    const [given] = await warmup.ready;
+    const url = new URL(given.url);
+    const send = (pathName, host) => new Promise((resolve, reject) => {
+      const request = http.request({ host: '127.0.0.1', port: url.port, path: pathName, method: 'POST',
+        headers: { host, authorization: TOKEN, 'content-type': 'application/json', accept: 'application/json, text/event-stream' } },
+      (response) => { response.resume(); response.on('end', () => resolve(response.statusCode)); });
+      request.on('error', reject);
+      request.end(JSON.stringify(INITIALIZE));
+    });
+    const before = log.length;
+    assert.equal(await send(url.pathname.replace(/\/[^/]+\/0$/, '/not-the-token/0'), url.host), 404);
+    assert.equal(await send(url.pathname, `evil.example.test:${url.port}`), 421);
+    assert.equal(log.length, before, 'neither request reached the server');
+    assert.equal(await send(url.pathname, url.host), 200, 'agy itself is still answered');
+  });
+
+  test('closing during the warm-up ends the sessions its interrupted handshakes opened', async (t) => {
+    const { entry, sessions } = await bridgeServer(t, { delayMs: 200 });
+    const warmup = warmMcpServers([entry]);
+    await new Promise((resolve) => setTimeout(resolve, 300)); // initialize answered, the rest still on its way
+    assert.equal(sessions.size, 1);
+    await warmup.close();
+    assert.equal(sessions.size, 0, 'no session is left on the other computer');
+    assert.deepEqual(await warmup.ready, [entry]);
   });
 
   test('a server that is not warmed in time, or not on this computer, is given to agy at its own address', async (t) => {

@@ -135,7 +135,7 @@ function createSteeringRelay() {
   };
 }
 
-function attachSteering(input, output, child, stop, errorRelay, verification) {
+function attachSteering(input, output, child, stop) {
   const steering = createSteeringRelay();
   const openingSessions = new Map();
   const mcpSessions = new Map();
@@ -171,18 +171,9 @@ function attachSteering(input, output, child, stop, errorRelay, verification) {
     const message = parse(line);
     if (!message) return line;
     if (message.method) {
-      const normalized = isAntigravity ? normalizeToolMessage(message) : undefined;
+      if (!isAntigravity) return line;
+      const normalized = normalizeToolMessage(message);
       if (normalized === null) return null;
-      const outgoing = normalized || message;
-      if (errorRelay) {
-        const action = errorRelay.notification(outgoing);
-        if (action) {
-          if (action.flush) {
-            for (const item of action.flush) toClient.push(encode(item));
-          }
-          if (action.hold) return null;
-        }
-      }
       return normalized ? encode(normalized) : line;
     }
     if (message.id === undefined) return line;
@@ -199,26 +190,12 @@ function attachSteering(input, output, child, stop, errorRelay, verification) {
     if (opening) {
       openingSessions.delete(message.id);
       const sessionId = opening.sessionId ?? message.result?.sessionId;
-      if (isObject(message.result) && typeof sessionId === 'string') {
-        if (verification) {
-          const previous = mcpSessions.get(sessionId);
-          opening.account = previous ? previous.account : verification.sessionAccount();
-        }
-        mcpSessions.set(sessionId, opening);
-      }
+      if (isObject(message.result) && typeof sessionId === 'string') mcpSessions.set(sessionId, opening);
     }
 
     const handled = steering.handleAgentResponse(message);
     if (handled.action === 'drop') return null;
-    const flushHeld = (item) => toClient.push(encode(item));
-    if (handled.action === 'reply') {
-      const classified = errorRelay ? errorRelay.response(handled.message, flushHeld) : handled.message;
-      return encode(classified);
-    }
-    if (errorRelay) {
-      const classified = errorRelay.response(message, flushHeld);
-      if (classified !== message) return encode(classified);
-    }
+    if (handled.action === 'reply') return encode(handled.message);
     return line;
   });
 
@@ -226,14 +203,6 @@ function attachSteering(input, output, child, stop, errorRelay, verification) {
     const message = parse(line);
     if (!message?.method || message.id === undefined) return line;
     const params = message.params;
-    if (message.method === '_cindy/checkAccountVerification' && isAntigravity && verification &&
-        typeof params?.sessionId === 'string' && mcpSessions.has(params.sessionId)) {
-      void verification.check(mcpSessions.get(params.sessionId).account).catch(() => ({ status: 'unknown' })).then(result => {
-        if (!toClient.destroyed && !toClient.readableEnded) toClient.push(encode({ jsonrpc: '2.0', id: message.id, result }));
-      });
-      return null;
-    }
-    if (errorRelay) errorRelay.request(message);
     if (message.method === 'initialize') {
       initializeId = message.id;
       elicitationForm = clientSupportsElicitationForm(params);
