@@ -590,5 +590,5 @@
     "ja": "locales/ja.json",
     "ko": "locales/ko.json"
   },
-  "releaseNotes": "首发版本，使用独立官方 id `cindy-herdr`。此前以本地开发副本（id `herdr`）安装的人请注意：这是另一个插件实例，不继承原实例的数据——`herdr_events` 的「已退订」偏好需要重新 subscribe；此前用 `herdr_automation_setup` 创建的自动化绑定在旧会话上，需要重新创建并绑定到目标会话。`$herdr` 命令与全部工具名（herdr_state / herdr_read / herdr_prompt / …）不变。"
+  "releaseNotes": "首发版本，使用独立官方 id `cindy-herdr`。此前以本地开发副本（id `herdr`）安装的人请注意：安装本插件会替换同命令的旧开发实例，旧实例的数据不会自动迁移——`herdr_events` 的「已退订」偏好需要重新设置，想继续关闭通知请调用 `herdr_events` 并传 `mode=unsubscribe`（`mode=subscribe` 会重新打开通知）；此前用 `herdr_automation_setup` 创建的自动化绑定在旧会话上，需要重新创建并绑定到目标会话。`$herdr` 命令与全部工具名（herdr_state / herdr_read / herdr_prompt / …）不变。"
 }
