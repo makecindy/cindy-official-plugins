@@ -358,11 +358,16 @@ export function pacingDue(previous, now, { triggered = false } = {}) {
   if (fast) return { due: true, pace: 'fast', reason: 'fast' };
   const recent = (value) => Number.isFinite(Number(value)) && Number(value) > 0 && now - Number(value) < ACTIVE_WINDOW_MS;
   let pace;
-  // A model wait delays model work, not detection of new work. Keep cheap polling responsive.
-  if (previous.wait || previous.inFlight || (watch.failedChecks ?? []).length > 0 || watch.conflicting
+  // A non-human wait (checks/baseline/retry) delays model work, not detection of new work.
+  // A human wait explicitly parks the PR on a human decision or merge (and accounts for any
+  // set-aside failures/threads), so once recent activity cools down it paces at `waiting`.
+  const humanWait = previous.wait?.kind === 'human';
+  const activeWait = Boolean(previous.wait) && !humanWait;
+  const unhandledFailedChecks = !humanWait && (watch.failedChecks ?? []).length > 0;
+  if (activeWait || previous.inFlight || unhandledFailedChecks || watch.conflicting
     || (watch.queueProblems ?? []).length > 0 || recent(previous.headSeenAt) || recent(previous.lastPassAt)) {
     pace = 'active';
-  } else if (previous.humanOnlyPending || WAITING_VERDICTS.has(previous.verdict)) {
+  } else if (humanWait || previous.humanOnlyPending || WAITING_VERDICTS.has(previous.verdict)) {
     pace = 'waiting';
   } else if (watch.isDraft || (Number(previous.lastChangeAt) > 0 && now - Number(previous.lastChangeAt) >= QUIET_AFTER_MS)) {
     pace = 'quiet';

@@ -34,6 +34,19 @@ test('pacing: each stage looks at its own interval; fast reasons look every tick
   assert.equal(at(looked({ verdict: 'READY' }), 28).due, false);
   assert.equal(at(looked({ verdict: 'BLOCKED_HUMAN' }), 29).due, true);
   assert.equal(at(looked({ humanOnlyPending: true }), 28).pace, 'waiting');
+  // Explicit human waits (plain merge/approval wait or set-aside failure) cool down to waiting (30m),
+  // whereas technical waits (checks/baseline/retry) stay active (5m) and due waits wake immediately.
+  const humanWait = { kind: 'human', headSha: 'aaa', reason: 'waiting for merge', createdAt: T0 - 2 * 60 * MIN, until: null, checks: [], threads: [] };
+  assert.equal(at(looked({ verdict: 'READY', wait: humanWait }), 28).due, false);
+  assert.equal(at(looked({ verdict: 'READY', wait: humanWait }), 28).pace, 'waiting');
+  assert.equal(at(looked({ verdict: 'READY', wait: humanWait }), 29).due, true);
+  const setAsideHumanWait = { ...humanWait, until: T0 + 20 * 60 * MIN, checks: [{ name: 'CodeQL', workflowName: '', outcome: 'failed' }] };
+  assert.equal(at(looked({ verdict: 'NEEDS_WORK', watch: { failedChecks: ['CodeQL'] }, wait: setAsideHumanWait }), 28).pace, 'waiting');
+  assert.equal(at(looked({ verdict: 'NEEDS_WORK', watch: { failedChecks: ['CodeQL'] }, wait: { ...setAsideHumanWait, until: T0 } }), 1).pace, 'fast');
+  for (const kind of ['checks', 'baseline', 'retry']) {
+    const techWait = { kind, headSha: 'aaa', reason: 'waiting', createdAt: T0 - 2 * 60 * MIN, until: T0 + 60 * MIN, checks: [], threads: [] };
+    assert.equal(at(looked({ verdict: 'READY', wait: techWait }), 5).pace, 'active', kind);
+  }
   // quiet: drafts, or nothing changed for six hours
   assert.equal(at(looked({ watch: { isDraft: true } }), 58).due, false);
   assert.equal(at(looked({ lastChangeAt: T0 - 7 * 60 * MIN }), 59).due, true);

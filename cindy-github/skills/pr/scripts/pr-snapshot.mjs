@@ -5,7 +5,7 @@
 // script centralizes the API shape and uses execFile-based gh wrappers so shell
 // quoting cannot corrupt long GraphQL queries.
 
-import { ensureAuth, ensureBinary, ghGraphQL, ghJson } from './lib/gh.mjs';
+import { ensureBinary, ghGraphQL, ghJson } from './lib/gh.mjs';
 import { execFile } from 'node:child_process';
 import { resolvePullRequestTarget } from './lib/repo-target.mjs';
 import { applyRequiredChecks, requiredChecksOf } from './lib/required-checks.mjs';
@@ -570,7 +570,6 @@ async function fetchReviewCommitChecks(owner, name, oids) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   await ensureBinary();
-  await ensureAuth();
   if (args.probe) return probe(args);
 
   const prView = await ghJson(
