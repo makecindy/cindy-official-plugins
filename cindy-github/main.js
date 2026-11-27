@@ -2832,9 +2832,9 @@ function prCardProtected(card) {
   return prFollowActive(card) || card.stage === 'publishing' || !!card.pending || !!card.scheduleAction || card.readyUncertain === true;
 }
 
-async function findPrCardOwner(repo, number, head, explicitId, sessionId, localOnly) {
+async function listPrCardCandidates(repo, number, head) {
   var listing = await cindy.send({ type: 'fs-request', root: 'data', op: 'list', path: PR_CARD_DIR });
-  if (listing && !listing.ok && listing.errorCode === 'NOT_FOUND') return null;
+  if (listing && !listing.ok && listing.errorCode === 'NOT_FOUND') return [];
   if (!listing || !listing.ok || !Array.isArray(listing.entries)) throw new Error(t('prOwnershipUnknown'));
   var candidates = [];
   for (var i = 0; i < listing.entries.length; i++) {
@@ -2848,6 +2848,10 @@ async function findPrCardOwner(repo, number, head, explicitId, sessionId, localO
     if (String(record.repo).toLowerCase() !== repo.toLowerCase()) continue;
     if (number ? record.pr && record.pr.number === number : !record.pr && record.head === head) candidates.push(record);
   }
+  return candidates;
+}
+
+function selectPrCardOwner(candidates, explicitId, sessionId, localOnly) {
   // Only an active (or starting/stopping) follow-up excludes other tasks.
   // A task's own active record wins, so records duplicated before this rule existed can still be stopped by their own task.
   return (!localOnly && (candidates.find(function (c) { return prFollowActive(c) && c.sessionId === sessionId; }) ||
@@ -2855,20 +2859,109 @@ async function findPrCardOwner(repo, number, head, explicitId, sessionId, localO
     candidates.find(function (c) { return !c.sessionId && c.id === explicitId; }) || null;
 }
 
-async function prOtherTask(owner, callId, sessionId, localCard, toLatest, stateOp) {
+async function findPrCardOwner(repo, number, head, explicitId, sessionId, localOnly) {
+  var candidates = await listPrCardCandidates(repo, number, head);
+  return selectPrCardOwner(candidates, explicitId, sessionId, localOnly);
+}
+
+function isReconcilableStalePeer(card, sessionId) {
+  return !!card && !!card.sessionId && card.sessionId !== sessionId &&
+    !prFollowActive(card) && !card.scheduleId && !card.scheduleAction && !card.pending &&
+    Boolean(card.scheduleError) && !isPreservedCreateError(card);
+}
+
+function buildOtherTaskOwner(row, peerCard, repo, number, pr, stage, head, base) {
+  if (peerCard) {
+    return Object.assign({}, peerCard, {
+      sessionId: row.targetSessionId,
+      prNumber: number,
+      scheduleId: peerCard.scheduleId || row.id,
+      scheduleStatus: peerCard.scheduleStatus || (row.status === 'active' ? null : row.status),
+    });
+  }
+  return {
+    id: null,
+    sessionId: row.targetSessionId,
+    repo: repo,
+    prNumber: number,
+    pr: pr || null,
+    stage: stage || (pr ? pr.state : 'open'),
+    head: head || (pr ? pr.head : ''),
+    base: base || (pr ? pr.base : ''),
+    pending: null,
+    scheduleId: row.id,
+    scheduleStatus: row.status === 'active' ? null : row.status,
+  };
+}
+
+/**
+ * Resolve another task's sole live PR follow-up schedule when card files alone
+ * do not show an active owner (for example after a pre-upgrade verification
+ * error on the owning card, a custom hook on another task, or a pruned/missing
+ * peer card). If that peer card had a stale verification error, reconcile it in
+ * place so both tasks converge cleanly.
+ */
+async function resolveLiveOtherTaskOwner(repo, number, sessionId, candidates, fallback, opts) {
+  if (!repo || !number || !hasSchedulerQuery()) return null;
+  var options = opts || {};
+  var rows = options.rows;
+  if (!rows) {
+    try { rows = await schedulesForPrRef(repo, number); }
+    catch (_) { return null; }
+  }
+  var otherRow = otherTaskFollowSchedule(rows, repo, number, sessionId);
+  if (!otherRow) return null;
+  var live;
+  try { live = await prSchedule('schedule_get', { id: otherRow.id }); }
+  catch (err) {
+    if (options.throwOnReadError) throw err;
+    return null;
+  }
+  if (!otherTaskFollowSchedule(live ? [live] : [], repo, number, sessionId)) return null;
+  var peerCard = (candidates || []).find(function (c) { return c.sessionId === live.targetSessionId; }) || null;
+  if (hasCardScheduler() && peerCard && isReconcilableStalePeer(peerCard, sessionId)) {
+    var before = JSON.stringify(peerCard);
+    await reconcileLegacyFollow(peerCard, null, false, false, false, [live]);
+    if (JSON.stringify(peerCard) !== before && await savePrCard(peerCard)) {
+      await deliverPrCard(peerCard, options.settings || await readPrSettings(), null, null);
+    }
+    // If reconciliation's final schedule_get saw the schedule vanish or change owner,
+    // do not return a stale owner snapshot from the earlier read.
+    if (!peerCard.scheduleId && (!peerCard.scheduleError ||
+        (peerCard.scheduleErrorSource === 'verify' && peerCard.scheduleError === t('prScheduleFailed', { detail: t('prOwnershipUnknown') })))) {
+      return null;
+    }
+  }
+  var base = fallback || {};
+  return buildOtherTaskOwner(live, peerCard, repo, number, base.pr, base.stage, base.head, base.base);
+}
+
+async function prOtherTask(owner, callId, sessionId, localCard, toLatest, stateOp, prefetchedStatus) {
   var local = localCard && localCard.sessionId === sessionId ? localCard : newPrCard(callId, owner.repo);
   var updating = local.id !== callId;
   local.sessionId = sessionId;
-  local.pr = owner.pr;
-  local.stage = owner.stage;
-  local.head = owner.head;
-  local.base = owner.base;
+  if (owner.pr) local.pr = owner.pr;
+  if (owner.stage) local.stage = owner.stage;
+  if (owner.head) local.head = owner.head;
+  if (owner.base) local.base = owner.base;
   local.settingsApplied = true;
+  local.pending = null;
+  local.scheduleAction = null;
+  local.followNotice = null;
+  clearCardScheduleError(local);
+  clearLegacyScheduleNotice(local);
   // Never copy the other task's pending or following state into this task.
-  if (local.pr) {
-    var status = await fetchPrStatus(local.repo, local.pr.number, callId);
-    if (status.err) local.note = t('prFetchFailed', { detail: status.err });
-    else { local.pr = status.pr; local.stage = status.pr.state; local.note = null; }
+  var prNumber = local.pr ? local.pr.number : owner.prNumber || null;
+  if (prNumber) {
+    var status = prefetchedStatus || await fetchPrStatus(local.repo, prNumber, callId);
+    if (status.err) {
+      if (!local.pr || local.pr.number !== prNumber) return fail(t('prFetchFailed', { detail: status.err }));
+      local.note = t('prFetchFailed', { detail: status.err });
+    } else if (status.pr) {
+      local.pr = status.pr;
+      local.stage = status.pr.state;
+      local.note = null;
+    }
   }
   // The read-only card moves like any other card; its local card_id stays.
   var movedFrom = updating && toLatest && prAnchor(local) !== callId ? await movePrCard(local, callId) : null;
@@ -2880,14 +2973,15 @@ async function prOtherTask(owner, callId, sessionId, localCard, toLatest, stateO
     if (movedFrom !== local.id) await deletePrCardFile(prCardPath(movedFrom));
     await sendPrMovedStub(local, movedFrom, callId);
   }
-  var shown = await sendPrCard(local, await readPrSettings(), updating && !movedFrom ? callId : null);
+  var shown = await deliverPrCard(local, await readPrSettings(), updating && !movedFrom ? callId : null, owner);
   if (!updating || movedFrom === local.id) await prunePrCards(local.id);
   // A claim or stop report still needs the answer when no card can be shown (IM).
   if (!shown && !stateOp) return fail(t('prCardNotDelivered'));
   var other = {
-    disposition: 'existing_task', card_id: local.id, owner_card_id: owner.id, owner_session_id: owner.sessionId,
+    disposition: 'existing_task', card_id: local.id, owner_session_id: owner.sessionId,
     task_url: 'cindy://session/' + encodeURIComponent(owner.sessionId), follow_claimed: false, todo: [], next: t('prOtherTask'),
   };
+  if (owner.id) other.owner_card_id = owner.id;
   if (!shown) { other.card_shown = false; other.note = t('prCardNotShown'); }
   return { ok: true, result: other };
 }
@@ -3999,8 +4093,12 @@ async function prSchedule(tool, args) {
   return body.data;
 }
 
+function prFollowUrl(repo, number) {
+  return 'https://github.com/' + String(repo).toLowerCase() + '/pull/' + number;
+}
+
 function followUrl(card) {
-  return 'https://github.com/' + card.repo.toLowerCase() + '/pull/' + card.pr.number;
+  return prFollowUrl(card.repo, card.pr.number);
 }
 
 function mentionsPr(row, url) {
@@ -4010,19 +4108,37 @@ function mentionsPr(row, url) {
   return links.indexOf(url) >= 0;
 }
 
-function ownedFollowSchedule(row, card) {
-  if (!row || row.targetSessionId !== card.sessionId || !row.recurring || !row.preRunHook) return false;
+function isFollowScheduleForUrl(row, url) {
+  if (!row || !row.recurring || !row.preRunHook) return false;
   var command = String(row.preRunHook.command).replace(/\\/g, '/').toLowerCase();
-  var url = followUrl(card);
   return /(?:^|\s)node\s+["']?[^\r\n]+\/scripts\/(?:pr-heartbeat-gate\.mjs["']?|pr-node\.cjs["']?\s+pr-heartbeat-gate\.mjs)\s+/.test(command) &&
     command.split(/\s+/).pop().replace(/^["']|["']$/g, '') === url && mentionsPr(row, url);
 }
 
-async function schedulesForPr(card) {
-  var url = followUrl(card);
+function ownedFollowSchedule(row, card) {
+  return !!row && row.targetSessionId === card.sessionId && isFollowScheduleForUrl(row, followUrl(card));
+}
+
+async function schedulesForPrRef(repo, number) {
+  var url = prFollowUrl(repo, number);
   var rows = await prSchedule('schedule_list', { query: url });
   if (!Array.isArray(rows)) throw new Error('schedule_list');
   return rows.filter(function (row) { return mentionsPr(row, url); });
+}
+
+async function schedulesForPr(card) {
+  return schedulesForPrRef(card.repo, card.pr.number);
+}
+
+function otherTaskFollowSchedule(rows, repo, number, sessionId) {
+  if (!Array.isArray(rows) || rows.length !== 1) return null;
+  var row = rows[0];
+  if (!row || !row.id || typeof row.targetSessionId !== 'string' || !row.targetSessionId || row.targetSessionId === sessionId) {
+    return null;
+  }
+  if (row.status !== 'active' && row.status !== 'paused') return null;
+  if (!isFollowScheduleForUrl(row, prFollowUrl(repo, number))) return null;
+  return row;
 }
 
 async function cardFollowSkillEnv() {
@@ -4176,12 +4292,12 @@ function isPreservedCreateError(card) {
 
 // Reconcile all ID-less legacy follow fields in one place, using only the
 // final read of a unique, same-PR schedule. No user configuration is changed.
-async function reconcileLegacyFollow(card, readError, fromStop, hadClaim, clearOnStop) {
+async function reconcileLegacyFollow(card, readError, fromStop, hadClaim, clearOnStop, prefetchedRows) {
   var row = null, hook = null, error = null, errorSource = null, unverified = false;
   var showManualStop = card.pending === 'stop' || fromStop === true || card.pendingStopNotice === true;
   try {
     if (readError) throw new Error(readError);
-    var rows = await schedulesForPr(card);
+    var rows = Array.isArray(prefetchedRows) ? prefetchedRows : await schedulesForPr(card);
     if (rows.length) {
       var candidate = rows.length === 1 && rows[0];
       if (!candidate || !candidate.id || !ownedFollowSchedule(candidate, card)) {
@@ -4463,12 +4579,14 @@ async function syncCardSchedule(card, settings, mode) {
   }
   var prevPending = card.pending;
   var prevAction = card.scheduleAction;
+  var prevManaged = card.managedFollow;
   card.pending = action === 'start' ? 'follow' : action;
   card.scheduleAction = action;
   card.managedFollow = true;
   if (!(await savePrCard(card))) {
     card.pending = prevPending;
     card.scheduleAction = prevAction;
+    card.managedFollow = prevManaged;
     card.note = t('prSaveFailed');
     return;
   }
@@ -4499,8 +4617,27 @@ async function syncCardSchedule(card, settings, mode) {
           throw creationError || new Error('schedule_create');
         }
       }
+      var otherRow = otherTaskFollowSchedule(rows, card.repo, card.pr.number, card.sessionId);
+      if (otherRow) {
+        errorSource = 'read';
+        var peerCandidates = [];
+        try { peerCandidates = await listPrCardCandidates(card.repo, card.pr.number, card.head); } catch (_) {}
+        var otherOwner = await resolveLiveOtherTaskOwner(card.repo, card.pr.number, card.sessionId, peerCandidates, card, {
+          rows: rows, settings: settings, throwOnReadError: true,
+        });
+        if (otherOwner) {
+          card.pending = card.scheduleAction = null;
+          card.managedFollow = prevManaged;
+          card.followNotice = null;
+          clearCardScheduleError(card);
+          clearLegacyScheduleNotice(card);
+          card.note = null;
+          await savePrCardRetry(card);
+          return { otherOwner: otherOwner };
+        }
+      }
       var row = rows.length === 1 && rows[0];
-      if (!ownedFollowSchedule(row, card) || !row.id || row.status !== 'active') {
+      if (!ownedFollowSchedule(row, card) || !row.id || (row.status !== 'active' && row.status !== 'paused')) {
         card.pending = card.scheduleAction = null;
         errorSource = 'verify';
         throw new Error(t('prOwnershipUnknown'));
@@ -4508,7 +4645,7 @@ async function syncCardSchedule(card, settings, mode) {
       errorSource = 'read';
       var env = await cardFollowSkillEnv();
       var saved = await prSchedule('schedule_get', { id: row.id });
-      if (!ownedFollowSchedule(saved, card) || saved.status !== 'active' || saved.id !== row.id) {
+      if (!ownedFollowSchedule(saved, card) || (saved.status !== 'active' && saved.status !== 'paused') || saved.id !== row.id) {
         errorSource = 'verify';
         throw new Error('schedule_get');
       }
@@ -4518,15 +4655,15 @@ async function syncCardSchedule(card, settings, mode) {
         errorSource = 'verify';
         throw new Error(t('prScheduleHookUnknown'));
       }
-      repair = await resolveLegacyHookRepair(hook, saved);
+      repair = saved.status === 'active' ? await resolveLegacyHookRepair(hook, saved) : null;
       card.scheduleId = row.id;
       applyCardStopProvenance(card, saved, env, createdId === saved.id ? createdDefaults : null);
-      card.scheduleStatus = null;
       card.followedEver = true;
-      card.following = true;
+      card.following = saved.status === 'active';
+      card.scheduleStatus = card.following ? null : saved.status;
       card.followDeclined = false;
-      card.followNotice = (usedTaskModelFallback ||
-        (requestedModel && requestedModel.model_agent_kind === 'acp' && !saved.modelAgentKind && !saved.model))
+      card.followNotice = (card.following && (usedTaskModelFallback ||
+        (requestedModel && requestedModel.model_agent_kind === 'acp' && !saved.modelAgentKind && !saved.model)))
         ? t('prFollowModelFallback')
         : null;
     } else if (action === 'resume') {
@@ -5004,23 +5141,33 @@ async function prCardTool(args, callId, fromLegacyStop) {
   if (card && ref && card.pr && (card.repo.toLowerCase() !== ref.repo.toLowerCase() || card.pr.number !== ref.number)) {
     return fail(t('prBadCardId'));
   }
-  var ownerArgs = [ref ? ref.repo : repo || (card && card.repo) || '',
-    ref ? ref.number : card && card.pr ? card.pr.number : null,
-    prText(a.head) || (card && card.head), card && card.id, sessionId];
-  var owner = await findPrCardOwner.apply(null, ownerArgs);
+  var targetRepo = ref ? ref.repo : repo || (card && card.repo) || '';
+  var targetNumber = ref ? ref.number : card && card.pr ? card.pr.number : null;
+  var targetHead = prText(a.head) || (card && card.head);
+  var stateOp = a.claim_follow === true || typeof a.following === 'boolean';
+  var candidates = targetRepo ? await listPrCardCandidates(targetRepo, targetNumber, targetHead) : [];
+  var owner = selectPrCardOwner(candidates, card && card.id, sessionId, false);
   // Another task's claim that was never confirmed must not keep this task out.
   if (owner && owner.sessionId && owner.sessionId !== sessionId && prClaimWaiting(owner) &&
       await settlePrClaim(owner) && !prFollowActive(owner)) {
-    owner = await findPrCardOwner.apply(null, ownerArgs);
+    candidates = targetRepo ? await listPrCardCandidates(targetRepo, targetNumber, targetHead) : [];
+    owner = selectPrCardOwner(candidates, card && card.id, sessionId, false);
+  }
+  var hasPeerCard = candidates.some(function (c) { return c.sessionId && c.sessionId !== sessionId; });
+  var checkedLiveOwner = false;
+  if ((!owner || !prFollowActive(owner)) && targetRepo && targetNumber &&
+      (hasPeerCard || a.claim_follow === true ||
+       (owner && owner.sessionId === sessionId && Boolean(owner.scheduleError) && !isPreservedCreateError(owner)))) {
+    checkedLiveOwner = true;
+    var earlyLiveOwner = await resolveLiveOtherTaskOwner(targetRepo, targetNumber, sessionId, candidates, owner || card);
+    if (earlyLiveOwner) owner = earlyLiveOwner;
   }
   if (owner) {
     if (!owner.sessionId && (!card || card.id !== owner.id)) return fail(t('prOwnershipUnknown'));
     if (owner.sessionId && owner.sessionId !== sessionId) {
       // Reuse a local card even when a different task currently holds the follow-up.
-      var local = card || await findPrCardOwner(owner.repo, owner.pr && owner.pr.number,
-        owner.head, null, sessionId, true);
-      return prOtherTask(owner, callId, sessionId, local, a.to_latest === true,
-        a.claim_follow === true || typeof a.following === 'boolean');
+      var local = card || selectPrCardOwner(candidates, null, sessionId, true);
+      return prOtherTask(owner, callId, sessionId, local, a.to_latest === true, stateOp);
     }
     card = owner;
     updating = true;
@@ -5085,6 +5232,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
   var settings = await readPrSettings();
   var legacyStop = card.scheduleAction === 'stop' && manualFollowStop(card);
   var terminalResume = card.scheduleAction === 'resume' && (card.stage !== 'open' || (card.pr && card.pr.draft));
+  var hadBoundSchedule = Boolean(card.scheduleId);
   var showManualStop = false;
   if (card.scheduleId && hasCardScheduler() && (!card.scheduleAction || legacyStop || terminalResume)) {
     try {
@@ -5184,6 +5332,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
   var todo = [];
   var nativeStart = false;
   var settingsAppliedBefore = card.settingsApplied;
+  var publishedHereBefore = card.publishedHere;
   if (card.stage === 'open' && !card.settingsApplied && settings.unreadable) {
     // Unreadable settings are not "all off": keep the one-time to-do list for the next call.
     notes.push(t('prSettingsLater'));
@@ -5209,7 +5358,20 @@ async function prCardTool(args, callId, fromLegacyStop) {
       notes.push(card.note);
       card.scheduleAction = syncAction;
     } else {
-      await syncCardSchedule(card, settings, syncAction);
+      var syncResult = await syncCardSchedule(card, settings, syncAction);
+      if (syncResult && syncResult.otherOwner) {
+        if (publishedHereBefore === undefined) delete card.publishedHere; else card.publishedHere = publishedHereBefore;
+        return prOtherTask(syncResult.otherOwner, callId, sessionId, updating ? card : null, a.to_latest === true, stateOp, status);
+      }
+    }
+  } else if (!checkedLiveOwner && !hadBoundSchedule && !legacyFollow && !retryScheduleError &&
+      status && !status.err && card.stage === 'open' && card.pr && !card.pr.draft &&
+      !prFollowActive(card) && !card.scheduleAction && !card.followDeclined && typeof a.following !== 'boolean') {
+    checkedLiveOwner = true;
+    var openLiveOwner = await resolveLiveOtherTaskOwner(card.repo, card.pr.number, sessionId, candidates, card, { settings: settings });
+    if (openLiveOwner) {
+      if (publishedHereBefore === undefined) delete card.publishedHere; else card.publishedHere = publishedHereBefore;
+      return prOtherTask(openLiveOwner, callId, sessionId, updating ? card : null, a.to_latest === true, stateOp, status);
     }
   }
   if (card.stage !== 'open') card.followNotice = null;
@@ -5229,8 +5391,6 @@ async function prCardTool(args, callId, fromLegacyStop) {
   }
   var delivered = await sendPrCard(card, settings, updating && !movedFrom ? callId : null);
   if (!updating || movedFrom === card.id) await prunePrCards(card.id);
-  // A follow claim or a start/stop report is a state operation: its answer matters even where no card can be shown (IM).
-  var stateOp = a.claim_follow === true || typeof a.following === 'boolean';
   // The state is saved but the card did not reach the conversation: do not report a card the user cannot see.
   if (!delivered && !stateOp && !nativeStart && !card.managedFollow) {
     // The retry must produce the same to-do list again, so the one-time settings are not used up by this call.
@@ -5394,6 +5554,7 @@ async function markPrReadyInner(card, settings, msg, progress) {
   card.pending = null;
   card.readyUncertain = false;
   if (!card.pr.draft) card.markedReady = true;
+  var otherOwner = null;
   if (card.pr.draft) {
     // 重读到的状态才算准;读不到时,写请求发出过又没被服务端明确拒绝就是不确定,要用户先核对。
     var uncertain = !fresh.pr && sent && !rejected;
@@ -5403,7 +5564,8 @@ async function markPrReadyInner(card, settings, msg, progress) {
       ? t('prReadyUnknown')
       : t('prReadyFailed', { detail: String(err || fresh.err || '').slice(0, 160) });
   } else if (settings.autoFollow && !card.followDeclined && card.stage === 'open' && card.publishedHere && hasCardScheduler()) {
-    await syncCardSchedule(card, settings, true);
+    var readySync = await syncCardSchedule(card, settings, true);
+    if (readySync && readySync.otherOwner) otherOwner = readySync.otherOwner;
   } else if (settings.autoFollow && !card.followDeclined && card.stage === 'open') {
     // Record "following is starting" before handing it to the agent, as the first step does for "ready":
     // if that cannot be saved, nothing is sent, so a later click can never send it a second time.
@@ -5431,7 +5593,8 @@ async function markPrReadyInner(card, settings, msg, progress) {
     // from GitHub at the next click or update; a 'follow' that was handed off is cleared by the agent's update.
     card.note = t('prSaveFailed');
   }
-  await sendPrCard(card, settings, null);
+  if (otherOwner) await deliverPrCard(card, settings, null, otherOwner);
+  else await sendPrCard(card, settings, null);
 }
 
 async function notifyPrCardUnavailable(msg, status) {
@@ -5459,16 +5622,35 @@ async function prCardAction(msg) {
   if (lookup.missingAlias) await repairPrCardAlias(id, card.id);
   var action = String(msg.actionId || '');
   var settings = await readPrSettings();
-  var active = await findPrCardOwner(card.repo, card.pr && card.pr.number, card.head, card.id, card.sessionId);
-  if (active && prFollowActive(active) && active.sessionId !== card.sessionId) {
+  var candidates = card.repo ? await listPrCardCandidates(card.repo, card.pr && card.pr.number, card.head) : [];
+  var active = selectPrCardOwner(candidates, card.id, card.sessionId, false);
+  if ((!active || !prFollowActive(active)) && card.pr &&
+      (action === 'pr:follow' || action === 'pr:open-task' || action === 'pr:ready')) {
+    var liveOther = await resolveLiveOtherTaskOwner(card.repo, card.pr.number, card.sessionId, candidates, card, { settings: settings });
+    if (liveOther) active = liveOther;
+  }
+  if (active && (prFollowActive(active) || active.scheduleId) && active.sessionId && active.sessionId !== card.sessionId) {
+    var clearedLocalError = false;
+    if (card.scheduleError || card.legacyScheduleNotice || card.followNotice || card.pending || card.scheduleAction || card.settingsOpen) {
+      card.pending = null;
+      card.scheduleAction = null;
+      card.settingsOpen = false;
+      card.followNotice = null;
+      clearCardScheduleError(card);
+      clearLegacyScheduleNotice(card);
+      card.note = null;
+      clearedLocalError = true;
+    }
     // Legacy clients use the existing click handoff to provide a normal task link.
     // Re-resolve the active task at click time; never start/stop or transfer follow-up.
     if (action === 'pr:open-task' && active.sessionId) {
       var navigation = await handOffPr(card, action, settings, msg, 'cindy://session/' + encodeURIComponent(active.sessionId));
       card.note = navigation.unknown ? t('prHandoffUnknown') : navigation.ok ? null : t('prHandoffFailed');
       await savePrCard(card);
+    } else if (clearedLocalError) {
+      await savePrCard(card);
     }
-    await sendPrCard(card, settings, null);
+    await deliverPrCard(card, settings, null, active);
     return;
   }
   if (action.startsWith('pr:merge')) return prMergeAction(card, settings, msg, action);
@@ -5604,7 +5786,13 @@ async function prCardAction(msg) {
   } else if (msg.userActionToken && hasCardScheduler() && (action === 'pr:follow' && card.publishedHere ||
       action === 'pr:stop' && card.scheduleId) && PR_AGENT_ACTIONS[action](card)) {
     if (settings.unreadable && action === 'pr:follow') card.note = t('prSettingsUnreadable');
-    else await syncCardSchedule(card, settings, action === 'pr:follow' ? 'start' : 'stop');
+    else {
+      var actionSync = await syncCardSchedule(card, settings, action === 'pr:follow' ? 'start' : 'stop');
+      if (actionSync && actionSync.otherOwner) {
+        await deliverPrCard(card, settings, null, actionSync.otherOwner);
+        return;
+      }
+    }
   } else if (PR_AGENT_ACTIONS[action] && PR_AGENT_ACTIONS[action](card)) {
     var publishing = action === 'pr:publish' || action === 'pr:draft';
     if ((publishing || action === 'pr:follow') && settings.unreadable) {

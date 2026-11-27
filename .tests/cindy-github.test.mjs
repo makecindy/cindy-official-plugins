@@ -1775,7 +1775,8 @@ test('bound ACP follow-up fails closed on non-compatibility errors, existing sch
     assert.equal(rows.size, 0);
   }
 
-  // Do not create a second schedule when a matching schedule already exists after rejection.
+  // Do not create a second schedule when another task's PR follow-up already exists after rejection:
+  // hand off cleanly to existing_task instead of falling back or surfacing a generic ownership error.
   const race = followScheduler({
     onCreate(args, rows) {
       rows.set('other-1', { ...args, id: 'other-1', targetSessionId: 'session-other', status: 'active', updatedAt: 1000 });
@@ -1789,8 +1790,31 @@ test('bound ACP follow-up fails closed on non-compatibility errors, existing sch
   });
   const raceAsk = await raceRuntime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
   const raceResult = (await raceRuntime.tool({ card_id: raceAsk.callId, pr: 7, published: true })).reply.result;
-  assert.equal(raceResult.follow_state, 'failed');
+  assert.equal(raceResult.disposition, 'existing_task');
+  assert.equal(raceResult.owner_session_id, 'session-other');
+  assert.equal(raceResult.follow_claimed, false);
+  assert.equal(raceResult.follow_model_fallback, undefined);
   assert.equal(race.createAttempts.length, 1);
+  assert.equal(race.rows.size, 1);
+
+  // An unrecognized custom schedule mentioning the PR URL after rejection still fails closed without retrying.
+  const customRace = followScheduler({
+    onCreate(args, rows) {
+      rows.set('other-custom', { ...args, id: 'other-custom', targetSessionId: 'session-other', preRunHook: 'echo custom', status: 'active', updatedAt: 1000 });
+      return { ok: false, message: 'A plugin engine schedule starts a new task each run' };
+    },
+  });
+  const customRaceRuntime = createPrRuntime({
+    github: prGraphql({ number: 7 }),
+    hostApi: customRace.hostApi,
+    kv: { prCard: { autoFollow: true, followModel: { route: acpRoute, label: 'Gemini 4 Neon · Antigravity' } } },
+  });
+  const customRaceAsk = await customRaceRuntime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
+  const customRaceResult = (await customRaceRuntime.tool({ card_id: customRaceAsk.callId, pr: 7, published: true })).reply.result;
+  assert.equal(customRaceResult.follow_state, 'failed');
+  assert.equal(customRaceResult.follow_model_fallback, undefined);
+  assert.equal(customRace.createAttempts.length, 1);
+  assert.equal(customRace.rows.size, 1);
 
   // Non-ACP overrides never fall back even if the error string resembles an ACP rejection.
   const codexRoute = { agentKind: 'codex', providerId: 'openai', model: 'gpt-5.6', effort: 'high', fastMode: false };
@@ -6471,4 +6495,193 @@ test('pr Skill allows simulator/sanitized screenshots directly while gating real
   assert.match(publish, /simulator\/emulator, mock, fixture, or redacted\/sanitized data[\s\S]{0,160}may be attached directly without asking first/);
   assert.match(publish, /real or unredacted user, account, machine, or private\/sensitive data/);
   assert.match(publish, /never push, open\/update the PR, or post while waiting for the answer/);
+});
+
+test('source task heals a stale pre-upgrade peer card and switches to read-only reference instead of prOwnershipUnknown', async () => {
+  const skillDir = '/approved skills/agent-skills/skills/_root__cindy-github--pr';
+  const posixSingleHook = {
+    command: `node '${skillDir}/scripts/pr-node.cjs' pr-heartbeat-gate.mjs ${PR42}`,
+    timeoutMs: 180000,
+  };
+  for (const mode of ['click-follow', 'refresh-card']) {
+    const { hostApi, calls, rows } = followScheduler({ skillDir, platform: 'darwin' });
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+
+    // Source task opened the PR with following: false (later stuck on prOwnershipUnknown),
+    // while the dedicated task's card was left with a pre-upgrade single-quote hook error.
+    const orig = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, following: false, session_context: { session_id: 's-orig' } });
+    const follow = await rt.tool({ repo: 'octo/repo', pr: 42, following: true, session_context: { session_id: 's-follow' } });
+
+    const origKey = `pr-cards/${orig.callId}.json`;
+    const followKey = `pr-cards/${follow.callId}.json`;
+    const origSaved = JSON.parse(rt.files.get(origKey));
+    origSaved.scheduleError = fill(zhCopy.prScheduleFailed, { detail: zhCopy.prOwnershipUnknown });
+    origSaved.scheduleErrorSource = 'verify';
+    origSaved.note = origSaved.scheduleError;
+    rt.files.set(origKey, JSON.stringify(origSaved));
+
+    const followSaved = JSON.parse(rt.files.get(followKey));
+    followSaved.following = false;
+    followSaved.followedEver = true;
+    followSaved.scheduleId = null;
+    followSaved.scheduleStatus = null;
+    followSaved.scheduleError = fill(zhCopy.prScheduleFailed, { detail: zhCopy.prScheduleHookUnknown });
+    followSaved.note = followSaved.scheduleError;
+    delete followSaved.scheduleErrorSource;
+    rt.files.set(followKey, JSON.stringify(followSaved));
+
+    rows.set('sch-follow', {
+      id: 'sch-follow', prompt: 'Follow ' + PR42, targetSessionId: 's-follow',
+      recurring: true, status: 'active', prTrigger: { url: PR42, change: 'any' },
+      preRunHook: posixSingleHook,
+    });
+
+    if (mode === 'click-follow') {
+      await rt.click(orig.callId, 'pr:follow', { sessionId: 's-orig' });
+      const origHtml = rt.lastCard(orig.callId).html;
+      assert.match(origHtml, /其他任务正在跟进/, mode);
+      assert.match(origHtml, /data-ghost-session-link="cindy:\/\/session\/s-follow"/, mode);
+      assert.doesNotMatch(origHtml, /无法确认 PR 卡片所属任务/, mode);
+      assert.doesNotMatch(origHtml, /data-ghost-action="pr:follow"/, mode);
+    } else {
+      const refreshed = await rt.tool({ card_id: orig.callId, pr: 42, to_latest: true, session_context: { session_id: 's-orig' } });
+      assert.equal(refreshed.reply.ok, true, mode);
+      assert.equal(refreshed.reply.result.disposition, 'existing_task', mode);
+      assert.equal(refreshed.reply.result.card_id, orig.callId, mode);
+      assert.equal(refreshed.reply.result.owner_card_id, follow.callId, mode);
+      assert.equal(refreshed.reply.result.owner_session_id, 's-follow', mode);
+      assert.equal(refreshed.reply.result.task_url, 'cindy://session/s-follow', mode);
+      assert.equal(refreshed.reply.result.follow_claimed, false, mode);
+      const movedHtml = rt.lastCard(refreshed.callId).html;
+      assert.match(movedHtml, /其他任务正在跟进/, mode);
+      assert.match(movedHtml, /data-ghost-session-link="cindy:\/\/session\/s-follow"/, mode);
+      assert.doesNotMatch(movedHtml, /无法确认 PR 卡片所属任务/, mode);
+    }
+
+    // Both cards converged cleanly: source card cleared its stale error and peer card self-healed.
+    const origAfter = savedCard(rt, orig.callId);
+    assert.equal(origAfter.scheduleError, null, mode);
+    assert.equal(origAfter.scheduleErrorSource, null, mode);
+    assert.equal(origAfter.note, null, mode);
+
+    const followAfter = savedCard(rt, follow.callId);
+    assert.equal(followAfter.following, true, mode);
+    assert.equal(followAfter.scheduleId, 'sch-follow', mode);
+    assert.equal(followAfter.scheduleError, null, mode);
+    assert.equal(followAfter.note, null, mode);
+    assert.match(rt.lastCard(follow.callId).html, /data-ghost-live-label=/, mode);
+
+    assert.equal(calls.includes('schedule_create'), false, mode);
+    assert.equal(rt.agentRuns.length, 0, mode);
+  }
+});
+
+test('live follow-up schedule in another task renders read-only existing_task even without an active peer card', async () => {
+  const customHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + PR42, timeoutMs: 180000 };
+  for (const variant of ['missing-peer-card', 'custom-hook-peer-card', 'paused-other-task']) {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+
+    let peerCardId = null;
+    if (variant === 'custom-hook-peer-card') {
+      const peer = await rt.tool({ repo: 'octo/repo', pr: 42, following: true, session_context: { session_id: 's-follow' } });
+      peerCardId = peer.callId;
+      rows.set('sch-b', taskSchedule('sch-b', 's-follow', customHook));
+      const failed = await rt.tool({ card_id: peerCardId, session_context: { session_id: 's-follow' } });
+      assert.equal(failed.reply.result.follow_state, 'failed', variant);
+    } else {
+      const row = taskSchedule('sch-b', 's-follow');
+      if (variant === 'paused-other-task') row.status = 'paused';
+      rows.set('sch-b', row);
+    }
+
+    // Fresh open PR view in another task immediately recognizes the live schedule owner.
+    const viewed = await rt.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's-orig' } });
+    assert.equal(viewed.reply.result.disposition, 'existing_task', variant);
+    assert.equal(viewed.reply.result.owner_session_id, 's-follow', variant);
+    assert.equal(viewed.reply.result.task_url, 'cindy://session/s-follow', variant);
+    assert.equal(viewed.reply.result.owner_card_id, peerCardId || undefined, variant);
+    assert.equal(viewed.reply.result.follow_claimed, false, variant);
+    assert.match(rt.lastCard(viewed.callId).html, /其他任务正在跟进/, variant);
+    assert.match(rt.lastCard(viewed.callId).html, /data-ghost-session-link="cindy:\/\/session\/s-follow"/, variant);
+
+    // Legacy client fallback click on "Open follow-up task" resolves the live owner too.
+    await rt.click(viewed.callId, 'pr:open-task', { sessionId: 's-orig' });
+    assert.equal(rt.agentRuns.length, 1, variant);
+    assert.equal(rt.agentRuns[0].event.action, 'open-task', variant);
+    assert.equal(rt.agentRuns[0].event.task_url, 'cindy://session/s-follow', variant);
+
+    // Explicit claim_follow or published: true in a third task also returns existing_task without creating duplicates.
+    const claimed = await rt.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's-third' } });
+    assert.equal(claimed.reply.result.disposition, 'existing_task', variant);
+    assert.equal(claimed.reply.result.follow_claimed, false, variant);
+    const published = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, session_context: { session_id: 's-fourth' } });
+    assert.equal(published.reply.result.disposition, 'existing_task', variant);
+
+    // Clicking pr:follow on an already-saved idle card (both viewed and publishedHere) redirects instead of erroring or handing off.
+    const idleCard = savedCard(rt, viewed.callId);
+    idleCard.publishedHere = true;
+    rt.files.set(`pr-cards/${viewed.callId}.json`, JSON.stringify(idleCard));
+    await rt.click(viewed.callId, 'pr:follow', { sessionId: 's-orig' });
+    assert.equal(rt.agentRuns.length, 1, variant);
+    assert.match(rt.lastCard(viewed.callId).html, /其他任务正在跟进/, variant);
+    assert.doesNotMatch(rt.lastCard(viewed.callId).html, /无法确认 PR 卡片所属任务/, variant);
+
+    if (variant === 'custom-hook-peer-card') {
+      // Peer card with custom hook must remain unverified/not-following rather than gaining Stop authority.
+      const peerAfter = savedCard(rt, peerCardId);
+      assert.equal(peerAfter.following, false, variant);
+      assert.equal(peerAfter.scheduleId, null, variant);
+    }
+    assert.equal(calls.includes('schedule_create'), false, variant);
+  }
+});
+
+test('start adopts a same-session paused schedule and fails closed when a foreign schedule is deleted mid-check or ambiguous', async () => {
+  // 1) Same-session paused schedule discovered on pr:follow adopts paused state instead of throwing prOwnershipUnknown.
+  {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: false } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    rows.set('paused-mine', { ...taskSchedule('paused-mine', 's1'), status: 'paused' });
+    await rt.click(opened.callId, 'pr:follow');
+    const card = savedCard(rt, opened.callId);
+    assert.equal(card.scheduleId, 'paused-mine');
+    assert.equal(card.following, false);
+    assert.equal(card.scheduleStatus, 'paused');
+    assert.equal(card.scheduleError, null);
+    assert.match(rt.lastCard(opened.callId).html, /跟进已暂停/);
+    assert.match(rt.lastCard(opened.callId).html, /data-ghost-action="pr:resume"/);
+    assert.equal(calls.includes('schedule_create'), false);
+    assert.equal(calls.includes('schedule_resume'), false);
+  }
+
+  // 2) Foreign schedule deleted between schedule_list and schedule_get must not produce a ghost existing_task reference.
+  {
+    const { hostApi, rows } = followScheduler({
+      beforeGet(liveRows, id) {
+        if (id === 'vanishing') liveRows.delete(id);
+      },
+    });
+    rows.set('vanishing', taskSchedule('vanishing', 's-other'));
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: false } } });
+    const viewed = await rt.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's-orig' } });
+    assert.equal(viewed.reply.result.disposition, undefined);
+    assert.doesNotMatch(rt.lastCard(viewed.callId).html, /其他任务正在跟进/);
+  }
+
+  // 3) Multiple schedules or an expired foreign schedule never redirect as a single active owner.
+  for (const [label, list] of [
+    ['ambiguous', [taskSchedule('a', 's-other'), taskSchedule('b', 's-other-2')]],
+    ['expired', [{ ...taskSchedule('exp', 's-other'), status: 'expired' }]],
+  ]) {
+    const { hostApi, calls, rows } = followScheduler();
+    for (const r of list) rows.set(r.id, r);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, session_context: { session_id: 's-orig' } });
+    assert.equal(opened.reply.result.disposition, undefined, label);
+    assert.equal(opened.reply.result.follow_state, 'failed', label);
+    assert.match(opened.reply.result.note, /无法确认 PR 卡片所属任务/, label);
+    assert.equal(calls.includes('schedule_create'), false, label);
+  }
 });
