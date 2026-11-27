@@ -128,7 +128,7 @@ function createSteeringRelay() {
   };
 }
 
-function attachSteering(input, output, child, stop) {
+function attachSteering(input, output, child, stop, errorRelay) {
   const steering = createSteeringRelay();
   const openingSessions = new Map();
   const mcpSessions = new Map();
@@ -156,6 +156,16 @@ function attachSteering(input, output, child, stop) {
     if (!message) return line;
     if (message.method) {
       const normalized = isAntigravity && normalizeToolMessage(message);
+      const outgoing = normalized || message;
+      if (errorRelay) {
+        const action = errorRelay.notification(outgoing);
+        if (action) {
+          if (action.flush) {
+            for (const item of action.flush) toClient.push(encode(item));
+          }
+          if (action.hold) return null;
+        }
+      }
       return normalized ? encode(normalized) : line;
     }
     if (message.id === undefined) return line;
@@ -177,7 +187,14 @@ function attachSteering(input, output, child, stop) {
 
     const handled = steering.handleAgentResponse(message);
     if (handled.action === 'drop') return null;
-    if (handled.action === 'reply') return encode(handled.message);
+    if (handled.action === 'reply') {
+      const classified = errorRelay ? errorRelay.response(handled.message) : handled.message;
+      return encode(classified);
+    }
+    if (errorRelay) {
+      const classified = errorRelay.response(message);
+      if (classified !== message) return encode(classified);
+    }
     return line;
   });
 
@@ -185,6 +202,7 @@ function attachSteering(input, output, child, stop) {
     const message = parse(line);
     if (!message?.method || message.id === undefined) return line;
     const params = message.params;
+    if (errorRelay) errorRelay.request(message);
     if (message.method === 'initialize') initializeId = message.id;
     if (isAntigravity && isSessionOpen(message.method)) {
       const servers = Array.isArray(params?.mcpServers) ? params.mcpServers : [];

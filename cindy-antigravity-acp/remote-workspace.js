@@ -39,6 +39,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { completeInitializeResult, isObject, isSessionOpen, normalizeMcpToolCall } = require('./agy-mcp.js');
 const { createSteeringRelay } = require('./agy-steering.js');
+const { accountErrorRelay, classifyAccountErrorResponse } = require('./agy-account-errors.js');
 
 const REMOTE_WORKSPACE_ARG = '--cindy-remote-workspace';
 const GUEST_WORKSPACE_ARG = '--cindy-guest-workspace';
@@ -296,6 +297,7 @@ function startRemoteWorkspace(agyPath, host) {
   const forwardClientLine = (line, parsed) => {
     const message = parsed === undefined ? parseLine(line) : parsed;
     if (message) {
+      errorRelay.request(message);
       const handled = steering.handleClientMessage(message);
       if (handled) {
         if (handled.toClient) toClient(handled.toClient);
@@ -358,6 +360,8 @@ function startRemoteWorkspace(agyPath, host) {
     terminate();
     setTimeout(() => finish(stopCode), timings.signalGrace + 300).unref();
   };
+
+  const errorRelay = accountErrorRelay();
 
   const launch = (args) => {
     const child = spawnAgy(agyPath, args, { stdio: ['pipe', 'pipe', 'pipe'], cwd: dir });
@@ -471,7 +475,9 @@ function startRemoteWorkspace(agyPath, host) {
     forceTimer = null;
     clearTimeout(agentCloseTimer);
     agentCloseTimer = null;
-    toClient({ jsonrpc: '2.0', id: failedId, error });
+    const rawFailure = { jsonrpc: '2.0', id: failedId, error };
+    const trackedFailure = errorRelay.response(rawFailure);
+    toClient(trackedFailure !== rawFailure ? trackedFailure : classifyAccountErrorResponse(rawFailure));
     for (const pending of queued.splice(0)) {
       const pendingMessage = parseLine(pending);
       if (pendingMessage && typeof pendingMessage.method === 'string' && pendingMessage.id !== undefined) {
@@ -494,6 +500,7 @@ function startRemoteWorkspace(agyPath, host) {
         failOpen(message.error);
         return;
       }
+      errorRelay.request(sessionRequest);
       toAgent(sessionRequest);
       phase = 'opening-session';
       return;
@@ -503,7 +510,9 @@ function startRemoteWorkspace(agyPath, host) {
         failOpen(message.error);
         return;
       }
-      toClientLine(line, agent.stdout);
+      const classified = errorRelay.response(message);
+      if (classified !== message) toClient(classified, agent.stdout);
+      else toClientLine(line, agent.stdout);
       sessionRequest = null;
       phase = 'session';
       for (const pending of queued.splice(0)) forwardClientLine(pending);
@@ -513,7 +522,12 @@ function startRemoteWorkspace(agyPath, host) {
       const handled = steering.handleAgentResponse(message);
       if (handled.action === 'drop') return;
       if (handled.action === 'reply') {
-        toClient(handled.message, agent.stdout);
+        toClient(errorRelay.response(handled.message), agent.stdout);
+        return;
+      }
+      const classified = errorRelay.response(message);
+      if (classified !== message) {
+        toClient(classified, agent.stdout);
         return;
       }
       toClientLine(line, agent.stdout);
@@ -524,6 +538,15 @@ function startRemoteWorkspace(agyPath, host) {
     const update = message.method === 'session/update' && params && isObject(params.update) ? params.update : null;
     const isToolUpdate = Boolean(update) && (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update');
     if (!params || (!isPermission && !isToolUpdate)) {
+      if (update) {
+        const action = errorRelay.notification(message);
+        if (action) {
+          if (action.flush) {
+            for (const item of action.flush) toClient(item, agent.stdout);
+          }
+          if (action.hold) return;
+        }
+      }
       toClientLine(line, agent.stdout);
       return;
     }
@@ -540,8 +563,17 @@ function startRemoteWorkspace(agyPath, host) {
       );
       return;
     }
+    const outgoing = verdict.type === 'mcp'
+      ? { ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }
+      : message;
+    if (isToolUpdate) {
+      const action = errorRelay.notification(outgoing);
+      if (action?.flush) {
+        for (const item of action.flush) toClient(item, agent.stdout);
+      }
+    }
     if (verdict.type === 'mcp') {
-      toClient({ ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }, agent.stdout);
+      toClient(outgoing, agent.stdout);
       return;
     }
     toClientLine(line, agent.stdout);

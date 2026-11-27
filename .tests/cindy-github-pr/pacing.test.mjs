@@ -34,6 +34,19 @@ test('pacing: each stage looks at its own interval; fast reasons look every tick
   assert.equal(at(looked({ verdict: 'READY' }), 28).due, false);
   assert.equal(at(looked({ verdict: 'BLOCKED_HUMAN' }), 29).due, true);
   assert.equal(at(looked({ humanOnlyPending: true }), 28).pace, 'waiting');
+  // Explicit human waits (plain merge/approval wait or set-aside failure) cool down to waiting (30m),
+  // whereas technical waits (checks/baseline/retry) stay active (5m) and due waits wake immediately.
+  const humanWait = { kind: 'human', headSha: 'aaa', reason: 'waiting for merge', createdAt: T0 - 2 * 60 * MIN, until: null, checks: [], threads: [] };
+  assert.equal(at(looked({ verdict: 'READY', wait: humanWait }), 28).due, false);
+  assert.equal(at(looked({ verdict: 'READY', wait: humanWait }), 28).pace, 'waiting');
+  assert.equal(at(looked({ verdict: 'READY', wait: humanWait }), 29).due, true);
+  const setAsideHumanWait = { ...humanWait, until: T0 + 20 * 60 * MIN, checks: [{ name: 'CodeQL', workflowName: '', outcome: 'failed' }] };
+  assert.equal(at(looked({ verdict: 'NEEDS_WORK', watch: { failedChecks: ['CodeQL'] }, wait: setAsideHumanWait }), 28).pace, 'waiting');
+  assert.equal(at(looked({ verdict: 'NEEDS_WORK', watch: { failedChecks: ['CodeQL'] }, wait: { ...setAsideHumanWait, until: T0 } }), 1).pace, 'fast');
+  for (const kind of ['checks', 'baseline', 'retry']) {
+    const techWait = { kind, headSha: 'aaa', reason: 'waiting', createdAt: T0 - 2 * 60 * MIN, until: T0 + 60 * MIN, checks: [], threads: [] };
+    assert.equal(at(looked({ verdict: 'READY', wait: techWait }), 5).pace, 'active', kind);
+  }
   // quiet: drafts, or nothing changed for six hours
   assert.equal(at(looked({ watch: { isDraft: true } }), 58).due, false);
   assert.equal(at(looked({ lastChangeAt: T0 - 7 * 60 * MIN }), 59).due, true);
@@ -41,6 +54,21 @@ test('pacing: each stage looks at its own interval; fast reasons look every tick
   for (const extra of [{ pendingWatch: {} }, { nextAllowAt: T0 }, { watch: { checksAwaitedSince: new Date(T0 - 20 * MIN).toISOString() } }, { settleUntil: T0 + 10 * MIN }, { settleUntil: T0 - MIN }]) {
     assert.equal(at(looked({ verdict: 'READY', ...extra }), 1).due, true, JSON.stringify(extra));
   }
+  // terminal-backoff: skip API calls until terminalBackoffUntil, EXCEPT an unacknowledged
+  // host-deferred retry of terminal-backoff-attempt within minPassSpacingMs.
+  const terminalAttempt = looked({
+    merged: true,
+    pendingWatch: watch(),
+    lastDecisionReason: 'terminal-backoff-attempt',
+    lastPassAt: T0,
+    terminalPassCount: 4,
+    terminalBackoffUntil: T0 + 120 * MIN,
+  });
+  assert.equal(pacingDue(terminalAttempt, T0 + 1.5 * MIN).due, true, '宿主 90s 顺延重试必须放行进入 decide()');
+  assert.equal(pacingDue(terminalAttempt, T0 + 1.5 * MIN, { minPassSpacingMs: 0 }).due, false, '关闭空放行间隔时保持退避');
+  assert.equal(pacingDue(terminalAttempt, T0 + 5 * MIN).due, false, '超过空放行窗口后恢复退避');
+  assert.equal(pacingDue({ ...terminalAttempt, pendingWatch: undefined }, T0 + 1.5 * MIN).due, false, '已 --ack 确认后即使在 5 分钟内也不再重复放行');
+  assert.equal(pacingDue({ ...terminalAttempt, lastDecisionReason: 'terminal-backoff' }, T0 + 1.5 * MIN).due, false, '普通退避跳过态保持零调用');
 });
 
 test('settle: expected bots answer by a submitted review on the head or a thumbs-up reaction', () => {

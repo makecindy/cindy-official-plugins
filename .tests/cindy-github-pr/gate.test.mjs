@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -22,6 +22,7 @@ import {
   snapshotFailurePlan,
 } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
 import { classifyMergeQueue } from '../../cindy-github/skills/pr/scripts/lib/merge-queue.mjs';
+import { pacingDue } from '../../cindy-github/skills/pr/scripts/lib/follow-pacing.mjs';
 
 const gatePath = fileURLToPath(new URL('../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs', import.meta.url));
 
@@ -128,14 +129,15 @@ function createFixture(t) {
       return { code, stdout, stderr, json: () => JSON.parse(stdout) };
     },
     /** 真实子进程调用指定路径的脚本:只给软链入口用例用,验证 CLI 入口判据本身。 */
-    runVia(scriptPath, extraArgs = []) {
+    runVia(scriptPath, extraArgs = [], hookPayload) {
       return new Promise((resolve) => {
-        execFile(process.execPath, [scriptPath, ...gateArgs(extraArgs)], {
+        const child = execFile(process.execPath, [scriptPath, ...gateArgs(extraArgs)], {
           encoding: 'utf8',
           env: { ...process.env, FAKE_SNAPSHOT_OUT: outFile },
         }, (err, stdout, stderr) => {
           resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout: stdout ?? '', stderr: stderr ?? '' });
         });
+        if (hookPayload) child.stdin.end(JSON.stringify(hookPayload));
       });
     },
   };
@@ -227,6 +229,53 @@ test('normalizeConflicting:两套字段域都认,未知窗口 carry-forward', ()
 
 // ── 事件:检查 ──────────────────────────────────────────────────────────────
 
+test('PR launcher selects a supported Node from PATH and preserves hook stdin, exit codes and child snapshot runtime', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-node-launcher-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const launcher = path.join(path.dirname(gatePath), 'pr-node.cjs');
+  const stateDir = path.join(dir, 'state');
+  const fakeSnapshot = path.join(dir, 'fake-snapshot.mjs');
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fs.writeFileSync(fakeSnapshot, `if (Number(process.versions.node.split('.')[0]) < 18) process.exit(9);
+    if (process.argv.includes('--probe')) process.exit(1);
+    process.stdout.write(${JSON.stringify(JSON.stringify(red))});`);
+  // CI need not have an ancient Node installed. Simulate its reported version
+  // and executable identity, while selecting and actually running a modern
+  // executable from PATH. The real old binary is exercised by the dev-app test.
+  const simulateOld = `Object.defineProperty(process.versions,'node',{value:'8.12.0'});
+    Object.defineProperty(process,'execPath',{value:${JSON.stringify(path.join(dir, 'obsolete-node'))}});
+    const file=process.argv[1]; process.argv=[process.execPath,file,...process.argv.slice(2)]; require(file);`;
+  const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'path'));
+  const invoke = (extra = [], payload, modernPath = path.dirname(process.execPath)) => spawnSync(process.execPath,
+    ['-e', simulateOld, launcher, 'pr-heartbeat-gate.mjs', PR_URL,
+      '--state-dir', stateDir, '--snapshot', fakeSnapshot, '--no-pacing', ...extra], {
+      encoding: 'utf8', input: payload ? JSON.stringify(payload) : '', timeout: 15000,
+      env: { ...cleanEnv, PATH: modernPath, CINDY_PR_TRACE: '0' },
+    });
+  const payload = { event: 'schedule-pre-run', scheduleId: 'first-schedule', runId: 'first', firedAt: T0 };
+  const first = invoke([], payload);
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, /events=\[checks-failed\]/);
+  const saved = () => JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'));
+  assert.equal(saved().followStartId, 'first-schedule', 'real hook stdin must reach the modern child');
+  assert.equal(invoke(['--resume', 'Inspected the failed fixture check.']).status, 0);
+  const skipped = invoke([], { ...payload, runId: 'second', lastFinishedAt: T0 });
+  assert.equal(skipped.status, 2, skipped.stderr);
+  assert.match(skipped.stdout, /SKIP/);
+  const before = fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8');
+  const unsupported = invoke([], payload, dir);
+  assert.equal(unsupported.status, 1);
+  assert.match(unsupported.stderr, /needs Node\.js 18 or newer/);
+  assert.equal(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'), before);
+  // A modern Node already running the launcher does not need PATH probing.
+  const current = spawnSync(process.execPath, [launcher, 'pr-heartbeat-gate.mjs', '--help'], {
+    encoding: 'utf8', env: { ...cleanEnv, PATH: dir }, timeout: 15000,
+  });
+  assert.equal(current.status, 0, current.stderr);
+  assert.match(current.stderr, /Usage: node pr-heartbeat-gate/);
+});
+
 test('检查失败按名字每个 head 只报一次;换 head 后再失败会再报', () => {
   const red = snap({ checks: [check('build', 'failed', { required: true }), check('lint')] });
   const first = evaluateWatch(seenWatch(snap()), red, T0);
@@ -271,6 +320,218 @@ test('必需检查全部通过报一次;还在跑的其它检查结束时再报�
   assert.deepEqual(r.events, [{ kind: 'checks-passed', count: 2, required: false }], '欠的那一次');
   r = evaluateWatch(r.next, pushed([check('build', 'passed', { required: true }), check('codeql'), check('late', 'pending')]), T0 + 30 * MIN);
   assert.deepEqual(kinds(r), [], '后来冒出的非必需检查不唤起');
+});
+
+test('host test and self-test preview an existing wait and unacknowledged event without writing any follow state', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', checks: [{ name: 'build' }], threads: [] });
+  fx.advance(5);
+  fx.setSnapshot({ ...red, checks: [...red.checks, check('lint', 'failed')] });
+  assert.equal((await fx.run()).code, 0);
+  assert.ok(fx.readState().wait && fx.readState().pendingWatch);
+  const dir = path.dirname(fx.stateFile());
+  const files = () => Object.fromEntries(fs.readdirSync(dir).sort().map(name =>
+    [name, fs.readFileSync(path.join(dir, name), 'utf8')]));
+  const before = files();
+  // The actual Host uses these two pairs of IDs without lastFinishedAt.
+  // A preview which sees new work must still not change the production state.
+  fx.setSnapshot({ ...red, checks: [...red.checks, check('lint', 'failed'), check('package', 'failed')] });
+  for (const id of ['test', 'self-test']) {
+    const result = await fx.runVia(gatePath, [], { event: 'schedule-pre-run',
+      scheduleId: id, scheduleName: 'PR #42', runId: id, firedAt: Date.now() });
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /diagnostic only, follow-up state unchanged/);
+    assert.deepEqual(files(), before, 'PR state, repository state and trace stay byte-identical');
+  }
+  const production = await fx.run();
+  assert.equal(production.code, 0, 'the real schedule can still deliver its pending event');
+  const first = createFixture(t);
+  first.setSnapshot(red);
+  assert.equal((await first.runVia(gatePath, [], { event: 'schedule-pre-run',
+    scheduleId: 'test', runId: 'test', firedAt: Date.now() })).code, 0);
+  assert.equal(fs.existsSync(first.stateFile()), false, 'diagnostics do not create a new follower');
+});
+
+test('a partially failed batch reports its final result once even with no new failure', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing', 'pending_checks'],
+    checks: [check('build', 'failed', { required: true }), check('lint', 'pending'), check('package', 'pending')] });
+  fx.setSnapshot(red);
+  let first = await fx.run();
+  assert.equal(first.code, 0);
+  assert.match(first.stdout, /checks-failed/);
+  assert.match(first.stdout, /notify the user \(schedule_notify_current_run\)/);
+  assert.equal((await fx.run(['--resume', 'Inspected the initial failure.'])).code, 0);
+  fx.advance(5);
+  fx.setSnapshot({ ...red, checks: [red.checks[0], check('lint'), red.checks[2]] });
+  assert.equal((await fx.run()).code, 2);
+  fx.advance(5);
+  const finished = { ...red, blockers: ['ci_failing'], checks: [red.checks[0], check('lint'), check('package')] };
+  fx.setSnapshot(finished);
+  const final = await fx.run();
+  assert.equal(final.code, 0);
+  assert.match(final.stdout, /checks-finished/);
+  assert.match(final.stdout, /All 3 checks finished.*1 still failed/);
+  assert.match(final.stdout, /notify the user \(schedule_notify_current_run\)/);
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /retry-unacked/);
+  assert.equal((await fx.run(['--resume', 'Reported the final failure.'])).code, 0);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
+  // A new follower's first snapshot is already final: exactly the failure event.
+  const fresh = createFixture(t);
+  fresh.setSnapshot(finished);
+  assert.match((await fresh.run()).stdout, /events=\[checks-failed\]/);
+  assert.equal((await fresh.run(['--resume', 'Reported the failure.'])).code, 0);
+  fresh.advance(5);
+  assert.equal((await fresh.run()).code, 2);
+});
+
+test('a new schedule observes an existing failure even if a stopped follower had acknowledged it', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', reason: 'Previous follower investigated.', checks: [{ name: 'build' }], threads: [] });
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2, 'reusing a schedule preserves its recorded wait');
+  fx.setTrigger({ firstScheduleId: 'new-schedule' });
+  fx.advance(5);
+  assert.match((await fx.run(['--pacing'])).stdout, /events=\[checks-failed\]/);
+  assert.equal(fx.readState().wait, undefined, 'stopped follower wait must not suppress the initial failure');
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /retry-unacked/, 'repeated first hook does not reset pending watch');
+  assert.equal((await fx.run(['--resume', 'Reported the existing failure.'])).code, 0);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
+});
+
+test('a new follower reports green checks even when the old owner was waiting only for approval', async t => {
+  const fx = createFixture(t);
+  const approval = snap({
+    verdict: 'NEEDS_WORK', blockers: ['unresolved_review_threads', 'branch_protection_blocked'],
+    reviewThreads: { totalCount: 1, unresolvedCount: 1, activeUnresolvedCount: 1, truncated: false,
+      nodes: [{ id: 'approval', isResolved: false, isOutdated: false,
+        comments: [comment('A1', 'lead', '2026-10-20T09:00:00Z', 'This needs explicit approval from a designated maintainer.')] }] },
+  });
+  fx.setSnapshot(approval);
+  assert.equal((await fx.run()).code, 0);
+  assert.equal((await fx.run(['--resume', 'Old owner reported the approval blocker.'])).code, 0);
+  const old = fx.readState();
+  assert.equal(old.humanOnlyPending, true);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2, 'same owner remains quiet');
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  fx.advance(5);
+  const first = await fx.run(['--pacing']);
+  assert.equal(first.code, 0, first.stdout);
+  assert.match(first.stdout, /events=\[checks-passed\]/);
+  const next = fx.readState();
+  assert.equal(next.headOid, old.headOid);
+  assert.equal(next.roundCount, old.roundCount);
+  assert.equal(next.lastAckAt, undefined, 'old confirmation must not constitute new owner acknowledgement');
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /retry-unacked/);
+  assert.equal((await fx.run(['--resume', 'New owner reported the approval blocker.'])).code, 0);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2, 'confirmed result is deduplicated again');
+});
+
+test('new follower retains actual CI registration history and the same-head deadline', async t => {
+  for (const mode of ['same-head', 'new-head', 'previously-reminded', 'unacknowledged', 'unavailable', 'registered', 'never-had-checks']) {
+    const fx = createFixture(t);
+    const green = snap();
+    const missing = snap({ latestCommitOid: 'bbb2222', verdict: 'NOT_READY', blockers: ['pending_checks'],
+      checks: [], checksSummary: { total: 0, pending: 0, failed: 0, unavailable: false, truncated: false } });
+    fx.setSnapshot(mode === 'never-had-checks' ? { ...missing, latestCommitOid: green.latestCommitOid } : green);
+    await fx.run();
+    await fx.run(['--resume', 'old owner observed']);
+    fx.advance(5);
+    fx.setSnapshot(missing);
+    assert.equal((await fx.run()).code, 2);
+    const started = fx.readState().watch.checksAwaitedSince;
+    if (mode !== 'never-had-checks') assert.ok(started);
+    if (mode === 'previously-reminded' || mode === 'unacknowledged') {
+      fx.advance(15);
+      assert.match((await fx.run()).stdout, /no-checks/);
+      if (mode === 'previously-reminded') await fx.run(['--resume', 'old owner reported absent checks']);
+    }
+    if (mode === 'new-head') fx.setSnapshot({ ...missing, latestCommitOid: 'ccc3333' });
+    if (mode === 'unavailable') fx.setSnapshot({ ...missing, checksSummary: { unavailable: true } });
+    if (mode === 'registered') fx.setSnapshot({ ...missing, checks: [check('build', 'pending')] });
+    fx.setTrigger({ firstScheduleId: 'new-follower' });
+    fx.advance(15);
+    const first = await fx.run();
+    if (['same-head', 'unacknowledged'].includes(mode)) {
+      assert.equal(first.code, 0, mode + ': ' + first.stdout);
+      assert.match(first.stdout, /no-checks/);
+      await fx.run(['--resume', 'new owner reported absent checks']);
+    } else {
+      assert.equal(first.code, 2, mode + ': ' + first.stdout);
+      if (mode === 'unavailable') {
+        assert.equal(fx.readState().watch.checksAwaitedSince, started);
+        fx.setSnapshot(missing);
+        fx.advance(5);
+        assert.match((await fx.run()).stdout, /no-checks/);
+        await fx.run(['--resume', 'new owner reported absent checks']);
+      } else if (mode === 'registered') {
+        assert.equal(fx.readState().watch.checksAwaitedSince, null);
+      } else if (mode !== 'never-had-checks') {
+        assert.equal(fx.readState().watch.checksAwaitedSince, iso(fx.now()), mode);
+        fx.advance(15);
+        assert.match((await fx.run()).stdout, /no-checks/);
+        await fx.run(['--resume', 'new owner reported absent checks']);
+      }
+    }
+    fx.advance(20);
+    assert.equal((await fx.run()).code, 2, mode + ': no repeated reminder');
+  }
+});
+
+test('first hook reads the actual scheduler stdin and re-observes a stopped follower\'s red check', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', checks: [{ name: 'build' }], threads: [] });
+  const payload = { event: 'schedule-pre-run', scheduleId: 'new-follow', runId: 'first', firedAt: Date.now() };
+  const first = await fx.runVia(gatePath, [], payload);
+  assert.equal(first.code, 0, first.stderr);
+  assert.match(first.stdout, /events=\[checks-failed\]/);
+  assert.equal((await fx.runVia(gatePath, ['--resume', 'Reported the red result.'])).code, 0);
+  const later = await fx.runVia(gatePath, [], { ...payload, runId: 'second', lastFinishedAt: Date.now() });
+  assert.equal(later.code, 2, later.stderr);
+});
+
+test('a pre-upgrade partially failing watch still reports completion after unavailable data', () => {
+  const red = snap({ checks: [check('build', 'failed', { required: true }), check('lint', 'pending')] });
+  const old = seenWatch(red);
+  delete old.failureCompletionOwed;
+  const unavailable = evaluateWatch(old, snap({ checks: [], checksSummary: { unavailable: true } }), T0 + MIN);
+  assert.deepEqual(kinds(unavailable), []);
+  const done = evaluateWatch(unavailable.next, snap({ checks: [red.checks[0], check('lint')] }), T0 + 2 * MIN);
+  assert.deepEqual(kinds(done), ['checks-finished']);
+});
+
+test('a timed baseline wait still reports a partial batch becoming final without extending its deadline', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing', 'pending_checks'],
+    checks: [check('build', 'failed', { required: true }), check('lint', 'pending')] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', checks: [{ name: 'build' }], threads: [] });
+  const deadline = fx.readState().wait.until;
+  fx.advance(5);
+  fx.setSnapshot({ ...red, blockers: ['ci_failing'], checks: [red.checks[0], check('lint')] });
+  const result = await fx.run();
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /events=\[checks-finished\]/);
+  assert.equal(fx.readState().wait.until, deadline);
+  // A new commit must not carry this old completion obligation.
+  const nextHead = evaluateWatch(seenWatch(red), snap({ latestCommitOid: 'new-head', checks: [red.checks[0], check('lint')] }), T0 + MIN);
+  assert.deepEqual(kinds(nextHead), ['checks-failed']);
 });
 
 test('读不到检查时保留原状态,不把「没读到」当成「全部通过」或「没有检查」', () => {
@@ -467,12 +728,121 @@ test('decide:空放行(宿主顺延、agent 没跑)照常放行但不消耗重�
   assert.equal(decide({ snap: red, previous: { ...previous, lastPassAt: T0 - 11 * MIN }, now: T0 }).nextPendingCount, 2);
 });
 
-test('decide:merged / closed 每轮放行;截断的快照放行且不推进基线', () => {
+test('decide:merged / closed 前 N 次快速放行后进入递增退避且跨 --ack 保留，重开后清零;截断的快照放行且不推进基线', () => {
+  const at = (m) => T0 + m * MIN;
   const watch = seenWatch(snap());
-  const merged = decide({ snap: snap({ merged: true }), previous: { watch }, now: T0 });
-  assert.equal(merged.reason, 'terminal');
-  const again = decide({ snap: snap({ merged: true }), previous: { watch, pendingWatch: merged.nextPendingWatch, pendingKey: 'terminal', pendingPassCount: 9 }, now: T0 });
-  assert.equal(again.exitCode, 0, '收口不受重试上限约束');
+  const mergedSnap = snap({ merged: true });
+  const d1 = decide({ snap: mergedSnap, previous: { watch }, now: at(0), maxPassAttempts: 2, retryBackoffMs: 30 * MIN });
+  assert.equal(d1.exitCode, 0);
+  assert.equal(d1.reason, 'terminal');
+  assert.equal(d1.nextTerminalPassCount, 1);
+
+  // Host-deferred empty pass (< minPassSpacingMs) does not consume a terminal cleanup attempt.
+  const empty = decide({
+    snap: mergedSnap,
+    previous: { watch, pendingWatch: d1.nextPendingWatch, pendingKey: 'terminal', pendingPassCount: 1, terminalPassCount: 1, lastPassAt: at(0) },
+    now: at(1.5),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(empty.exitCode, 0);
+  assert.equal(empty.reason, 'terminal');
+  assert.equal(empty.nextTerminalPassCount, 1);
+
+  const d2 = decide({
+    snap: mergedSnap,
+    previous: { watch, pendingWatch: d1.nextPendingWatch, pendingKey: 'terminal', pendingPassCount: 1, terminalPassCount: 1, lastPassAt: at(0) },
+    now: at(5),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(d2.exitCode, 0);
+  assert.equal(d2.reason, 'terminal');
+  assert.equal(d2.nextTerminalPassCount, 2);
+
+  // Even after --ack cleared pending*, terminalPassCount survives and enters 30m backoff on next tick.
+  const d3 = decide({
+    snap: mergedSnap,
+    previous: { watch, terminalPassCount: 2, lastPassAt: at(5) },
+    now: at(10),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(d3.exitCode, 2);
+  assert.equal(d3.reason, 'terminal-backoff');
+  assert.equal(d3.nextTerminalPassCount, 2);
+  assert.equal(d3.nextTerminalBackoffUntil, at(35));
+
+  // Once backoff expires, wakes with user-notification guidance and escalates to 2h.
+  const d4 = decide({
+    snap: mergedSnap,
+    previous: { watch, terminalPassCount: 2, terminalBackoffUntil: at(35), lastPassAt: at(5) },
+    now: at(35),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(d4.exitCode, 0);
+  assert.equal(d4.reason, 'terminal-backoff-attempt');
+  assert.match(d4.detail, /schedule_notify_current_run/);
+  assert.equal(d4.nextTerminalPassCount, 3);
+  assert.equal(d4.nextTerminalBackoffUntil, at(35 + 120));
+
+  // Host-deferred retry of an unacknowledged terminal-backoff-attempt keeps notify guidance & backoff deadline.
+  const d4Retry = decide({
+    snap: mergedSnap,
+    previous: {
+      watch,
+      merged: true,
+      pendingWatch: d4.nextPendingWatch,
+      pendingKey: 'terminal',
+      pendingPassCount: d4.nextPendingCount,
+      lastDecisionReason: 'terminal-backoff-attempt',
+      terminalPassCount: d4.nextTerminalPassCount,
+      terminalBackoffUntil: d4.nextTerminalBackoffUntil,
+      lastPassAt: at(35),
+    },
+    now: at(36.5),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(d4Retry.exitCode, 0);
+  assert.equal(d4Retry.reason, 'terminal-backoff-attempt');
+  assert.match(d4Retry.detail, /schedule_notify_current_run/);
+  assert.equal(d4Retry.nextTerminalPassCount, 3);
+  assert.equal(d4Retry.nextTerminalBackoffUntil, at(35 + 120));
+
+  // Once acknowledged (pendingWatch cleared), even a tick within minPassSpacingMs stays in terminal-backoff.
+  const d4AfterAck = decide({
+    snap: mergedSnap,
+    previous: {
+      watch,
+      merged: true,
+      lastDecisionReason: 'terminal-backoff-attempt',
+      terminalPassCount: d4.nextTerminalPassCount,
+      terminalBackoffUntil: d4.nextTerminalBackoffUntil,
+      lastPassAt: at(35),
+    },
+    now: at(36.5),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(d4AfterAck.exitCode, 2);
+  assert.equal(d4AfterAck.reason, 'terminal-backoff');
+  assert.equal(d4AfterAck.nextPendingWatch, null);
+  assert.equal(d4AfterAck.nextTerminalPassCount, 3);
+  assert.equal(d4AfterAck.nextTerminalBackoffUntil, at(35 + 120));
+
+  // Reopening a closed PR clears terminal backoff state.
+  const reopened = decide({
+    snap: snap({ closed: false, merged: false }),
+    previous: { watch, closed: true, terminalPassCount: 3, terminalBackoffUntil: at(35 + 120), lastPassAt: at(35) },
+    now: at(40),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(reopened.nextTerminalPassCount, undefined);
+  assert.equal(reopened.nextTerminalBackoffUntil, undefined);
+
   const truncated = decide({ snap: snap({ gate: { truncated: true } }), previous: { watch }, now: T0 });
   assert.equal(truncated.reason, 'truncated');
   assert.equal(truncated.nextPendingWatch, watch);
@@ -654,7 +1024,253 @@ test('低成本探测:与上次完整读取一致时不做完整快照;有理由
   assert.equal(probeAllowsSkip(settled, previous.probe, now + 31 * MIN), false, '30 分钟完整读一次');
   assert.equal(probeAllowsSkip(settled, { ...previous.probe, status: 'x' }, now + MIN), false);
   assert.equal(probeAllowsSkip(settled, null, now + MIN), false, '探测失败');
-  assert.equal(probeAllowsSkip({ ...settled, lastPassAt: now - 24 * 60 * MIN }, previous.probe, now + MIN), false, '保底巡检到点');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['ci_failing'], lastPassAt: now - 24 * 60 * MIN }, previous.probe, now + MIN), false, '保底巡检到点');
+  // 当保底巡检在 decide() 中被人工等待/活跃 wait/defer 抑制时，探测一致不应丢弃结果强拉完整快照。
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'READY', lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, 'READY 等合并超过 24 小时仍可走探测');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'BLOCKED_HUMAN', blockers: ['approval_required'], lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, '仅等人工审批超过 24 小时仍可走探测');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['approval_required'], humanOnlyPending: true, lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, 'humanOnlyPending 超过 24 小时仍可走探测');
+  const activeHumanWait = { kind: 'human', headSha: 'aaa1111', reason: 'wait merge', createdAt: now - 48 * 60 * MIN, until: null, checks: [], threads: [] };
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['ci_failing'], wait: activeHumanWait, lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, '未到点的 wait 不应被静默门禁强拉完整快照');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['ci_failing'], nextAllowAt: now + 30 * MIN, lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, '未到点的 defer 不应被静默门禁强拉完整快照');
+  // Base-branch churn briefly flips mergeable to UNKNOWN while GitHub recalculates; keep skipping
+  // when everything else matches, while real transitions (CONFLICTING / UNKNOWN->MERGEABLE) still miss.
+  const knownProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0', base: 'base-1' };
+  const transientUnknown = { ...knownProbe, status: 'OPEN false UNKNOWN aaa1111  SUCCESS:2 ', base: 'base-2' };
+  const conflicted = { ...knownProbe, status: 'OPEN false CONFLICTING aaa1111  SUCCESS:2 ', base: 'base-2' };
+  const settledKnown = { ...settled, probe: knownProbe };
+  assert.equal(probeAllowsSkip(settledKnown, transientUnknown, now + MIN), true, '瞬态 UNKNOWN 不应打穿已知 MERGEABLE 探测');
+  assert.equal(probeAllowsSkip(settledKnown, conflicted, now + MIN), false, 'MERGEABLE → CONFLICTING 必须完整读取');
+  assert.equal(probeAllowsSkip({ ...settledKnown, probe: transientUnknown }, knownProbe, now + MIN), false, '上次未知变为已知必须完整读取');
+  assert.equal(
+    probeAllowsSkip({ ...settledKnown, watch: { ...settledKnown.watch, baseSha: 'base-1' } }, transientUnknown, now + MIN),
+    false,
+    '失败期间 base 前进仍须完整读取',
+  );
+});
+
+test('终态退避端到端: 复用调度 --ack 后不每 5 分钟空转，且退避期内零 API 调用', async (t) => {
+  const fx = createFixture(t);
+  fx.setSnapshot(snap({ merged: true, verdict: 'MERGED_CLEANUP_READY' }));
+  for (let i = 0; i < 3; i += 1) {
+    const r = await fx.run(['--json']);
+    assert.equal(r.code, 0);
+    assert.equal(r.json().reason, 'terminal');
+    assert.equal((await fx.run(['--ack'])).code, 0);
+    fx.advance(5);
+  }
+  // 4th tick enters terminal-backoff (30 min from 3rd pass), skipping without waking agent.
+  const b1 = await fx.run(['--json']);
+  assert.equal(b1.code, 2);
+  assert.equal(b1.json().reason, 'terminal-backoff');
+
+  // With pacing enabled (production default), ticks inside terminalBackoffUntil skip with zero GitHub calls.
+  fx.advance(5);
+  assert.equal(pacingDue(fx.readState(), fx.now()).due, false);
+  assert.equal(pacingDue(fx.readState(), fx.now()).reason, 'terminal-backoff');
+  assert.equal(pacingDue(fx.readState(), fx.now(), { triggered: true }).due, true, '宿主事件触发仍可穿透以检测重开');
+
+  // Even with --no-pacing, decide() stays in terminal-backoff without waking the agent.
+  const b2 = await fx.run(['--json']);
+  assert.equal(b2.code, 2);
+  assert.equal(b2.json().reason, 'terminal-backoff');
+
+  // Once the 30-minute window passes, pacing becomes due and gate emits terminal-backoff-attempt with notify directive, escalating to 2h.
+  fx.advance(25);
+  assert.equal(pacingDue(fx.readState(), fx.now()).due, true);
+  const b3 = await fx.run(['--pacing', '--json']);
+  assert.equal(b3.code, 0);
+  assert.equal(b3.json().reason, 'terminal-backoff-attempt');
+  assert.match(b3.json().detail, /schedule_notify_current_run/);
+  assert.equal(fx.readState().terminalPassCount, 4);
+  const nextDeadline = fx.now() + 120 * MIN;
+  assert.equal(fx.readState().terminalBackoffUntil, nextDeadline);
+
+  // If the host defers that terminal-backoff-attempt (e.g. user-active) and retries ~90s later
+  // with pacing enabled (default minPassSpacingMinutes=5), pacing must let it through so decide()
+  // replays the unexecuted reminder with the notify directive and unchanged deadline.
+  fx.advance(1.5);
+  const retryArgs = ['--pacing', '--min-pass-spacing-minutes', '5', '--json'];
+  assert.equal(pacingDue(fx.readState(), fx.now()).due, true);
+  const b3Retry = await fx.run(retryArgs);
+  assert.equal(b3Retry.code, 0);
+  assert.equal(b3Retry.json().reason, 'terminal-backoff-attempt');
+  assert.match(b3Retry.json().detail, /schedule_notify_current_run/);
+  assert.equal(fx.readState().terminalPassCount, 4);
+  assert.equal(fx.readState().terminalBackoffUntil, nextDeadline);
+
+  // Once the agent actually runs and acknowledges (--ack), even a tick 90s later stays in
+  // terminal-backoff with zero GitHub calls.
+  assert.equal((await fx.run(['--ack'])).code, 0);
+  fx.advance(1.5);
+  const readsBeforeAckSkip = fx.snapshotRuns();
+  const b3PostAck = await fx.run(retryArgs);
+  assert.equal(b3PostAck.code, 2);
+  assert.equal(b3PostAck.json().reason, 'not-due');
+  assert.match(b3PostAck.json().detail, /pace=terminal-backoff/);
+  assert.equal(fx.snapshotRuns(), readsBeforeAckSkip, '已确认后在退避期内不得调用 GitHub');
+});
+
+test('宿主触发完整快照会用 snap.probe 刷新探测基线，下一轮普通巡检直接命中 unchanged', async (t) => {
+  const fx = createFixture(t);
+  const freshProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0', base: 'base-1' };
+  fx.setProbe(freshProbe);
+  fx.setSnapshot({ ...snap(), probe: freshProbe });
+  // Triggered run skips runProbe(), yet persists snap.probe into state.
+  assert.equal((await fx.run(['--triggered'])).code, 0);
+  assert.equal((await fx.run(['--ack'])).code, 0);
+  assert.deepEqual(fx.readState().probe, freshProbe);
+
+  fx.advance(10);
+  const reads = fx.snapshotRuns();
+  const next = await fx.run(['--json']);
+  assert.equal(next.code, 2);
+  assert.equal(next.json().reason, 'unchanged');
+  assert.equal(fx.snapshotRuns(), reads, '命中刷新后的 probe，不再补拉完整快照');
+});
+
+test('快照检查与 GraphQL 探测错位 (probe: null) 时不缓存新探针且下轮按 5 分钟强制完整重读', async (t) => {
+  const fx = createFixture(t);
+  const greenProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0', base: 'base-1' };
+  const failedProbe = { status: 'OPEN false MERGEABLE aaa1111  FAILURE:1,SUCCESS:2 ', remarks: '0  0  0', base: 'base-1' };
+  const greenSnap = snap({ verdict: 'READY' });
+  fx.setProbe(greenProbe);
+  fx.setSnapshot({ ...greenSnap, probe: greenProbe });
+  assert.equal((await fx.run(['--pacing'])).code, 0);
+  assert.equal((await fx.run(['--ack'])).code, 0);
+  // Cool down past 1h so the PR is in waiting pace (30 min).
+  fx.writeState({ lastPassAt: fx.now() - 120 * MIN });
+
+  // A check reruns and fails between gh pr view and GraphQL: probe already sees FAILURE:1,
+  // while snap.checks still carries the older green rollup, so pr-snapshot emits probe: null.
+  fx.advance(30);
+  fx.setProbe(failedProbe);
+  fx.setSnapshot({ ...greenSnap, probe: null });
+  const skewed = await fx.run(['--pacing', '--json']);
+  assert.equal(skewed.code, 2);
+  assert.equal(fx.readState().probe, undefined, '错位快照不得缓存新的或旧的 probe 基线');
+  assert.equal(fx.readState().inFlight, true, '错位快照标记 inFlight，促使下一轮 5 分钟完整重读');
+
+  // 5 minutes later (not 30 minutes!), pacing is due and forces a full snapshot that catches the failure.
+  fx.advance(5);
+  fx.setSnapshot({
+    ...snap({ checks: [check('build', 'passed', { required: true }), check('lint', 'failed', { required: true })], verdict: 'NEEDS_WORK', blockers: ['ci_failing'] }),
+    probe: failedProbe,
+  });
+  const readsBefore = fx.snapshotRuns();
+  const caught = await fx.run(['--pacing', '--json']);
+  assert.equal(caught.code, 0, caught.stdout);
+  assert.equal(fx.snapshotRuns(), readsBefore + 1);
+  assert.match(caught.json().detail, /events=\[checks-failed\]/);
+  assert.deepEqual(fx.readState().probe, failedProbe);
+  assert.equal(fx.readState().inFlight, false);
+
+  // Unavailable checks must also never cache a probe baseline even on legacy snapshots without snap.probe.
+  const fx2 = createFixture(t);
+  fx2.setProbe(failedProbe);
+  fx2.setSnapshot(snap({ checksSummary: { unavailable: true } }));
+  await fx2.run();
+  assert.equal(fx2.readState().probe, undefined, 'checks unavailable 不得持久化 probe 基线');
+});
+
+test('超过 24 小时的人工等待在探测一致时跳过完整快照；首次 gh api 未登录报错仍诊断为 auth', async (t) => {
+  const fx = createFixture(t);
+  const probe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' };
+  fx.setProbe(probe);
+  fx.setSnapshot(snap({ verdict: 'READY' }));
+  await fx.run();
+  const wait = { kind: 'human', headSha: 'aaa1111', reason: 'waiting for maintainer merge', afterMinutes: null, checks: [], threads: [] };
+  assert.equal((await fx.run(['--wait', fx.writeWait(wait)])).code, 0);
+  // 模拟静默超过 48 小时，但最近刚做过一次完整读取（10 分钟前）
+  fx.advance(10);
+  fx.writeState({ lastPassAt: fx.now() - 48 * 60 * MIN });
+  const reads = fx.snapshotRuns();
+  const skipped = await fx.run(['--json']);
+  assert.equal(skipped.code, 2);
+  assert.equal(skipped.json().reason, 'unchanged');
+  assert.equal(fx.snapshotRuns(), reads, '探测匹配时不应强跑完整快照');
+
+  const noCredsPlan = snapshotFailurePlan(
+    { code: 1, stderr: '[gh] fatal on repos/acme/widgets/pulls/42: To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.\n' },
+    null,
+    fx.now(),
+    1,
+  );
+  assert.equal(noCredsPlan.diagnosis.kind, 'auth');
+  const badCredsPlan = snapshotFailurePlan(
+    { code: 1, stderr: '[gh] fatal on repos/acme/widgets/pulls/42: gh: Bad credentials (HTTP 401)\n' },
+    null,
+    fx.now(),
+    1,
+  );
+  assert.equal(badCredsPlan.diagnosis.kind, 'auth');
+});
+
+test('探针收到明确限流时直接进入退避、保留 retryAt，且零次调用完整快照', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-probe-rate-limit-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const fakeSnapshot = path.join(dir, 'fake-snapshot.mjs');
+  fs.writeFileSync(fakeSnapshot, '// placeholder for existsSync check\n', 'utf8');
+
+  let clock = T0;
+  let probeCalls = 0;
+  let snapshotCalls = 0;
+  let probeReply = { code: 0, stdout: JSON.stringify({ status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' }), stderr: '' };
+  const currentSnap = snap({ verdict: 'READY' });
+  const run = async (extra = []) => {
+    let stdout = '';
+    let stderr = '';
+    const code = await runGate([PR_URL, '--state-dir', stateDir, '--snapshot', fakeSnapshot, '--min-pass-spacing-minutes', '0', '--no-pacing', ...extra], {
+      now: () => clock,
+      runProbe: async () => { probeCalls += 1; return probeReply; },
+      runSnapshot: async () => { snapshotCalls += 1; return { code: 0, stdout: JSON.stringify(currentSnap), stderr: '' }; },
+      readTrigger: async () => null,
+      out: (text) => { stdout += text; },
+      err: (text) => { stderr += text; },
+    });
+    return { code, stdout, stderr };
+  };
+
+  // Seed baseline and acknowledge so the next tick uses probe first.
+  assert.equal((await run()).code, 0);
+  assert.equal((await run(['--ack'])).code, 0);
+  const readsBefore = snapshotCalls;
+
+  // Probe receives explicit rate limit with retryAt: must enter backoff directly with 0 full snapshots.
+  clock += 5 * MIN;
+  const resetAt = clock + 45 * MIN;
+  probeReply = {
+    code: 1,
+    stdout: '',
+    stderr: `[gh-rate-limit] retryAt=${resetAt}\n[gh] fatal on graphql: gh: API rate limit already exceeded (HTTP 403)\n`,
+  };
+  const blocked = await run();
+  assert.equal(blocked.code, 1, 'first rate-limit failure notifies once');
+  assert.match(blocked.stderr, /GitHub API rate limit reached/);
+  assert.equal(snapshotCalls, readsBefore, 'probe rate limit must not trigger a full snapshot');
+  const diagMatch = /CINDY_PR_CHECK_DIAGNOSIS (\{[^\n]+\})/.exec(blocked.stdout);
+  assert.ok(diagMatch, blocked.stdout);
+  assert.deepEqual(JSON.parse(diagMatch[1]), { kind: 'rate-limit', failures: 1, retryAt: resetAt + 1000 });
+  const saved = JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'));
+  assert.equal(saved.snapshotFailureBackoffUntil, resetAt + 1000);
+  assert.equal(saved.consecutiveSnapshotFailures, 1);
+
+  // Before retryAt, scheduled ticks skip immediately with 0 probes and 0 snapshots.
+  const probesBeforeBackoff = probeCalls;
+  clock += 10 * MIN;
+  const skipped = await run(['--json']);
+  assert.equal(skipped.code, 2);
+  assert.equal(JSON.parse(skipped.stdout).reason, 'snapshot-failure-backoff');
+  assert.equal(probeCalls, probesBeforeBackoff);
+  assert.equal(snapshotCalls, readsBefore);
+
+  // After retryAt passes, gate recovers via full snapshot and clears failure state.
+  clock = resetAt + 2000;
+  probeReply = { code: 0, stdout: JSON.stringify({ status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' }), stderr: '' };
+  const recovered = await run(['--json']);
+  assert.equal(recovered.code, 2);
+  assert.equal(snapshotCalls, readsBefore + 1);
+  assert.equal(JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8')).consecutiveSnapshotFailures, 0);
 });
 
 test('从未放行过的跟进也能数满静默时长:起点固定在首次检查,不随每轮刷新', async (t) => {
@@ -743,6 +1359,47 @@ test('blocked snapshot reports its underlying cause and scheduled probe', async 
     assert.ok(!result.stderr.split('\n')[0].includes('gh auth refresh'));
     assert.ok(result.stderr.includes(stderr));
   }
+});
+
+test('new follower reports an inherited snapshot outage once without bypassing its retry deadline', async (t) => {
+  const fx = createFixture(t);
+  const fail = { FAKE_SNAPSHOT_EXIT: '1', FAKE_SNAPSHOT_STDERR: 'HTTP 429' };
+  const args = ['--max-snapshot-failures', '1'];
+  assert.equal((await fx.run(args, fail)).code, 1);
+  const deadline = fx.readState().snapshotFailureBackoffUntil;
+  const reads = fx.snapshotRuns();
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  const next = await fx.run(args, fail);
+  assert.equal(next.code, 1);
+  assert.match(next.stderr, /rate limit/i);
+  assert.equal(fx.snapshotRuns(), reads);
+  assert.equal(fx.readState().snapshotFailureBackoffUntil, deadline);
+  assert.equal((await fx.run(args, fail)).code, 2);
+  assert.equal(fx.snapshotRuns(), reads);
+  fx.advance(31);
+  assert.equal((await fx.run(args, fail)).code, 2);
+  assert.equal(fx.snapshotRuns(), reads+1);
+});
+
+test('new follower reads the 1.5.35 failure state and deduplicates it through expiry', async (t) => {
+  const fx = createFixture(t);
+  const fail = { FAKE_SNAPSHOT_EXIT: '1', FAKE_SNAPSHOT_STDERR: 'HTTP 429' };
+  const args = ['--max-snapshot-failures', '1'];
+  assert.equal((await fx.run(args, fail)).code, 1);
+  const old = fx.readState();
+  fx.writeState({ snapshotFailureSummary: undefined });
+  assert.equal(Object.hasOwn(fx.readState(), 'snapshotFailureSummary'), false);
+  const reads = fx.snapshotRuns();
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  const result = await fx.run(args, fail);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /rate limit/i);
+  assert.equal(fx.snapshotRuns(), reads);
+  assert.equal(fx.readState().snapshotFailureBackoffUntil, old.snapshotFailureBackoffUntil);
+  assert.ok(fx.readState().snapshotFailureReports[old.snapshotFailureFingerprint]);
+  fx.advance(31);
+  assert.equal((await fx.run(args, fail)).code, 2);
+  assert.equal(fx.snapshotRuns(), reads + 1);
 });
 
 test('a change to the watched PR retries a network failure without moving the scheduled retry', async (t) => {
@@ -1999,6 +2656,25 @@ test('inventory failure survives resume; new CI failures still wake', async t =>
   assert.equal((await fx.run()).code,0);
 });
 
+test('new follower gets the persistent inventory failure without inheriting the old notice window', async t => {
+  const fx = createFixture(t);
+  fx.setSnapshot(snap({ verdict: 'NEEDS_WORK', blockers: ['required_checks_unavailable'],
+    gate: { requiredChecksUnavailable: true }, checks: [] }));
+  await fx.run();
+  await fx.run(['--resume', 'observed']);
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /required-checks-unavailable/);
+  await fx.run(['--resume', 'noted persistent outage']);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /required-checks-unavailable/);
+  await fx.run(['--resume', 'new owner informed']);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
+});
+
 test('trace records continuous decisions and receipts without comment or resume text', async t => {
   const fx=createFixture(t);
   fx.setSnapshot(snap({comments:[comment('private','human',iso(T0),'private comment should never be recorded')]}));
@@ -2109,4 +2785,270 @@ test('replay refuses to call a trace complete when a recorded round is missing',
   assert.equal((await replay(lines)).complete, true);
   const holed = await replay([lines[0], lines[1], lines[3]]);
   assert.equal(holed.complete, false); assert.equal(holed.gaps, 1);
+});
+
+test('gate requires Node 18+ before skipping and appends CINDY_PR_NODE after CINDY_PRECHECK_OK', async (t) => {
+  const fx = createFixture(t);
+  fx.setSnapshot(snap());
+  const first = await fx.run();
+  assert.equal(first.code, 0, first.stderr);
+  assert.match(first.stdout, /CINDY_PRECHECK_OK\nCINDY_PR_NODE=\d+\n$/);
+  await fx.run(['--ack']);
+
+  // Pacing not-due tick still fails closed on Node < 18 instead of emitting CINDY_PRECHECK_OK
+  let oldOut = '';
+  let oldErr = '';
+  const blocked = await runGate([PR_URL, '--state-dir', path.join(fx.root, 'state'), '--snapshot', path.join(fx.root, 'fake-pr-snapshot.mjs'), '--pacing'], {
+    now: () => fx.now(),
+    readTrigger: async () => null,
+    out: (s) => { oldOut += s; },
+    err: (s) => { oldErr += s; },
+    nodeVersion: '16.20.2',
+  });
+  assert.equal(blocked, 1);
+  assert.match(oldErr, /Node\.js 18\+ is required \(running 16\.20\.2\)/);
+  assert.equal(oldOut, '');
+
+  // Healthy not-due skip on Node 18+ emits both CINDY_PRECHECK_OK and CINDY_PR_NODE
+  let okOut = '';
+  const skipped = await runGate([PR_URL, '--state-dir', path.join(fx.root, 'state'), '--snapshot', path.join(fx.root, 'fake-pr-snapshot.mjs'), '--pacing'], {
+    now: () => fx.now(),
+    readTrigger: async () => null,
+    out: (s) => { okOut += s; },
+    err: () => {},
+    nodeVersion: '22.14.0',
+  });
+  assert.equal(skipped, 2);
+  assert.match(okOut, /CINDY_PRECHECK_OK\nCINDY_PR_NODE=22\n$/);
+});
+
+test('reconcile watch trigger bypasses pacing but runs lightweight probe first; real status watch still reads in full', async (t) => {
+  const fx = createFixture(t);
+  const s = snap();
+  const baseProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0 0', base: 'base-1' };
+  fx.setSnapshot(s);
+  fx.setProbe(baseProbe);
+  assert.equal((await fx.run(['--json'])).code, 0);
+  assert.equal((await fx.run(['--ack', '--json'])).code, 0);
+  // Seed lastProbe so probeAllowsSkip can match.
+  fx.writeState({ probe: baseProbe });
+  const runsAfterAck = fx.snapshotRuns();
+
+  // Within the 30-min waiting pace (5 min later), an ordinary tick would be not-due.
+  // A host `reconcile` watch trigger bypasses pacing, runs --probe, sees unchanged, and skips with 0 full snapshots.
+  fx.advance(5);
+  fx.setTrigger({ kind: 'watch', source: 'pr-status', detail: PR_URL, reason: 'reconcile' });
+  const unchanged = await fx.run(['--pacing', '--json']);
+  assert.equal(unchanged.code, 2);
+  assert.equal(unchanged.json().reason, 'unchanged');
+  assert.equal(fx.snapshotRuns(), runsAfterAck, 'unchanged reconcile trigger must not run a full snapshot');
+
+  // If the probe actually changed (e.g. a new comment arrived during webhook overflow), reconcile runs the full snapshot.
+  fx.advance(5);
+  fx.setProbe({ ...baseProbe, remarks: '1 2026-10-20T10:09:00Z 0  0 0' });
+  fx.setSnapshot(snap({ comments: [comment('C-missed', 'reviewer', iso(fx.now()), 'missed comment')] }));
+  const changed = await fx.run(['--pacing', '--json']);
+  assert.equal(changed.code, 0);
+  assert.equal(fx.snapshotRuns(), runsAfterAck + 1);
+  assert.match(changed.json().report, /missed comment/);
+  assert.equal((await fx.run(['--ack', '--json'])).code, 0);
+  const updatedProbe = { ...baseProbe, remarks: '1 2026-10-20T10:09:00Z 0  0 0' };
+  fx.writeState({ probe: updatedProbe });
+
+  // A non-reconcile watch trigger (explicit pr-status change such as mergeStateStatus -> BEHIND)
+  // still skips the probe and runs a full snapshot even when the probe fingerprint is unchanged.
+  fx.advance(5);
+  fx.setTrigger({ kind: 'watch', source: 'pr-status', detail: PR_URL });
+  const runsBeforeWatch = fx.snapshotRuns();
+  fx.setSnapshot(snap({
+    comments: [comment('C-missed', 'reviewer', iso(fx.now() - 5 * MIN), 'missed comment')],
+    mergeStateStatus: 'BEHIND',
+  }));
+  const explicitWatch = await fx.run(['--pacing', '--json']);
+  assert.equal(explicitWatch.code, 2);
+  assert.equal(fx.snapshotRuns(), runsBeforeWatch + 1, 'real pr-status change must still read full snapshot');
+});
+
+test('real CLI preserves trigger.reason=reconcile, keeps legacy snapshot argv, and passes CINDY_PR_STATE_DIR via env', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-gate-reconcile-cli-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const argvLog = path.join(dir, 'snap-argv.log');
+  const fakeSnap = path.join(dir, 'fake-snap.mjs');
+  const s = snap();
+  const baseProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0 0', base: 'base-1' };
+  // Strict legacy parser mirroring the previous official pr-snapshot.mjs:
+  // rejects any unknown option such as `--state-dir`.
+  fs.writeFileSync(fakeSnap, `
+import fs from 'node:fs';
+const argv = process.argv.slice(2);
+let prArg = null;
+let probe = false;
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === '--repo') { i++; continue; }
+  if (a === '--probe') { probe = true; continue; }
+  if (a === '--strict-exit') continue;
+  if (a === '--expect-head') { i++; continue; }
+  if (!prArg && !a.startsWith('-')) { prArg = a; continue; }
+  throw new Error('Unexpected argument: ' + a);
+}
+fs.appendFileSync(${JSON.stringify(argvLog)}, JSON.stringify({ argv, stateDirEnv: process.env.CINDY_PR_STATE_DIR ?? null }) + '\\n');
+if (probe) {
+  process.stdout.write(${JSON.stringify(JSON.stringify(baseProbe))});
+} else {
+  process.stdout.write(${JSON.stringify(JSON.stringify(s))});
+}
+`, 'utf8');
+
+  const invoke = (extra = [], payload = null, envExtra = {}) => spawnSync(
+    process.execPath,
+    [gatePath, PR_URL, '--state-dir', stateDir, '--snapshot', fakeSnap, '--min-pass-spacing-minutes', '0', ...extra],
+    { encoding: 'utf8', input: payload ? JSON.stringify(payload) : '', env: { ...process.env, CINDY_PR_TRACE: '0', ...envExtra } },
+  );
+
+  // First full snapshot must keep the legacy argv (no --state-dir) and pass CINDY_PR_STATE_DIR via env.
+  const first = invoke(['--no-pacing', '--json']);
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(invoke(['--ack', '--json']).status, 0);
+  const firstCalls = fs.readFileSync(argvLog, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  const fullCall = firstCalls.find(call => !call.argv.includes('--probe'));
+  assert.ok(fullCall, 'expected a full snapshot invocation');
+  assert.deepEqual(fullCall.argv, [String(NUMBER), '--repo', REPO], 'must preserve legacy snapshot CLI argv');
+  assert.equal(fullCall.stateDirEnv, stateDir, 'full snapshot must receive stateDir via CINDY_PR_STATE_DIR');
+
+  // PR_SNAPSHOT_SCRIPT env override also works with the strict legacy parser.
+  fs.writeFileSync(argvLog, '');
+  const viaEnv = spawnSync(
+    process.execPath,
+    [gatePath, PR_URL, '--state-dir', stateDir, '--triggered', '--no-pacing', '--json'],
+    { encoding: 'utf8', env: { ...process.env, CINDY_PR_TRACE: '0', PR_SNAPSHOT_SCRIPT: fakeSnap } },
+  );
+  assert.equal(viaEnv.status, 2, viaEnv.stderr);
+  const envCalls = fs.readFileSync(argvLog, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  assert.deepEqual(envCalls[0].argv, [String(NUMBER), '--repo', REPO]);
+  assert.equal(envCalls[0].stateDirEnv, stateDir);
+
+  // Seed probe to match fakeSnap's probe output, then send host reconcile trigger via stdin.
+  const statePath = stateFilePath(stateDir, REPO, NUMBER);
+  const saved = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  saved.probe = baseProbe;
+  fs.writeFileSync(statePath, JSON.stringify(saved));
+  fs.writeFileSync(argvLog, '');
+
+  const rec = invoke(['--pacing', '--json'], {
+    event: 'schedule-pre-run',
+    scheduleId: 'sched-1',
+    runId: 'run-2',
+    lastFinishedAt: Date.now() - 60_000,
+    firedAt: Date.now(),
+    trigger: { kind: 'watch', source: 'pr-status', detail: PR_URL, reason: 'reconcile' },
+  });
+  assert.equal(rec.status, 2, rec.stderr);
+  assert.equal(JSON.parse(rec.stdout).reason, 'unchanged');
+  const recCalls = fs.readFileSync(argvLog, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  assert.equal(recCalls.length, 1, 'reconcile trigger should only run --probe when unchanged');
+  assert.ok(recCalls[0].argv.includes('--probe'));
+});
+
+test('diagnostic test-run disables snapshot cache writes even with --state-dir and inherited CINDY_PR_STATE_DIR', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim' : false }, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-gate-diag-readonly-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const freshDir = path.join(dir, 'fresh-state');
+  const cfgFile = path.join(dir, 'cfg.json');
+  const prUrl = 'https://github.com/acme/game/pull/54';
+
+  fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+const cfg = JSON.parse(fs.readFileSync(process.env.CFG_FILE, 'utf8'));
+if (args[0] === '--version') process.exit(0);
+if (args[0] === 'pr' && args[1] === 'view') {
+  process.stdout.write(JSON.stringify({
+    headRefOid: cfg.headSha,
+    statusCheckRollup: [{ __typename: 'CheckRun', name: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+  }));
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1] === 'graphql') {
+  process.stdout.write(JSON.stringify({
+    data: {
+      viewer: { login: 'alice' },
+      repository: {
+        pullRequest: {
+          state: 'OPEN', headRefOid: cfg.headSha, mergeStateStatus: 'CLEAN', baseRefName: 'main',
+          baseRef: { target: { oid: 'base-1' }, branchProtectionRule: null },
+          reviewThreads: { nodes: [] }, mergeQueueEntry: null, timelineItems: { nodes: [] },
+        },
+      },
+    },
+  }));
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1] === 'repos/acme/game/pulls/54') {
+  process.stdout.write(
+    'HTTP/2.0 200 OK\\nETag: ' + cfg.pullEtag + '\\n\\n' +
+    JSON.stringify({
+      base: { sha: 'base-1' }, head: { sha: cfg.headSha }, mergeable: true, state: 'open',
+      html_url: 'https://github.com/acme/game/pull/54',
+    }),
+  );
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1].includes('/rules/branches/')) {
+  process.stdout.write('HTTP/2.0 200 OK\\nETag: ' + cfg.rulesEtag + '\\n\\n' + JSON.stringify(cfg.rules));
+  process.exit(0);
+}
+process.stderr.write('Unexpected gh call: ' + args.join(' ') + '\\n');
+process.exit(2);
+`, { mode: 0o755 });
+
+  const baseEnv = { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, CFG_FILE: cfgFile };
+
+  // 1. Prime an existing production stateDir with gate state + snapshot ETag caches.
+  fs.writeFileSync(cfgFile, JSON.stringify({ headSha: 'head-1', pullEtag: 'W/"pull-v1"', rulesEtag: 'W/"rules-v1"', rules: [] }));
+  const primed = spawnSync(
+    process.execPath,
+    [gatePath, prUrl, '--state-dir', stateDir, '--no-pacing', '--json'],
+    { encoding: 'utf8', env: baseEnv },
+  );
+  assert.equal(primed.status, 0, primed.stderr);
+  const filesBefore = fs.readdirSync(stateDir).sort();
+  assert.ok(filesBefore.some(f => f.endsWith('.rest-cache.json')), 'normal run should prime pull REST cache');
+  assert.ok(filesBefore.some(f => f.endsWith('.rules-cache.json')), 'normal run should prime rules cache');
+  const snapshotDirState = (targetDir) => Object.fromEntries(
+    fs.readdirSync(targetDir).sort().map(name => {
+      const full = path.join(targetDir, name);
+      const st = fs.statSync(full);
+      return [name, { content: fs.readFileSync(full, 'utf8'), mtimeMs: st.mtimeMs }];
+    }),
+  );
+  const before = snapshotDirState(stateDir);
+
+  // 2. Change upstream ETags/data and run a diagnostic hook with BOTH --state-dir AND inherited CINDY_PR_STATE_DIR.
+  fs.writeFileSync(cfgFile, JSON.stringify({
+    headSha: 'head-2',
+    pullEtag: 'W/"pull-v2"',
+    rulesEtag: 'W/"rules-v2"',
+    rules: [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'ci' }] } }],
+  }));
+  const diagPayload = JSON.stringify({ event: 'schedule-pre-run', scheduleId: 'test', runId: 'test', firedAt: Date.now() });
+  const diag = spawnSync(
+    process.execPath,
+    [gatePath, prUrl, '--state-dir', stateDir, '--json'],
+    { encoding: 'utf8', input: diagPayload, env: { ...baseEnv, CINDY_PR_STATE_DIR: stateDir } },
+  );
+  assert.equal(diag.status, 0, diag.stderr);
+  assert.match(JSON.parse(diag.stdout).detail, /diagnostic only, follow-up state unchanged/);
+  assert.deepEqual(snapshotDirState(stateDir), before, 'diagnostic run must not create or modify any state or cache file');
+
+  // 3. Diagnostic run with only inherited CINDY_PR_STATE_DIR pointing at a non-existent directory creates nothing.
+  const diagFresh = spawnSync(
+    process.execPath,
+    [gatePath, prUrl, '--json'],
+    { encoding: 'utf8', input: diagPayload, env: { ...baseEnv, CINDY_PR_STATE_DIR: freshDir } },
+  );
+  assert.equal(diagFresh.status, 0, diagFresh.stderr);
+  assert.equal(fs.existsSync(freshDir), false, 'diagnostic run must not create inherited CINDY_PR_STATE_DIR');
 });
