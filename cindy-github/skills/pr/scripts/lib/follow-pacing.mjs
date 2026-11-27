@@ -334,12 +334,36 @@ export function settleState({ snap, headSeenAt, expected, now }) {
 }
 
 /**
+ * A release too close to the previous one means the host deferred/dropped it (no real agent run).
+ */
+export function isEmptyPass(previous, now, minPassSpacingMs = TICK_MS) {
+  const lastPassAt = Number(previous?.lastPassAt) || 0;
+  return minPassSpacingMs > 0 && lastPassAt > 0 && now - lastPassAt < minPassSpacingMs;
+}
+
+/**
+ * An unacknowledged terminal-backoff reminder retried within the empty-pass spacing window
+ * (e.g. host deferred due to user-active and retried ~90s later) must still pass pacing so
+ * `decide()` can replay the unexecuted reminder instead of delaying it 2–12 hours.
+ */
+export function isPendingTerminalBackoffRetry(previous, now, minPassSpacingMs = TICK_MS) {
+  return Boolean(previous?.pendingWatch)
+    && previous?.lastDecisionReason === 'terminal-backoff-attempt'
+    && isEmptyPass(previous, now, minPassSpacingMs);
+}
+
+/**
  * Is a look due? Reads only the state written by the previous check, so a "not due" answer
  * costs no GitHub call.
  */
-export function pacingDue(previous, now, { triggered = false } = {}) {
+export function pacingDue(previous, now, { triggered = false, minPassSpacingMs = TICK_MS } = {}) {
   if (triggered) return { due: true, pace: 'fast', reason: 'host-trigger' };
   if (!previous?.watch) return { due: true, pace: 'fast', reason: 'first-check' };
+  const terminalBackoffUntil = Number(previous.terminalBackoffUntil) || 0;
+  if ((previous.merged || previous.closed) && terminalBackoffUntil > now
+    && !isPendingTerminalBackoffRetry(previous, now, minPassSpacingMs)) {
+    return { due: false, pace: 'terminal-backoff', reason: 'terminal-backoff', nextAt: terminalBackoffUntil };
+  }
   const watch = previous.watch;
   const lastLook = Math.max(
     Number(previous.lastFullReadAt) || 0,
@@ -354,7 +378,8 @@ export function pacingDue(previous, now, { triggered = false } = {}) {
     || waitIsDue(previous.wait, now)
     || (awaited !== null && now - awaited >= 15 * 60_000)
     || (Number(previous.settleUntil) || 0) > 0
-    || Number(previous.retryBackoffUntil) > 0;
+    || Number(previous.retryBackoffUntil) > 0
+    || (terminalBackoffUntil > 0 && now >= terminalBackoffUntil);
   if (fast) return { due: true, pace: 'fast', reason: 'fast' };
   const recent = (value) => Number.isFinite(Number(value)) && Number(value) > 0 && now - Number(value) < ACTIVE_WINDOW_MS;
   let pace;
