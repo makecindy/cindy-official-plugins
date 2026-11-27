@@ -136,7 +136,7 @@ function makeWorker(env, workerFile = path.join(pluginDir, 'node', 'worker.cjs')
   };
 }
 
-function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSync = null, timers = null, source = mainSource, rowBytes, backup }) {
+function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSync = null, checks = null, controlPoints = null, timers = null, source = mainSource, rowBytes, backup }) {
   const library = makeLibrary(libDir, { rowBytes, backup });
   const worker = makeWorker({
     CINDY_CONTACTS_LEGACY_DB_FOR_TEST: legacyDb,
@@ -153,11 +153,17 @@ function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSy
     }
   }
   const schedules = [];
+  const verdicts = [];
   const oneshots = [];
   const tasks = { created: [], sent: [], access: [], tooHigh: new Set(), reply: '已经记下了。', runStatus: 'completed', quick: { ok: true, text: '她在推进 Pi 清单。' } };
   const cindy = {
+    ...(checks ? { checks } : {}),
     ...(deviceSync ? { deviceSync } : {}),
-    ...(locale ? { request: async (req) => (req.kind === 'app-context' ? { ok: true, context: { locale } } : { ok: false }) } : {}),
+    ...(locale || controlPoints ? { request: async (req) => {
+      if (req.kind === 'app-context' && locale) return { ok: true, context: { locale } };
+      if (req.kind === 'control-points' && controlPoints) return { ok: true, points: controlPoints };
+      return { ok: false };
+    } } : {}),
     tasks: {
       capabilities: async () => ({ operations: ['create', 'get', 'send', 'getRun', 'readMessages'] }),
       create: async (req) => {
@@ -198,6 +204,7 @@ function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSy
     send: async (raw) => {
       // 真实宿主经 IPC 结构化克隆传递；这里同样克隆，脱离沙箱 realm。
       const m = structuredClone(raw);
+      if (m.type === 'event-verdict') verdicts.push(m);
       if (m.type === 'tool-result') {
         results.set(m.callId, m);
         waiters.get(m.callId)?.(m);
@@ -250,10 +257,129 @@ function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSy
   tap.onmessage = (ev) => {
     if (ev.data && ev.data.kind === 'event') events.push(ev.data);
   };
-  return { call, view, close, library, schedules, oneshots, tasks, events, ctx, deliver: async msg => { for (const listener of listeners) await listener(msg); } };
+  return { call, view, close, library, schedules, oneshots, tasks, events, verdicts, ctx, deliver: async msg => { for (const listener of listeners) await listener(msg); } };
 }
 
 /* ───────── 旧版通讯录夹具（与旧版内置 schema 同构，数据全部为占位） ───────── */
+
+test('pre-run check skips the model only for fully checked sources; partial proofs narrow the next scan', async () => {
+  const dir = tmp();
+  const sources = ['mail', 'calendar', 'im', 'cindy'];
+  const states = Object.fromEntries(sources.map(source => [source, 'unchanged']));
+  const queries = [];
+  const checks = {
+    list: async () => ({ ok: true, providers: sources.map(source => ({ providerId: `test:${source}`, sources: [source] })) }),
+    probe: async values => {
+      queries.push(structuredClone(values));
+      return { ok: true, results: values.map(value => ({ ...value, state: states[value.source] })) };
+    },
+  };
+  let a = boot({ libDir: dir, checks });
+  try {
+    const run = ok(await a.call('maintenance', { action: 'begin' }));
+    ok(await a.call('maintenance', { action: 'end', run_id: run.run_id,
+      coverage: sources.map(source => ({ source, coverage: 'complete' })) }));
+    ok(await a.call('maintenance', { action: 'sources', sources_status: sources.map(source => ({
+      source, status: 'ok', note: 'All configured accounts verified', check_providers: [`test:${source}`],
+    })) }));
+    const fire = async () => {
+      await a.deliver({ type: 'event', name: 'will-schedule-run', hookId: 'test-hook', deadline: Date.now() + 30000 });
+      return a.verdicts.at(-1).action;
+    };
+    assert.equal(await fire(), 'skip');
+    assert.equal(a.tasks.created.length, 0);
+    assert.equal(a.oneshots.length, 0);
+    const firstTo = queries.at(-1)[0].to;
+    const overlappedFrom = new Date(Date.parse(firstTo) - 3600000).toISOString();
+    // A restart retains certified progress; it does not re-query yesterday's mail.
+    a.close(); a = boot({ libDir: dir, checks });
+    states.im = 'unknown';
+    assert.equal(await fire(), 'allow');
+    assert.equal(queries.at(-1).find(x => x.source === 'mail').from, overlappedFrom);
+    const partial = ok(await a.call('maintenance', { action: 'begin' }));
+    assert.equal(partial.sources[0].from, overlappedFrom, 'a delayed item in the overlap stays readable after an empty check');
+    assert.deepEqual(partial.sources.map(x => x.source), ['im']);
+    assert.deepEqual(partial.checked_empty, ['mail', 'calendar', 'cindy']);
+    assert.equal(queries.at(-1).find(x => x.source === 'im').from, overlappedFrom);
+    states.im = 'changed';
+    assert.equal(await fire(), 'allow');
+    assert.equal(queries.at(-1).find(x => x.source === 'im').from, overlappedFrom, 'unknown never advances the checkpoint');
+    // A different route invalidates the previous complete binding.
+    ok(await a.call('maintenance', { action: 'sources', sources_status: [{ source: 'mail', status: 'ok', note: 'Added another mailbox' }] }));
+    states.im = 'unchanged';
+    assert.equal(await fire(), 'allow');
+    assert.ok(!queries.at(-1).some(x => x.source === 'mail'));
+    const changedRoute = ok(await a.call('maintenance', { action: 'begin' }));
+    assert.ok(changedRoute.sources.some(x => x.source === 'mail'));
+  } finally { a.close(); }
+});
+
+test('an unavailable check API keeps the existing Agent path without starting a second task', async () => {
+  const a = boot({ libDir: tmp() });
+  try {
+    await a.deliver({ type: 'event', name: 'will-schedule-run', hookId: 'old-host' });
+    assert.equal(a.verdicts.at(-1).action, 'allow');
+    assert.equal(a.tasks.created.length, 0);
+  } finally { a.close(); }
+});
+
+test('expired and concurrently invalidated checks cannot advance source checkpoints', async () => {
+  const sources = ['mail', 'calendar', 'im', 'cindy'];
+  let duringProbe = async () => {};
+  const a = boot({ libDir: tmp(), checks: {
+    list: async () => ({ ok: true, providers: sources.map(source => ({ providerId: `test:${source}`, sources: [source] })) }),
+    probe: async values => {
+      await duringProbe();
+      return { ok: true, results: values.map(value => ({ ...value, state: 'unchanged' })) };
+    },
+  } });
+  try {
+    const run = ok(await a.call('maintenance', { action: 'begin' }));
+    ok(await a.call('maintenance', { action: 'end', run_id: run.run_id,
+      coverage: sources.map(source => ({ source, coverage: 'complete' })) }));
+    ok(await a.call('maintenance', { action: 'sources', sources_status: sources.map(source => ({
+      source, status: 'ok', note: 'Verified route', check_providers: [`test:${source}`],
+    })) }));
+    const checkpoints = () => vm.runInContext('getMeta("maintenance").then(meta => JSON.stringify(meta.sources))', a.ctx);
+    const before = await checkpoints();
+    await a.deliver({ type: 'event', name: 'will-schedule-run', hookId: 'expired', deadline: Date.now() - 1 });
+    assert.equal(a.verdicts.at(-1).action, 'allow');
+    assert.equal(await checkpoints(), before);
+    duringProbe = async () => {
+      ok(await a.call('maintenance', { action: 'sources', sources_status: [{ source: 'mail', status: 'ok', note: 'New route' }] }));
+    };
+    await a.deliver({ type: 'event', name: 'will-schedule-run', hookId: 'rebound', deadline: Date.now() + 30000 });
+    assert.equal(a.verdicts.at(-1).action, 'allow');
+    assert.equal(await checkpoints(), before);
+    assert.equal(a.tasks.created.length, 0);
+  } finally { a.close(); }
+});
+
+test('an empty recent window still allows due Monday backfill without waking every day', async () => {
+  const a = boot({ libDir: tmp(), checks: {
+    list: async () => ({ ok: true, providers: [{ providerId: 'test:cindy', sources: ['cindy'] }] }),
+    probe: async values => ({ ok: true, results: values.map(value => ({ ...value, state: 'unchanged' })) }),
+  } });
+  try {
+    a.ctx.fixedNow = new Date(2026, 10, 9, 12).getTime();
+    vm.runInContext('Date = class extends Date { constructor(...args) { super(...(args.length ? args : [fixedNow])); } static now() { return fixedNow; } }', a.ctx);
+    ok(await a.view('settings', { sources: { mail: false, calendar: false, im: false, cindy: true, github: false } }));
+    const run = ok(await a.call('maintenance', { action: 'begin' }));
+    ok(await a.call('maintenance', { action: 'end', run_id: run.run_id, coverage: [{ source: 'cindy', coverage: 'partial',
+      gaps: [{ where: 'Older fixture', from: run.from, to: run.to, reason: 'Next page' }] }] }));
+    ok(await a.call('maintenance', { action: 'sources', sources_status: [{ source: 'cindy', status: 'ok', note: 'Local fixture', check_providers: ['test:cindy'] }] }));
+    a.ctx.fixedNow += 1000;
+    await a.deliver({ type: 'event', name: 'will-schedule-run', hookId: 'monday' });
+    assert.equal(a.verdicts.at(-1).action, 'allow');
+    const backfill = ok(await a.call('maintenance', { action: 'begin' }));
+    assert.deepEqual(backfill.checked_empty, ['cindy']);
+    assert.equal(backfill.backlog.length, 1);
+    a.ctx.fixedNow += 86400000;
+    await a.deliver({ type: 'event', name: 'will-schedule-run', hookId: 'tuesday' });
+    assert.equal(a.verdicts.at(-1).action, 'skip');
+    assert.equal(ok(await a.call('maintenance', { action: 'begin' })).backlog_pending, 1);
+  } finally { a.close(); }
+});
 
 function makeLegacyDb(file) {
   const db = new DatabaseSync(file);
@@ -1342,6 +1468,44 @@ test('导入过 macOS 通讯录后，超过一天会在自动维护开始时自�
   }
 });
 
+test('an idle scheduled check still reconciles previously imported Mac contacts without a model', async () => {
+  const dir = tmp();
+  const fixture = path.join(dir, 'system.json');
+  const contact = id => ({ name: id, org: '', title: '', id, isCompany: false, emails: [], phones: [] });
+  fs.writeFileSync(fixture, JSON.stringify([contact('AB-1')]));
+  const a = boot({ libDir: dir, systemFixture: fixture, checks: {} });
+  try {
+    ok(await a.call('import_macos', { dry_run: false }));
+    const db = a.library.db('contacts.sqlite');
+    // Empty enabled-source set makes the scheduled check skip without consulting a provider.
+    await a.view('settings', { sources: { mail: false, calendar: false, im: false, cindy: false, github: false } });
+    const fire = async () => {
+      await a.deliver({ type: 'event', name: 'will-schedule-run', hookId: 'mac-idle', deadline: Date.now() + 30000 });
+      assert.equal(a.verdicts.at(-1).action, 'skip');
+      assert.equal(a.tasks.created.length, 0);
+      assert.equal(a.oneshots.length, 0);
+    };
+    const ageImport = () => db.prepare("UPDATE plugin_meta SET value = json_set(value, '$.at', ?) WHERE key = 'system_import'")
+      .run(new Date(Date.now() - 2 * 86400000).toISOString());
+    fs.writeFileSync(fixture, JSON.stringify([contact('AB-1'), contact('AB-2')]));
+    ageImport();
+    await fire();
+    for (let i = 0; i < 40 && ok(await a.call('stats')).people < 2; i++) {
+      await new Promise(r => setTimeout(r, 25));
+    }
+    assert.equal(ok(await a.call('stats')).people, 2);
+    fs.writeFileSync(fixture, JSON.stringify([contact('AB-3')]));
+    await fire();
+    await vm.runInContext('queue', a.ctx);
+    assert.equal(ok(await a.call('stats')).people, 2, 'an idle skip respects the daily cadence');
+    await a.view('settings', { macAutoSync: false });
+    ageImport();
+    await fire();
+    await vm.runInContext('queue', a.ctx);
+    assert.equal(ok(await a.call('stats')).people, 2, 'an idle skip respects opt-out');
+  } finally { a.close(); }
+});
+
 test('几千人的规模：批量写入、列表与查重都在可接受时间内完成', async () => {
   const dir = tmp();
   const a = boot({ libDir: dir });
@@ -1995,6 +2159,118 @@ test('device sync stays idle until enabled and stops polling when disabled', asy
   }
 });
 
+test('scan receipts skip acknowledged ids across restarts, isolate accounts, and leave unfinished work retryable', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    const person = ok(await a.call('save', { name: '扫描测试', identities: [{ platform: 'email', value: 'person@example.test' }] }));
+    const input = { source: 'mail', account: 'gmail:work@example.test', refs: ['message-1', 'notification-1', 'unfinished-1'] };
+    assert.deepEqual(ok(await a.call('maintenance', { action: 'filter', ...input })).unseen, input.refs);
+    // Recording alone is not a receipt: a crash before updating the profile must stay retryable.
+    ok(await a.call('record', { items: [{ contact_id: person.id, occurred_at: '2026-10-11T15:29:00Z', channel: 'mail', title: '约定', ref: 'unfinished-1' }] }));
+    assert.equal(ok(await a.call('maintenance', { action: 'filter', ...input })).skipped, 0);
+    ok(await a.call('maintenance', { action: 'ack', ...input, refs: ['message-1', 'notification-1', 'message-1'] }));
+    const compact = ok(await a.call('get', { id: person.id, compact: true }));
+    assert.equal(compact.name, '扫描测试');
+    a.close();
+    a = boot({ libDir: dir });
+    assert.deepEqual(ok(await a.call('maintenance', { action: 'filter', ...input })), { unseen: ['unfinished-1'], skipped: 2 });
+    assert.deepEqual(ok(await a.call('maintenance', { action: 'filter', ...input, account: 'gmail:personal@example.test' })).unseen, input.refs);
+    assert.deepEqual(ok(await a.call('maintenance', { action: 'filter', ...input, source: 'calendar' })).unseen, input.refs);
+    assert.equal((await a.call('maintenance', { action: 'ack', ...input, account: '' })).errorCode, 'INVALID_PARAMS');
+    assert.equal((await a.call('maintenance', { action: 'ack', ...input, refs: Array(101).fill('too-many') })).errorCode, 'INVALID_PARAMS');
+    // Batches are genuinely bounded, and filtering does not return receipt metadata or mail bodies.
+    const refs = Array.from({ length: 100 }, (_, i) => `batch-${i}`);
+    ok(await a.call('maintenance', { action: 'ack', ...input, refs }));
+    assert.deepEqual(ok(await a.call('maintenance', { action: 'filter', ...input, refs })), { unseen: [], skipped: 100 });
+    assert.equal(ok(await a.call('get', { id: person.id })).interactionTotal, 1);
+  } finally { a.close(); }
+});
+
+test('backlog saves exact pagination, deduplicates gaps, backs off blocked work and retains unissued gaps', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    const b = ok(await a.call('maintenance', { action: 'begin' }));
+    const gap = { where: '工作邮箱', from: b.from, to: b.to, reason: '还有下一页', resume: { account: 'gmail:work@example.test', query: 'after:1 before:2', cursor: 'page-2' } };
+    const cov = b.sources.map((s) => ({ source: s.source, coverage: s.source === 'mail' ? 'partial' : 'complete', ...(s.source === 'mail' ? { gaps: [gap, gap, { ...gap, where: '另一个会话' }] } : {}) }));
+    ok(await a.call('maintenance', { action: 'end', run_id: b.run_id, coverage: cov }));
+    let next = ok(await a.call('maintenance', { action: 'begin' }));
+    assert.equal(next.backlog_pending, 2);
+    assert.equal(next.backlog.length, 1);
+    assert.equal(next.budget.max_index_items, 200);
+    const id = next.backlog[0].id;
+    assert.equal(next.backlog[0].resume.cursor, 'page-2');
+    // Re-reporting the same gap cannot create a new queue entry or replace a saved cursor.
+    const partial = { ...gap, resume: { ...gap.resume, cursor: 'page-3' } };
+    ok(await a.call('maintenance', { action: 'progress', run_id: next.run_id, backlog_id: id, status: 'partial', remaining: partial }));
+    ok(await a.call('maintenance', { action: 'end', run_id: next.run_id, coverage: cov }));
+    a.close();
+    a = boot({ libDir: dir });
+    next = ok(await a.call('maintenance', { action: 'begin' }));
+    assert.equal(next.backlog_pending, 2);
+    assert.equal(next.backlog[0].resume.cursor, 'page-3');
+    assert.equal((await a.call('maintenance', { action: 'progress', run_id: next.run_id, backlog_id: id, status: 'partial' })).ok, false);
+    assert.equal((await a.call('maintenance', { action: 'progress', run_id: next.run_id, backlog_id: id, status: 'partial', remaining: { ...partial, from: '2000-01-01T00:00:00Z' } })).errorCode, 'INVALID_PARAMS');
+    assert.equal((await a.call('maintenance', { action: 'progress', run_id: next.run_id, backlog_id: id, status: 'partial', remaining: { ...partial, resume: { ...partial.resume, account: 'different@example.test' } } })).errorCode, 'INVALID_PARAMS');
+    const blocked = ok(await a.call('maintenance', { action: 'progress', run_id: next.run_id, backlog_id: id, status: 'blocked', note: '附件读取权限未变化' }));
+    assert.equal(blocked.remaining.resume.cursor, 'page-3');
+    assert.ok(Date.parse(blocked.remaining.retryAfter) > Date.now() + 23 * 3600000);
+    const later = ok(await a.call('maintenance', { action: 'begin' }));
+    assert.equal(later.backlog_pending, 2);
+    assert.equal(later.backlog.length, 1);
+    assert.notEqual(later.backlog[0].id, id);
+    assert.equal((await a.call('maintenance', { action: 'progress', run_id: later.run_id, backlog_id: id, status: 'complete' })).errorCode, 'INVALID_PARAMS');
+    ok(await a.call('maintenance', { action: 'progress', run_id: later.run_id, backlog_id: later.backlog[0].id, status: 'complete' }));
+    const last = ok(await a.call('maintenance', { action: 'begin' }));
+    assert.equal(last.backlog_pending, 1);
+    assert.equal(last.backlog.length, 0);
+  } finally { a.close(); }
+});
+
+test('overlapping runs cannot roll back, postpone or complete a newer backlog position', async () => {
+  const a = boot({ libDir: tmp() });
+  try {
+    const first = ok(await a.call('maintenance', { action: 'begin' }));
+    const gap = { where: '工作邮箱', from: first.from, to: first.to, reason: '还有下一页',
+      resume: { account: 'gmail:work@example.test', query: 'after:1 before:2', cursor: 'page-2' } };
+    const coverage = first.sources.map(({ source }) => ({ source, coverage: 'complete' }));
+    ok(await a.call('maintenance', { action: 'end', run_id: first.run_id,
+      coverage: coverage.map(c => c.source === 'mail' ? { ...c, coverage: 'partial', gaps: [gap] } : c) }));
+    const begin = async () => ok(await a.call('maintenance', { action: 'begin' }));
+    const older = await begin(), newer = await begin();
+    const id = newer.backlog[0].id;
+    assert.equal(older.backlog[0].id, id);
+    const progress = (run, status, cursor) => a.call('maintenance', { action: 'progress',
+      run_id: run.run_id, backlog_id: id, status,
+      ...(cursor === undefined ? {} : { remaining: { ...gap, resume: { ...gap.resume, cursor } } }) });
+    ok(await progress(newer, 'partial', 'page-3'));
+    ok(await progress(newer, 'partial', 'page-4'));
+    assert.equal((await progress(older, 'partial', 'page-3')).errorCode, 'STALE_BACKLOG');
+    assert.equal((await progress(older, 'blocked')).errorCode, 'STALE_BACKLOG');
+    assert.equal((await progress(older, 'complete')).errorCode, 'STALE_BACKLOG');
+    ok(await a.call('maintenance', { action: 'end', run_id: older.run_id, coverage, backlog_done: [id] }));
+    assert.equal((await begin()).backlog[0].resume.cursor, 'page-4');
+    ok(await a.call('maintenance', { action: 'end', run_id: newer.run_id, coverage, backlog_done: [id] }));
+    assert.equal((await begin()).backlog_pending, 0);
+  } finally { a.close(); }
+});
+
+test('compact profiles retain all editable fields and loops with only five history entries', async () => {
+  const a = boot({ libDir: tmp() });
+  try {
+    const person = ok(await a.call('save', { name: '精简档案', narrative: '团队负责人', facts: [{ label: '公司', value: '示例公司' }], open_loops: [{ text: '给小林发文件' }] }));
+    ok(await a.call('record', { items: Array.from({ length: 12 }, (_, i) => ({ contact_id: person.id, occurred_at: `2026-10-${String(i + 1).padStart(2, '0')}T12:00:00Z`, channel: 'mail', title: `主题 ${i}`, ref: `compact-${i}` })) }));
+    const full = ok(await a.call('get', { id: person.id }));
+    const compact = ok(await a.call('get', { id: person.id, compact: true }));
+    assert.equal(full.interactions.length, 12);
+    assert.equal(compact.interactions.length, 5);
+    assert.equal(compact.interactionTotal, 12);
+    for (const key of ['name', 'narrative', 'facts', 'loops', 'identities', 'latest']) assert.deepEqual(compact[key], full[key]);
+    assert.deepEqual(compact.interactions, full.interactions.slice(0, 5));
+  } finally { a.close(); }
+});
+
 test('one disabled peer does not hide another computer’s confirmed sync', async t => {
   let disconnected = false;
   const app = boot({ libDir: tmp(), deviceSync: async req => {
@@ -2020,7 +2296,10 @@ test('one disabled peer does not hide another computer’s confirmed sync', asyn
 
 test('new installs stay passive, only the chosen computer may open a draft and paused schedules stay paused', async t => {
   let primary = null, revision = 0, connected = true;
-  const make = (name, schedule) => boot({ libDir: tmp(), deviceSync: async req => {
+  const make = (name, schedule) => boot({ libDir: tmp(),
+    checks: { list: async () => ({ ok: true, providers: [] }) },
+    controlPoints: [{ id: 'will-schedule-run', active: true }],
+    deviceSync: async req => {
     if (!connected) return { ok: false, errorCode: 'SYNC_OFFLINE' };
     if (req.op === 'status') return { ok: true, peers: [] };
     if (req.op === 'selectAutomationHost') {
@@ -2047,9 +2326,50 @@ test('new installs stay passive, only the chosen computer may open a draft and p
   assert.equal(ok(await laptop.view('chooseAutomationHost', { revision, useThisDevice: true })).isPrimary, true);
   assert.equal(ok(await laptop.view('requestAutomation')).opened, true);
   assert.equal(laptop.schedules[0].primaryDeviceOnly, true);
+  assert.equal(laptop.schedules[0].preRunCheck, true);
   connected = false;
   assert.equal((await laptop.view('requestAutomation')).ok, false);
   connected = true;
   assert.equal(ok(await home.view('automationStatus')).isPrimary, false);
   assert.equal((await home.view('requestAutomation')).ok, false);
+});
+
+test('all 21 gaps survive when partial coverage advances the checkpoint', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    const run = ok(await a.call('maintenance', { action: 'begin' }));
+    const gaps = Array.from({ length: 21 }, (_, i) => ({
+      where: `mail folder ${i + 1}`, from: run.from, to: run.to, reason: 'budget reached',
+      resume: { account: 'gmail:work@example.test', query: `folder:${i + 1}`, cursor: `page-${i + 1}` },
+    }));
+    const coverage = run.sources.map(({ source }) => source === 'mail'
+      ? { source, coverage: 'partial', gaps }
+      : { source, coverage: 'complete' });
+    ok(await a.call('maintenance', { action: 'end', run_id: run.run_id, coverage }));
+    a.close();
+    a = boot({ libDir: dir });
+    assert.equal(ok(await a.call('maintenance', { action: 'begin' })).backlog_pending, 21);
+  } finally { a.close(); }
+});
+
+test('record uses the receipt account scope while legacy refs stay readable and idempotent', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    const person = ok(await a.call('save', { name: 'Account scope' }));
+    const item = { contact_id: person.id, occurred_at: '2026-10-11T15:29:00Z', channel: 'mail', title: 'Exchange', ref: 'same-message-id' };
+    const record = async items => ok(await a.call('record', { items }));
+    assert.equal((await record([item, item])).added, 1);
+    for (const account of ['gmail:work@example.test', 'gmail:personal@example.test']) {
+      const receipt = { source: 'mail', account, refs: [item.ref] };
+      assert.deepEqual(ok(await a.call('maintenance', { action: 'filter', ...receipt })).unseen, [item.ref]);
+      assert.equal((await record([{ ...item, account }])).added, 1);
+      ok(await a.call('maintenance', { action: 'ack', ...receipt }));
+    }
+    a.close();
+    a = boot({ libDir: dir });
+    assert.equal((await record([item, { ...item, account: 'gmail:work@example.test' }])).duplicates, 2);
+    assert.equal(ok(await a.call('get', { id: person.id })).interactions.length, 3);
+  } finally { a.close(); }
 });
