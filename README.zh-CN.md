@@ -334,9 +334,9 @@ unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 
 提交到官方仓库前，还必须补充 `provisioning.json` 条目，并在 Manifest 中声明恰好
 `zh-CN`、`en`、`ja`、`ko` 四份 locale 文件，完整覆盖插件文案和全部工具描述；随后
-按 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md) 自查。可以先开 PR 取得验证包；
-合并前按实际影响提供运行与兼容性证据，作者或维护者均可验证。未受影响路径可
-沿用有效记录，不要求每次改措辞都重新安装整个插件。
+按 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md) 自查。可以先开 PR 从 CI 取得
+测试包；自动化测试与 CI 试打包是合并门禁，人工实机测试推荐用于全新插件首发或重大
+宿主能力接入，不再作为常规更新的合并硬门禁。
 
 `taptap-maker/vendor/taptap-maker/` 固定随插件分发官方
 `@taptap/maker@0.0.40`。升级时应整体替换 npm 包发布内容并同步更新插件版本，

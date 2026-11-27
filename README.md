@@ -409,10 +409,10 @@ complete declaration examples and downloading PR verification packages.
 
 Before submitting to this official repository, add a `provisioning.json` entry
 and locale files for `zh-CN`, `en`, `ja` and `ko`, covering plugin text and tool
-descriptions. Follow [`CONTRIBUTING.md`](./CONTRIBUTING.md). Open a PR to obtain a
-test package; authors or maintainers supply runtime and compatibility evidence
-appropriate to the affected behavior before merge. Valid evidence for unaffected
-paths can be reused without reinstalling after every wording change.
+descriptions. Follow [`CONTRIBUTING.md`](./CONTRIBUTING.md). You can open a PR
+to obtain a test package from CI; automated tests and CI packaging are the merge
+gates, while manual Cindy client testing is recommended for brand-new plugins or
+major host-capability integrations rather than a hard merge gate.
 
 `taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.40`
 with the plugin. When upgrading, replace the published npm package content

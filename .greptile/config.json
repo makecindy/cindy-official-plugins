@@ -73,10 +73,7 @@
     {
       "id": "third-party-oauth-scope-approval",
       "severity": "high",
-      "scope": [
-        "**/ghost.json"
-      ],
-      "rule": "仅当本次改动新增/变更插件 oauth.scopes 或依赖尚未发布/未获平台批准的 Cindy 宿主 OAuth 授权时检查：说明须列出相关 scope 及平台批准/宿主发布状态；未就绪时在 summary 标明「等平台批准」并暂停自动批准（不标代码 P1，不让 review check 失败）。未涉及 OAuth 变更时完全跳过本条。"
+      "rule": "仅当本次改动新增/变更插件 oauth.scopes，或（即使未改 ghost.json）新增/变更对尚未发布或未获平台批准的 Cindy 宿主 OAuth 授权的依赖时检查：说明须列出相关 scope 及平台批准/宿主发布状态；未就绪时在 summary 标明「等平台批准」并暂停自动批准（不标代码 P1，不让 review check 失败）。未涉及此类授权时完全跳过本条。"
     },
     {
       "id": "vendor-dist-evidence",

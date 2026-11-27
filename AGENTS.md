@@ -36,8 +36,11 @@ Every AI reviewer (including **Codex** and **Greptile**) MUST follow these rules
      whether the fix introduced a new crash or security bug.
    - **Never** expand follow-up rounds with new P2s or recursively critique
      defensive safeguards added solely to satisfy an earlier review comment.
-   - Prioritize user experience and shipping important fixes over chasing
-     low-probability edge cases.
+   - After 3 rounds, stop iterating: if **no confirmed P0/P1 remains unresolved**,
+     proceed to merge; if a confirmed P0/P1 (security, data loss, or core
+     regression) is still unresolved, escalate to a maintainer rather than
+     waiving an old defect. Prioritize user experience and shipping important
+     fixes over chasing low-probability edge cases.
 5. **Compatibility proportional to `audience`**: check `provisioning.json`.
    For opt-in / early plugins (`audience` ≠ `"all"`), do NOT require
    multi-generation local state or cache migration — clean reset or graceful
@@ -51,17 +54,22 @@ Every AI reviewer (including **Codex** and **Greptile**) MUST follow these rules
 - **L1 Routine maintenance (Fast-Lane)**: bugfixes, perf, small enhancements,
   copy/locales/icons, tests, and traceable dependency maintenance on existing
   plugins — especially by a maintainer or plugin owner listed in
-  `.github/plugin-owners.json` without widening boundaries. **Green CI +
-  Greptile APPROVED + no unresolved Codex P0/P1 → merge directly.** No manual
-  re-review and no device-verification wait.
+  `.github/plugin-owners.json` without widening boundaries. **Required CI green
+  + Greptile `APPROVED` + no unresolved Codex P0/P1 → merge directly.** No
+  manual re-review and no device-verification wait.
 - **L2 Boundary changes**: new plugin submission, widening `provisioning.json`
   to `all`, new/widened permissions, credentials, autonomous hosts, or
-  subprocesses, or changed third-party OAuth scopes / unready host OAuth
-  grants. Maintainers check only the boundary (or wait for platform OAuth
-  approval when applicable).
+  subprocesses, or changed third-party OAuth scopes / newly added dependency on
+  an unready host OAuth grant (even without editing `ghost.json`). **Required
+  CI green + no unresolved confirmed P0/P1 + maintainer boundary confirmation**
+  (maintainer `Approve` satisfies the approval gate when Greptile does not
+  auto-approve; wait for platform approval when an OAuth/host grant is not
+  ready).
 - **L3 Repository governance & publish trust**: `.github/workflows/**`,
   `.greptile/**`, `AGENTS.md`, `.github/plugin-owners.json`, weakening `.tests/`
-  gates, or renaming/deleting a published plugin. Requires maintainer approval.
+  gates, or renaming/deleting a published plugin. **Required CI green + no
+  unresolved confirmed P0/P1 + explicit maintainer `Approve`** (Greptile does
+  not auto-approve L3 paths; maintainer `Approve` satisfies the approval gate).
 
 Reviewers never bypass GitHub ruleset protections or self-approve; authorized
 merge automation executes once the applicable tier's conditions are met.

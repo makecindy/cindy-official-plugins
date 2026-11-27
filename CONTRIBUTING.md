@@ -174,11 +174,11 @@ Global pending releases.
    counterpart must update both files in the same pull request, and vice
    versa. A pull request that updates only one side will not be merged.
 
-Bug fixes and small improvements are welcome as direct PRs. New plugins,
-built-in providers, and audience changes are judged by the standard below. A
-match needs no separate maintainer approval. A proposal issue or Draft PR may
-record design notes; it is not an approval gate, and no duplicate proposal is
-required.
+Bug fixes and small improvements are welcome as direct PRs (L1 fast-lane).
+New plugins, built-in providers, and audience changes require **no prior
+proposal approval** — you can open a PR directly (a proposal issue or Draft PR
+is optional), and maintainers confirm the L2 boundary during PR review against
+the standard below.
 
 ### Admission and audience
 
@@ -196,10 +196,12 @@ it as opt-in instead of waiting for a case-by-case decision.
    something the agent can already do directly without a plugin.
 
 The `author` field must be the real author, not an impersonation of the official
-team. A mismatch is a concrete review finding. Only a genuine boundary expansion
-needs the maintainers' explicit decision: real permission, credential, or
-publish-trust widening; undisclosed network access; renaming or deleting a
-published plugin.
+team. A mismatch is a concrete review finding. L2 boundary confirmations (new
+plugins, widening to `all`, permission/credential/autonomous-host/subprocess
+widening) and L3 repository governance changes (`.github/workflows/**`,
+`.greptile/**`, `AGENTS.md`, `.github/plugin-owners.json`, weakening `.tests/`
+gates, renaming or deleting a published plugin) require maintainer confirmation
+or approval before merge.
 
 ## Licensing of contributions (DCO)
 
