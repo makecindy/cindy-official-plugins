@@ -16,7 +16,8 @@ Before any GitHub call the check asks whether a look is due, from what its last 
 
 | Stage | Looks |
 |---|---|
-| Fast: an unacknowledged update, a due model wait or defer or no-checks deadline, an open settle window | every firing |
+| Fast: an unacknowledged update (outside retry backoff), a due model wait or defer or no-checks deadline, an open settle window | every firing |
+| Retry backoff: an unacknowledged update waiting for its next 30-minute retry window | skipped with zero API calls until `retryBackoffUntil` (a host status trigger still inspects immediately) |
 | Explicit active wait (`checks`, `retry`, or an unsettled `baseline` wait with running checks or named threads) | every 5 minutes to detect new work; this does not call the model |
 | Active: checks running, a failure, a conflict or merge-queue problem, a new commit or an agent round in the last hour | every firing of the 5-minute schedule |
 | Idle | about every 10 minutes |
@@ -181,7 +182,7 @@ wait, existing stage pacing and the 30-minute full-read fallback remain unchange
 - **Two-phase watch.** A released update stays pending until the agent's `--ack` moves `pendingWatch` into `watch`. If the run never starts or crashes, the same items are released again: three quick retries, then every 30 minutes until acknowledged. Releases less than 5 minutes apart (the host postponing a run) do not count as attempts.
 - Pending records only the earliest unacknowledged watch, so a slow agent's `--ack` can only confirm what it was actually told; anything newer is reported again. This relies on one agent turn at a time in the bound task: keep `bindToCurrentSession: true`.
 - If the items disappear before the agent acknowledges them (for example a fix was pushed), the pending update is dropped.
-- **Snapshot failures** are skipped up to three times in a row before the check fails and the user is notified. A GitHub rate limit backs off until the reset time from the response headers. The same failure is reported at most once a day.
+- **Snapshot failures** are skipped up to three times in a row before the check fails and the user is notified. A GitHub rate limit backs off until the reset time from the response headers and records a shared `.rate-limit.json` marker in the state directory so other followed PRs on the same account skip with zero API calls and avoid duplicate alerts until reset (at most one failure notification per active rate-limit window, and the same per-PR failure is reported at most once a day).
 - After the same update goes unacknowledged for three backoff cycles, the detail tells the agent to notify the user.
 - **Upgrades.** A state file written by the earlier version of the check (fingerprints, no watch) starts a watch from the current PR without repeating old news. If it still had an unacknowledged change, the agent is woken once (`upgraded`). Retired options (`--no-cadence-throttle`, `--draft-reminder-hours`, `--max-work-pending-passes`) are accepted and ignored so existing schedules keep working.
 
