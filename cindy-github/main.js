@@ -3833,7 +3833,7 @@ async function prCardTool(args, callId) {
   }
   var needPublishSettings = card.stage === 'open' && !card.settingsApplied;
   var needReadyFollow = card.stage === 'open' && !needPublishSettings &&
-    (readyAfterPublish || card.readyFollowPending === true) && card.publishedHere === true && !card.followedEver;
+    (readyAfterPublish || card.readyFollowPending === true) && !card.followedEver;
   if ((needPublishSettings || needReadyFollow) && prFresh && settings.unreadable) {
     // Unreadable settings are not "all off": keep the one-time to-do list for the next call.
     notes.push(t('prSettingsLater'));
@@ -3853,7 +3853,7 @@ async function prCardTool(args, callId) {
     if (!legacyFollow && settings.autoFollow && !wasPendingStop && card.pending !== 'stop' &&
         !card.following && !card.followedEver && !card.scheduleId && !card.pr.draft) {
       card.pending = 'follow';
-      nativeStart = hasCardScheduler();
+      nativeStart = Boolean(card.publishedHere) && hasCardScheduler();
       if (!nativeStart) todo.push(t('prTodoFollow', { url: card.pr.url }));
     }
   }
@@ -4044,6 +4044,10 @@ async function markPrReadyInner(card, settings, msg, progress) {
     card.note = uncertain
       ? t('prReadyUnknown')
       : t('prReadyFailed', { detail: String(err || fresh.err || '').slice(0, 160) });
+  } else if (card.stage === 'open' && !card.followedEver && (settings.unreadable || (settings.autoFollow && !fresh.pr))) {
+    // Mutation only confirmed leaving draft; defer follow-up until fresh PR status confirms it is still open and non-draft.
+    card.readyFollowPending = true;
+    card.note = !fresh.pr ? t('prFetchFailed', { detail: fresh.err || '' }) : t('prSettingsLater');
   } else if (settings.autoFollow && card.stage === 'open' && !card.followedEver && card.publishedHere && hasCardScheduler()) {
     await syncCardSchedule(card, settings, true);
   } else if (settings.autoFollow && card.stage === 'open' && !card.followedEver) {

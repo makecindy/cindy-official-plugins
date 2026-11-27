@@ -100,7 +100,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.39');
+  assert.equal(manifest.version, '1.5.40');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -2638,6 +2638,80 @@ test('deferred publish and draft-ready follow-up wait for a fresh PR status read
     const recovered = await rt.tool({ card_id: opened.callId });
     assert.equal(recovered.reply.result.todo.length, 1);
     assert.equal((await rt.tool({ card_id: opened.callId, claim_follow: true })).reply.result.follow_claimed, true);
+  }
+
+  // pr:ready button: mutation confirms isDraft=false, but post-mutation PR status read fails -> defer until a fresh open non-draft read.
+  const readyThenFail = () => {
+    let failReads = false;
+    return {
+      setFail: (v) => { failReads = v; },
+      github: (request) => {
+        const { query } = JSON.parse(request.body);
+        if (query.startsWith('mutation')) {
+          failReads = true;
+          return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } });
+        }
+        if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+        if (failReads) return github503();
+        return prGraphql({ draft: true })(request);
+      },
+    };
+  };
+
+  for (const recoveredPr of [{ draft: false }, { merged: true }]) {
+    const { hostApi, rows } = followScheduler();
+    const gh = readyThenFail();
+    const rt = createPrRuntime({ github: gh.github, hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    await rt.click(opened.callId, 'pr:ready');
+    assert.equal(rows.size, 0);
+    assert.equal(rt.agentRuns.length, 0);
+    assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).readyFollowPending, true);
+    assert.ok(visibleText(rt.lastCard(opened.callId).html).join('\n').includes('读取 PR 信息失败'));
+
+    const stillFailing = await rt.tool({ card_id: opened.callId });
+    assert.equal(rows.size, 0);
+    assert.equal(stillFailing.reply.result.follow_state, undefined);
+
+    rt.setGithub(prGraphql(recoveredPr));
+    const recovered = await rt.tool({ card_id: opened.callId });
+    if (recoveredPr.merged) {
+      assert.equal(rows.size, 0);
+      assert.equal(recovered.reply.result.stage, 'merged');
+      assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).readyFollowPending, false);
+    } else {
+      assert.equal(rows.size, 1);
+      assert.equal(recovered.reply.result.follow_state, 'active');
+    }
+  }
+
+  // Legacy host pr:ready re-read failure defers handoff/claim until GitHub confirms open & non-draft.
+  {
+    const gh = readyThenFail();
+    const rt = createPrRuntime({ github: gh.github, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    await rt.click(opened.callId, 'pr:ready');
+    assert.equal(rt.agentRuns.length, 0);
+    assert.equal((await rt.tool({ card_id: opened.callId, claim_follow: true })).reply.result.follow_claimed, false);
+    rt.setGithub(prGraphql({ draft: false }));
+    const recovered = await rt.tool({ card_id: opened.callId });
+    assert.equal(recovered.reply.result.todo.length, 1);
+    assert.equal((await rt.tool({ card_id: opened.callId, claim_follow: true })).reply.result.follow_claimed, true);
+  }
+
+  // Viewed draft (not published here) on native host: pr:ready re-read failure defers to todo handoff on recovery, not direct local scheduling.
+  {
+    const { hostApi, rows } = followScheduler();
+    const gh = readyThenFail();
+    const rt = createPrRuntime({ github: gh.github, hostApi, kv: { prCard: { autoFollow: true } } });
+    const viewed = await rt.tool({ repo: 'octo/repo', pr: 42 });
+    await rt.click(viewed.callId, 'pr:ready');
+    assert.equal(rows.size, 0);
+    assert.equal(rt.agentRuns.length, 0);
+    rt.setGithub(prGraphql({ draft: false }));
+    const recovered = await rt.tool({ card_id: viewed.callId });
+    assert.equal(rows.size, 0);
+    assert.equal(recovered.reply.result.todo.length, 1);
   }
 });
 
