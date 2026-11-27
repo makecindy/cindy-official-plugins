@@ -1,13 +1,19 @@
 {
   "name": "GitLab",
   "description": "gitlab.com、セルフホスト、複数インスタンスに対応する GitLab の組み込みサービスプラグインです。インスタンス URL と api scope の Personal Access Token を追加すると、issue、Merge Request、レビュー、リポジトリ、CI、release、検索など、カタログ化された 107 操作を読み書きできます。各トークンはホストが暗号化し、対応するインスタンスへのリクエストにだけ注入します。",
-  "whenToUse": "gitlab.com、社内、セルフホストの GitLab インスタンスに使用します。github.com のリンクには GitHub を使用してください。issue や Merge Request の確認・変更、コードレビューの投稿・返信・公開、Merge Request のマージ・rebase、リポジトリ・ブランチ・commit・ファイル・CI pipeline・job ログの確認、release・tag・ブランチ管理、インスタンス検索、リポジトリアーカイブのダウンロードができます。先にプラグイン詳細でインスタンスとトークンを追加してください。",
+  "whenToUse": "gitlab.com、社内・セルフホストの GitLab に使用します。issue、MR、レビュー、CI、ログ、リリースを扱います。MR の作成確認、表示、フォローには mr_card を使います。github.com のリンクには GitHub を使用してください。",
   "tools": {
     "list_tools": {
-      "description": "issues、merge_requests、repo、commits、events、search、projects、users、pipelines、jobs、discussions、approvals、draft_notes、reactions、groups、environments、wiki、snippets、releases、meta を含む 107 個の GitLab 操作を一覧表示します。category なしではカテゴリ名・件数・説明を返し、category を指定するとそのカテゴリの全操作と説明・パラメータを返します。"
+      "description": "issues、merge_requests、project_path、commits、events、search、projects、users、pipelines、jobs、discussions、approvals、draft_notes、reactions、groups、environments、wiki、snippets、releases、meta を含む 107 個の GitLab 操作を一覧表示します。category なしではカテゴリ名・件数・説明を返し、category を指定するとそのカテゴリの全操作と説明・パラメータを返します。"
     },
     "call_tool": {
       "description": "list_tools が返した GitLab 操作を、パラメータ schema に従う args で実行します。プロジェクト操作には group/subgroup/project のような project_path が必要で、Git リポジトリ内では git remote get-url origin から推定できます。複数インスタンスでは instance に接続 ID または URL を指定し、省略時は既定接続を使います。既定では avatar と _links を削除し、raw=true で元の JSON を返します。50KB を超える結果はセッション作業ディレクトリへ書き込み、ファイルパスだけを返します。out_file でパスを指定できます。リポジトリアーカイブのダウンロードには ghost_call 最上位の save_dir、upload_project_file にはユーザーメディアを最上位の attachments に指定します。"
+    },
+    "mr_card": {
+      "description": "Cindy に MR カードを表示します。作成前に project_path、head、base を指定し、必要に応じて commits と files を追加します。このタスクで作成に成功したら published=true と mr を渡し、既存カードがあれば card_id も指定します。対応ホストでは、設定が有効な場合に下書き以外の MR をカードがフォローします。作成のみを依頼された場合は following=false を指定します。既存 MR の閲覧時は published を省略します。follow_state が返された場合はカードが管理するため、別のスケジュールを作成しないでください。active は実行中、paused は一時停止中、stopped は終了、failed は開始失敗、unverified は未確認です。旧ホストで follow_state がなければ todo に従います。自分で作成する前に claim_follow=true を渡し、follow_claimed=true を確認します。existing_task は担当済みタスクを示し、カードのリンクは移動専用です。renamed と following は確認済みの操作だけを報告します。更新には card_id、通知時には to_latest を使います。"
+    },
+    "mr_follow_settings": {
+      "description": "MR カードと共通の自動改名・自動フォロー・フォロー用モデル設定を読み取ります。カード表示、タスク作成、フォロー開始は行いません。settings は稼働の証明ではありません。IM で MR を作成した後も読み取り、mr の手順でフォローを作成・検証します。読み取り失敗は無効ではなく不明です。"
     }
   }
 }

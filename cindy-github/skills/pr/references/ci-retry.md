@@ -91,7 +91,9 @@ const replaceRefsArgs = ['--no-replace-objects', 'for-each-ref', '--format=%(ref
 const shallowStateArgs = ['--no-replace-objects', 'rev-parse', '--is-shallow-repository'];
 const shallowPathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'shallow'];
 const refFormatArgs = ['--no-replace-objects', 'rev-parse', '--show-ref-format'];
-const commitMessagePathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'COMMIT_EDITMSG'];
+const mutableGitPathArgs = ['COMMIT_EDITMSG', 'logs/HEAD', 'logs/' + exactRef]
+  .map(name => ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', name]);
+const commitMessagePathArgs = mutableGitPathArgs[0];
 const lockPathArgs = ['index', 'HEAD', exactRef, 'packed-refs']
   .map(name => ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', name]);
 const originalObjectArgs = ['--no-replace-objects', 'cat-file', 'commit', originalRemoteSha];
@@ -135,6 +137,21 @@ arguments also avoid default destination/ref selection (`push.default` and
 `remote.<name>.push`); require the verified single push URL as below.
 
 This is a bounded Agent workflow, not a sandbox for arbitrary Git extensions.
+Only verified GitHub HTTPS URLs are supported by CI-only recovery. SSH URLs,
+scp-style remotes and every non-HTTPS transport stop before any remote read or
+budget operation. Require the independently verified head repository's canonical
+HTTPS Git URL at each boundary, before reserve/amend and immediately before push.
+Do not contact an SSH remote even to check its SHA: GIT_SSH_COMMAND, GIT_SSH,
+core.sshCommand or OpenSSH host/proxy rules can redirect both reads and writes,
+so a matching SHA and successful lease cannot establish the original receiver.
+This entire SSH family is outside the route, even when overrides appear absent.
+Do not parse SSH configuration, probe a receiver, replace a helper, clear an
+override or change the user's remote to qualify. Ordinary authorized work keeps
+its own transport choices. If an earlier SSH attempt is unknown, reconcile all
+suspected receivers read-only within existing authorization; the original PR
+remaining unchanged is not proof that nothing was pushed. Do not restore refs,
+replay or refund. This scope exclusion adds no transport resolver or executor.
+
 Any effective url.*.pushInsteadOf or url.*.insteadOf entry stops this route,
 including empty or nonmatching values. Read `urlRewriteConfigArgs` in the actual
 checkout/environment before any remote read, budget status/reservation, amend and push.
@@ -205,10 +222,14 @@ read back HEAD and every suspected notes ref from its original configuration and
 environment without repeating the amend. Unknown destinations/effects remain
 unknown; do not restore/delete refs, replay notes, reset user work or refund quota.
 
-COMMIT_EDITMSG must be absent or a private regular file. Even --no-edit amend
-writes this helper; resolve `commitMessagePathArgs` in the actual Git environment,
-including linked worktrees, before any budget status/reservation, amend and push.
-Do not construct `.git/COMMIT_EDITMSG` or assume `.git` is a directory. Confirm the
+COMMIT_EDITMSG must be absent or a private regular file. Apply one private-file
+predicate to every mutableGitPathArgs target: COMMIT_EDITMSG, logs/HEAD and
+logs/ plus the exact branch ref. Even --no-edit amend overwrites the message
+helper and can append to both reflogs. Resolve every argument list in the actual
+Git environment, including linked worktrees and the branch's common metadata,
+before any budget status/reservation, amend and push. `commitMessagePathArgs`
+is only the first member of this one inventory, not a separate check owner.
+Do not construct `.git/...` or assume `.git` is a directory. Confirm each
 absolute path belongs to this verified repository's Git metadata. Inspect the
 existing parent chain with lstat: every component must be a real directory with
 known, stable lossless device/inode identity. Any symlink/junction, missing parent,
@@ -225,15 +246,20 @@ parents, type, link count and identity at every boundary: a changed path/parent,
 file replacement or absence becoming presence before amend stops without refund.
 Both signed and unsigned paths share this prerequisite.
 
-After amend, an existing private file must retain its pinned identity; a formerly
-absent target must now be a private regular file, whose identity is pinned for
-the final pre-push recheck. Unexpected, changed or unknown state leaves the local
-commit unpushed. Never remove, replace or relink this file to qualify, change Git
+After amend, every existing private target must retain its pinned identity.
+An absent COMMIT_EDITMSG must become a private regular file; an absent reflog may
+remain absent or become a private regular file. Pin the observed state and any
+new identity for the final pre-push recheck. Missing parents still stop; disabled
+logging is not an exception to inspect only one reflog or skip its parents.
+Unexpected, changed or unknown state leaves the local commit unpushed.
+Never remove, replace or relink this file to qualify, change Git
 environment/configuration, or run a probe amend. These checks are not an atomic
 binding of Git to the inspected file; they rely on the required exclusive
 checkout and do not prevent a later concurrent swap. No lock owner or executor
 is added. [Git commit's file contract](https://git-scm.com/docs/git-commit#FILES)
-describes the overwrite.
+describes the overwrite; [Git repository logs](https://git-scm.com/docs/gitrepository-layout#Documentation/gitrepository-layout.txt-logs)
+identifies HEAD/worktree and common branch reflogs. These are one shared
+overwrite/append eligibility predicate, not duplicate per-path guard systems.
 
 If an earlier amend may have followed an alias, a failure or unchanged HEAD does
 not prove that outside files were untouched. Read back HEAD and account for every

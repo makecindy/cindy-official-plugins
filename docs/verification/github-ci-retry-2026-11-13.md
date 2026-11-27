@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.72, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.73, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1731,3 +1731,28 @@ Final72 mandatory four suites plus GitHub plugin: **693 passed /42 skipped /0 fa
 Before the single round push, main advanced again to d2fbaa7db847cafb899217615f29059f76735308, changing only repository governance/templates/paired authoring docs. Normal merge has no conflicts; all13 non-README inherited paths exactly match main, and README retains only existing paired feature pointers. Packaged cindy-github content and its test files are byte-identical to the validated72/a89822e1 tree, so version1.5.72 and the exact Forge72 audit are reused rather than generating another package. Repository checks for the new root content follow below. The task explicit real-evidence, no-merge, installation/preferences/permission/cleanup constraints still govern this work; no new merge permission or acceptance is inferred from the inherited general policy.
 
 On the root-only d2fbaa7d merge, all four required repository suites passed **68/68, 0 fail/skip (155.88s)**. The plugin-content/test byte comparison above justifies reusing the693/42/0 plugin batch and exact package audit; this is not a claim of one complete plugin batch on a different tree. Actual final committed-tree publish contract is reported in the delivery receipt.
+
+
+## Auxiliary-write and receiver scope checkpoint — source1.5.73, not installed
+
+Invariants: every known mutable amend helper target uses one private-file predicate; CI recovery never invokes an SSH/non-HTTPS receiver. The existing Agent owns eligibility and transient observations. COMMIT_EDITMSG, Git-resolved logs/HEAD and logs/+exactRef share one literal-argument inventory, including linked-worktree/common metadata. No duplicate per-path owner, persistent field, resolver, executor, lock or retry. Existing raw/slot/cap/config-source/notes/signing/URL/approval/consumer/full-sync checks remain; receipt I/O, settings, budget code and amend/push argv are unchanged. The first inventory member retains the old commitMessagePathArgs alias for compatibility.
+
+| Event / state | Required result |
+| --- | --- |
+| Any helper alias, nonregular/multiple-link/unknown identity, or missing/unknown parent before quota | Stop before status/reserve/amend/push |
+| Pinned helper path/parent/state changes after reserve | Stop, no refund |
+| After amend: existing private files stable; absent message created private; absent reflog remains absent or becomes private | Pin every resulting state for final push check |
+| Unexpected/unknown helper after amend | Leave unpushed; no relink/remove/repair/reset/replay |
+| Independently verified canonical GitHub HTTPS URL | Continue all existing checks; URL alone grants nothing |
+| SSH/scp-style/other transport, even no visible override | Stop before remote read or quota; no SSH config parse, probe or override |
+| Earlier SSH effects unknown | Read-only reconciliation of all suspected receivers; original unchanged does not prove no write |
+
+Missing reflog parents still stop; logging disabled does not bypass inventory. The predicate applies equally to signed/unsigned paths and is not atomic against a later path swap. SSH scope deliberately excludes the whole family rather than implementing OpenSSH receiver resolution; ordinary authorized work keeps its transport choices. [Git repository logs](https://git-scm.com/docs/gitrepository-layout#Documentation/gitrepository-layout.txt-logs) and [core.sshCommand](https://git-scm.com/docs/git-config#Documentation/git-config.txt-coresshCommand) support these boundaries.
+
+Native Windows10.0.26100/Node22.22.3/Git2.54.0.windows.1 fixtures reproduce ordinary/linked worktree × hardlink/symlink for BOTH reflogs: amend exits0, moves HEAD and appends metadata into both outside FIXTURE files; all4 ran, none skipped. Two SSH counterexamples (core.sshCommand and GIT_SSH_COMMAND) use a test-only local routing command and disposable bare repositories: read and exact lease push succeed, alternate receives newSHA while intended staysold. No actual network/account/GitHub receiver, quota or retired lab is used. These are native Git counterexamples plus guide contracts, NOT real Cindy refusal/GitHub recovery or Linux/power-loss acceptance. Correct new cases red0pass/8fail8.71s on unchanged72 guide, then new+existing message-family14pass0fail13.24s. All red failures occur AFTER native corruption/redirect assertions pass. Native GIT_SSH/OpenSSH config variants were not separately executed; the declared SSH scope excludes them. Fixtures self-clean.
+
+Merge main7b184a552d5ea047a6899e2b6c923d4a02e5804a/GitHub1.5.51 normally, including earlier GitLab140. Only manifest/version assertion conflicts. GitHub main.js normalized patch exactly upstream; all GitLab source/tests exactly main. Preserve upstream native merge UI/tri-state/permission checks, but DO NOT invoke merge/queue operations: inherited UI grants this task no new authority. Current merge UI, new refusal paths and previous runtime gaps remain unverified; source73 not installed, root installed version unread. Local namespace unavailable means CI rewrite authorization unknown/disabled. No real config/pref/credential/permission/quota changes.
+
+Forge73 exact-content:35 tracked files /294483 archive bytes /843065 uncompressed bytes, semantic manifest and every other byte match. Generated package deleted and absence read back. No new candidate copy, numbered diagnostic file, blocked cleanup retry or residual. Final required suites and committed-tree contract recorded separately.
+
+Mandatory four + GitHub/GitLab batch: **727 pass /1 fail /42 skip (292.39s)**. The sole failure is original publish-contract trackedFiles reading the old HEAD146: newly inherited cindy-gitlab/skills/mr/SKILL.md is already stage0/index-tracked but not in that parent commit. All plugin functional cases and other required cases passed. No assertion/production workaround, alternate checkout or validation copy is introduced. Verify the index file matches the recorded7b base, finalize the authorized normal merge, then run unchanged contract/localization on the actual committed tree before any push. Do not call this initial batch all green or a confirmed infrastructure flake. Later0f8a2447 changes only GitLab and is outside this73/7b validation; earlier exact-main comparisons refer to7b at the time of comparison.

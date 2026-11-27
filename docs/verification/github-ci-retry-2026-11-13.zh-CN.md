@@ -2,7 +2,7 @@
 
 # GitHub CI 恢复运行证据 — 2026-11-13
 
-当前发布方案：**1.5.72，未安装**；任何有效 hook 或不支持完整目录持久性的环境均停止恢复。下方 local 1.5.45 实测有版本限制，见末节。
+当前发布方案：**1.5.73，未安装**；任何有效 hook 或不支持完整目录持久性的环境均停止恢复。下方 local 1.5.45 实测有版本限制，见末节。
 
 环境：Cindy 0.1.136 Beta、Windows 10.0.26100、Node v22.22.3。
 仅安装/更新隔离的 `local` GitHub 开发实例，市场版及其偏好保持原样。
@@ -1177,3 +1177,28 @@ Forge72完整内容核对通过：**35个tracked文件 /290138包字节 /827407�
 本轮唯一推送前，main再次前进到d2fbaa7db847cafb899217615f29059f76735308，仅改仓库规则/模板及双语编写文档。正常merge无冲突；13个非README继承路径逐字节等于main，README仅保留既有成对特性指针。cindy-github打包内容及其测试文件逐字节等于已验证72/a89822e1，因此保留版本1.5.72并复用Forge72完整核对，不再生成相同包。新根目录内容的仓库检查另记。本任务明确的真实证据、禁止合并、安装/偏好/权限/清理限制继续适用；不从继承的通用规则推断新的合并权限或验收完成。
 
 根目录限定的d2fbaa7d合入树上，规定四套仓库检查**68/68通过，0失败/跳过（155.88秒）**。上述插件内容/测试字节比对支持复用693/42/0整套与包核对，不伪称在不同树上单次全插件整套运行。最终实际提交树发布契约记于交付回执。
+
+
+## 辅助写入与接收端范围收敛 — source1.5.73，未安装
+
+不变量：所有已知amend可写辅助目标共用一个私有文件条件；CI恢复不调用SSH/非HTTPS接收端。既有Agent负责资格及临时观察。COMMIT_EDITMSG、经Git解析的logs/HEAD与logs/+exactRef共用字面参数清单，覆盖linked worktree及common元数据。没有逐路径重复owner、持久字段、解析器、执行器、锁或重试；raw/槽/上限/配置来源/notes/签名/URL/审批/消费者/fullsync保护保留。receiptIO、settings、预算实现及amend/push参数未改，旧commitMessagePathArgs仅作为清单首项别名保留。
+
+| 事件/状态 | 必须结果 |
+| --- | --- |
+| 额度前任一辅助文件为别名/非普通/多重链接/未知身份，或父链缺失/未知 | 预算status/reserve/amend/push之前停止 |
+| 预留后路径/父链/已固定状态变化 | 停止、不退款 |
+| amend后原私有文件稳定；原缺失消息文件创建为私有；原缺失reflog仍缺失或创建为私有 | 固定所有结果状态供push前复核 |
+| amend后异常/未知 | 保留未推送，无重连/删除/修复/reset/重放 |
+| 独立核验的规范GitHub HTTPS URL | 继续全部其它核验，URL本身不授权 |
+| SSH/scp-style/其它传输，即使没有可见覆盖 | 远端或额度读取前停止，不解析/探测/覆盖SSH配置 |
+| 较早SSH执行副作用未知 | 只读核对全部疑似接收端，原仓不变不能证明未写入 |
+
+reflog父链缺失仍停止；禁用日志不跳过清单。签名/未签名共用条件，不保证之后并发换路径的原子性。整个SSH族直接排除，未实现OpenSSH接收端解析；普通授权工作保留自身传输选择。[Git日志布局](https://git-scm.com/docs/gitrepository-layout#Documentation/gitrepository-layout.txt-logs)及[core.sshCommand](https://git-scm.com/docs/git-config#Documentation/git-config.txt-coresshCommand)支持该边界。
+
+Windows10.0.26100/Node22.22.3/Git2.54.0.windows.1原生夹具覆盖普通/linked worktree × hardlink/symlink，同时放置两类reflog别名：amend退出0、HEAD移动、两个外部夹具文件均追加元数据，4种全部实际运行未跳过。SSH两例(core.sshCommand、GIT_SSH_COMMAND)通过仅测试用的本地转发命令和临时bare仓复现：读取与精确lease推送成功，替代仓变新SHA、原仓保持旧SHA。没有实际网络/账号/GitHub接收端、额度或退休lab；这是原生Git反例加指南契约，不是真实Cindy拒绝/GitHub恢复或Linux/断电验收。正确新例对未改72指南先0通过/8失败(8.71秒)，新加既有消息族14通过/0失败(13.24秒)；red均在原生破坏/重定向断言通过之后失败。GIT_SSH/OpenSSH配置未另行原生执行，整个SSH排除范围仍覆盖它们。夹具自清理。
+
+正常合入main7b184a552d5ea047a6899e2b6c923d4a02e5804a/GitHub1.5.51，含此前GitLab140。冲突仅manifest/版本断言。GitHub main.js增删补丁逐项等于上游，GitLab全部实现/测试等于main；保留上游原生合并UI/三态/权限核验，但本任务不调用merge/队列，继承UI不增加授权。当前合并UI、新拒绝路径与既有runtime缺口未验收；源码73未安装、root现装版本未读。local命名空间不可读使CI改写授权未知/禁用，无真实配置/偏好/凭证/权限/额度改动。
+
+Forge73完整内容35个tracked文件 /294483包字节 /843065解压字节，manifest语义及其它逐字节匹配。新包已删除并回读不存在；无新验证副本、编号诊断文件、受阻清理重试或残留。最终规定套件和实际提交树契约另记。
+
+规定四套+GitHub/GitLab批次：**727通过 /1失败 /42跳过（292.39秒）**。唯一失败是原发布契约trackedFiles读取旧HEAD146：新继承cindy-gitlab/skills/mr/SKILL.md已stage0/index跟踪，但不在父提交中。插件功能及其它规定用例均通过。不修改断言/生产逻辑，不使用其它checkout或验证副本。核对index文件等于已记录7b基线后，正常完成获准merge，再在实际提交树运行原契约/本地化，推送前完成验证。不称初批全绿或已证实基础设施flake。之后0f8a2447仅改GitLab，不在本73/7b验证范围；较早逐字节main比较指当时的7b。

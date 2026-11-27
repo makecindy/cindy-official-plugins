@@ -40,11 +40,19 @@ exclusive branch with write permission, no WIP, no rewrite ban and no unknown or
 other people's commits. Required real fixes take priority and are batched into a
 normal push when possible.
 
-The Agent also resolves Git's actual `COMMIT_EDITMSG` helper path. It must be
+CI-only recovery supports only the verified head repository's canonical GitHub
+HTTPS Git URL. SSH/scp-style and all other transports are excluded before a
+remote read or budget operation, even without visible SSH overrides. The Agent
+does not change remotes, inspect/probe SSH routing or clear user configuration
+to qualify. Ordinary authorized work keeps its transport choices.
+
+The Agent resolves `COMMIT_EDITMSG` and both HEAD/branch reflogs through Git and
+applies one private-file check to every path. Each must be
 absent under verified real parents or a private regular file with a known single
 link and stable identity. Symlinks, multiple hard links, replacement or unknown
 state stop before budget/amend/push; the file is never removed or repaired to
-qualify. These observations are not an atomic binding of Git to that file.
+qualify. Missing parents stop too; these observations do not atomically bind Git
+to the files. Unexpected or unknown post-amend state leaves work unpushed.
 
 CI-only recovery also stops if there is any retained approval, a merge-queue
 entry, enabled auto-merge or unknown/incomplete information about those states.

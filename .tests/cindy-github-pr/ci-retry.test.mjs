@@ -144,7 +144,7 @@ function guideArguments(values) {
   const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
   const source = guide.match(/```js\n(\/\/ Argument lists for the existing task execution tool\.[\s\S]*?)\n```/)?.[1];
   assert.ok(source, 'the recovery guide must define argument lists, not shell command templates');
-  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, encodingConfigArgs: typeof encodingConfigArgs === "undefined" ? undefined : encodingConfigArgs, committerIdentArgs: typeof committerIdentArgs === "undefined" ? undefined : committerIdentArgs, pushSigningConfigArgs: typeof pushSigningConfigArgs === "undefined" ? undefined : pushSigningConfigArgs, hookConfigArgs: typeof hookConfigArgs === "undefined" ? undefined : hookConfigArgs, hookListArgs: typeof hookListArgs === "undefined" ? undefined : hookListArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, shallowStateArgs: typeof shallowStateArgs === "undefined" ? undefined : shallowStateArgs, shallowPathArgs: typeof shallowPathArgs === "undefined" ? undefined : shallowPathArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs, lockPathArgs: typeof lockPathArgs === "undefined" ? undefined : lockPathArgs, refFormatArgs: typeof refFormatArgs === "undefined" ? undefined : refFormatArgs, urlRewriteConfigArgs: typeof urlRewriteConfigArgs === "undefined" ? undefined : urlRewriteConfigArgs })', values);
+  return runInNewContext(source + '\n({ mutableGitPathArgs: typeof mutableGitPathArgs === "undefined" ? undefined : mutableGitPathArgs, checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, encodingConfigArgs: typeof encodingConfigArgs === "undefined" ? undefined : encodingConfigArgs, committerIdentArgs: typeof committerIdentArgs === "undefined" ? undefined : committerIdentArgs, pushSigningConfigArgs: typeof pushSigningConfigArgs === "undefined" ? undefined : pushSigningConfigArgs, hookConfigArgs: typeof hookConfigArgs === "undefined" ? undefined : hookConfigArgs, hookListArgs: typeof hookListArgs === "undefined" ? undefined : hookListArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, shallowStateArgs: typeof shallowStateArgs === "undefined" ? undefined : shallowStateArgs, shallowPathArgs: typeof shallowPathArgs === "undefined" ? undefined : shallowPathArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs, lockPathArgs: typeof lockPathArgs === "undefined" ? undefined : lockPathArgs, refFormatArgs: typeof refFormatArgs === "undefined" ? undefined : refFormatArgs, urlRewriteConfigArgs: typeof urlRewriteConfigArgs === "undefined" ? undefined : urlRewriteConfigArgs })', values);
 }
 
 test('config-only environment overrides cannot stand in for execution configuration', async t => {
@@ -264,6 +264,86 @@ test('notes rewrite eligibility excludes auxiliary-ref writes before quota or am
       assert.equal(git(['config', 'notes.rewriteRef', value]).status, 0);
       const found = git(read); assert.equal(found.status, 0); assert.match(found.stdout, /notes\.rewriteref/);
     }
+  });
+});
+
+test('reflog aliases share the amend helper-file boundary', async t => {
+  for (const linked of [false, true]) for (const alias of ['hardlink', 'symlink']) await t.test(`${linked ? 'linked' : 'ordinary'} / ${alias}`, t => {
+    const fx = fixture(t), work = path.join(fx.root, 'work'); fs.mkdirSync(work);
+    const global = path.join(fx.root, 'global'); fs.writeFileSync(global, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1', GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' };
+    for (const k of Object.keys(env)) if (/^GIT_(?:CONFIG$|DIR$|WORK_TREE$|COMMON_DIR$|INDEX_FILE$|NOTES_|CONFIG_(?:COUNT|KEY_|VALUE_|PARAMETERS))/i.test(k)) delete env[k];
+    let active = work;
+    const invoke = (args, actualEnv = env) => spawnSync('git', args, { cwd: active, env: actualEnv, encoding: 'utf8', shell: false });
+    const git = args => { const r = invoke(args); assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };
+    git(['init', '-b', 'main']);
+    for (const [k, v] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false'], ['core.hooksPath', path.join(fx.root, 'no-hooks')]]) git(['config', k, v]);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'fixture code\n'); git(['add', '.']); git(['commit', '-s', '-m', 'original fixture']);
+    const original = git(['rev-parse', 'HEAD']);
+    if (linked) { const next = path.join(fx.root, 'linked'); git(['worktree', 'add', '-b', 'feature', next]); active = next; }
+    const branch = linked ? 'feature' : 'main', names = ['logs/HEAD', 'logs/refs/heads/' + branch];
+    const targets = names.map(name => git(['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', name]));
+    const outside = targets.map((target, i) => {
+      const external = path.join(fx.root, 'outside-log-' + i), bytes = 'fixture-owned log prefix\n'; fs.writeFileSync(external, bytes);
+      fs.unlinkSync(target);
+      try { if (alias === 'hardlink') fs.linkSync(external, target); else fs.symlinkSync(external, target, 'file'); }
+      catch (error) { if (alias === 'symlink' && error.code === 'EPERM') { t.skip('native file symlink unavailable'); return null; } throw error; }
+      const st = fs.lstatSync(target, { bigint: true }); assert.equal(alias === 'symlink' ? st.isSymbolicLink() : st.nlink === 2n, true);
+      assert.equal(fs.readFileSync(external, 'utf8'), bytes); return { external, bytes };
+    });
+    if (outside.some(x => !x)) return;
+    assert.equal(git(['rev-parse', 'HEAD']), original); assert.equal(fs.existsSync(fx.retryDir), false);
+    const plan = guideArguments({ verifiedBranch: branch, verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    // Native old-risk counterexample confined to disposable fixture files.
+    const amended = invoke(plan.amendArgs, { ...env, GIT_COMMITTER_DATE: '2026-01-02T00:00:00Z' });
+    assert.equal(amended.status, 0, amended.stderr); assert.notEqual(git(['rev-parse', 'HEAD']), original);
+    for (const { external, bytes } of outside) { const after = fs.readFileSync(external, 'utf8'); assert.ok(after.startsWith(bytes)); assert.ok(after.includes('commit (amend): original fixture')); }
+    assert.equal(fs.existsSync(fx.retryDir), false);
+    assert.ok(plan.mutableGitPathArgs, 'all append/overwrite helper paths share one documented inventory');
+    assert.deepEqual(Array.from(plan.mutableGitPathArgs, a => Array.from(a)), ['COMMIT_EDITMSG', ...names].map(n => ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', n]));
+    const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    assert.ok(guide.includes('Apply one private-file predicate to every mutableGitPathArgs target'));
+  });
+});
+
+test('SSH receiver overrides are excluded by a HTTPS-only recovery scope', async t => {
+  for (const source of ['core.sshCommand', 'GIT_SSH_COMMAND']) await t.test(source, t => {
+    const fx = fixture(t), work = path.join(fx.root, 'work'); fs.mkdirSync(work);
+    const global = path.join(fx.root, 'global'); fs.writeFileSync(global, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1', GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z', GIT_TERMINAL_PROMPT: '0' };
+    for (const k of Object.keys(env)) if (/^GIT_(?:CONFIG$|SSH|DIR$|WORK_TREE$|COMMON_DIR$|NOTES_|CONFIG_(?:COUNT|KEY_|VALUE_|PARAMETERS))/i.test(k)) delete env[k];
+    const invoke = (args, actualEnv = env) => spawnSync('git', args, { cwd: work, env: actualEnv, encoding: 'utf8', shell: false });
+    const git = args => { const r = invoke(args); assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };
+    git(['init', '-b', 'main']);
+    for (const [k, v] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false'], ['core.hooksPath', path.join(fx.root, 'no-hooks')]]) git(['config', k, v]);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'fixture code\n'); git(['add', '.']); git(['commit', '-s', '-m', 'original fixture']);
+    const original = git(['rev-parse', 'HEAD']), intended = path.join(fx.root, 'intended.git'), redirected = path.join(fx.root, 'redirected.git');
+    git(['clone', '--bare', work, intended]); git(['clone', '--bare', work, redirected]);
+    const script = path.join(fx.root, 'ssh-fixture.cjs');
+    fs.writeFileSync(script, "const {spawn}=require('node:child_process');const c=process.argv.at(-1);const sub=c.startsWith('git-upload-pack ')?'upload-pack':c.startsWith('git-receive-pack ')?'receive-pack':null;if(!sub)process.exit(3);const p=spawn('git',[sub,process.env.FIXTURE_RECEIVER],{stdio:'inherit'});p.on('error',()=>process.exit(4));p.on('exit',c=>process.exit(c??5));\n");
+    // Git uses its sh for this command string. Quote complete fixture-owned
+    // paths for that shell; never use JSON encoding as shell escaping.
+    const quote = p => "'" + p.replaceAll('\\', '/').replaceAll("'", "'\\''") + "'";
+    const command = [process.execPath, script].map(quote).join(' ');
+    const actualEnv = { ...env, FIXTURE_RECEIVER: redirected, GIT_SSH_VARIANT: 'simple' };
+    if (source === 'core.sshCommand') git(['config', 'core.sshCommand', command]); else actualEnv.GIT_SSH_COMMAND = command;
+    const remote = 'ssh://git@example.test/intended.git';
+    const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: remote, originalRemoteSha: original, newSha: original,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    const observed = invoke(plan.remoteArgs, actualEnv); assert.equal(observed.status, 0, observed.stderr); assert.ok(observed.stdout.startsWith(original + '\t'));
+    assert.equal(invoke(['--git-dir', intended, 'rev-parse', 'refs/heads/main']).stdout.trim(), original);
+    const amended = invoke(plan.amendArgs, { ...actualEnv, GIT_COMMITTER_DATE: '2026-01-02T00:00:00Z' }); assert.equal(amended.status, 0, amended.stderr);
+    const replacement = git(['rev-parse', 'HEAD']);
+    const push = guideArguments({ verifiedBranch: 'main', verifiedRemote: remote, originalRemoteSha: original, newSha: replacement,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    const pushed = invoke(push.pushArgs, actualEnv); assert.equal(pushed.status, 0, pushed.stderr);
+    assert.equal(invoke(['--git-dir', intended, 'rev-parse', 'refs/heads/main']).stdout.trim(), original);
+    assert.equal(invoke(['--git-dir', redirected, 'rev-parse', 'refs/heads/main']).stdout.trim(), replacement);
+    assert.equal(fs.existsSync(fx.retryDir), false, 'native local transport counterexample does not reserve real quota');
+    const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    assert.ok(guide.includes('Only verified GitHub HTTPS URLs are supported by CI-only recovery'));
+    assert.ok(guide.includes('SSH URLs, scp-style remotes and every non-HTTPS transport stop before any remote read or budget operation'));
   });
 });
 
