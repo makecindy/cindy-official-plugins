@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.60, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.61, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1564,3 +1564,18 @@ This confirms a missing suffix against its nearest existing ancestor at that rea
 Forge1.5.60 exact-content verification passed: **30 files, 256759 archive bytes, 725168 uncompressed bytes**. The new package was deleted and absence verified; no installed plugin or blocked cleanup residual was changed.
 
 Final mandatory four suites plus plugin: **613 passed / 38 skipped / 0 failed (361.99 s)**. Skips remain 17 unsupported native full-directory-sync success cases, 19 earlier skips and two inherited POSIX-only command-line cases not run on Windows. Automated local/model coverage does not complete current-version runtime acceptance.
+
+
+## Synchronize main and retain strict recovery — 2026-11-27 Asia/Shanghai (source1.5.61, not installed)
+
+Source1.5.61 merges main5f5dae7090c8e5d0c0ef35947f3bb13d3470d0fa (main GitHub1.5.38) into the same feature branch. Three conflicts were limited to version/release notes, its version assertion and the authorization paragraph. Resolution preserves upstream reuse of explicit same-repository/same-branch ordinary push authorization and this feature's separate, opt-in bounded CI-only rewrite exception. Version61 exceeds main38 and retains both release notes. No task hook, timeout, model, target or cadence migration.
+
+Upstream terminal cleanup backoff (after initial attempts, 30min/2h/6h/12h, surviving acknowledgement) and matching/skew-aware probe baselines are retained, including transient UNKNOWN handling and host-triggered snapshot baseline updates. These are inherited changes already on main, not an added recovery executor, quota mechanism or permission. Six inherited files (pacing/snapshot tests, follow-up reference, pacing helper, snapshot script and my-browser manifest) exactly match main. The other plugin's manifest change is inherited unchanged, not a new feature edit.
+
+All CI quota helpers, retry guide, receipt I/O, UI/settings, four locales and retry regressions are byte-identical to source60. The gate's budget route still exits before observation-trigger metadata; existing raw preservation, prefix slots/caps, root/link refusal, ID-epoch exclusion, URL/lock/hook/signing/encoding/committer/message/sole-consumer/full-sync prerequisites remain. Manifest capabilities and credentials are unchanged except version/release notes. No new real quota, installation, user configuration/preference, credentials, permissions, fixtures or cleanup retry.
+
+This synchronization requires new-head CI/review. The inherited terminal/probe/pacing behavior has not been exercised through actual Cindy in this task; existing current recovery/UI/read-order/disable/shared-consumer/signed-head/causal runtime gaps remain. Source61 is not installed and historical local45 transport is not current eligibility evidence. Previous blocked cleanup residuals remain untouched; no candidate validation copy was created.
+
+Forge1.5.61 exact-content verification passed: **30 files, 260186 archive bytes, 736696 uncompressed bytes**. New package removed and absence verified; no live installation or cleanup retry.
+
+Final mandatory four suites plus plugin on merged content: **616 passed / 39 skipped / 0 failed (271.23 s)**. The 39 skips are 17 unsupported native full-directory-sync success paths, 19 earlier skips, two previously inherited POSIX-only CLI cases and one newly inherited fake-gh/symlink snapshot-probe fingerprint/skew CLI case. Gate/pacing regressions ran; the new POSIX snapshot invocation did not run on Windows. No native Linux or actual Cindy terminal/probe acceptance is implied.
