@@ -35,7 +35,7 @@ const DISCOVER = { jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _
 const INITIALIZE = { jsonrpc: '2.0', id: 2, method: 'initialize', params: { clientInfo: CLIENT_INFO, protocolVersion: '2025-11-25', capabilities: CAPABILITIES } };
 
 /** A server like Cindy's bridge behind the tunnel; `log` lists what reached it. */
-async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false, failInitialize = false, open = false } = {}) {
+async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false, failInitialize = false, open = false, initializeAnswer = null } = {}) {
   const sessions = new Map();
   const log = [];
   const server = http.createServer((req, res) => {
@@ -62,6 +62,12 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
         }
         if (!sid) {
           if (message.method !== 'initialize') return res.writeHead(400).end('Expected initialize request');
+          // An answer of a given shape that still names a session.
+          if (initializeAnswer) {
+            sessions.set('unclear-session', 'other');
+            const { type, body: text } = initializeAnswer(message.id);
+            return res.writeHead(200, { 'content-type': type, 'mcp-session-id': 'unclear-session' }).end(text);
+          }
           // A failing initialize that still names a session (one this handshake did not create).
           if (failInitialize) {
             sessions.set('someone-elses-session', 'other');
@@ -315,6 +321,29 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     await warmup.close();
     assert.ok(sessions.has('someone-elses-session'), 'the session named by the failed answer is left alone');
     assert.ok(!log.some((item) => item.method === 'DELETE'), 'nothing was ended');
+  });
+
+  // Why: only an unmistakable JSON-RPC success makes the named session the warm-up's own; an error, an
+  // unparsable or ambiguous body, or another content type leaves it to the server and ends nothing.
+  test('an initialize answer that is not a clear success ends no session', async (t) => {
+    const json = 'application/json';
+    const shapes = {
+      error: (id) => ({ type: json, body: JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32603, message: 'no' } }) }),
+      'result and error': (id) => ({ type: json, body: JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '2025-11-25' }, error: { code: 1, message: 'x' } }) }),
+      'not JSON-RPC 2.0': (id) => ({ type: json, body: JSON.stringify({ id, result: { protocolVersion: '2025-11-25' } }) }),
+      'no protocol version': (id) => ({ type: json, body: JSON.stringify({ jsonrpc: '2.0', id, result: {} }) }),
+      unparsable: () => ({ type: json, body: '{"jsonrpc":"2.0",' }),
+      'other content type': (id) => ({ type: 'text/plain', body: JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '2025-11-25' } }) }),
+      'two answers': (id) => ({ type: 'text/event-stream', body: [1, 2].map(() => `data: ${JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '2025-11-25' } })}\n\n`).join('') }),
+    };
+    for (const [shape, initializeAnswer] of Object.entries(shapes)) {
+      const { entry, log, sessions } = await bridgeServer(t, { initializeAnswer });
+      const warmup = warmMcpServers([entry]);
+      assert.deepEqual(await warmup.ready, [entry], `${shape}: agy connects directly`);
+      await warmup.close();
+      assert.ok(sessions.has('unclear-session'), `${shape}: the named session is left to the server`);
+      assert.ok(!log.some((item) => item.method === 'DELETE'), `${shape}: no cleanup request was sent`);
+    }
   });
 
   test('a session handed to agy is never reclaimed', async (t) => {

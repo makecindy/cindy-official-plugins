@@ -445,10 +445,12 @@ function startRemoteWorkspace(agyPath, host) {
     }
     try {
       writeAgentDefinition(dir, servers.map((server) => server.name));
-      // Warms while agy starts; session/new waits for it (see onAgentLine).
-      warmup = warmMcpServers(servers, { log: (text) => process.stderr.write(`[agy-acp] ${text}\n`) });
       agent = launch([...acpArgs, '--agent', AGENT_NAME]);
+      // Started only once agy is: a launch that throws leaves no warm-up running. session/new waits for
+      // it (see onAgentLine).
+      warmup = warmMcpServers(servers, { log: (text) => process.stderr.write(`[agy-acp] ${text}\n`) });
     } catch (error) {
+      releaseWarmup();
       refuse(request.id, -32603, `Antigravity could not be started for a task on another computer (${describe(error)}).`);
       return;
     }
@@ -460,7 +462,9 @@ function startRemoteWorkspace(agyPath, host) {
       if (current.pid === undefined) {
         agentExited = true;
         finished = true;
-        exitAfterStderr(`[agy-acp] Could not start Antigravity at ${agyPath} (${describe(error)}).`, host.notFoundExitCode);
+        // agy never ran: the warmed sessions are ended (within the same budget as any exit) before leaving.
+        Promise.race([releaseWarmup(), new Promise((resolve) => setTimeout(resolve, WARMUP_CLOSE_GRACE_MS))])
+          .finally(() => exitAfterStderr(`[agy-acp] Could not start Antigravity at ${agyPath} (${describe(error)}).`, host.notFoundExitCode));
         return;
       }
       process.stderr.write(`[agy-acp] Antigravity process error: ${describe(error)}\n`);

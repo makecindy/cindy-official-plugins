@@ -522,11 +522,13 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
   /** A loopback MCP server like Cindy's tunnel, answering after `delayMs`; `sessions` lists the open ones. */
   const tunnelServer = async (t, delayMs = 300) => {
     const sessions = new Set();
+    const counts = { requests: 0 };
     let created = 0;
     const mcp = http.createServer((req, res) => {
       let body = '';
       req.on('data', (chunk) => { body += chunk; });
       req.on('end', () => {
+        counts.requests += 1;
         const message = body ? JSON.parse(body) : {};
         const sid = req.headers['mcp-session-id'];
         // The session exists on the server as soon as initialize arrives, before its answer is sent.
@@ -551,7 +553,30 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     });
     await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
     t.after(() => mcp.close());
-    return { sessions, url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec` };
+    return { sessions, counts, url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec` };
+  };
+
+  /**
+   * Makes the entry's start of the session process fail: `throw` throws from spawn itself, `missing`
+   * starts a program that does not exist (spawn reports it asynchronously). Preloaded into the entry only.
+   */
+  const failSessionLaunch = (t, mode) => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agy-acp-spawn-')), 'fail-launch.cjs');
+    t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }));
+    fs.writeFileSync(file, `'use strict';
+if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
+  const childProcess = require('node:child_process');
+  const spawn = childProcess.spawn;
+  childProcess.spawn = function (command, args, options) {
+    if (Array.isArray(args) && args.includes('--agent')) {
+      if (${JSON.stringify(mode)} === 'throw') throw new Error('spawn failed');
+      return spawn.call(this, '/nonexistent/agy-for-test', args, options);
+    }
+    return spawn.apply(this, arguments);
+  };
+}
+`);
+    return { NODE_OPTIONS: `--require=${file}` };
   };
 
   if (official) test('remote-workspace mode hands agy its MCP servers only after their handshake is done', async (t) => {
@@ -601,6 +626,33 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     bridge.child.stdin.end(); // before the initialize answer arrives
     assert.equal((await bridge.closed).code, 0);
     assert.equal(sessions.size, 0, 'the session was ended before the entry exited');
+  });
+
+  // Why: starting the session process can fail synchronously (spawnAgy refuses unsafe paths or arguments)
+  // or asynchronously (the program is gone). Either way agy never runs, so no warmed session may stay.
+  if (official) test('remote-workspace mode leaves no warm-up running when agy cannot be started', async (t) => {
+    const { counts, url } = await tunnelServer(t, 50);
+    const { bridge, send, reply, server } = remoteSession(t, failSessionLaunch(t, 'throw'));
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    assert.match((await reply(1, 'session/new answer')).error.message, /could not be started/);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(counts.requests, 0, 'no handshake was started for an agy that never ran');
+    bridge.child.stdin.end();
+    await bridge.closed;
+  });
+
+  if (official) test('remote-workspace mode ends the warmed sessions when the agy program is gone', async (t) => {
+    const { sessions, url } = await tunnelServer(t, 50);
+    const { bridge, send, reply, server } = remoteSession(t, failSessionLaunch(t, 'missing'));
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    await bridge.closed;
+    assert.match(bridge.stderr.text(), /Could not start Antigravity/);
+    // Whether the handshake got as far as creating a session or was stopped before it, none is left.
+    assert.equal(sessions.size, 0, 'no warmed session is left on the other computer');
   });
 
   test('remote-workspace mode does not start a session without Cindy’s file and command tools', async (t) => {

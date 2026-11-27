@@ -199,6 +199,26 @@ function canonical(value) {
   return JSON.stringify(value);
 }
 
+/**
+ * The result of an initialize answer that is unmistakably a success for the request `id`: a JSON or
+ * event-stream body holding exactly one JSON-RPC 2.0 response with that id, with a result naming the
+ * protocol version and no error. Anything else is null: no session is taken as ours for it.
+ */
+function successfulInitialize(answer, id) {
+  if (answer.status !== 200) return null;
+  const type = String(answer.headers['content-type'] || '');
+  const text = answer.body.toString('utf8');
+  let candidates;
+  if (type.includes('text/event-stream')) candidates = text.split('\n').filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim());
+  else if (type.includes('application/json')) candidates = [text];
+  else return null;
+  const responses = candidates.map(parseJson).filter((message) => isObject(message) && message.id === id && !('method' in message));
+  if (responses.length !== 1) return null;
+  const [response] = responses;
+  if (response.jsonrpc !== '2.0' || 'error' in response || !isObject(response.result)) return null;
+  return typeof response.result.protocolVersion === 'string' ? response.result : null;
+}
+
 /** Whether agy's request is exactly the one sent ahead (client, version and capabilities included). */
 function sameParams(params, sent) {
   return canonical(params) === canonical(sent);
@@ -229,14 +249,14 @@ async function warmServer(server, signal, closing, initializeSignal) {
       body: JSON.stringify({ jsonrpc: '2.0', id: 'cindy-warm-initialize', method: 'initialize', params: INITIALIZE_PARAMS }),
       signal: initializeSignal,
     });
-    const result = firstResponse(initialize);
+    const accepted = successfulInitialize(initialize, 'cindy-warm-initialize');
     const created = initialize.headers['mcp-session-id'];
-    // A failed initialize names no session of ours, whatever its headers say: nothing is ended for it.
-    if (initialize.status !== 200 || typeof created !== 'string' || !created || !isObject(result)
-      || result.id !== 'cindy-warm-initialize' || !isObject(result.result)) return null;
+    // Only an unmistakable success makes the named session ours; a failed or unclear answer is left to
+    // the server (agy connects directly) and nothing is ended for it, whatever its headers say.
+    if (!accepted || typeof created !== 'string' || !created) return null;
     sessionId = created;
     if (signal.aborted) return null; // closed or past the deadline: the session is ended below
-    const protocol = typeof result.result.protocolVersion === 'string' ? result.result.protocolVersion : INITIALIZE_PROTOCOL;
+    const protocol = accepted.protocolVersion;
     const session = { ...auth, 'mcp-session-id': sessionId, 'mcp-protocol-version': protocol };
     const initialized = await post({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, session);
     if (initialized.status < 200 || initialized.status >= 300) return null;
