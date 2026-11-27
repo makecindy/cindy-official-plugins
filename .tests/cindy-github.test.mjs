@@ -3092,65 +3092,105 @@ async function handedOff(runtime, session = 's1') {
   return viewed.callId;
 }
 
-test('where the card creates schedules, a claim creates and verifies it in the same step', async () => {
-  const { hostApi, rows, calls } = followScheduler();
-  const runtime = createPrRuntime({ github: prGraphql(), hostApi });
-  const claimed = (await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true })).reply.result;
-  assert.equal(claimed.follow_state, 'active');
-  // Fulfilled by the card: never a permission for the task to create a second schedule.
-  assert.equal(claimed.follow_claimed, false);
-  assert.equal(claimed.next, zhCopy.prNextUpdated);
-  assert.equal(rows.size, 1);
-  assert.equal([...rows.values()][0].targetSessionId, 's1');
-  assert.equal(runtime.lastCard(claimed.card_id).state, 'done');
-  assert.equal(runtime.agentRuns.length, 0);
-  const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
-  assert.equal(other.reply.result.disposition, 'existing_task');
-  assert.equal(calls.filter((c) => c === 'schedule_create').length, 1);
+test('a granted claim says what is missing and is never released by time, on any host', async () => {
+  for (const host of ['task creates', 'card can list']) {
+    const options = { github: prGraphql(), kv: { prCard: { autoFollow: true } } };
+    if (host === 'card can list') options.hostApi = followScheduler().hostApi;
+    const runtime = createPrRuntime(options);
+    const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+    const result = claimed.reply.result;
+    assert.equal(result.follow_claimed, true, host);
+    assert.equal(result.follow_state, undefined, host);
+    assert.equal(result.next, zhCopy.prNextClaimed, host);
+    const card = runtime.lastCard(claimed.callId);
+    assert.equal(card.state, 'working', host);
+    assert.match(card.html, new RegExp(zhCopy.prFollowStarting), host);
+    assert.ok(Math.abs(savedCard(runtime, claimed.callId).claimedAt - Date.now()) < 5000, host);
+    // The deadline never revokes a granted permission: the task may still be about to create its schedule.
+    ageClaim(runtime, claimed.callId);
+    const refreshed = await runtime.tool({ card_id: claimed.callId });
+    assert.equal(refreshed.reply.result.next, zhCopy.prNextClaimed, host);
+    assert.equal(savedCard(runtime, claimed.callId).pending, 'follow', host);
+    const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+    assert.equal(other.reply.result.disposition, 'existing_task', host);
+    // Reporting the verified schedule ends the wait and clears the clock.
+    const following = await runtime.tool({ card_id: claimed.callId, following: true });
+    assert.equal(following.reply.result.next, zhCopy.prNextUpdated, host);
+    assert.equal(runtime.lastCard(claimed.callId).state, 'done', host);
+    assert.equal(savedCard(runtime, claimed.callId).claimedAt, undefined, host);
+    assert.equal(savedCard(runtime, claimed.callId).claimKind, undefined, host);
+  }
 });
 
-test('where the task creates the schedule, a claim says what is missing and stays until reported or returned', async () => {
-  const runtime = createPrRuntime({ github: prGraphql(), kv: { prCard: { autoFollow: true } } });
-  const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
-  const result = claimed.reply.result;
-  assert.equal(result.follow_claimed, true);
-  assert.equal(result.follow_state, undefined);
-  assert.equal(result.next, zhCopy.prNextClaimed);
-  const card = runtime.lastCard(claimed.callId);
-  assert.equal(card.state, 'working');
-  assert.match(card.html, new RegExp(zhCopy.prFollowStarting));
-  assert.ok(Math.abs(savedCard(runtime, claimed.callId).claimedAt - Date.now()) < 5000);
-  // The deadline never revokes a granted permission: the task may still be about to create its schedule.
-  ageClaim(runtime, claimed.callId);
-  const refreshed = await runtime.tool({ card_id: claimed.callId });
-  assert.equal(refreshed.reply.result.next, zhCopy.prNextClaimed);
-  assert.equal(savedCard(runtime, claimed.callId).pending, 'follow');
-  const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
-  assert.equal(other.reply.result.disposition, 'existing_task');
-  // Reporting the verified schedule ends the wait.
-  const following = await runtime.tool({ card_id: claimed.callId, following: true });
-  assert.equal(following.reply.result.next, zhCopy.prNextUpdated);
-  assert.equal(runtime.lastCard(claimed.callId).state, 'done');
-  assert.equal(savedCard(runtime, claimed.callId).claimedAt, undefined);
+test('a stalled task with a granted claim keeps it, so only its own schedule can ever exist', async () => {
+  const timers = [];
+  const { hostApi, rows } = followScheduler();
+  const runtime = createPrRuntime({ github: prGraphql(), hostApi, onTimer: (fn, delay) => {
+    if (delay < 60_000) return setTimeout(fn, delay);
+    timers.push({ fn, delay });
+    return timers.length;
+  } });
+  // A is granted the claim, finds no schedule and stalls before creating one.
+  const a = (await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true })).reply.result;
+  assert.equal(a.follow_claimed, true);
+  ageClaim(runtime, a.card_id);
+  timers.at(-1).fn();
+  await flushAsync();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  // Neither the clock nor B's claim releases it.
+  const b = (await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } })).reply.result;
+  assert.equal(b.disposition, 'existing_task');
+  assert.equal(b.follow_claimed, false);
+  assert.equal(savedCard(runtime, a.card_id).pending, 'follow');
+  // A resumes and creates its schedule; it is the only one.
+  rows.set('a', taskSchedule('a', 's1'));
+  const adopted = (await runtime.tool({ card_id: a.card_id })).reply.result;
+  assert.equal(adopted.follow_state, 'active');
+  assert.deepEqual([...rows.values()].map((row) => row.targetSessionId), ['s1']);
 });
 
-test('a stalled task cannot add a second schedule after another task took over its released hand-off', async () => {
+test('a waiting record from before claims were marked keeps its reservation across the upgrade', async () => {
+  for (const host of ['task creates', 'card can list']) {
+    const options = { github: prGraphql() };
+    if (host === 'card can list') options.hostApi = followScheduler().hostApi;
+    const before = createPrRuntime(options);
+    const claimed = (await before.tool({ repo: 'octo/repo', pr: 42, claim_follow: true })).reply.result;
+    // What an older plugin saved for a granted claim: pending, no clock, no kind.
+    const files = new Map(before.files);
+    const legacy = savedCard(before, claimed.card_id);
+    delete legacy.claimedAt;
+    delete legacy.claimKind;
+    files.set(`pr-cards/${claimed.card_id}.json`, JSON.stringify(legacy));
+    const after = createPrRuntime({ ...options, files });
+    await after.tool({ card_id: claimed.card_id });
+    ageClaim(after, claimed.card_id);
+    await after.tool({ card_id: claimed.card_id });
+    assert.equal(savedCard(after, claimed.card_id).pending, 'follow', host);
+    const other = await after.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+    assert.equal(other.reply.result.disposition, 'existing_task', host);
+  }
+});
+
+test('a hand-off released after the deadline grants nothing, so a later claim by its task is checked again', async () => {
   const { hostApi, rows, calls } = followScheduler();
   const runtime = createPrRuntime({ github: prGraphql(), hostApi });
-  // A was handed the click and stalls before claiming; after the deadline B takes over.
+  // A was handed the click and never claimed; after the deadline B claims and creates.
   const a = await handedOff(runtime, 's1');
+  assert.equal(savedCard(runtime, a).claimKind, 'handoff');
   const blocked = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
   assert.equal(blocked.reply.result.disposition, 'existing_task');
   ageClaim(runtime, a);
   const b = (await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } })).reply.result;
-  assert.equal(b.follow_state, 'active');
+  assert.equal(b.follow_claimed, true);
   assert.match(runtime.lastCard(a).html, new RegExp(fill(zhCopy.prClaimExpired, { minutes: 10 })));
-  // A resumes: it gets no permission and the card creates nothing for it.
+  rows.set('b', taskSchedule('b', 's2'));
+  await runtime.tool({ card_id: b.card_id, following: true, session_context: { session_id: 's2' } });
+  // A resumes: no permission, nothing to create.
   const resumed = (await runtime.tool({ card_id: a, claim_follow: true })).reply.result;
   assert.equal(resumed.disposition, 'existing_task');
   assert.equal(resumed.follow_claimed, false);
   assert.deepEqual([...rows.values()].map((row) => row.targetSessionId), ['s2']);
-  assert.equal(calls.filter((c) => c === 'schedule_create').length, 1);
+  assert.equal(calls.includes('schedule_create'), false);
 });
 
 test('an unanswered hand-off is released on the next refresh and the follow button comes back', async () => {
@@ -3168,10 +3208,11 @@ test('an unanswered hand-off is released on the next refresh and the follow butt
   assert.ok(actionsOf(card.html).includes('pr:follow'));
   assert.equal(savedCard(runtime, id).pending, null);
   assert.equal(savedCard(runtime, id).claimedAt, undefined);
-  // A later claim starts over and is fulfilled by the card.
+  // A later claim starts over as a granted claim.
   const again = await runtime.tool({ card_id: id, claim_follow: true });
-  assert.equal(again.reply.result.follow_state, 'active');
+  assert.equal(again.reply.result.follow_claimed, true);
   assert.equal(again.reply.result.note, undefined);
+  assert.equal(savedCard(runtime, id).claimKind, 'granted');
 });
 
 test('an expired hand-off whose schedule is running is adopted with the existing verification', async () => {

@@ -2613,7 +2613,7 @@ function prAnchor(card) {
 
 async function savePrCard(card) {
   // The claim clock lives with the record, so no path that saves a claim can leave it untimed.
-  if (!prClaimWaiting(card)) delete card.claimedAt;
+  if (!prClaimWaiting(card)) { delete card.claimedAt; delete card.claimKind; }
   else if (typeof card.claimedAt !== 'number') card.claimedAt = Date.now();
   var r = await cindy.send({
     type: 'fs-request', root: 'data', op: 'write',
@@ -3673,10 +3673,11 @@ async function syncCardSchedule(card, settings, start) {
 }
 
 /* ── Unconfirmed follow claims ──
- * A claim (claim_follow, or a follow click handed to the agent) only reserves the follow-up; the agent still has
- * to create the schedule and report following=true. If that never happens, the card must not spin "starting to
- * follow" forever, and the reservation must not keep other tasks out. Card-managed starts (scheduleAction) are
- * reconciled by syncCardSchedule instead. */
+ * A follow click handed to the agent waits for it to claim; a claim (claim_follow) grants it permission to create
+ * the schedule and report following=true. A hand-off nobody answers must not spin "starting to follow" forever or
+ * keep other tasks out, so it is released after the deadline when no schedule exists. A granted claim is never
+ * released by time (the generic scheduler cannot check who holds it); a running schedule is adopted for both.
+ * Card-managed starts (scheduleAction) are reconciled by syncCardSchedule instead. */
 var PR_CLAIM_TTL = 10 * 60 * 1000;
 var PR_CLAIM_RETRY = 5 * 60 * 1000;
 var prClaimTimers = Object.create(null);
@@ -3706,19 +3707,20 @@ function stampPrClaim(card) {
 /**
  * Settle an expired, unconfirmed claim. Returns 'following' when a running schedule of this task was found and
  * reconciled (it may still need a repair or stay unverified); 'kept' when such a schedule could not be confirmed
- * (the claim stays, with the reason on the card); 'released' when the card creates schedules itself and the
- * scheduler confirmed there is none; 'stamped' for a record saved before claims were timed; or null when nothing
+ * (the claim stays, with the reason on the card); 'released' for an unanswered hand-off when the scheduler
+ * confirmed there is no schedule; 'stamped' for a record saved before claims were timed; or null when nothing
  * changed: not yet expired, the scheduler cannot be queried or failed, a schedule exists that is not running, or
- * this host leaves schedule creation to the task.
+ * the wait is a granted (or legacy) claim that only the task can end.
  */
 async function expirePrClaim(card, now) {
   if (!prClaimWaiting(card)) return null;
   if (typeof card.claimedAt !== 'number') { card.claimedAt = now; return 'stamped'; }
   if (now - card.claimedAt < PR_CLAIM_TTL) return null;
-  // Only where the card creates schedules itself is a release safe: a later claim is fulfilled in the same
-  // serialized step. Elsewhere a granted claim lets the task call the generic scheduler, which no release can
-  // revoke, so the reservation stays until the task reports or returns it; a running schedule is still adopted.
-  var mayRelease = hasCardScheduler();
+  // Only a hand-off the task never answered may be released: no permission was granted, so any later claim is
+  // checked again. A granted claim (or a record from before claims were marked, whose permission is unknown) lets
+  // the task call the generic scheduler at any time, which no release can revoke: it stays until the task reports
+  // or returns it, and a running schedule is still adopted.
+  var mayRelease = prClaimReleasable(card);
   if (card.stage === 'open' && card.pr) {
     if (!hasSchedulerQuery()) return null;
     var rows;
@@ -3749,6 +3751,7 @@ async function expirePrClaim(card, now) {
   if (!mayRelease) return null;
   card.pending = null;
   delete card.claimedAt;
+  delete card.claimKind;
   card.note = t('prClaimExpired', prClaimMinutes());
   return 'released';
 }
@@ -3760,15 +3763,19 @@ async function settlePrClaim(card) {
     armPrClaimTimer(card.id, PR_CLAIM_RETRY);
     return null;
   }
-  // Where the task creates schedules, an expired claim stays until the task reports; one check at the deadline is
-  // enough (ordinary refreshes still adopt a schedule). Where the card creates them, keep checking.
+  // A granted claim stays until the task reports; one check at the deadline is enough (ordinary refreshes still
+  // adopt a schedule). An unanswered hand-off keeps being checked until it can be released.
   if (prClaimWaiting(card) && prClaimRearm(card)) armPrClaimTimer(card.id, prClaimDelay(card));
   if (outcome) await sendPrCard(card, await readPrSettings(), null);
   return outcome;
 }
 
+function prClaimReleasable(card) {
+  return card.claimKind === 'handoff';
+}
+
 function prClaimRearm(card) {
-  return hasCardScheduler() || !prClaimExpired(card);
+  return (prClaimReleasable(card) && hasSchedulerQuery()) || !prClaimExpired(card);
 }
 
 function prClaimDelay(card) {
@@ -3952,13 +3959,11 @@ async function prCardTool(args, callId) {
   // A claim is permission to create a schedule, not a report that one already exists.
   // Keep stop reservations until deletion is confirmed; contradictory requests never reacquire.
   var pendingBefore = card.pending;
-  var claimStart = false;
   if (!legacyFollow && a.claim_follow === true && a.following !== false && card.stage === 'open' && card.pending !== 'stop' && !card.following && !card.scheduleId) {
     card.pending = 'follow';
     stampPrClaim(card);
-    // Where the card creates schedules itself, the claim and the creation are one serialized step: no task ever
-    // holds a permission that a later release could outlive, so a second schedule cannot appear.
-    claimStart = hasCardScheduler();
+    // A granted permission: the task may call the generic scheduler at any time, so no deadline can revoke it.
+    card.claimKind = 'granted';
   }
 
   var settings = await readPrSettings();
@@ -3980,10 +3985,9 @@ async function prCardTool(args, callId) {
     }
   }
 
-  if (nativeStart || claimStart || (card.scheduleAction && hasCardScheduler())) {
-    var start = nativeStart || claimStart || card.scheduleAction === 'start';
-    // An explicit claim may follow a draft (the user asked for it); publication settings never do.
-    if (start && (card.stage !== 'open' || (card.pr.draft && !claimStart))) {
+  if (nativeStart || (card.scheduleAction && hasCardScheduler())) {
+    var start = nativeStart || card.scheduleAction === 'start';
+    if (start && (card.stage !== 'open' || card.pr.draft)) {
       card.scheduleAction = card.pending = null;
     } else if (start && (settings.unreadable || status && status.err)) {
       card.note = settings.unreadable ? t('prSettingsUnreadable') : t('prFetchFailed', { detail: status.err });
@@ -4021,7 +4025,7 @@ async function prCardTool(args, callId) {
     stage: card.stage === 'open' && card.pr.draft ? 'draft' : card.stage,
     settings: prSettingsForAgent(settings, settings.autoFollow),
   };
-  if (nativeStart || claimStart || card.scheduleId || card.scheduleAction || card.managedFollow) {
+  if (nativeStart || card.scheduleId || card.scheduleAction || card.managedFollow) {
     if (card.scheduleAction || card.legacyHookRepair || unverifiedLegacyFollow(card)) result.follow_state = 'unverified';
     else if (card.following) result.follow_state = 'active';
     else if (card.scheduleStatus === 'paused') result.follow_state = 'paused';
@@ -4029,8 +4033,7 @@ async function prCardTool(args, callId) {
   }
   if (card.legacyHookRepair) result.legacy_hook_repair = card.legacyHookRepair;
   if (!delivered) { result.card_shown = false; notes.push(t('prCardNotShown')); }
-  // A claim the card fulfilled itself is never a permission for the task to create another schedule.
-  if (a.claim_follow === true) result.follow_claimed = !claimStart && a.following !== false && card.stage === 'open' &&
+  if (a.claim_follow === true) result.follow_claimed = a.following !== false && card.stage === 'open' &&
     card.pending !== 'stop' && !card.scheduleId && !unverifiedLegacyFollow(card) && !(legacyFollow && hasCardScheduler()) && prFollowActive(card);
   if (card.pr) {
     result.pr = { number: card.pr.number, title: card.pr.title, url: card.pr.url, state: card.pr.state, draft: card.pr.draft };
@@ -4175,6 +4178,7 @@ async function markPrReadyInner(card, settings, msg, progress) {
     // if that cannot be saved, nothing is sent, so a later click can never send it a second time.
     card.pending = 'follow';
     stampPrClaim(card);
+    card.claimKind = 'handoff';
     if (!(await savePrCard(card))) {
       card.pending = null;
       card.note = t('prSaveFailed');
@@ -4307,6 +4311,8 @@ async function prCardAction(msg) {
       } else {
         card.pending = action === 'pr:follow' ? 'follow' : 'stop';
         stampPrClaim(card);
+        // Handed to the task, no permission granted yet: the only kind of wait a deadline may release.
+        if (card.pending === 'follow') card.claimKind = 'handoff';
       }
       if (!(await savePrCard(card))) {
         restoreCard();
