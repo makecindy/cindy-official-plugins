@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.62, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.63, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1592,3 +1592,14 @@ Four inherited files (snapshot tests, follow-up reference, gh helper and snapsho
 Forge1.5.62 exact-content verification passed: **30 files, 263521 archive bytes, 748833 uncompressed bytes**. New package deleted and absence verified. No candidate copy or new disposable runtime setup. Source62 is not installed. Inherited conditional-cache/reconcile/diagnostic behavior has not been accepted through actual Cindy in this task; existing current recovery/UI/pacing/shared-consumer/signed-head/causal runtime gaps and blocked cleanup residuals remain.
 
 Final mandatory four suites plus plugin on merged content: **618 passed / 42 skipped / 0 failed (271.40 s)**. Skips are 17 native receipt-contract success paths unavailable on this environment and 25 POSIX-only command-line cases. Three newly inherited skips cover HTTP200/304, minimal cross-PR rules/pull conditional caching, and diagnostic cache-write suppression. Reconcile/gate regressions ran; those fake-gh/symlink CLI cases did not run on Windows and do not establish live304 or Cindy acceptance.
+
+
+## Integrate a second base movement before publishing — 2026-11-27 Asia/Shanghai (source1.5.63, not installed)
+
+Before the single round push, live main moved again from5ae074b1 to c335abba6813fb83ab805afd0963df8342c612ac/main1.5.40. The already-tested conditional-read merge was signed off as local intermediate e259aa60563b251b9168dc6d79360a76f4dbb3c2/source62, then this same branch incorporated c335. The 618-pass result above covers intermediate62 only, not the final combined63. No reset, rebase, amend, extra checkout or separate intermediate push.
+
+Four conflict files required integration: version/release notes and version assertion, main.js settings/height, and gateMain signature. Final63 retains main's run-receipt Node18+ evidence, read-only manual-stop entry and coherent repair guidance; it also retains this feature's early unknown-settings refusal/refresh, explicit retry target, reference-only height and compact unknown height. Known full settings retain400 plus48 for the inherited manual guidance; unknown stays120, manual/repair additions apply only to non-reference cards. The gate consumes already-parsed args once and passes the inherited nodeMajor marker without reparsing. Strict budget helpers, receipt I/O, guide/Skill and four JSON locales remain byte-identical; main.js rendering now differs from61 and requires current runtime evidence.
+
+Focused production-entry regressions for unknown/reference/manual-stop/legacy-hook/Node gating pass11/11 (0.66s). Final combined mandatory validation is recorded below separately. Neither source62 nor63 is installed by this task. Inherited cache/reconcile/Node-evidence/manual-stop/repair UI and existing recovery/unknown/header/read-order/disable/signed-head/causal acceptance remain unverified in actual Cindy. The task's checked-in source hook and scheduler are intentionally preserved, with no launcher migration. No live preferences, credentials, permissions, hook configuration, real quota, retired fixtures or blocked cleanup were touched.
+
+Final combined63 mandatory four suites plus plugin: **626 passed / 42 skipped / 0 failed (244.57 s)**. The 42 skips retain the same 17 unavailable native receipt success cases and25 POSIX CLI cases; the new card/Node-entry regressions ran. Forge63 exact-content: **30 files, 265716 archive bytes, 757696 uncompressed bytes**; generated62/63 packages both removed and absence verified. No live installation or new runtime acceptance.
