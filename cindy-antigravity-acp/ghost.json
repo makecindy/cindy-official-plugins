@@ -4,7 +4,7 @@
   "name": "Antigravity",
   "description": "Run Cindy tasks with the Google Antigravity CLI (agy) installed on this computer.",
   "version": "0.5.4",
-  "releaseNotes": "Tasks whose files are on another computer no longer start without Cindy's file and command tools when the connection between the computers is slow.",
+  "releaseNotes": "Tasks whose files are on another computer, including tasks shared with friends, can now start subagents and set timers with agy 1.5.18 or later. Subagents work only through Cindy's tools on the task's computer; Antigravity's own and your custom agents stay off there.",
   "minCindyVersion": "0.1.143",
   "icon": "icon.png",
   "locales": {
