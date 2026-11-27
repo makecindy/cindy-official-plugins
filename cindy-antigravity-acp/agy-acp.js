@@ -214,6 +214,7 @@ async function runRemoteWorkspace() {
   }
   remoteWorkspace.startRemoteWorkspace(found.path, {
     acpArgs: ACP_ARGS,
+    agyVersion: found.version,
     guest: remoteWorkspace.isGuestWorkspaceLaunch(process.argv),
     spawnAgy,
     killTree,
