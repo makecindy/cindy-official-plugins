@@ -33,8 +33,16 @@ const http = require('node:http');
 
 /** The longest `session/new` waits for the handshakes; Cindy waits 60 s for its answer. */
 const WARMUP_DEADLINE_MS = 20_000;
-/** How much longer than the deadline an initialize already sent may take to name its session. */
-const INITIALIZE_GRACE_MS = 5_000;
+/** After the deadline or close(), how long an initialize already sent may still take to name its session. */
+const INITIALIZE_GRACE_MS = 3_000;
+/** How long one DELETE of a warmed session may take. */
+const DELETE_TIMEOUT_MS = 2_000;
+/**
+ * The longest close() takes: a late initialize, then the DELETE of the session it names. Whatever is
+ * still open after that is ended by Cindy on the task's computer, which closes every MCP session of
+ * a remote run when the run ends.
+ */
+const CLOSE_BUDGET_MS = INITIALIZE_GRACE_MS + DELETE_TIMEOUT_MS + 250;
 /** What agy 1.5.17 sends; a request that does not match is not answered from the warm-up. */
 const CLIENT_INFO = Object.freeze({ name: 'antigravity-client', version: 'v1.0.0' });
 const CLIENT_CAPABILITIES = Object.freeze({ elicitation: { form: {}, url: {} }, roots: { listChanged: true } });
@@ -201,7 +209,7 @@ function sameParams(params, sent) {
  * server cannot be warmed (it is then given to agy at its own address). A session the server opened
  * for a handshake that did not finish is ended.
  */
-async function warmServer(server, signal, closing, initializeTimeoutMs) {
+async function warmServer(server, signal, closing, initializeSignal) {
   if (!isLoopback(server.url)) return null;
   const auth = serverHeaders(server);
   /** Set only once the server confirmed creating this session for our initialize; only it may be ended here. */
@@ -219,7 +227,7 @@ async function warmServer(server, signal, closing, initializeTimeoutMs) {
     const initialize = await exchange(server.url, {
       headers: { ...auth, accept: ACCEPT, 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 'cindy-warm-initialize', method: 'initialize', params: INITIALIZE_PARAMS }),
-      signal: AbortSignal.timeout(initializeTimeoutMs),
+      signal: initializeSignal,
     });
     const result = firstResponse(initialize);
     const created = initialize.headers['mcp-session-id'];
@@ -247,7 +255,8 @@ async function warmServer(server, signal, closing, initializeTimeoutMs) {
 
 /** Ends a warmed MCP session nobody will use; `closing` holds the DELETEs still on their way. */
 function closeWarmSession(server, warm, closing) {
-  const done = exchange(server.url, { method: 'DELETE', headers: { ...serverHeaders(server), 'mcp-session-id': warm.sessionId } })
+  const done = exchange(server.url, { method: 'DELETE', headers: { ...serverHeaders(server), 'mcp-session-id': warm.sessionId },
+    signal: AbortSignal.timeout(DELETE_TIMEOUT_MS) })
     .catch(() => {})
     .finally(() => closing.delete(done));
   closing.add(done);
@@ -313,6 +322,9 @@ function forward(req, res, server, body) {
 function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => {} } = {}) {
   const token = crypto.randomBytes(24).toString('base64url');
   const abort = new AbortController();
+  /** Cuts off initialize requests already sent, INITIALIZE_GRACE_MS after the deadline or close(). */
+  const initializeAbort = new AbortController();
+  const stopInitializeLater = () => setTimeout(() => initializeAbort.abort(), INITIALIZE_GRACE_MS).unref();
   /** Per server: the kept answers not given yet, and whether agy left the warmed session. */
   const states = servers.map((server) => ({ server, warm: null, live: false, pending: { discover: true, initialize: true, initialized: true, stream: true, tools: true } }));
   let closed = false;
@@ -387,6 +399,12 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
       resolve(servers);
     });
     relay.listen(0, '127.0.0.1', () => {
+      // close() came first: no handshake is started, so none can leave a session behind.
+      if (closed) {
+        relay.close();
+        resolve(servers);
+        return;
+      }
       const { port } = relay.address();
       let done = false;
       const finish = () => {
@@ -400,9 +418,10 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
       };
       const timer = setTimeout(() => {
         abort.abort();
+        stopInitializeLater();
         finish();
       }, deadlineMs);
-      warming = Promise.all(states.map((state) => warmServer(state.server, abort.signal, closing, deadlineMs + INITIALIZE_GRACE_MS).then((warm) => {
+      warming = Promise.all(states.map((state) => warmServer(state.server, abort.signal, closing, initializeAbort.signal).then((warm) => {
         if (!warm) return;
         // A late warm-up after the deadline is not used: the server was already given at its own address.
         if (abort.signal.aborted || closed) closeWarmSession(state.server, warm, closing);
@@ -419,6 +438,7 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
      * once those DELETEs, and the ones of handshakes it interrupted, are answered.
      */
     close() {
+      if (!closed) stopInitializeLater();
       closed = true;
       abort.abort();
       if (relay.listening) relay.close();
@@ -428,9 +448,10 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
           closeWarmSession(state.server, state.warm, closing);
         }
       }
-      return warming.then(() => Promise.all([...closing])).then(() => {});
+      const reclaimed = warming.then(() => Promise.all([...closing])).then(() => {});
+      return Promise.race([reclaimed, new Promise((resolve) => setTimeout(resolve, CLOSE_BUDGET_MS).unref())]);
     },
   };
 }
 
-module.exports = { WARMUP_DEADLINE_MS, warmMcpServers };
+module.exports = { CLOSE_BUDGET_MS, WARMUP_DEADLINE_MS, warmMcpServers };

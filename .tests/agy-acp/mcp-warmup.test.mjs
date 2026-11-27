@@ -199,6 +199,18 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     assert.match(text, /"id":2/);
   });
 
+  // Why: close() can come before the relay is listening (agy failed at once). The listen callback must not
+  // start a handshake afterwards: nobody would end the session it creates while the task stays open.
+  test('closing before the relay is listening starts no handshake', async (t) => {
+    const { entry, log } = await bridgeServer(t);
+    const warmup = warmMcpServers([entry]);
+    const closing = warmup.close();
+    assert.deepEqual(await warmup.ready, [entry], 'agy connects directly');
+    await closing;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(log.length, 0, 'no request reached the server');
+  });
+
   test('closing before the initialize answer arrives still ends the session it created', async (t) => {
     const { entry, sessions, log } = await bridgeServer(t, { delayMs: 300 });
     const warmup = warmMcpServers([entry]);

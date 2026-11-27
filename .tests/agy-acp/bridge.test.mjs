@@ -590,8 +590,9 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
 
   // Why: the task can end while a handshake is still on its way. The server may already have created the
   // session; the entry waits for the answer that names it and ends it before exiting.
+  // The answer takes longer than a short exit wait would allow: the entry's wait covers the warm-up's close budget.
   if (official) test('remote-workspace mode ends a session whose handshake was still on its way at exit', async (t) => {
-    const { sessions, url } = await tunnelServer(t, 400);
+    const { sessions, url } = await tunnelServer(t, 1_800);
     const { bridge, send, reply, server } = remoteSession(t);
     bridge.child.stdin.write(INITIALIZE);
     await reply(0, 'initialize answer');
