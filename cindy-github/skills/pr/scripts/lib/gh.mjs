@@ -14,7 +14,8 @@ function looksFatal(stderrStr) {
     || /authentication required/i.test(stderrStr)
     || /requires authentication/i.test(stderrStr)
     || /rate limit|HTTP 429/i.test(stderrStr)
-    || /bad credentials/i.test(stderrStr);
+    || /bad credentials/i.test(stderrStr)
+    || /gh auth login|populate the GH_TOKEN|not logged into any(?: GitHub)? hosts|no oauth token found/i.test(stderrStr);
 }
 
 async function runOnce(args) {
@@ -33,7 +34,26 @@ function parseJson(stdout, context) {
 /** Only response metadata is exported; never echo headers that may carry credentials. */
 export function splitHttpResponse(stdout) {
   const match = /^HTTP\/[^\r\n]+\r?\n([\s\S]*?)\r?\n\r?\n/.exec(stdout);
-  return match ? { headers: match[1], body: stdout.slice(match[0].length) } : { headers: '', body: stdout };
+  if (!match) return { statusCode: null, headers: '', body: stdout };
+  const statusMatch = /^HTTP\/\S+\s+(\d{3})\b/.exec(match[0]);
+  return {
+    statusCode: statusMatch ? Number(statusMatch[1]) : null,
+    headers: match[1],
+    body: stdout.slice(match[0].length),
+  };
+}
+
+export function extractHeader(headers, name) {
+  if (!headers || !name) return null;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`^${escaped}:\\s*(.+?)\\s*$`, 'im').exec(headers);
+  return match ? match[1].trim() : null;
+}
+
+function isHttp304Error(error) {
+  const { statusCode } = splitHttpResponse(String(error?.stdout ?? ''));
+  if (statusCode === 304) return true;
+  return /\bHTTP 304\b/.test(String(error?.stderr ?? ''));
 }
 
 export function rateLimitRetryAt(headers, now = Date.now()) {
@@ -54,16 +74,6 @@ function reportRateLimit(error) {
   if (!/rate limit|HTTP 429/i.test(`${error.stderr ?? ''} ${error.message ?? ''}`)) return;
   const retryAt = rateLimitRetryAt(splitHttpResponse(String(error.stdout ?? '')).headers);
   process.stderr.write(`[gh-rate-limit] retryAt=${retryAt ?? 0}\n`);
-}
-
-// Run `gh auth status` and exit(1) on failure. Call once at startup.
-export async function ensureAuth() {
-  try {
-    await exec('gh', ['auth', 'status'], { encoding: 'utf8' });
-  } catch (e) {
-    process.stderr.write(`[gh] auth status failed: ${e.stderr || e.message}\n`);
-    process.exit(1);
-  }
 }
 
 // Run `gh --version` and exit(1) if not installed / not on PATH.
@@ -89,6 +99,55 @@ export async function ghJson(path, { retries = 1, includeHeaders = false, fatalE
       const errStr = String(e.stderr || '') + String(e.message || '');
       if (looksFatal(errStr)) {
         if (includeHeaders) reportRateLimit(e);
+        process.stderr.write(`[gh] fatal on ${path}: ${errStr.slice(0, 500)}\n`);
+        if (fatalExit) process.exit(1);
+        throw e;
+      }
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS));
+      }
+    }
+  }
+  throw lastErr;
+}
+
+// Conditional `gh api <path> --include` with optional ETag (`If-None-Match`).
+// HTTP 304 Not Modified returns `{ notModified: true, data: null, etag, headers }` without
+// consuming GitHub REST rate-limit quota or retrying.
+export async function ghJsonConditional(
+  path,
+  { etag = null, retries = 1, includeHeaders = true, fatalExit = true } = {},
+) {
+  const safeEtag = typeof etag === 'string' && etag.trim() && !/[\r\n]/.test(etag) ? etag.trim() : null;
+  const args = ['api', path, ...(includeHeaders || safeEtag ? ['--include'] : [])];
+  if (safeEtag) args.push('-H', `If-None-Match: ${safeEtag}`);
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const stdout = await runOnce(args);
+      const { headers, body } = includeHeaders || safeEtag
+        ? splitHttpResponse(stdout)
+        : { headers: '', body: stdout };
+      return {
+        notModified: false,
+        data: parseJson(body, path),
+        etag: extractHeader(headers, 'etag'),
+        headers,
+      };
+    } catch (e) {
+      if (safeEtag && isHttp304Error(e)) {
+        const { headers } = splitHttpResponse(String(e.stdout ?? ''));
+        return {
+          notModified: true,
+          data: null,
+          etag: extractHeader(headers, 'etag') || safeEtag,
+          headers,
+        };
+      }
+      lastErr = e;
+      const errStr = String(e.stderr || '') + String(e.message || '');
+      if (looksFatal(errStr)) {
+        if (includeHeaders || safeEtag) reportRateLimit(e);
         process.stderr.write(`[gh] fatal on ${path}: ${errStr.slice(0, 500)}\n`);
         if (fatalExit) process.exit(1);
         throw e;

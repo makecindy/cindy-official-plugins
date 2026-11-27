@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.35",
-  "releaseNotes": "PR 跟进遇到域名解析失败或连接超时时，会说明原因。同一个 PR 有新动态时会提前复查，成功读完后自动清除告警。GitHub 限流时仍按规定时间重试。",
+  "version": "1.5.45",
+  "releaseNotes": "发布 PR 后在原 Cindy 任务中显示卡片，包括来自 X 和其他聊天渠道的请求。自动跟进按已有设置执行。修复 PR 卡片在 macOS/Linux 上无法识别宿主稳定化后的单引号前置检查命令的问题：按宿主平台核验引用格式（macOS/Linux 兼容单引号路径、Windows 保持双引号并拒绝单引号），使旧调度在未确认为 Node.js 18+ 时能正常显示「跟进待修复」并给出修复命令，新启动脚本的稳定化命令也能直接通过核验。可在插件设置或通过 AI 开关本机的「发完自动跟进」，与 PR 卡片共用偏好。开启后可在发布前选好跟进模型，手动跟进也可先选模型。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -104,7 +104,7 @@
     },
     {
       "name": "pr_card",
-      "description": "在 Cindy 对话中展示 PR 卡片。发布前传 repo、head、base，可附 commits 和 files。当前任务成功发布后传 published=true 和 pr，有原卡片时带上 card_id。开启发完自动跟进且 PR 为非草稿时，卡片在支持的宿主上直接启动跟进；用户明确只要求发布时传 following=false。仅查看已有 PR 时省略 published。若返回 follow_state，跟进由卡片管理，请勿另建任务。active 为运行中，paused 为已暂停，stopped 为已停止，failed 为启动失败，unverified 为状态待核实。旧宿主仅在未返回 follow_state 时按 todo 交接；另建任务前以 claim_follow=true 申请并确认 follow_claimed=true。existing_task 表示已有其他任务负责，卡片中的入口仅用于导航。renamed 和 following 只报告已核实完成的操作。后台轮次用 card_id 刷新，提醒时可用 to_latest。",
+      "description": "在 Cindy 对话中展示 PR 卡片。发布前传 repo、head、base，可附 commits 和 files。当前任务成功发布后传 published=true 和 pr，有原卡片时带上 card_id。开启发完自动跟进且 PR 为非草稿时，卡片在支持的宿主上直接启动跟进；用户明确只要求发布时传 following=false。仅查看已有 PR 时省略 published。若返回 follow_state，跟进由卡片管理，请勿另建任务。active 为运行中，paused 为已暂停，stopped 为已停止，failed 为启动或核验失败，unverified 为状态待核实。若 unverified 同时返回 legacy_hook_repair，将其 schedule_id 和完整 command 原样告知用户，请用户在自动化设置中更换命令、保留原超时，勿自动改写。旧宿主仅在未返回 follow_state 时按 todo 交接；另建任务前以 claim_follow=true 申请并确认 follow_claimed=true。existing_task 表示已有其他任务负责，卡片中的入口仅用于导航。renamed 和 following 只报告已核实完成的操作。后台轮次用 card_id 刷新，提醒时可用 to_latest。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -171,21 +171,37 @@
           },
           "claim_follow": {
             "type": "boolean",
-            "description": "开始跟进前先传 true 申请在当前任务跟进。只有成功且 follow_claimed=true 才能创建定时任务；existing_task 表示其它任务正在跟进。following 仅报告已完成的开启或停止。"
+            "description": "开始跟进前先传 true 申请在当前任务跟进。只有成功且 follow_claimed=true 才能创建定时任务；认领不等于已开启，建好并确认后须用 following=true 回报，回报或用 following=false 释放之前认领一直保留。existing_task 表示其它任务正在跟进。following 仅报告已完成的开启或停止。"
           },
           "published": {
             "type": "boolean",
-            "description": "仅当当前任务刚刚成功创建了该 PR 时传 true；查看已有 PR 时省略。"
+            "description": "仅当当前任务刚刚成功创建了该 PR 时传 true；仅展示来源任务卡片并由专属任务跟进时传 false；查看已有 PR 时省略。"
           }
         }
       }
     },
     {
       "name": "pr_follow_settings",
-      "description": "只读获取与 PR 卡片共用的自动改名、自动跟进和跟进模型偏好。不显示卡片、不创建任务、不启动跟进；返回 settings，不代表跟进已经开启。IM 发 PR 后也用此入口读取偏好，再按 pr 流程创建并核验跟进。读取失败时设置未知，不当作关闭。",
+      "description": "只读获取与 PR 卡片共用的自动改名、自动跟进和跟进模型偏好。不显示卡片、不创建任务、不启动跟进；返回 settings，不代表跟进已经开启。每次发 PR 后都用 pr_card 在 Cindy 任务中出卡，包括 X 和其他聊天渠道。仅在卡片调用未返回偏好或用户单独查询设置时用此工具。读取失败时设置未知，不当作关闭。",
       "parameters": {
         "type": "object",
         "properties": {}
+      }
+    },
+    {
+      "name": "set_pr_follow_settings",
+      "description": "设置本机「发完自动跟进」默认值。auto_follow 必须是布尔值；只影响以后发布的非草稿 PR。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "auto_follow": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "auto_follow"
+        ],
+        "additionalProperties": false
       }
     },
     {
