@@ -35,7 +35,7 @@ const DISCOVER = { jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _
 const INITIALIZE = { jsonrpc: '2.0', id: 2, method: 'initialize', params: { clientInfo: CLIENT_INFO, protocolVersion: '2025-11-25', capabilities: CAPABILITIES } };
 
 /** A server like Cindy's bridge behind the tunnel; `log` lists what reached it. */
-async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false, failInitialize = false } = {}) {
+async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false, failInitialize = false, open = false } = {}) {
   const sessions = new Map();
   const log = [];
   const server = http.createServer((req, res) => {
@@ -47,7 +47,7 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
         const sid = req.headers['mcp-session-id'];
         const message = body ? JSON.parse(body) : {};
         log.push({ method: req.method, rpc: message.method, sid, id: message.id });
-        if (req.headers.authorization !== TOKEN) return res.writeHead(401).end();
+        if (!open && req.headers.authorization !== TOKEN) return res.writeHead(401).end();
         if (req.method === 'GET' && acceptStream) {
           // A server that keeps an event stream open and sends nothing on it.
           res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -178,6 +178,34 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     assert.deepEqual(first.body.result.tools.map((tool) => tool.name), ['Bash'], 'the kept first page was still there');
     assert.equal(first.body.result.nextCursor, 'page-2');
     assert.equal(log.length, before, 'the first page was not asked for again');
+  });
+
+  // Why: a request that brings a credential the warm-up did not send may be allowed something else by
+  // the server; it must reach the server, and the kept answers stay for agy's own requests.
+  test('a request whose authentication changed is not answered from the warm-up', async (t) => {
+    const { entry, log } = await bridgeServer(t, { open: true });
+    const openEntry = { ...entry, headers: [] };
+    const warmup = warmMcpServers([openEntry]);
+    t.after(() => warmup.close());
+    const [given] = await warmup.ready;
+    const warmed = log.length;
+    const added = await agyRequest(given.url, { message: INITIALIZE, auth: 'Bearer added-later' });
+    assert.equal(log.length, warmed + 1, 'the request with an added credential went to the server');
+    const response = await fetch(given.url, { method: 'POST', headers: { accept: 'application/json, text/event-stream', 'content-type': 'application/json' },
+      body: JSON.stringify(INITIALIZE) });
+    const text = await response.text();
+    assert.equal(log.length, warmed + 1, 'the request without one still got the kept answer');
+    assert.notEqual(response.headers.get('mcp-session-id'), added.sid, 'and the warmed session, not the server’s new one');
+    assert.match(text, /"id":2/);
+  });
+
+  test('closing before the initialize answer arrives still ends the session it created', async (t) => {
+    const { entry, sessions, log } = await bridgeServer(t, { delayMs: 300 });
+    const warmup = warmMcpServers([entry]);
+    await new Promise((resolve) => setTimeout(resolve, 50)); // initialize sent, not answered
+    await warmup.close();
+    assert.equal(sessions.size, 0, 'the session named by the late answer was ended');
+    assert.equal(log.at(-1).method, 'DELETE');
   });
 
   // Only the client's capabilities differ: the server may answer such a client differently.

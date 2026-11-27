@@ -86,7 +86,9 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
       lines = lines.slice(index + 1);
       if (!line.trim()) continue;
       const message = JSON.parse(line);
-      if (message.method === 'initialize') {
+      if (message.method === 'initialize' && process.env.FAKE_AGY_REMOTE_INIT_ERROR === '1') {
+        send({ id: message.id, error: { code: -32603, message: 'agy could not start' } });
+      } else if (message.method === 'initialize') {
         send({ id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [] } });
       } else if (message.method === 'session/new' || message.method === 'session/resume') {
         record({ method: message.method, session: message.params });
@@ -517,37 +519,47 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
   // Why: agy leaves out MCP servers that are not connected within five seconds, and here every handshake
   // crosses the device link. session/new must reach agy only after the warm-up, naming the local relay
   // for a server that was warmed (mcp-warmup.test.mjs covers the relay itself).
-  if (official) test('remote-workspace mode hands agy its MCP servers only after their handshake is done', async (t) => {
+  /** A loopback MCP server like Cindy's tunnel, answering after `delayMs`; `sessions` lists the open ones. */
+  const tunnelServer = async (t, delayMs = 300) => {
     const sessions = new Set();
+    let created = 0;
     const mcp = http.createServer((req, res) => {
       let body = '';
       req.on('data', (chunk) => { body += chunk; });
-      req.on('end', () => setTimeout(() => {
+      req.on('end', () => {
         const message = body ? JSON.parse(body) : {};
         const sid = req.headers['mcp-session-id'];
-        if (req.method === 'GET') return res.writeHead(405).end();
-        if (req.method === 'DELETE') {
-          sessions.delete(sid);
-          return res.writeHead(200).end();
-        }
-        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
-        if (!sid) {
-          const id = `s${sessions.size}`;
-          sessions.add(id);
-          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
-          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }));
-        }
-        if (message.id === undefined) return res.writeHead(202).end();
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [] } }));
-      }, 300));
+        // The session exists on the server as soon as initialize arrives, before its answer is sent.
+        const id = !sid && message.method === 'initialize' ? `s${created++}` : null;
+        if (id) sessions.add(id);
+        setTimeout(() => {
+          if (req.method === 'GET') return res.writeHead(405).end();
+          if (req.method === 'DELETE') {
+            sessions.delete(sid);
+            return res.writeHead(200).end();
+          }
+          if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+          if (id) {
+            res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
+            return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }));
+          }
+          if (message.id === undefined) return res.writeHead(202).end();
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [] } }));
+        }, delayMs);
+      });
     });
     await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
     t.after(() => mcp.close());
+    return { sessions, url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec` };
+  };
+
+  if (official) test('remote-workspace mode hands agy its MCP servers only after their handshake is done', async (t) => {
+    const { sessions, url } = await tunnelServer(t);
     const { launchFile, bridge, send, reply, server } = remoteSession(t);
     bridge.child.stdin.write(INITIALIZE);
     await reply(0, 'initialize answer');
-    const exec = { ...server('cindy_exec'), url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec` };
+    const exec = { ...server('cindy_exec'), url };
     send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec, server('cindy')] } });
     await reply(1, 'session/new answer');
     const { session } = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
@@ -559,6 +571,35 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     bridge.child.stdin.end();
     assert.equal((await bridge.closed).code, 0);
     assert.equal(sessions.size, 0, 'the warmed session agy never took over was ended before the entry exited');
+  });
+
+  // Why: when agy itself cannot start, nobody will take over the warmed sessions; they must be ended at
+  // once, not left on the other computer while the task stays open.
+  if (official) test('remote-workspace mode ends the warmed sessions when agy fails to start', async (t) => {
+    const { sessions, url } = await tunnelServer(t, 50);
+    const { bridge, send, reply, server } = remoteSession(t, { FAKE_AGY_REMOTE_INIT_ERROR: '1' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    assert.equal((await reply(1, 'session/new answer')).error.message, 'agy could not start');
+    await waitFor(() => sessions.size === 0, 3_000, 'the warmed session to be ended while the task is still open');
+    assert.equal(bridge.child.exitCode, null, 'released without waiting for the task to end');
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  // Why: the task can end while a handshake is still on its way. The server may already have created the
+  // session; the entry waits for the answer that names it and ends it before exiting.
+  if (official) test('remote-workspace mode ends a session whose handshake was still on its way at exit', async (t) => {
+    const { sessions, url } = await tunnelServer(t, 400);
+    const { bridge, send, reply, server } = remoteSession(t);
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    await waitFor(() => sessions.size === 1, 3_000, 'the server to create the session');
+    bridge.child.stdin.end(); // before the initialize answer arrives
+    assert.equal((await bridge.closed).code, 0);
+    assert.equal(sessions.size, 0, 'the session was ended before the entry exited');
   });
 
   test('remote-workspace mode does not start a session without Cindy’s file and command tools', async (t) => {

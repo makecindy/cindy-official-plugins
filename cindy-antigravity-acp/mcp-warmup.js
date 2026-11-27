@@ -33,6 +33,8 @@ const http = require('node:http');
 
 /** The longest `session/new` waits for the handshakes; Cindy waits 60 s for its answer. */
 const WARMUP_DEADLINE_MS = 20_000;
+/** How much longer than the deadline an initialize already sent may take to name its session. */
+const INITIALIZE_GRACE_MS = 5_000;
 /** What agy 1.5.17 sends; a request that does not match is not answered from the warm-up. */
 const CLIENT_INFO = Object.freeze({ name: 'antigravity-client', version: 'v1.0.0' });
 const CLIENT_CAPABILITIES = Object.freeze({ elicitation: { form: {}, url: {} }, roots: { listChanged: true } });
@@ -49,6 +51,27 @@ const ACCEPT = 'application/json, text/event-stream';
 const HOP_HEADERS = new Set(['host', 'connection', 'content-length', 'transfer-encoding', 'keep-alive', 'upgrade', 'proxy-connection']);
 /** Answers larger than this are not kept (a tools/list of a few hundred KB is the largest expected). */
 const MAX_KEPT_BYTES = 8 * 1024 * 1024;
+
+/** Headers that carry a credential: a request may get a kept answer only if each is the same as at warm-up. */
+const CREDENTIAL_HEADERS = Object.freeze(['authorization', 'proxy-authorization', 'cookie']);
+
+/** Constant-time equality of two header values. */
+function sameSecret(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const left = Buffer.from(a, 'utf8');
+  const right = Buffer.from(b, 'utf8');
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
+/**
+ * Whether a request carries exactly the authentication the kept answers were fetched with: every
+ * header Cindy gave for the server, and no credential header the warm-up did not send (a request
+ * that adds or changes one may be allowed something else by the server, so the server decides).
+ */
+function sameAuthentication(headers, expected) {
+  for (const [name, value] of Object.entries(expected)) if (!sameSecret(headers[name], value)) return false;
+  return CREDENTIAL_HEADERS.every((name) => name in expected || headers[name] === undefined);
+}
 
 /** The Host header of a request agy sends to the relay. */
 const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i;
@@ -178,7 +201,7 @@ function sameParams(params, sent) {
  * server cannot be warmed (it is then given to agy at its own address). A session the server opened
  * for a handshake that did not finish is ended.
  */
-async function warmServer(server, signal, closing) {
+async function warmServer(server, signal, closing, initializeTimeoutMs) {
   if (!isLoopback(server.url)) return null;
   const auth = serverHeaders(server);
   /** Set only once the server confirmed creating this session for our initialize; only it may be ended here. */
@@ -191,13 +214,20 @@ async function warmServer(server, signal, closing) {
   const handshake = async () => {
     const discover = post({ jsonrpc: '2.0', id: 'cindy-warm-discover', method: 'server/discover', params: DISCOVER_PARAMS },
       { 'mcp-method': 'server/discover', 'mcp-protocol-version': DISCOVER_PROTOCOL }).catch(() => null);
-    const initialize = await post({ jsonrpc: '2.0', id: 'cindy-warm-initialize', method: 'initialize', params: INITIALIZE_PARAMS });
+    // Not cut off by the deadline or close(): the server may already have created the session, and only
+    // its answer names it. It is ended below once known (its own timeout bounds a server that never answers).
+    const initialize = await exchange(server.url, {
+      headers: { ...auth, accept: ACCEPT, 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'cindy-warm-initialize', method: 'initialize', params: INITIALIZE_PARAMS }),
+      signal: AbortSignal.timeout(initializeTimeoutMs),
+    });
     const result = firstResponse(initialize);
     const created = initialize.headers['mcp-session-id'];
     // A failed initialize names no session of ours, whatever its headers say: nothing is ended for it.
     if (initialize.status !== 200 || typeof created !== 'string' || !created || !isObject(result)
       || result.id !== 'cindy-warm-initialize' || !isObject(result.result)) return null;
     sessionId = created;
+    if (signal.aborted) return null; // closed or past the deadline: the session is ended below
     const protocol = typeof result.result.protocolVersion === 'string' ? result.result.protocolVersion : INITIALIZE_PROTOCOL;
     const session = { ...auth, 'mcp-session-id': sessionId, 'mcp-protocol-version': protocol };
     const initialized = await post({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, session);
@@ -290,11 +320,6 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
   /** DELETEs of warmed sessions still on their way; close() waits for them. */
   const closing = new Set();
 
-  const tokenBytes = Buffer.from(token);
-  const sameToken = (given) => {
-    const bytes = Buffer.from(given);
-    return bytes.length === tokenBytes.length && crypto.timingSafeEqual(bytes, tokenBytes);
-  };
   const relay = http.createServer((req, res) => {
     void (async () => {
       // Only agy on this computer talks to the relay: a request naming another host (a web page that
@@ -305,7 +330,7 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
         return;
       }
       const match = /^\/([A-Za-z0-9_-]+)\/(\d+)$/.exec(req.url || '');
-      const state = match && sameToken(match[1]) ? states[Number(match[2])] : undefined;
+      const state = match && sameSecret(match[1], token) ? states[Number(match[2])] : undefined;
       if (!state || !state.warm) {
         res.writeHead(404);
         res.end();
@@ -324,16 +349,16 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
   /** The kept answer for agy's request, or null to pass it on (and everything after it). */
   const keptAnswer = (state, req, body) => {
     const { warm, pending } = state;
-    // Kept answers were fetched with Cindy's authorization for this server; only the same one gets them.
-    const authorized = Object.entries(serverHeaders(state.server)).every(([name, value]) => req.headers[name] === value);
-    if (!authorized) return null;
+    // Kept answers were fetched with Cindy's authorization for this server; only the same one gets them,
+    // and a request that does not match neither receives nor uses them up.
+    if (!sameAuthentication(req.headers, serverHeaders(state.server))) return null;
     const sameSession = req.headers['mcp-session-id'] === warm.sessionId;
     const message = req.method === 'POST' ? parseJson(body.toString('utf8')) : undefined;
     const method = isObject(message) ? message.method : undefined;
     let key = null;
     // agy 1.5.17 opens the event stream without its session id; the server turned it down either way.
     if (req.method === 'GET' && (sameSession || !req.headers['mcp-session-id']) && pending.stream && warm.stream) key = 'stream';
-    else if (method === 'server/discover' && pending.discover && warm.discover && sameParams(message.params, DISCOVER_PARAMS)) key = 'discover';
+    else if (method === 'server/discover' && !req.headers['mcp-session-id'] && pending.discover && warm.discover && sameParams(message.params, DISCOVER_PARAMS)) key = 'discover';
     else if (method === 'initialize' && pending.initialize && !req.headers['mcp-session-id'] && sameParams(message.params, INITIALIZE_PARAMS)) key = 'initialize';
     else if (method === 'notifications/initialized' && sameSession && pending.initialized && sameParams(message.params ?? {}, {})) key = 'initialized';
     // Only the first page, asked for as it was sent ahead; another page (a cursor) comes from the server.
@@ -377,7 +402,7 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
         abort.abort();
         finish();
       }, deadlineMs);
-      warming = Promise.all(states.map((state) => warmServer(state.server, abort.signal, closing).then((warm) => {
+      warming = Promise.all(states.map((state) => warmServer(state.server, abort.signal, closing, deadlineMs + INITIALIZE_GRACE_MS).then((warm) => {
         if (!warm) return;
         // A late warm-up after the deadline is not used: the server was already given at its own address.
         if (abort.signal.aborted || closed) closeWarmSession(state.server, warm, closing);
