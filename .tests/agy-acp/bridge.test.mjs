@@ -1713,6 +1713,83 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.deepEqual(modelsFromConfigOptions(undefined), []);
   });
 
+  if (official) test('listModels places built-in Orchestrator modes after direct models while preserving relative order', async () => {
+    const { modelsFromConfigOptions } = await import(pathToFileURL(path.join(root, 'agy-models.js')).href);
+    assert.deepEqual(modelsFromConfigOptions([
+      { id: 'model', category: 'model', type: 'select', currentValue: 'gemini-4-neon', options: [
+        { value: 'gemini-4-neon', name: 'Gemini 4 Neon' },
+        { value: 'gemini-4-hydrogen', name: 'Gemini 4 Hydrogen' },
+        { value: 'gemini-pro-orchestrator-neon', name: 'Orchestrator (Neon)' },
+        { value: 'gemini-pro-orchestrator', name: 'Orchestrator (Carbon)' },
+        { value: 'gemini-pro-orchestrator-argon', name: 'Orchestrator (Argon)' },
+        { value: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
+        { value: 'claude-opus-5-5', name: 'Claude Opus 5.5' },
+      ] },
+    ]).map((model) => model.id), [
+      'gemini-4-neon',
+      'gemini-4-hydrogen',
+      'gemini-3.8-flash',
+      'claude-opus-5-5',
+      'gemini-pro-orchestrator-neon',
+      'gemini-pro-orchestrator',
+      'gemini-pro-orchestrator-argon',
+    ]);
+  });
+
+  if (official) test('main.js deprioritizes cached Orchestrator models, adds localized hints, and preserves upstream descriptions', async () => {
+    const puts = [];
+    const hostListeners = [];
+    let savedKv = null;
+    const cachedModels = [
+      { id: 'gemini-4-neon', name: 'Gemini 4 Neon', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high' },
+      { id: 'gemini-pro-orchestrator-neon', name: 'Orchestrator (Neon)' },
+      { id: 'gemini-pro-orchestrator', name: 'Orchestrator (Carbon)', description: 'Upstream planner note' },
+      { id: 'gemini-4-hydrogen', name: 'Gemini 4 Hydrogen', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high' },
+    ];
+    const context = vm.createContext({
+      setTimeout,
+      clearTimeout,
+      cindy: {
+        request: async () => ({ ok: true, context: { locale: 'en', uiLocale: 'en' } }),
+        node: {
+          request: async (request) => {
+            if (request.method === 'detect') return { ok: true, result: { available: true, version: '1.5.18' } };
+            return { ok: true, result: { supported: true, models: cachedModels } };
+          },
+        },
+        onHostMessage: (listener) => {
+          hostListeners.push(listener);
+          return () => {};
+        },
+      },
+      fetch: async (url, init) => {
+        if (url === '/kv' && !init) return { ok: true, json: async () => ({ models: cachedModels, modelsListedAt: Date.now() }) };
+        if (url === '/kv') savedKv = JSON.parse(init.body);
+        if (url === '/harnesses') puts.push(JSON.parse(init.body));
+        return { ok: true, status: 204 };
+      },
+    });
+    vm.runInContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context, { filename: 'main.js' });
+    await waitFor(() => puts.length >= 1, 3_000, 'initial publish from cached models');
+    const enModels = puts[0].harnesses[0].models;
+    assert.deepEqual(enModels.map((model) => model.id), [
+      'gemini-4-neon',
+      'gemini-4-hydrogen',
+      'gemini-pro-orchestrator-neon',
+      'gemini-pro-orchestrator',
+    ]);
+    assert.equal(enModels[0].description, undefined);
+    assert.match(enModels[2].description, /Built-in orchestrator/i);
+    assert.equal(enModels[3].description, 'Upstream planner note');
+    // Locale switch republishes localized hint dynamically without re-listing or mutating cached /kv.
+    hostListeners[0]({ type: 'host-context-changed', ok: true, context: { locale: 'zh-CN', uiLocale: 'zh-CN' } });
+    await waitFor(() => puts.length >= 2, 3_000, 'republish on locale switch');
+    const zhModels = puts[1].harnesses[0].models;
+    assert.match(zhModels[2].description, /内置编排模式/);
+    assert.equal(zhModels[3].description, 'Upstream planner note');
+    assert.equal(savedKv, null);
+  });
+
   // 测试的是与 DSH 插件同一套档位规则(DSH 的 off 在 Cindy 中没有对应档)；agy 1.5.12 是 low / medium / high / xhigh。
   test('reasoning levels come from the thought_level option, keeping only Cindy level ids', async () => {
     const { effortsFromConfigOptions } = await import(pathToFileURL(path.join(root, 'agy-models.js')).href);

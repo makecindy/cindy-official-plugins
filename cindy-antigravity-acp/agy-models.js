@@ -39,6 +39,22 @@ const MAX_ID = 256;
 const EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 /** Cindy permission modes an agent mode can stand for (same rule as Cindy's ACP engine). */
 const MODES = ['default', 'acceptEdits', 'auto', 'plan'];
+const ORCHESTRATOR_MODEL_ID = /(?:^|-)orchestrator(?:$|-)/i;
+
+function isOrchestratorModel(model) {
+  return Boolean(model && typeof model.id === 'string' && ORCHESTRATOR_MODEL_ID.test(model.id));
+}
+
+/** Places built-in Orchestrator modes after direct models while preserving relative order. */
+function orderModels(models) {
+  if (!Array.isArray(models) || models.length < 2) return Array.isArray(models) ? models.slice() : [];
+  const direct = [];
+  const orchestrators = [];
+  for (const model of models) {
+    (isOrchestratorModel(model) ? orchestrators : direct).push(model);
+  }
+  return direct.concat(orchestrators);
+}
 
 function modeKey(value) {
   return value.toLowerCase().replace(/[-_\s]/g, '');
@@ -114,7 +130,7 @@ function modelsFromConfigOptions(configOptions) {
       add(item);
     }
   }
-  return models;
+  return orderModels(models);
 }
 
 function probeFolder() {
@@ -226,6 +242,8 @@ module.exports = {
   modelsFromConfigOptions,
   effortsFromConfigOptions,
   modesFromConfigOptions,
+  isOrchestratorModel,
+  orderModels,
   probeFolder,
   readModelSession,
   rememberModelSession,

@@ -41,6 +41,11 @@
     'zh-CN': 'Google 账号',
     en: 'Google account',
   };
+  var ORCHESTRATOR_MODEL_ID = /(?:^|-)orchestrator(?:$|-)/i;
+  var ORCHESTRATOR_DESCRIPTIONS = {
+    'zh-CN': '内置编排模式（无思考档位），建议直选模型或用 Cindy Orca',
+    en: 'Built-in orchestrator (no reasoning levels); prefer direct models or Cindy Orca',
+  };
 
   var locale = 'en';
   var lastResult = null;
@@ -154,6 +159,31 @@
     return true;
   }
 
+  function isOrchestratorModel(model) {
+    return Boolean(model && typeof model.id === 'string' && ORCHESTRATOR_MODEL_ID.test(model.id));
+  }
+
+  /**
+   * Projects sanitized models for Cindy's picker: keeps direct models ahead of Antigravity's
+   * built-in Orchestrator modes (even for older lists loaded from /kv) and attaches a localized
+   * fallback description when agy itself omitted one, without mutating the cached list.
+   */
+  function publishedModels(list) {
+    if (!Array.isArray(list) || !list.length) return [];
+    var direct = [];
+    var orchestrators = [];
+    var hint = ORCHESTRATOR_DESCRIPTIONS[locale] || ORCHESTRATOR_DESCRIPTIONS.en;
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i];
+      if (isOrchestratorModel(item)) {
+        orchestrators.push(item.description ? item : Object.assign({}, item, { description: hint }));
+      } else {
+        direct.push(item);
+      }
+    }
+    return direct.concat(orchestrators);
+  }
+
   /** Only metadata leaves the plugin: never the executable path or a command. */
   function harnessEntry(result) {
     var entry = { id: HARNESS_ID, available: result.available === true };
@@ -183,7 +213,7 @@
     }
     var version = shortString(result.version, 64);
     if (version) entry.version = version;
-    if (entry.available && models && models.length) entry.models = models;
+    if (entry.available && models && models.length) entry.models = publishedModels(models);
     if (entry.available && modes && modes.length) {
       entry.modes = modes;
       if (defaultMode) entry.defaultMode = defaultMode;
