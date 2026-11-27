@@ -35,7 +35,7 @@ call_tool(name:"member +export", args:{developer_id:"<developerId>", format:"csv
 - 超级管理员只占一行。普通成员按已分配的游戏和角色逐行列出。每个厂商角色占一行,“权限内容”列出该角色的全部权限。如果整个角色适用于全部游戏,“游戏名称”标明游戏总数。若角色同时包含厂商权限和全游戏权限,只在适用于全部游戏的权限名旁标注“全部游戏”。仅有成员身份时保留一行“未配置游戏角色”。
 - 具体游戏的授权按游戏及角色列出。“全部游戏”行的权限看“权限内容”,例如全厂只读。要核对超级管理员额外获授的角色或所有可管理的游戏编号,使用 `detailed:true`。角色名旁的“已失效”表示该角色仍有历史分配记录。核对资料、传包和提审能力时用 `member check-access`。
 - 需要脚本核对文件时,在 `output` 后指定路径并加 `json:true`,从标准输出的 `data.path`、`data.total_members` 和 `data.snapshot_id` 读取文件路径、人数和快照。省略 `format` 时,.csv 文件会按 CSV 写入,.json 文件按 JSON 写入。
-- 详细 JSON 的 `roster_sampled_from/until` 记录厂商成员、角色和游戏归属的读取时间范围,成员的 `platform_sampled_from/until` 记录平台权限读取范围。权限按页读取,导出期间不同成员可能在不同时间取值。分页提示名册已变化时,从首页重新导出。查看一页成员用 `call_tool(name:"member list", args:{developer_id:"<developerId>", page_size:"<size>"})`;需要完整名册用 `member +export`。`page_size` 可指定每页 1 至 100 人,响应过大时自动减小。
+- 详细 JSON 的 `roster_sampled_from/until` 记录厂商成员、角色和游戏归属的读取时间范围,成员的 `platform_sampled_from/until` 记录平台权限读取范围。权限按页读取,导出期间不同成员可能在不同时间取值。分页提示名册已变化时,从首页重新导出。查看一页成员用 `call_tool(name:"member list", args:{developer_id:"<developerId>", page_size:50})`;需要完整名册用 `member +export`。`page_size` 可指定每页 1 至 100 人,响应过大时自动减小。
 - 新建或刚转入厂商的游戏可能暂未出现在名册中。发现成员已有角色的游戏仍属该厂商、但游戏清单尚未收录时,导出提示稍后重试。已知游戏 ID 时,用 `member check-access` 直接核对当前归属与该成员的具体操作权限。
 - 厂商角色名旁显示“待核实”时,可用 `detailed:true` 核对角色编号。该角色是否仍然有效尚未确认,核对具体操作可用 `member check-access`。
 - 任一页读取失败,整次导出都会失败。例如,历史角色可能导致某位成员的详情无法读取。使用 `output` 时会保留已有文件,只有命令成功写出的完整文件才能作为本次结果。
