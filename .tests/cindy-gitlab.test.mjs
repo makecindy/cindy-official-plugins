@@ -491,3 +491,46 @@ test('plugin-engine (acp) follow models are preserved in agent handoff when nati
     agent_device_id: 'mac-mini',
   });
 });
+
+test('live MR follow-up schedule in another task resolves to existing_task even when its peer card is missing', async () => {
+  const r = runtime();
+  const opened = await r.show({ mr: url, published: true }, 's-owner');
+  assert.equal(opened.follow_state, 'active');
+  assert.equal(r.schedules.size, 1);
+
+  // Simulate the owning task's card being evicted/absent while its schedule keeps running.
+  r.files.delete('mr-cards/' + opened.card_id + '.json');
+
+  const viewed = await r.show({ mr: url }, 's-other');
+  assert.equal(viewed.disposition, 'existing_task');
+  assert.equal(viewed.owner_session_id, 's-owner');
+  assert.equal(viewed.task_url, 'cindy://session/s-owner');
+  assert.equal(viewed.follow_claimed, false);
+  assert.match(viewed.html, /cindy:\/\/session\/s-owner/);
+  assert.doesNotMatch(viewed.html, /data-ghost-action="pr:follow"/);
+
+  // Legacy client fallback click on "Open follow-up task" resolves the live schedule owner.
+  await r.click(viewed.anchor, 'pr:open-task', { sessionId: 's-other' });
+  assert.equal(r.handoffs.length, 1);
+  assert.equal(r.handoffs[0].event.action, 'open-task');
+  assert.equal(r.handoffs[0].event.task_url, 'cindy://session/s-owner');
+
+  // Clicking follow or calling published: true in another task stays read-only and creates no duplicate.
+  await r.click(viewed.anchor, 'pr:follow', { sessionId: 's-other' });
+  const pub = await r.show({ mr: url, published: true }, 's-third');
+  assert.equal(pub.disposition, 'existing_task');
+  assert.equal(pub.owner_session_id, 's-owner');
+  assert.equal(r.schedules.size, 1);
+});
+
+test('unrecognized or ambiguous foreign MR schedules still fail closed without misdirecting', async () => {
+  const r = runtime();
+  r.schedules.set('custom', {
+    id: 'custom', targetSessionId: 's-other', recurring: true, status: 'active',
+    prTrigger: { url, change: 'any' }, prompt: 'Custom reminder for ' + url,
+  });
+  const pub = await r.show({ mr: url, published: true }, 's-orig');
+  assert.equal(pub.disposition, undefined);
+  assert.equal(pub.follow_state, 'failed');
+  assert.equal(r.schedules.size, 1);
+});
