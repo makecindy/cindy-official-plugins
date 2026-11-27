@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.44",
-  "releaseNotes": "PR 卡片在跟进已暂停时新增「继续跟进」按钮，核实归属与前置检查后可直接恢复调度（恢复期间若前置检查变化或核验失败则保留「跟进待核实」状态，不误报跟进中）；并兼容升级前由卡片创建的旧记录，在刷新与停止入口按实时调度核验配置，继续保护已被用户修改或接管的调度。沿用 1.5.40–1.5.43 优化：按宿主平台兼容 macOS/Linux 单引号稳定化路径，且在未确认为 Node.js 18+ 时保留「跟进待修复」提示与修复命令。",
+  "version": "1.5.45",
+  "releaseNotes": "PR 卡片在跟进已暂停时新增「继续跟进」按钮，核实归属与前置检查后可直接恢复调度（恢复期间若前置检查变化或核验失败则保留「跟进待核实」状态，不误报跟进中）；并兼容升级前由卡片创建的旧记录，在刷新与停止入口按实时调度核验配置，继续保护已被用户修改或接管的调度。沿用 1.5.40–1.5.44 优化：按宿主平台兼容 macOS/Linux 单引号稳定化路径，且在未确认为 Node.js 18+ 时保留「跟进待修复」提示与修复命令。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -186,6 +186,22 @@
       "parameters": {
         "type": "object",
         "properties": {}
+      }
+    },
+    {
+      "name": "set_pr_follow_settings",
+      "description": "设置本机「发完自动跟进」默认值。auto_follow 必须是布尔值；只影响以后发布的非草稿 PR。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "auto_follow": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "auto_follow"
+        ],
+        "additionalProperties": false
       }
     },
     {
