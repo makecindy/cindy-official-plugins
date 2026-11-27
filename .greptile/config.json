@@ -16,7 +16,8 @@
         ".greptile/**",
         "AGENTS.md",
         ".github/workflows/**",
-        ".github/plugin-owners.json"
+        ".github/plugin-owners.json",
+        "provisioning.json"
       ]
     }
   },
