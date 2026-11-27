@@ -2,7 +2,7 @@
 
 # GitHub CI 恢复运行证据 — 2026-11-13
 
-当前发布方案：**1.5.67，未安装**；任何有效 hook 或不支持完整目录持久性的环境均停止恢复。下方 local 1.5.45 实测有版本限制，见末节。
+当前发布方案：**1.5.68，未安装**；任何有效 hook 或不支持完整目录持久性的环境均停止恢复。下方 local 1.5.45 实测有版本限制，见末节。
 
 环境：Cindy 0.1.136 Beta、Windows 10.0.26100、Node v22.22.3。
 仅安装/更新隔离的 `local` GitHub 开发实例，市场版及其偏好保持原样。
@@ -1063,45 +1063,41 @@ Forge64全内容：**35文件、包272077字节、解压764540字节**；生成�
 本地64续办规定四套加插件：**630通过 / 42跳过 / 0失败（255.85秒）**。跳过仍为17个不支持的原生receipt成功路径及25个POSIX CLI。这是等待下一轮交付的已验证本地源码，不是公开PR当前验收。
 
 
-## 排除 notes 重写并同步当前基线 — 2026-11-27（source1.5.65，未安装）
+## 排除 notes 重写并同步基线 — 2026-11-27（source1.5.68，未安装）
 
-同一 checkout 合入 main1758878d5f2b48a5812bbb6b12518aa36bfece64（GitHub1.5.43），保留上游跟进认领超时释放、按平台识别引用的 hook 和未改动的 antigravity 额度错误修复。仅清单/版本断言冲突；main.js、跟进说明正常自动合并。source64/dabd 之前仅本地存在，本轮一并交付，不当作早先公开63证据。任务 source hook、身份、周期、偏好与运行实例不变。
-
-同族不变量：CI-only amend 只能改变已核验提交，不得更新额外 notes refs。仍由现有 Agent 流程单一负责，回执 IO/槽/上限及 amend/push argv 不变。额度前保守排除所有有效 notes.rewrite 前缀配置及已定义 GIT_NOTES_REWRITE_REF/MODE，含空值、不匹配、禁用或未知输入；完整读取覆盖 includes 和所有作用域。不新增 notes 解析器、锁、存储、执行器或配置修复。
+同族不变量：CI-only amend 不得写额外 notes refs，仍由现有 Agent 流程单一负责；回执IO、固定槽/上限、Git amend/push argv及既有严格保护不变。完整有效 notes.rewrite 前缀配置读取覆盖所有作用域/includes/worktree/command环境；任何已定义键或 GIT_NOTES_REWRITE_REF/MODE（含空值、不匹配、禁用或未知）都在status/reservation、amend及push前停止。不新增notes解析器、锁管理、执行器或配置修复。[官方依据](https://git-scm.com/docs/git-notes#CONFIGURATION)。
 
 | 事件/状态 | 结果 |
 | --- | --- |
-| 额度前存在或未知 notes 输入 | 不执行 status/reservation/amend |
+| 额度前存在/未知notes输入 | 不执行status/reservation/amend |
 | 预留后输入变化 | 停止，不退还 |
-| amend 后输入变化或 notes 更新失败 | 保留本地未推送，只读核对 HEAD 与所有可疑 refs |
-| 先前执行效果不明 | 如实报告 unknown，不重试/reset/恢复 refs |
+| amend后输入变化或notes更新失败 | 保留本地未推送，只读核对HEAD及所有可疑refs |
+| 先前执行效果不明 | 如实报告unknown，不重放/reset/恢复refs |
 
-Windows/Node22/Git2.54 隔离本机夹具复现 local/include 多值 glob/command/env notes 写入；notes ref 被锁时 amend 非零退出，但 HEAD 已变而 notes 保持原值。禁用 amend 对照在本机遵守 false；仍保守排除，不宣称环境 refs 覆盖 false。修正后的新用例对未改 source64 guide 先0通过/8失败，再8/8通过（8.44秒）。早先用例错误假定环境 refs 覆盖 amend=false，依据本机对照修正后才完成 red/green。无真实额度、远端、运行实例或退役夹具。这是本机反例与 Agent guide 契约覆盖，不是机械拒绝/Cindy/GitHub/断电验收。官方依据：https://git-scm.com/docs/git-notes#CONFIGURATION 。
+Windows10.0.26100/Node22.22.3/Git2.54.0.windows.1独立本机夹具复现local/include多值glob/command/env notes写入。锁住notes ref时amend非零退出，但HEAD已变、notes仍旧；禁用amend对照在本机遵守false，仍保守排除，不宣称环境refs覆盖false。早先错误假定覆盖，经本机观察修正后才做最终red/green：修正用例对未改64指南0通过/8失败，再8/8通过（8.44秒）。这是本机反例与Agent指南契约，不是机械CLI拒绝/Cindy/GitHub/断电验收，无真实额度、远端夹具或退役lab。
 
-当前 notes/config 拒绝、上游认领/引用解析、当前 UI/读序/关闭恢复/共用 ref/签名 head/因果归类等真实验收仍缺；source65 未安装。绿色测试、代码线程处置不代替验收。既有被拒清理残留未触碰，本机临时夹具自行清理。
+本轮唯一计划推送前main持续移动，同一checkout保留各已签署中间提交，无reset/rebase/amend、新worktree或中途推送：
 
-中间65规定四套+插件：**652通过/42跳过/0失败（294.51秒）**。上游antigravity额度错误单元/集成用例4/4通过（1.91秒），其源码完全等于main175。Forge65完整内容：**35文件、包277066字节、解压780810字节**；新包已删除并确认不存在。这些结果早于其后mainf0bb5b2f的跟进偏好改动，不是最终组合验证。
+| Source | 纳入main | 规定四套+插件 |
+| --- | --- | --- |
+| 65 /3fb899dd | 1758878d（GitHub43） | 652通过/42跳过/0失败，294.51秒 |
+| 66 /b1f24278 | f0bb5b2f（GitHub44） | 657/42/0，290.13秒 |
+| 67 /7002d796 | 3a3e9270（GitHub45） | 658/42/0，531.56秒 |
+| **68** | **4b27251cb18b785bc1b44ddcbf783011f8620fc8（GitHub46）** | **665/42/0，330.99秒** |
 
+更早64/dabd此前仅本地存在；中间结果只适用各自基线。较长67套件只等一次完成，只读进程核验确认隔离Git夹具仍推进，未中断或重复整套。42跳过=17个本机不支持完整目录同步的成功路径+25个POSIX-only CLI，不冒充原生Linux/Cindy证据。
 
-## 最终组合跟进偏好基线 — source1.5.66，未安装
+保留main的认领超时释放、按平台识别引用hook、自动跟进设置/模型选择、各渠道来源Cindy卡片及调度错误协调。修复后清理旧错误，区分read/create/delete/verify并在适当刷新/语言切换保留操作失败反馈。新auto-follow写入保留CI授权，额外字段也不能赋权；CI恢复仍仅PR卡片设置。settings/worker同main，宿主/凭证声明不变。antigravity额度错误代码完全等于main175，其单元/集成4/4通过（1.91秒）。这些是上游工作，不是新CI存储/重试机制。
 
-本轮唯一推送前 main 又移动到 f0bb5b2fecf93faff13d219e7900404c8088c43f（GitHub1.5.44）。保留本地已签署中间65/3fb899dd，再在同一分支合入f0。最终66保留上游 set_pr_follow_settings(auto_follow) 工具、账号页自动跟进开关、跟进前模型选择及四语言条目。它们来自main，不是新增CI授权UI：CI恢复仍仅PR卡片设置，新writer保留ciRetryRepush，额外参数也不能赋权。没有修改真实偏好或安装。
+冲突为清单/版本notes、四语言偏好说明和测试适配。说明同时保留来源卡片路由与严格CI默认关闭/上限/实时读/目录同步/hooks（EN932、zh378、JA511、KO596，root=zh，均小于1024）。适配保留异步requestContext、locale、channel和timer注入；账号页旧no-KV断言改为禁止授权写入、允许main新增auto-follow读取，退役CI消息拒绝保留。一处遗留适配marker在验证前发现并解决，不削弱断言。集中集成12/12（.36秒）、授权保留1/1（.23秒）、交接/清单5/5（.37秒）、错误恢复/未知/引用/授权保留10/10（.77秒）通过。
 
-实际只解决版本/notes及版本断言/设置测试适配冲突。适配器兼容两种channel选项、crypto和原有注入timer；账号页旧no-KV断言调整为禁止授权写入、允许main新增的auto-follow读取，退役CI消息拒绝测试保留。未知/引用高度、撤权和排队读保护仍在。集中集成12/12通过（.36秒），另补missing/false/true的CI偏好保留用例。settings.js/settings.html/node follow worker完全等于main，JSON locale改动来自上游，宿主/凭证声明不变。main/UI/偏好写路由不同于65，尚无真实Cindy验收。
+| Forge完整内容包 | 文件 | 包/解压字节 |
+| --- | --- | --- |
+| 65 | 35 | 277066/780810 |
+| 66 | 35 | 278975/787744 |
+| 67 | 35 | 279437/789515 |
+| **68** | **35** | **280859/795689** |
 
-严格receipt owner/gate、上限与Git argv同65逐字节一致；相对公开63仅新增共用Agent notes排除规则。签名/未签名路径共用同一排除，没有另建执行器。旧64/65结果只是中间证据，最终组合测试/包事实见下。受阻清理残留、退役资源和#12846跟进均未触碰。
+新包及本轮自动生成的大GitHub响应均删除并回读不存在。无新候选副本、受阻清理重试或真实运行夹具。真实67 Git树发布契约1/1通过（11.57秒），最终68提交后回执记在PR交付说明。
 
-中间组合66规定四套+插件：**657通过/42跳过/0失败（290.13秒）**。Forge66：**35文件、包278975字节、解压787744字节**，全内容及删除/不存在核对通过。其后main3a3e9270来源卡片交接改动不在此中间验证范围。
-
-
-## 最终来源卡片交接基线 — source1.5.67，未安装
-
-本轮唯一推送前main继续前进至3a3e92701457706521f09b0a6ab08cf955960723（GitHub1.5.45）。保留本地已签署且未推送的66/b1f24278，再在同一checkout合入3a。上游行为在各渠道都在来源Cindy任务展示PR卡片，由专属任务负责已有授权的跟进；运行代码仅继承main的published=false/settingsApplied保护，场景/preflight说明保留来源卡片展示，只有卡片缺偏好时才回退独立偏好读。不为本任务新建worker，也不迁移source hook。
-
-实际冲突是版本/notes/版本断言和四语言pr_follow_settings说明。最终说明同时保留main的渠道/卡片路由及完整严格CI偏好/默认关闭/上限/实时读/目录同步/hook前提；均小于1024字符（EN932、zh378、JA511、KO596），root同zh。集中清单/发布/dispatcher契约5/5通过（.37秒）。source67的notes排除/receipt owner/gate/argv与恢复回归同65/66逐字节一致，settings/worker代码仍同main。未扩大scope/凭证声明、改真实偏好或安装。此处main1.5.45特指3a，不是早先实测的feature-local1.5.45提交。
-
-最终67测试/包记录见下；66的657/42/0仅作为中间证据。来源卡片路由/模型偏好/notes拒绝及其余当前runtime缺口没有新Cindy验收，本机夹具与测试宿主仍单独标注。既有受阻清理及退役资源限制保持。
-
-Forge67完整内容：**35文件、包279437字节、解压789515字节**；新65/66/67包均删除并确认不存在。本轮自动生成的大GitHub读取响应在摘要后也已清理；无新候选副本、受阻清理重试或运行夹具。真实提交后的发布契约回执记录在PR交付说明。
-
-最终组合67规定四套+插件：**658通过/42跳过/0失败（531.56秒）**。较长运行只等这一次完成，只读进程核验确认仍有隔离Git夹具子进程推进，未中断或重复整套。42跳过仍为17个本机不支持完整目录同步的成功路径及25个POSIX-only CLI，不是新Cindy/Linux证据。
+任务原source hook、调度/归属/模型/超时/周期和作者保持。source68未安装，root现装版本未读，local45只是历史最后实测；此处main45/46对应各自main提交，不是旧feature-local45构建。无真实偏好/令牌/权限/hook配置/额度修改。当前notes/config拒绝、来源卡片/模型偏好/错误恢复、cache/probe/诊断/启动/UI/读序/关闭恢复/共用消费者/签名head/因果等runtime缺口保持，测试/API读不代替验收。旧受阻清理残留与#12846跟进不触碰；原验收是外部解决，并非本轮新接受。

@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.67, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.68, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1616,45 +1616,41 @@ Forge64 exact-content: **35 files, 272077 archive bytes, 764540 uncompressed byt
 Local64 continuation mandatory four suites plus plugin: **630 passed / 42 skipped / 0 failed (255.85 s)**. Skip scope remains17 unavailable native receipt positive cases and25 POSIX CLI cases. This is validated local source awaiting the next round delivery, not current public PR acceptance.
 
 
-## Notes rewrite exclusion and current base — 2026-11-27 (source1.5.65, not installed)
+## Notes rewrite exclusion and base synchronization — 2026-11-27 (source1.5.68, not installed)
 
-This same checkout merges main1758878d5f2b48a5812bbb6b12518aa36bfece64 (GitHub1.5.43), including inherited follow-claim timeout/release, platform-specific quoted-hook recognition and unchanged antigravity quota-error fixes. Only manifest/version assertion conflicted; incoming main.js and follow-up guidance merge normally. Source64/dabd was local-only; it is delivered with this continuation rather than claimed as earlier public63 evidence. The task source hook, identity, cadence, preferences and runtime installations are unchanged.
-
-The failure-family invariant is: a CI-only amend may alter only the verified commit, never auxiliary notes refs. The existing Agent workflow remains its sole owner; the receipt I/O/slots/caps and Git amend/push argv are unchanged. Conservative eligibility excludes every effective notes.rewrite-prefixed config key plus defined GIT_NOTES_REWRITE_REF/MODE, including empty, nonmatching, disabled and unknown inputs; complete effective reads cover includes and all scopes. No notes resolver, extra lock/store/executor or config repair is added.
+The failure-family invariant is: a CI-only amend must not write auxiliary notes refs. The existing Agent workflow is its sole owner; receipt I/O, fixed slots/caps, Git amend/push argv and all earlier strict guards are unchanged. Complete effective notes.rewrite-prefixed configuration reads cover scopes/includes/worktree/command environment. Any defined key or GIT_NOTES_REWRITE_REF/MODE (even empty, nonmatching, disabled or unknown inputs) stops before status/reservation, amend and push. No notes resolver, lock owner, executor or config repair was added. [Official notes behavior](https://git-scm.com/docs/git-notes#CONFIGURATION).
 
 | Event/state | Result |
 | --- | --- |
 | Defined/unknown notes input before budget | Stop before status/reservation or amend |
-| Changed input after reservation | Stop, no refund |
-| Changed input or failed notes update after amend | Leave local work unpushed, inspect HEAD and all suspected refs read-only |
-| Prior execution effects unknown | Report unknown, no replay/reset/ref restoration |
+| Input changes after reservation | Stop, no refund |
+| Changed input or failed notes update after amend | Leave local work unpushed; inspect HEAD and all suspected refs read-only |
+| Prior execution effects unknown | Report unknown; no replay/reset/ref restoration |
 
-Native isolated Windows/Node22/Git2.54 fixtures reproduce local/included multi-glob/command/env notes writes. A locked notes ref produces nonzero amend after HEAD changes while notes stays old. A disabled-amend control honors false on this Git; it remains conservatively excluded, not described as an environment override of false. New corrected cases first fail against unchanged source64 guide (0 pass/8 fail), then pass (8/8,8.44s). An earlier test expectation incorrectly assumed environment refs override amend=false and was corrected using this native control before red/green. No real quota, remote, runtime or retired fixture was used. This is native counterexample plus Agent-guide contract coverage, not mechanical refusal/Cindy/GitHub/power-loss acceptance. Official notes behavior: https://git-scm.com/docs/git-notes#CONFIGURATION .
+Native isolated Windows10.0.26100/Node22.22.3/Git2.54.0.windows.1 fixtures reproduce local/included multi-glob/command/env notes writes. A locked notes ref causes nonzero amend after HEAD moves while notes stays old. A disabled-amend control honors false on this Git; it remains conservatively excluded, not described as an environment override of false. An initial mistaken expectation about that override was corrected from native observation before the final red/green: corrected cases fail against unchanged64 guide (0 pass/8 fail), then pass8/8 (8.44s). This is a native counterexample plus Agent-guide contract, not a mechanical CLI guard or Cindy/GitHub/power-loss acceptance. No real quota, remote fixture or retired lab was used.
 
-Current notes/config refusal, inherited claim/quote handling, current UI/read-order/disable/shared-consumer/signed-head/causal recovery remain unverified live. Source65 is not installed; green tests or resolved code threads do not waive these prerequisites. All previous blocked cleanup residuals remain untouched; temporary native fixtures clean themselves up.
+Main kept advancing before the single planned round push. The same checkout retained each signed intermediate; no reset/rebase/amend, extra worktree or intermediate push:
 
-Intermediate65 mandatory four suites plus plugin: **652 passed / 42 skipped / 0 failed (294.51 s)**. Inherited antigravity account-error unit/integration suite:4/4 passed (1.91s), with its source exactly matching main175. Forge65 exact-content: **35 files, 277066 archive bytes, 780810 uncompressed bytes**; new package deleted and absence verified. These results precede the later mainf0bb5b2f preference change and are not final combined validation.
+| Source | Included main | Mandatory four suites + plugin |
+| --- | --- | --- |
+| 65 / 3fb899dd | 1758878d (GitHub43) | 652 pass /42 skip /0 fail,294.51s |
+| 66 / b1f24278 | f0bb5b2f (GitHub44) | 657 /42 /0,290.13s |
+| 67 / 7002d796 | 3a3e9270 (GitHub45) | 658 /42 /0,531.56s |
+| **68** | **4b27251cb18b785bc1b44ddcbf783011f8620fc8 (GitHub46)** | **665 /42 /0,330.99s** |
 
+The older64/dabd continuation was local-only before this round. Intermediate results apply only to their recorded bases. The longer67 suite completed once; read-only process inspection confirmed active isolated Git fixture subprocesses, with no interruption or duplicate suite. All42 skips are17 unavailable native full-directory-sync positive cases and25 POSIX-only CLI cases; no native Linux/Cindy evidence is implied.
 
-## Final combined follow-preference baseline — source1.5.66, not installed
+Inherited main behavior includes claim timeout/release, platform-specific quoted-hook recognition, auto-follow settings/model selection, source Cindy cards across channels and schedule-error reconciliation. Known errors clear after repair; read/create/delete/verification states remain distinct and failed-operation feedback survives appropriate refreshes/locale switches. The new auto-follow writer preserves CI authorization and cannot grant it through extra fields; CI recovery remains PR-card-only. Settings/worker code matches main, host/credential grants are unchanged. Antigravity quota-error code is byte-identical to main175, its unit/integration suite passes4/4 (1.91s). This is inherited main work, not a new CI storage/retry mechanism.
 
-Before the single round push, main moved to f0bb5b2fecf93faff13d219e7900404c8088c43f (GitHub1.5.44). Signed intermediate65/3fb899dd was kept locally, then this same branch incorporated f0. Final66 retains upstream's set_pr_follow_settings(auto_follow) tool, account-page auto-follow switch, pre-follow model selection and all four locale entries. These are inherited main features, not new CI authorization UI: CI recovery still uses only PR cards; the new writer preserves ciRetryRepush and cannot set it via extra request fields. No live preference or installation changed.
+Conflicts were manifest/version notes, four-language preference descriptions and test adapters. Descriptions retain both source-card routing and strict CI defaults/caps/live reads/directory sync/hooks (EN932,zh378,JA511,KO596; root=zh, all under1024). Test adapters retain injected async requestContext, locale, channel and timer options. The old account-page no-KV assertion now prohibits authorization writes while permitting main's auto-follow read; retired CI message rejection remains tested. A leftover adapter marker was caught and resolved before validation, without weakening assertions. Focused integration12/12 (.36s), CI-preference preservation1/1 (.23s), handoff/manifest5/5 (.37s), and error/unknown/reference/auth-preservation10/10 (.77s) passed.
 
-Only version/notes and version-assertion/settings-test adapter conflicts required resolution. The test adapter supports both channel option names, crypto and original injected timers. Old account-page no-KV assertion was updated to prohibit authorization writes while allowing main's new auto-follow read; retired CI message rejection remains tested. Unknown/reference height, revocation and queue-read guards remain. Focused integration12/12 passed (.36s), plus new missing/false/true CI preference-preservation coverage. settings.js/settings.html/node follow worker match main exactly, JSON locale changes are inherited; host/credential grants are unchanged. Main/UI/pref write routing is not byte-identical to65 and requires real Cindy validation, which was not performed.
+| Forge exact-content package | Files | Archive / uncompressed bytes |
+| --- | --- | --- |
+| 65 | 35 | 277066 /780810 |
+| 66 | 35 | 278975 /787744 |
+| 67 | 35 | 279437 /789515 |
+| **68** | **35** | **280859 /795689** |
 
-The strict receipt owner/gate, caps and Git argv are byte-identical to65; only its shared Agent notes exclusion is new versus public63. Both signed and unsigned paths use that same exclusion, not a separate executor. Prior source64/65 results are intermediate evidence only; final combined checks/package follow below. All blocked cleanup residuals, retired resources and #12846 follower remain untouched.
+All newly generated packages and this round's automatic large GitHub response were deleted with absence read-back. No candidate copy, blocked cleanup retry or live runtime fixture was created. Actual67 Git-tree publish contract passed1/1 (11.57s); final68 post-commit receipt is recorded in the PR delivery report.
 
-Intermediate combined66 mandatory four suites plus plugin: **657 passed / 42 skipped / 0 failed (290.13 s)**. Forge66: **35 files, 278975 archive bytes, 787744 uncompressed bytes**, exact content and deletion/absence verified. A later main3a3e9270 source-card handoff change is not covered by this intermediate validation.
-
-
-## Final source-card handoff baseline — source1.5.67, not installed
-
-Before the one round push, main advanced to3a3e92701457706521f09b0a6ab08cf955960723 (GitHub1.5.45). Local66/b1f24278 remains signed and unpushed while this same checkout incorporates3a. Inherited behavior displays the source Cindy PR card on every channel while a dedicated task owns any authorized follow-up. The runtime only adds main's published=false settingsApplied guard; scenario/preflight instructions preserve source-card presentation and fall back to preference-only reads only when the card lacks settings. This does not authorize a new worker for this task or migrate its source hook.
-
-Conflicts are version/notes/version assertion plus the four-language pr_follow_settings descriptions. Final descriptions retain main's channel/card routing and the entire strict CI preference/default-off/cap/live-read/directory-sync/hook conditions. All are within1024 characters (EN932,zh378,JA511,KO596), root matcheszh. Five focused manifest/publication/dispatcher contracts pass (.37s). Source67 notes exclusion/receipt owner/gate/argv and recovery regression content are byte-identical to65/66. Settings/worker code still matches main; no scopes, credential grants, real preferences or installations changed. main1.5.45 here identifies3a, not the older tested feature-local1.5.45 commit.
-
-Final67 checks/package are recorded below. Source66 657/42/0 is reused only as intermediate evidence. No source-card routing/model preference/notes refusal or other current runtime gap has new Cindy acceptance; native fixtures and test hosts remain distinct from real integration. Existing blocked cleanup and retired-resource prohibitions remain.
-
-Forge67 exact-content: **35 files, 279437 archive bytes, 789515 uncompressed bytes**; generated65/66/67 packages all deleted and absence verified. The task-created large GitHub read response was also removed after summarizing; no new candidate copy, blocked cleanup retry or runtime fixture. Actual post-commit release-contract receipt is recorded in the PR delivery report.
-
-Final combined67 mandatory four suites plus plugin: **658 passed / 42 skipped / 0 failed (531.56 s)**. The longer run was allowed to complete once; read-only process inspection confirmed active isolated Git fixture subprocesses, with no interruption or duplicate suite. Skip scope remains17 unavailable native full-directory-sync positive paths and25 POSIX-only CLI cases, not new Cindy/Linux evidence.
+The task's exact source hook, schedule/target/model/timeout/cadence and author remain. Source68 was not installed; current root version was not read, local45 is historical last tested only. GitHub main45/46 labels here refer to their specific main commits, not the older feature-local45 build. No real preference, token, permission, hook configuration or quota changed. Current notes/config refusal, card routing/model prefs/error recovery, cache/probe/diagnostic/launcher/UI/read-order/disable/shared-consumer/signed-head/causal runtime gaps remain; tests and API reads do not waive them. Prior blocked cleanup residuals and #12846 follower remain untouched. Original acceptance was externally resolved, not newly accepted here.
