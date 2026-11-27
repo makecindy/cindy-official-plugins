@@ -219,6 +219,15 @@ function main() {
   lines.push(result.templateContent
     ? `\n── PR template (${result.template}); fill it truthfully ──\n${result.templateContent.trimEnd()}`
     : '\nNo PR template: describe what changed and why, how it was verified, and the risks.');
+  lines.push(
+    '',
+    '── After publishing or pushing (required before final reply) ──',
+    '- New PR: read back the published body, then check ownership and opt-out BEFORE the first `pr_card` call:',
+    '  1. Group chat or unrelated source task: read `pr_follow_settings` first and determine/hand off to the dedicated PR task (`references/follow-up-setup.md`) instead of calling `pr_card(published: true)` in the source session.',
+    '  2. Publish-only or follow-up explicitly stopped: pass `following: false` on the first `pr_card(..., published: true)` call so saved `auto_follow` does not start a schedule.',
+    '  3. Owning PR task: call cindy-github `pr_card` with `repo`, `pr`, and `published: true` (plus `card_id` if one exists; on IM use `pr_follow_settings`).',
+    '- Existing PR update: refresh `pr_card` and verify follow-up state. Report the actual follow-up state alongside the PR link (never end with only "waiting for CI/review").',
+  );
   process.stdout.write(`${lines.join('\n')}\n`);
   process.exit(result.blocks.length ? 1 : 0);
 }

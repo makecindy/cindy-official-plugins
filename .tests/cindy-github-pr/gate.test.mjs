@@ -2794,6 +2794,41 @@ test('replay refuses to call a trace complete when a recorded round is missing',
   assert.equal(holed.complete, false); assert.equal(holed.gaps, 1);
 });
 
+test('gate requires Node 18+ before skipping and appends CINDY_PR_NODE after CINDY_PRECHECK_OK', async (t) => {
+  const fx = createFixture(t);
+  fx.setSnapshot(snap());
+  const first = await fx.run();
+  assert.equal(first.code, 0, first.stderr);
+  assert.match(first.stdout, /CINDY_PRECHECK_OK\nCINDY_PR_NODE=\d+\n$/);
+  await fx.run(['--ack']);
+
+  // Pacing not-due tick still fails closed on Node < 18 instead of emitting CINDY_PRECHECK_OK
+  let oldOut = '';
+  let oldErr = '';
+  const blocked = await runGate([PR_URL, '--state-dir', path.join(fx.root, 'state'), '--snapshot', path.join(fx.root, 'fake-pr-snapshot.mjs'), '--pacing'], {
+    now: () => fx.now(),
+    readTrigger: async () => null,
+    out: (s) => { oldOut += s; },
+    err: (s) => { oldErr += s; },
+    nodeVersion: '16.20.2',
+  });
+  assert.equal(blocked, 1);
+  assert.match(oldErr, /Node\.js 18\+ is required \(running 16\.20\.2\)/);
+  assert.equal(oldOut, '');
+
+  // Healthy not-due skip on Node 18+ emits both CINDY_PRECHECK_OK and CINDY_PR_NODE
+  let okOut = '';
+  const skipped = await runGate([PR_URL, '--state-dir', path.join(fx.root, 'state'), '--snapshot', path.join(fx.root, 'fake-pr-snapshot.mjs'), '--pacing'], {
+    now: () => fx.now(),
+    readTrigger: async () => null,
+    out: (s) => { okOut += s; },
+    err: () => {},
+    nodeVersion: '22.14.0',
+  });
+  assert.equal(skipped, 2);
+  assert.match(okOut, /CINDY_PRECHECK_OK\nCINDY_PR_NODE=22\n$/);
+});
+
 test('reconcile watch trigger bypasses pacing but runs lightweight probe first; real status watch still reads in full', async (t) => {
   const fx = createFixture(t);
   const s = snap();
