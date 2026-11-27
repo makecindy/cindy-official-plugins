@@ -77,8 +77,11 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
           res.write(': started\n\n', () => setTimeout(() => res.socket.destroy(), 20));
           return;
         }
-        const result = message.method === 'tools/list'
-          ? { tools: [{ name: 'Bash', description: 'Run a command.', inputSchema: { type: 'object' } }] }
+        // Two pages: the first names the second with nextCursor.
+        const result = message.method === 'tools/list' && message.params?.cursor === 'page-2'
+          ? { tools: [{ name: 'Read', description: 'Read a file.', inputSchema: { type: 'object' } }] }
+          : message.method === 'tools/list'
+          ? { tools: [{ name: 'Bash', description: 'Run a command.', inputSchema: { type: 'object' } }], nextCursor: 'page-2' }
           : { content: [{ type: 'text', text: `${message.params.name} ran for ${sessions.get(sid)}` }] };
         res.writeHead(200, { 'content-type': 'text/event-stream' });
         res.end(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: message.id, result })}\n\n`);
@@ -93,8 +96,8 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
 }
 
 /** One request as agy sends it; the answer as agy reads it. */
-async function agyRequest(url, { method = 'POST', message, sid } = {}) {
-  const headers = { authorization: TOKEN, ...(sid ? { 'mcp-session-id': sid } : {}) };
+async function agyRequest(url, { method = 'POST', message, sid, auth = TOKEN } = {}) {
+  const headers = { authorization: auth, ...(sid ? { 'mcp-session-id': sid } : {}) };
   if (message) Object.assign(headers, { accept: 'application/json, text/event-stream', 'content-type': 'application/json' });
   const response = await fetch(url, { method, headers, body: message ? JSON.stringify(message) : undefined });
   const text = await response.text();
@@ -137,6 +140,39 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     assert.equal(call.body.id, 4);
     assert.equal(call.body.result.content[0].text, 'Bash ran for antigravity-client', 'the call runs on the session the server knows as agy’s');
     assert.deepEqual(log.at(-1), { method: 'POST', rpc: 'tools/call', sid, id: 4 });
+  });
+
+  // Why: the relay holds answers fetched with Cindy's authorization for the server. A request without that
+  // authorization must neither receive them nor use them up, and a request for another page must get that page.
+  test('kept answers go only to the same authorization and the same request', async (t) => {
+    const { entry, log, sessions } = await bridgeServer(t);
+    const warmup = warmMcpServers([entry]);
+    t.after(() => warmup.close());
+    const [given] = await warmup.ready;
+    const warmedSession = [...sessions.keys()][0];
+    const warmed = log.length;
+
+    const stranger = await agyRequest(given.url, { message: INITIALIZE, auth: 'Bearer someone-else' });
+    assert.equal(stranger.status, 401, 'the server, not the relay, answered the wrong authorization');
+    assert.equal(log.length, warmed + 1);
+    assert.ok(sessions.has(warmedSession), 'the warmed session was not given up');
+
+    const init = await agyRequest(given.url, { message: INITIALIZE });
+    assert.equal(init.sid, warmedSession, 'the right authorization still gets the kept initialize answer');
+    assert.equal(log.length, warmed + 1, 'without asking the server');
+
+    const listMessage = { jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} };
+    const strangerList = await agyRequest(given.url, { message: listMessage, sid: init.sid, auth: 'Bearer someone-else' });
+    assert.equal(strangerList.status, 401);
+
+    const second = await agyRequest(given.url, { message: { jsonrpc: '2.0', id: 4, method: 'tools/list', params: { cursor: 'page-2' } }, sid: init.sid });
+    assert.deepEqual(second.body.result.tools.map((tool) => tool.name), ['Read'], 'another page comes from the server');
+    const before = log.length;
+    const first = await agyRequest(given.url, { message: listMessage, sid: init.sid });
+    assert.equal(first.body.id, 3);
+    assert.deepEqual(first.body.result.tools.map((tool) => tool.name), ['Bash'], 'the kept first page was still there');
+    assert.equal(first.body.result.nextCursor, 'page-2');
+    assert.equal(log.length, before, 'the first page was not asked for again');
   });
 
   // Only the client's capabilities differ: the server may answer such a client differently.

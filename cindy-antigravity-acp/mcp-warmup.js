@@ -20,7 +20,9 @@
  * It only ever falls back to what happens without it. A server that could not be warmed in time
  * is given to agy at its own address. A handshake request that differs from the one sent ahead
  * (another agy version) goes to the server as it is, and from then on so does everything of that
- * server. Only servers on this computer's loopback address are warmed (Cindy's tunnel to the other
+ * server. A kept answer is given only to a request carrying the authorization Cindy gave for that
+ * server and asking exactly what was sent ahead; any other request goes to the server, which
+ * decides, and leaves the kept answers in place. Only servers on this computer's loopback address are warmed (Cindy's tunnel to the other
  * computer is one), so the plugin itself reaches nothing beyond this computer. The relay listens on
  * 127.0.0.1 behind a random path segment, holds no credential of its own (agy sends the headers
  * Cindy gave it) and forwards only to the address Cindy named.
@@ -294,6 +296,9 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
   /** The kept answer for agy's request, or null to pass it on (and everything after it). */
   const keptAnswer = (state, req, body) => {
     const { warm, pending } = state;
+    // Kept answers were fetched with Cindy's authorization for this server; only the same one gets them.
+    const authorized = Object.entries(serverHeaders(state.server)).every(([name, value]) => req.headers[name] === value);
+    if (!authorized) return null;
     const sameSession = req.headers['mcp-session-id'] === warm.sessionId;
     const message = req.method === 'POST' ? parseJson(body.toString('utf8')) : undefined;
     const method = isObject(message) ? message.method : undefined;
@@ -302,8 +307,9 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
     if (req.method === 'GET' && (sameSession || !req.headers['mcp-session-id']) && pending.stream && warm.stream) key = 'stream';
     else if (method === 'server/discover' && pending.discover && warm.discover && sameParams(message.params, DISCOVER_PARAMS)) key = 'discover';
     else if (method === 'initialize' && pending.initialize && !req.headers['mcp-session-id'] && sameParams(message.params, INITIALIZE_PARAMS)) key = 'initialize';
-    else if (method === 'notifications/initialized' && sameSession && pending.initialized) key = 'initialized';
-    else if (method === 'tools/list' && sameSession && pending.tools) key = 'tools';
+    else if (method === 'notifications/initialized' && sameSession && pending.initialized && sameParams(message.params ?? {}, {})) key = 'initialized';
+    // Only the first page, asked for as it was sent ahead; another page (a cursor) comes from the server.
+    else if (method === 'tools/list' && sameSession && pending.tools && sameParams(message.params ?? {}, {})) key = 'tools';
     if (key === 'initialized') {
       pending.initialized = false;
       return { kept: { status: 202, headers: {}, body: Buffer.alloc(0) }, body: undefined };
