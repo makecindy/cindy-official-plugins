@@ -32,7 +32,7 @@ if (require.main === module || globalThis.__CINDY_NODE__) {
     const reply = { jsonrpc: '2.0', id: req.id };
     try {
       if (req.method !== 'followSkillDir') throw new Error('Unsupported method');
-      reply.result = followSkillDir(path.resolve(__dirname, '..'));
+      reply.result = { dir: followSkillDir(path.resolve(__dirname, '..')), platform: process.platform };
     } catch (error) {
       reply.error = { code: -32000, message: error.message };
     }
