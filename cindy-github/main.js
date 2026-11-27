@@ -2648,6 +2648,18 @@ function manualFollowStop(card) {
   return !!card.scheduleId && card.manualStop !== false;
 }
 
+function isBoundStopError(card) {
+  return !!card.scheduleId && !!card.scheduleError && card.scheduleErrorSource === 'stop';
+}
+
+function boundHookUnverified(card) {
+  return !!card.scheduleId && !!card.scheduleError && !isBoundStopError(card);
+}
+
+function boundFollowUnverified(card) {
+  return !!card.scheduleId && (card.scheduleStatus === 'unverified' || !!card.scheduleError);
+}
+
 function prFollowActive(card) {
   return unverifiedLegacyFollow(card) || card.following === true || !!card.scheduleId || card.pending === 'follow' || card.pending === 'stop';
 }
@@ -2797,6 +2809,16 @@ async function writePrSettings(change) {
   var r = await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
   if (!r || r.ok === false) throw new Error('kv write failed');
   return next;
+}
+async function setPrAutoFollow(enabled) {
+  if (typeof enabled !== 'boolean') return fail(t('required', { fields: 'auto_follow (boolean)' }));
+  return enqueuePr(async function () {
+    var kv = await readKv(true);
+    kv.prCard = Object.assign({}, kv.prCard, { autoFollow: enabled });
+    var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
+    if (!response || response.ok === false) throw new Error('kv write failed');
+    return { ok: true, result: { settings: prSettingsForAgent(prSettingsFrom(kv), enabled) } };
+  });
 }
 function togglePrSetting(key) {
   return writePrSettings(function (next) { next[key] = !next[key]; });
@@ -3201,11 +3223,11 @@ function prSettingRow(action, label, hint, on) {
 }
 
 // 手机端只看得到按钮的名字(aria-label),选中的那一段在名字里注明「当前」;电脑端显示里面的文字。
-function prSegment(action, label, active, inner) {
+function prSegment(action, label, active, inner, extraAttrs) {
   return prButton(action, active ? t('prChoiceCurrent', { name: label }) : label, 'display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:9999px;' +
     'font-size:12px;font-weight:500;white-space:nowrap;' + (active
       ? 'color:var(--text-primary);--bg:var(--surface-elevated);box-shadow:0 0 0 1px var(--border-default)'
-      : 'color:var(--text-secondary);--hover:' + PR_HOVER), inner);
+      : 'color:var(--text-secondary);--hover:' + PR_HOVER), inner, extraAttrs);
 }
 
 /** 推理档位与速度的显示名(和输入框旁的模型选择器一样跟在模型名后面)。 */
@@ -3239,7 +3261,8 @@ function prModelRow(settings) {
       prEsc(t('prFollowModelTaskHint')) + '</div>') + '</div>' +
     '<div style="display:flex;flex:none;gap:2px;padding:2px;border-radius:9999px;background:var(--surface-chip)">' +
     prSegment('prset:modelTask', t('prFollowModelTask'), !m, prEsc(t('prFollowModelTask'))) +
-    prSegment('prset:model', t('prFollowModelCustom'), !!m, prEsc(t('prFollowModelCustom'))) +
+    prSegment('prset:model', t('prFollowModelCustom'), !!m, prEsc(t('prFollowModelCustom')),
+      !m && !settings.lastFollowModel ? ' data-ghost-model-select=""' : '') +
     '</div></div>';
   var picker = m
     ? '<div style="margin-top:8px">' + prButton('prset:modelPick', t('prFollowModelChangeTo', { name: m.label }),
@@ -3360,13 +3383,14 @@ function renderPrCard(card, settings) {
     }
     if (card.stage === 'open') {
       tile = pr.draft ? prTile('draft', 'muted') : prTile('pr', 'open');
+      var followingLive = card.following && !boundFollowUnverified(card);
       // 跟进中由下层的「● 跟进中」表达,标题行不再重复。
-      meta = card.following
+      meta = followingLive
         ? [prEsc(card.repo)]
         : [prEsc(card.repo), '<span' + prOpenOnly(card) + '>' + prEsc(pr.draft ? t('prStateDraft') : t('prStateOpen')) + '</span>'];
       // 跟进中的检查状态交给宿主按标题栏同一份数据实时填写;这里画的是兜底快照
       // (旧版宿主、手机,或宿主还没查到这条 PR 时显示)。
-      left = card.following
+      left = followingLive
         ? '<div data-ghost-pr-status="' + prEsc(card.repo + '#' + pr.number) + '">' + prStatusStrip(pr) + '</div>'
         : prContextLine(card);
       // 停止排在状态左边:悬停这一行才出现,出现时不推动「跟进中」。
@@ -3379,10 +3403,12 @@ function renderPrCard(card, settings) {
             ? prChip(t('prMarkingReady'), true)
             : unverifiedLegacyFollow(card)
               ? prChip(t('prFollowUnverified'), 'wait')
-              : card.following
+              : followingLive
               ? (manualFollowStop(card) ? '' : prQuietButton('pr:stop', t('prStop'))) + (card.legacyHookRepair ? prChip(t('prFollowNeedsRepair'), 'warn') : prFollowingPill())
               : card.scheduleId
-                ? (manualFollowStop(card) ? '' : prQuietButton('pr:stop', t('prStop'))) + prChip(card.scheduleStatus === 'paused' ? t('prFollowPaused') : t('prFollowEnded'), card.scheduleStatus === 'paused' ? 'wait' : undefined)
+                ? (manualFollowStop(card) || boundHookUnverified(card) ? '' : prQuietButton('pr:stop', t('prStop'))) +
+                  prChip(card.scheduleStatus === 'paused' ? t('prFollowPaused') : boundFollowUnverified(card) ? t('prFollowUnverified') : t('prFollowEnded'),
+                    card.scheduleStatus === 'paused' || boundFollowUnverified(card) ? 'wait' : undefined)
                 : pr.draft
                   ? (card.readyUncertain ? '' : prCtaButton('pr:ready', t('prMarkReady')))
                   : prPillButton('pr:follow', t('prFollow'));
@@ -3393,7 +3419,7 @@ function renderPrCard(card, settings) {
       tile = card.stage === 'merged' ? prTile('merged', 'merged') : prTile('closed', 'muted');
       meta = [prEsc(card.repo), prEsc(card.stage === 'merged' ? t('prStateMerged') : t('prStateClosed'))];
       if (card.followedEver) meta.push(prEsc(t(
-        card.scheduleId && card.following ? 'prStateFollowing' :
+        card.scheduleId && card.following && !boundFollowUnverified(card) ? 'prStateFollowing' :
           card.scheduleStatus === 'paused' ? 'prFollowPaused' :
             card.scheduleId || unverifiedLegacyFollow(card) || card.scheduleError ? 'prFollowUnverified' : 'prFollowEnded'
       )));
@@ -3407,8 +3433,13 @@ function renderPrCard(card, settings) {
     left += '<div style="margin-top:4px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
   }
   var openOnly = card.stage === 'open' ? prOpenOnly(card) : '';
-  var body = prHeader(tile, title, meta, card.pr, gear ? prGearButton(card.settingsOpen, manualFollowStop(card)) : '') +
-    prFooter(left, actions, openOnly, prArchiveButton(card, settings), persistentActions);
+  var body = prHeader(tile, title, meta, card.pr, gear ? prGearButton(card.settingsOpen, manualFollowStop(card)) : '');
+  var beforeFollow = card.stage === 'ask' ? settings.autoFollow
+    : card.stage === 'open' && !card.following && !card.pending && !card.scheduleId && (!card.pr.draft || settings.autoFollow);
+  if (beforeFollow && !card.settingsOpen && typeof cindy.pickModel === 'function') {
+    body += '<div' + openOnly + '>' + prModelRow(settings) + '</div>';
+  }
+  body += prFooter(left, actions, openOnly, prArchiveButton(card, settings), persistentActions);
   // Host copy-link accepts only HTTP(S) URLs. Keep the repair guidance and
   // command together in one panel so ordinary card clicks (e.g. settings) never
   // wipe the explanation while leaving an orphaned command box.
@@ -3537,28 +3568,49 @@ async function schedulesForPr(card) {
   return rows.filter(function (row) { return mentionsPr(row, url); });
 }
 
-async function cardFollowSkillDir() {
+async function cardFollowSkillEnv() {
   var response = await cindy.node.request({ method: 'followSkillDir' });
-  var dir = response && response.ok && response.result;
+  var raw = response && response.ok && response.result;
+  var dir = typeof raw === 'string' ? raw : raw && typeof raw.dir === 'string' ? raw.dir : null;
+  var platform = raw && typeof raw === 'object' && typeof raw.platform === 'string' ? raw.platform : null;
   // Double quoting is portable for these paths. Reject shell interpolation and
   // Windows command expansion even in host-generated directory names.
   if (typeof dir !== 'string' || /["$`%!\r\n]/.test(dir)) throw new Error('PR Skill unavailable');
-  return dir;
+  return { dir: dir, platform: platform };
 }
 
 function cardFollowCommand(dir, url) {
   return 'node "' + dir + '/scripts/pr-node.cjs" pr-heartbeat-gate.mjs ' + url;
 }
 
+// Cindy's scheduler stabilizes skill-snapshot paths with POSIX single quotes on
+// macOS/Linux (shellQuotePath), while card-created and Windows hooks use double quotes.
+function posixSingleQuoted(filePath) {
+  return "'" + filePath.replace(/'/g, "'\\''") + "'";
+}
+
 // Only exact generated commands from this approved Skill confer native
 // schedule ownership. URL owner/repo case is immaterial, not shell syntax.
-function exactFollowHook(row, card, dir) {
+function exactFollowHook(row, card, skillEnv) {
   var url = followUrl(card);
   var command = row.preRunHook.command;
   var match = typeof command === 'string' && /^(.*) (https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+)$/.exec(command);
+  var dir = typeof skillEnv === 'string' ? skillEnv : skillEnv && skillEnv.dir;
+  var platform = skillEnv && typeof skillEnv === 'object' && typeof skillEnv.platform === 'string' ? skillEnv.platform : null;
   if (!dir || !match || match[2].toLowerCase() !== url) return null;
-  var legacy = match[1] === 'node "' + dir + '/scripts/pr-heartbeat-gate.mjs"';
-  if (!legacy && match[1] !== 'node "' + dir + '/scripts/pr-node.cjs" pr-heartbeat-gate.mjs') return null;
+  // Windows schedules run under cmd.exe where POSIX single quotes are not path quotes.
+  // Fail closed when the scheduler host platform is Windows or unknown.
+  var isWin32 = platform === 'win32';
+  var allowPosixSingle = platform === 'darwin' || platform === 'linux';
+  function matchesQuoted(scriptName, suffix) {
+    var posixPath = dir + '/scripts/' + scriptName;
+    if (match[1] === 'node "' + posixPath + '"' + suffix) return true;
+    if (isWin32 && match[1] === 'node "' + dir + '\\scripts\\' + scriptName + '"' + suffix) return true;
+    if (allowPosixSingle && match[1] === 'node ' + posixSingleQuoted(posixPath) + suffix) return true;
+    return false;
+  }
+  var legacy = matchesQuoted('pr-heartbeat-gate.mjs', '');
+  if (!legacy && !matchesQuoted('pr-node.cjs', ' pr-heartbeat-gate.mjs')) return null;
   // The public scheduler API has no caller-supplied compare-and-update guard:
   // report a replacement for the old command, never write it automatically.
   return { repair: legacy ? { schedule_id: row.id, command: cardFollowCommand(dir, url) } : null };
@@ -3605,16 +3657,70 @@ async function resolveLegacyHookRepair(hook, row) {
 }
 
 async function legacyFollowRepair(row, card) {
-  if (typeof row.preRunHook.command !== 'string' || row.preRunHook.command.indexOf('/scripts/pr-heartbeat-gate.mjs" ') < 0) return null;
-  var dir;
-  try { dir = await cardFollowSkillDir(); } catch (_) { return null; }
-  return resolveLegacyHookRepair(exactFollowHook(row, card, dir), row);
+  if (typeof row.preRunHook.command !== 'string' ||
+    !/[\\/]scripts[\\/]pr-heartbeat-gate\.mjs["'] /.test(row.preRunHook.command)) return null;
+  var env;
+  try { env = await cardFollowSkillEnv(); } catch (_) { return null; }
+  return resolveLegacyHookRepair(exactFollowHook(row, card, env), row);
+}
+
+function clearCardScheduleError(card) {
+  card.scheduleError = null;
+  card.scheduleErrorSource = null;
+}
+
+function clearLegacyScheduleNotice(card) {
+  card.legacyScheduleNotice = null;
+}
+
+function preserveUnsourcedLegacyNotice(card) {
+  if (card.scheduleError && !card.scheduleErrorSource && !isLegacyVerificationErrorText(card.scheduleError)) {
+    card.legacyScheduleNotice = card.scheduleError;
+  }
+}
+
+function setCardScheduleError(card, detail, source) {
+  if (source === 'read') preserveUnsourcedLegacyNotice(card);
+  else card.legacyScheduleNotice = null;
+  card.scheduleError = t('prScheduleFailed', { detail: detail });
+  card.scheduleErrorSource = source;
+}
+
+function isLegacyVerificationErrorText(text) {
+  if (!text) return false;
+  var locales = Object.keys(MESSAGES);
+  for (var i = 0; i < locales.length; i++) {
+    var table = MESSAGES[locales[i]];
+    var wrap = String(table.prScheduleFailed || '');
+    if (text === wrap.replace('{detail}', String(table.prOwnershipUnknown || '')) ||
+        text === wrap.replace('{detail}', String(table.prScheduleHookUnknown || ''))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Pre-upgrade records had no scheduleErrorSource: once live reads recover,
+// clear known verification messages completely, and demote other unsourced
+// errors to non-blocking last-operation feedback so status and claims recover
+// without erasing why the earlier create/delete failed.
+function settleUnsourcedLegacyError(card) {
+  preserveUnsourcedLegacyNotice(card);
+  clearCardScheduleError(card);
+}
+
+function deriveCardNote(card, manualStopNote) {
+  return card.scheduleError || card.legacyScheduleNotice || manualStopNote || null;
+}
+
+function isPreservedCreateError(card) {
+  return !!card.scheduleError && card.scheduleErrorSource === 'create';
 }
 
 // Reconcile all ID-less legacy follow fields in one place, using only the
 // final read of a unique, same-PR schedule. No user configuration is changed.
-async function reconcileLegacyFollow(card, readError, fromStop) {
-  var row = null, hook = null, error = null, unverified = false;
+async function reconcileLegacyFollow(card, readError, fromStop, hadClaim, clearOnStop) {
+  var row = null, hook = null, error = null, errorSource = null, unverified = false;
   var showManualStop = card.pending === 'stop' || fromStop === true || card.pendingStopNotice === true;
   try {
     if (readError) throw new Error(readError);
@@ -3623,24 +3729,32 @@ async function reconcileLegacyFollow(card, readError, fromStop) {
       var candidate = rows.length === 1 && rows[0];
       if (!candidate || !candidate.id || !ownedFollowSchedule(candidate, card)) {
         error = t('prOwnershipUnknown');
+        errorSource = 'verify';
       } else {
         // An unavailable approved directory is not evidence of a custom
         // command. Keep the reservation for the next ordinary refresh.
-        var dir = await cardFollowSkillDir();
+        var env = await cardFollowSkillEnv();
         var saved = await prSchedule('schedule_get', { id: candidate.id });
         if (saved) {
-          if (saved.id !== candidate.id || !ownedFollowSchedule(saved, card)) error = t('prOwnershipUnknown');
-          else {
-            hook = exactFollowHook(saved, card, dir);
-            if (!hook) error = t('prScheduleHookUnknown');
-            else row = saved;
+          if (saved.id !== candidate.id || !ownedFollowSchedule(saved, card)) {
+            error = t('prOwnershipUnknown');
+            errorSource = 'verify';
+          } else {
+            hook = exactFollowHook(saved, card, env);
+            if (!hook) {
+              error = t('prScheduleHookUnknown');
+              errorSource = 'verify';
+            } else {
+              row = saved;
+            }
           }
         }
       }
     }
   } catch (err) {
-    unverified = true;
+    unverified = hadClaim !== false;
     error = String(err && err.message || err).slice(0, 160);
+    errorSource = 'read';
   }
   // The old agent handoff could persist Stop without a schedule ID. Its
   // intent is settled by this same read; an unavailable read still reserves
@@ -3652,19 +3766,31 @@ async function reconcileLegacyFollow(card, readError, fromStop) {
     delete card.pendingStopNotice;
   }
   card.managedFollow = true;
-  card.followedEver = true;
+  if (hadClaim !== false || row) card.followedEver = true;
   card.scheduleId = row ? row.id : null;
   card.manualStop = !!row;
   if (!row) delete card.manualStopOpen;
   card.following = !!row && row.status === 'active';
   card.scheduleStatus = unverified ? 'unverified' : row && !card.following ? row.status : null;
   card.legacyHookRepair = card.stage === 'open' && card.following ? await resolveLegacyHookRepair(hook, row) : null;
-  card.scheduleError = error ? t('prScheduleFailed', { detail: error }) : null;
-  card.note = card.scheduleError || (showManualStop && row ? t('prManualStop', { id: row.id }) : null);
+  if (!row && hadClaim === false && isPreservedCreateError(card) &&
+      ((!error && !clearOnStop) || errorSource === 'read')) {
+    // Keep a failed-creation error across passive empty or transient-read
+    // refreshes until retried, adopted, replaced by a verification conflict,
+    // or explicitly stopped on a healthy read.
+  } else if (error) {
+    setCardScheduleError(card, error, errorSource);
+  } else if (row || clearOnStop) {
+    clearCardScheduleError(card);
+    clearLegacyScheduleNotice(card);
+  } else {
+    settleUnsourcedLegacyError(card);
+  }
+  card.note = deriveCardNote(card, showManualStop && row ? t('prManualStop', { id: row.id }) : null);
 }
 
 async function createCardSchedule(card, settings) {
-  var dir = await cardFollowSkillDir();
+  var dir = (await cardFollowSkillEnv()).dir;
   var url = followUrl(card);
   var model = prSettingsForAgent(settings, true).follow_model;
   var input = {
@@ -3703,6 +3829,7 @@ async function syncCardSchedule(card, settings, start) {
   card.scheduleAction = start ? 'start' : 'stop';
   card.managedFollow = true;
   if (!(await savePrCard(card))) { card.note = t('prSaveFailed'); return; }
+  var errorSource = start ? 'read' : 'stop';
   try {
     var repair = null;
     var rows = start ? await schedulesForPr(card) : [];
@@ -3714,20 +3841,29 @@ async function syncCardSchedule(card, settings, start) {
         createdId = created && typeof created.id === 'string' ? created.id : null;
       } catch (err) { creationError = err; }
       rows = await schedulesForPr(card);
-      if (!rows.length) throw creationError || new Error('schedule_create');
+      if (!rows.length) {
+        errorSource = 'create';
+        throw creationError || new Error('schedule_create');
+      }
     }
     if (start) {
       var row = rows.length === 1 && rows[0];
       if (!ownedFollowSchedule(row, card) || !row.id || row.status !== 'active') {
         card.pending = card.scheduleAction = null;
+        errorSource = 'verify';
         throw new Error(t('prOwnershipUnknown'));
       }
-      var dir = await cardFollowSkillDir();
+      errorSource = 'read';
+      var env = await cardFollowSkillEnv();
       var saved = await prSchedule('schedule_get', { id: row.id });
-      if (!ownedFollowSchedule(saved, card) || saved.status !== 'active' || saved.id !== row.id) throw new Error('schedule_get');
-      var hook = exactFollowHook(saved, card, dir);
+      if (!ownedFollowSchedule(saved, card) || saved.status !== 'active' || saved.id !== row.id) {
+        errorSource = 'verify';
+        throw new Error('schedule_get');
+      }
+      var hook = exactFollowHook(saved, card, env);
       if (!hook) {
         card.pending = card.scheduleAction = null;
+        errorSource = 'verify';
         throw new Error(t('prScheduleHookUnknown'));
       }
       repair = await resolveLegacyHookRepair(hook, saved);
@@ -3737,12 +3873,20 @@ async function syncCardSchedule(card, settings, start) {
       card.scheduleStatus = null;
       card.followedEver = true;
     } else {
-      var stopDir;
-      try { stopDir = await cardFollowSkillDir(); } catch (_) {}
+      var stopEnv;
+      try { stopEnv = await cardFollowSkillEnv(); } catch (_) {}
+      errorSource = 'read';
       var owned = await prSchedule('schedule_get', { id: card.scheduleId });
       if (owned) {
-        if (!ownedFollowSchedule(owned, card) || owned.id !== card.scheduleId) throw new Error(t('prOwnershipUnknown'));
-        if (!exactFollowHook(owned, card, stopDir)) throw new Error(t('prScheduleHookUnknown'));
+        if (!ownedFollowSchedule(owned, card) || owned.id !== card.scheduleId) {
+          errorSource = 'verify';
+          throw new Error(t('prOwnershipUnknown'));
+        }
+        if (!exactFollowHook(owned, card, stopEnv)) {
+          errorSource = 'verify';
+          throw new Error(t('prScheduleHookUnknown'));
+        }
+        errorSource = 'stop';
         await prSchedule('schedule_delete', { id: owned.id });
         if (await prSchedule('schedule_get', { id: owned.id })) throw new Error('schedule_delete');
       }
@@ -3754,12 +3898,17 @@ async function syncCardSchedule(card, settings, start) {
     card.following = start;
     card.followDeclined = !start;
     card.pending = card.scheduleAction = null;
-    card.scheduleError = null;
+    clearCardScheduleError(card);
+    clearLegacyScheduleNotice(card);
     card.legacyHookRepair = repair;
     card.note = null;
   } catch (err) {
-    card.note = t('prScheduleFailed', { detail: String(err.message || err).slice(0, 160) });
-    card.scheduleError = card.note;
+    setCardScheduleError(card, String(err.message || err).slice(0, 160), errorSource);
+    card.note = card.scheduleError;
+    if (!start && card.scheduleId) {
+      card.following = false;
+      card.scheduleStatus = 'unverified';
+    }
     // A confirmed absence releases the reservation. An unreadable scheduler
     // keeps it until a refresh reconciles the operation.
     try {
@@ -3965,6 +4114,9 @@ async function prCardTool(args, callId, fromLegacyStop) {
     card = newPrCard(callId, repo);
     if (ref && a.published !== true) card.settingsApplied = true;
   }
+  // A dispatcher may already have an ask card. Show the PR there while the
+  // dedicated task handles publication preferences and owns the schedule.
+  if (ref && a.published === false) card.settingsApplied = true;
   card.sessionId = sessionId;
   if (ref) card.repo = ref.repo;
   else if (repo) card.repo = repo;
@@ -3981,6 +4133,8 @@ async function prCardTool(args, callId, fromLegacyStop) {
   var legacyPendingStop = updating && !card.scheduleId && !card.scheduleAction && card.pending === 'stop';
   var legacyFollow = updating && !card.scheduleId && !card.scheduleAction &&
     (legacyPendingStop || (!card.pending && (card.following === true || unverifiedLegacyFollow(card))));
+  var retryScheduleError = updating && !legacyFollow && !card.scheduleId && !card.scheduleAction &&
+    !card.pending && (Boolean(card.scheduleError) || (a.following === true && card.managedFollow));
   var number = ref ? ref.number : card.pr ? card.pr.number : null;
   if (number) {
     var status;
@@ -4019,47 +4173,83 @@ async function prCardTool(args, callId, fromLegacyStop) {
       if (currentSchedule && a.following === false) return fail(t('prScheduleFailed', { detail: currentSchedule.status }));
       if (currentSchedule && a.following === true && currentSchedule.status !== 'active')
         return fail(t('prScheduleFailed', { detail: currentSchedule.status }));
-      card.following = !!currentSchedule && currentSchedule.status === 'active';
-      card.scheduleStatus = currentSchedule && !card.following ? currentSchedule.status : null;
       if (legacyStop) {
         // A persisted pre-upgrade Stop cannot authorize a deletion. Converge
         // through the ordinary bound read, not another write or stale intent.
         card.pending = card.scheduleAction = null;
         card.managedFollow = true;
-        card.scheduleError = null;
+        clearCardScheduleError(card);
+        clearLegacyScheduleNotice(card);
         if (currentSchedule) showManualStop = true;
       }
       if (!currentSchedule) {
+        if (a.following === true) return fail(t('prScheduleFailed', { detail: 'schedule_get' }));
+        card.following = false;
+        card.scheduleStatus = null;
         card.manualStop = false;
         delete card.manualStopOpen;
         card.scheduleId = null;
-        if (a.following === true) return fail(t('prScheduleFailed', { detail: 'schedule_get' }));
+        clearCardScheduleError(card);
+        clearLegacyScheduleNotice(card);
+      } else {
+        if (card.scheduleError || card.scheduleStatus === 'unverified') {
+          var checkEnv;
+          try { checkEnv = await cardFollowSkillEnv(); } catch (_) {}
+          var verifiedHook = checkEnv ? exactFollowHook(currentSchedule, card, checkEnv) : null;
+          if (verifiedHook && !isBoundStopError(card)) {
+            settleUnsourcedLegacyError(card);
+          } else if (checkEnv && !verifiedHook) {
+            setCardScheduleError(card, t('prScheduleHookUnknown'), 'verify');
+          }
+        }
+        if (card.scheduleError) {
+          card.following = false;
+          card.scheduleStatus = 'unverified';
+        } else {
+          card.following = currentSchedule.status === 'active';
+          card.scheduleStatus = card.following ? null : currentSchedule.status;
+        }
       }
     } catch (err) { return fail(t('prScheduleFailed', { detail: String(err.message || err) })); }
   }
+  var deferFollowing = hasCardScheduler() && status && (legacyFollow || retryScheduleError);
   if (typeof a.following === 'boolean') {
-    if (!a.following && unverifiedLegacyFollow(card)) card.scheduleError = null;
-    if (!a.following || !unverifiedLegacyFollow(card)) card.following = a.following;
+    if (!a.following) {
+      if (unverifiedLegacyFollow(card) || !deferFollowing) {
+        clearCardScheduleError(card);
+        clearLegacyScheduleNotice(card);
+      }
+      card.following = false;
+      card.scheduleId = card.scheduleStatus = null;
+      card.manualStop = false;
+      delete card.manualStopOpen;
+      delete card.pendingStopNotice;
+    } else if (!unverifiedLegacyFollow(card) && !boundFollowUnverified(card) && !deferFollowing) {
+      card.following = true;
+      card.followedEver = true;
+      if (!hasCardScheduler() || !card.scheduleId) {
+        clearCardScheduleError(card);
+        clearLegacyScheduleNotice(card);
+      }
+    }
     card.scheduleAction = null;
     card.followDeclined = !a.following;
-    if (!a.following) { card.scheduleId = card.scheduleStatus = null; card.manualStop = false; delete card.manualStopOpen; delete card.pendingStopNotice; }
-    if (a.following) card.followedEver = true;
     if (card.pending === 'follow' || card.pending === 'stop') card.pending = null;
   }
-  card.note = card.scheduleError || (showManualStop ? t('prManualStop', { id: card.scheduleId }) : null);
   card.legacyHookRepair = null;
+  card.note = deriveCardNote(card, showManualStop ? t('prManualStop', { id: card.scheduleId }) : null);
   if (a.claim_follow !== true && typeof a.following !== 'boolean') await expirePrClaim(card, Date.now());
 
   // A blocked old Node cannot start the agent that would inspect its hook.
   // The owning task's card can identify the exact old command and report the
   // manual repair when the default Node on PATH is unsupported, never rewriting
   // a user configuration without a guard.
-  if (hasCardScheduler() && status && (legacyFollow || (card.pending !== 'stop' && a.following !== false))) {
+  if (hasCardScheduler() && status && (legacyFollow || retryScheduleError || (card.pending !== 'stop' && a.following !== false))) {
     try {
-      if (card.stage === 'open' && !status.err && currentSchedule && currentSchedule.status === 'active') {
+      if (card.stage === 'open' && !status.err && currentSchedule && currentSchedule.status === 'active' && !card.scheduleError) {
         card.legacyHookRepair = await legacyFollowRepair(currentSchedule, card);
-      } else if (legacyFollow) {
-        await reconcileLegacyFollow(card, status.err, fromLegacyStop || legacyPendingStop);
+      } else if (legacyFollow || (retryScheduleError && !status.err)) {
+        await reconcileLegacyFollow(card, status.err, fromLegacyStop || legacyPendingStop, legacyFollow, a.following === false);
       }
     } catch (err) { return fail(t('prScheduleFailed', { detail: String(err.message || err) })); }
   }
@@ -4067,8 +4257,10 @@ async function prCardTool(args, callId, fromLegacyStop) {
   // A claim is permission to create a schedule, not a report that one already exists.
   // Keep stop reservations until deletion is confirmed; contradictory requests never reacquire.
   var pendingBefore = card.pending;
-  if (!legacyFollow && a.claim_follow === true && a.following !== false && card.stage === 'open' && card.pending !== 'stop' && !card.following && !card.scheduleId) {
+  if (!legacyFollow && a.claim_follow === true && a.following !== false && card.stage === 'open' && card.pending !== 'stop' && !card.following && !card.scheduleId && !card.scheduleError) {
     card.pending = 'follow';
+    clearLegacyScheduleNotice(card);
+    card.note = deriveCardNote(card, showManualStop ? t('prManualStop', { id: card.scheduleId }) : null);
     stampPrClaim(card);
     // A granted permission: the task may call the generic scheduler at any time, so no deadline can revoke it.
     card.claimKind = 'granted';
@@ -4134,10 +4326,10 @@ async function prCardTool(args, callId, fromLegacyStop) {
     settings: prSettingsForAgent(settings, settings.autoFollow),
   };
   if (nativeStart || card.scheduleId || card.scheduleAction || card.managedFollow) {
-    if (card.scheduleAction || card.legacyHookRepair || unverifiedLegacyFollow(card)) result.follow_state = 'unverified';
+    if (card.scheduleAction || card.legacyHookRepair || unverifiedLegacyFollow(card) || boundFollowUnverified(card)) result.follow_state = 'unverified';
     else if (card.following) result.follow_state = 'active';
     else if (card.scheduleStatus === 'paused') result.follow_state = 'paused';
-    else result.follow_state = card.scheduleError || !card.followedEver ? 'failed' : 'stopped';
+    else result.follow_state = card.scheduleError ? 'failed' : 'stopped';
   }
   if (card.legacyHookRepair) result.legacy_hook_repair = card.legacyHookRepair;
   if (!delivered) { result.card_shown = false; notes.push(t('prCardNotShown')); }
@@ -4165,7 +4357,7 @@ var PR_AGENT_ACTIONS = {
   'pr:publish': function (card) { return card.stage === 'ask'; },
   'pr:draft': function (card) { return card.stage === 'ask'; },
   'pr:follow': function (card) { return card.stage === 'open' && !card.pr.draft && !card.following && !card.scheduleId && !card.pending && !unverifiedLegacyFollow(card); },
-  'pr:stop': function (card) { return card.stage === 'open' && (card.following || card.scheduleId) && !card.pending && !unverifiedLegacyFollow(card) && !manualFollowStop(card); },
+  'pr:stop': function (card) { return card.stage === 'open' && (card.following || card.scheduleId) && !card.pending && !unverifiedLegacyFollow(card) && !manualFollowStop(card) && !boundHookUnverified(card); },
 };
 
 /**
@@ -4364,20 +4556,20 @@ async function prCardAction(msg) {
     } catch (e) {
       card.note = t('prSettingFailed');
     }
-  } else if (action === 'prset:model' && settings.followModel) {
-    // 已经是「指定模型」:不重复打开选择器,换模型点下面的模型名。
-  } else if (action === 'prset:model' && settings.lastFollowModel) {
-    try {
-      settings = await writePrSettings(function (next) { next.followModel = next.lastFollowModel; });
-    } catch (e) {
-      card.note = t('prSettingFailed');
-    }
-  } else if (action === 'prset:modelPick' && msg.modelSelection) {
+  } else if ((action === 'prset:model' || action === 'prset:modelPick') && msg.modelSelection) {
     // 新版宿主在卡内下拉框里已选好(并核对过可用),直接记下。
     try {
       var chosen = await savePrFollowModel(settings, msg.modelSelection);
       settings = chosen.settings;
       if (chosen.error) card.note = t('prFollowModelFailed', { detail: chosen.error });
+    } catch (e) {
+      card.note = t('prSettingFailed');
+    }
+  } else if (action === 'prset:model' && settings.followModel) {
+    // 已经是「指定模型」:不重复打开选择器,换模型点下面的模型名。
+  } else if (action === 'prset:model' && settings.lastFollowModel) {
+    try {
+      settings = await writePrSettings(function (next) { next.followModel = next.lastFollowModel; });
     } catch (e) {
       card.note = t('prSettingFailed');
     }
@@ -4488,6 +4680,18 @@ var seenTestReqs = {};
 
 bc.onmessage = function (ev) {
   var m = ev && ev.data;
+  if (m && m.type === 'pr-settings-ping') {
+    bc.postMessage({ type: 'pr-settings-ready', reqId: m.reqId });
+    return;
+  }
+  if (m && m.type === 'pr-settings-save') {
+    void setPrAutoFollow(m.enabled).then(function (r) {
+      bc.postMessage({ type: 'pr-settings-saved', reqId: m.reqId, ok: r.ok });
+    }, function () {
+      bc.postMessage({ type: 'pr-settings-saved', reqId: m.reqId, ok: false });
+    });
+    return;
+  }
   if (!m || m.type !== 'test-connection' || !m.reqId) return;
   if (seenTestReqs[m.reqId]) return;
   // 去重表只为吸收 settings 页的重发风暴,超量直接清零重来(常驻期不泄漏)。
@@ -4856,6 +5060,8 @@ cindy.onHostMessage(async function (msg) {
       r = await callTool(msg.args || {}, msg.callId);
     } else if (msg.tool === 'status_watch') {
       r = await watchTool(msg.args || {}, msg.callId);
+    } else if (msg.tool === 'set_pr_follow_settings') {
+      r = await setPrAutoFollow((msg.args || {}).auto_follow);
     } else if (msg.tool === 'pr_follow_settings') {
       var settings = await readPrSettings();
       r = settings.unreadable
