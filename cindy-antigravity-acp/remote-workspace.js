@@ -471,7 +471,7 @@ function startRemoteWorkspace(agyPath, host) {
       return;
     }
     if (message.method === undefined && message.id !== undefined) {
-      const classified = errorRelay.response(message);
+      const classified = errorRelay.response(message, item => toClient(item, agent.stdout));
       if (classified !== message) {
         toClient(classified, agent.stdout);
         return;

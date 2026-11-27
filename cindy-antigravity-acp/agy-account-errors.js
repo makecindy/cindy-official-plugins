@@ -36,7 +36,7 @@ const AUTH_TEXT = /\bauthentication required\b|\bnot logged into antigravity\b|\
 const QUOTA_TEXT = /you have exhausted your quota|prepaid balance is insufficient|\b(?:individual|subscription|model|daily|weekly|monthly)\s+quota\s+(?:reached|exhausted|exceeded)\b|\bexceeded\s+(?:the\s+|your\s+)?(?:individual|subscription|model|daily|weekly|monthly)\s+quota\b|\busage[\s_-]?limit[\s_-]?(?:reached|exceeded)\b|(?<![A-Z_])QUOTA_EXHAUSTED\b/i;
 const OVERLOADED_TEXT = /\bMODEL_CAPACITY_EXHAUSTED\b|\bPREFILL_QUEUE_OVERLOADED\b|\bCAPACITY_EXHAUSTED\b|\b(?:model|server|service)\s+overloaded\b|\brate[- ]?limit(?:ed| exceeded)?\b/i;
 
-const WARNING_CHUNK_RE = /^\s*⚠\s+([^\r\n]+?)\s*$/;
+const WARNING_CHUNK_RE = /^\r?\n⚠ ([^\r\n]+)\r?\n$/;
 const RELATIVE_RESET_RE = /\b(?:resets?|retry(?:\s+after)?|try\s+again)\s+(?:in\s+)?(?:~\s*|about\s+)?(?:(\d+)\s*d(?:ays?)?\s*)?(?:(\d+)\s*h(?:ours?|rs?)?\s*)?(?:(\d+)\s*m(?:in(?:ute)?s?)?\s*)?(?:(\d+)\s*s(?:ec(?:ond)?s?)?)?(?=$|[\s.,;!?)])/i;
 const ISO_TIMESTAMP_RE = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})\b/g;
 
@@ -165,13 +165,11 @@ function classifyAccountErrorResponse(message, now = Date.now()) {
  */
 function accountErrorRelay(nowFn = Date.now) {
   const pending = new Map();
-  const heldWarnings = new Map();
 
-  function hasActivePrompt(sessionId) {
+  function activePrompt(sessionId) {
     for (const entry of pending.values()) {
-      if (entry.method === 'session/prompt' && entry.sessionId === sessionId) return true;
+      if (entry.sessionId === sessionId) return entry;
     }
-    return false;
   }
 
   return {
@@ -185,8 +183,10 @@ function accountErrorRelay(nowFn = Date.now) {
         const sessionId = message.method === 'session/prompt' && typeof message.params?.sessionId === 'string'
           ? message.params.sessionId
           : undefined;
-        pending.set(message.id, { method: message.method, sessionId });
-        if (sessionId) heldWarnings.delete(sessionId);
+        // Notifications only identify the session. Overlapping prompts cannot attribute a text warning.
+        const previous = sessionId && activePrompt(sessionId);
+        if (previous) previous.canInferWarning = false;
+        pending.set(message.id, { sessionId, canInferWarning: !previous, warning: null });
       }
     },
 
@@ -197,43 +197,44 @@ function accountErrorRelay(nowFn = Date.now) {
       const update = isObject(params?.update) ? params.update : null;
       if (!sessionId || !update) return null;
 
-      if (
-        update.sessionUpdate === 'agent_message_chunk'
-        && isObject(update.content)
-        && update.content.type === 'text'
-        && typeof update.content.text === 'string'
-        && hasActivePrompt(sessionId)
-      ) {
-        const match = WARNING_CHUNK_RE.exec(update.content.text);
+      const prompt = activePrompt(sessionId);
+      if (!prompt || !CONTENT_SESSION_UPDATES.has(update.sessionUpdate)) return null;
+
+      if (prompt.warning) {
+        // More content makes the held chunk part of the visible reply, even if the next chunk is also a warning.
+        const { rawMessage } = prompt.warning;
+        prompt.warning = null;
+        prompt.canInferWarning = false;
+        return { hold: false, flush: [rawMessage] };
+      }
+
+      if (update.sessionUpdate !== 'agent_message_chunk' || !prompt.canInferWarning) return null;
+      const content = update.content;
+      if (content?.type === 'text' && typeof content.text === 'string') {
+        if (!content.text.trim()) return null;
+        // ACP puts this CLI fallback on the same channel as model text. Never interpret a quotation
+        // inside an existing answer as an account signal. Explicit RPC errors are handled separately.
+        const match = WARNING_CHUNK_RE.exec(content.text);
         if (match) {
-          const errorText = match[1].trim();
+          const errorText = match[1];
           const info = classifyAccountErrorInfo({ text: errorText, now: nowFn() });
           if (info) {
-            const previous = heldWarnings.get(sessionId);
-            if (heldWarnings.size >= MAX_TRACKED_REQUESTS && !previous) {
-              heldWarnings.delete(heldWarnings.keys().next().value);
-            }
-            heldWarnings.set(sessionId, { rawMessage: message, errorText, info });
-            return { hold: true, ...(previous ? { flush: [previous.rawMessage] } : {}) };
+            prompt.warning = { rawMessage: message, errorText, info };
+            return { hold: true };
           }
         }
       }
-
-      const held = heldWarnings.get(sessionId);
-      if (!held) return null;
-      if (!CONTENT_SESSION_UPDATES.has(update.sessionUpdate)) return null;
-      heldWarnings.delete(sessionId);
-      return { hold: false, flush: [held.rawMessage] };
+      prompt.canInferWarning = false;
+      return null;
     },
 
-    response(message) {
+    response(message, flush) {
       if (!isObject(message) || message.method !== undefined || message.id === undefined) return message;
       const tracked = pending.get(message.id);
       if (!tracked) return message;
       pending.delete(message.id);
-
-      const held = tracked.sessionId ? heldWarnings.get(tracked.sessionId) : undefined;
-      if (held && tracked.sessionId) heldWarnings.delete(tracked.sessionId);
+      const held = tracked.canInferWarning ? tracked.warning : null;
+      if (!held && tracked.warning) flush?.(tracked.warning.rawMessage);
 
       if (isObject(message.error)) {
         const classified = classifyAccountErrorResponse(message, nowFn());
@@ -246,8 +247,7 @@ function accountErrorRelay(nowFn = Date.now) {
         return attachCindyMeta(message, held.info);
       }
 
-      if (held && isObject(message.result)) {
-        if (message.result.stopReason === 'cancelled') return message;
+      if (held && message.result?.stopReason === 'end_turn') {
         return {
           jsonrpc: '2.0',
           id: message.id,
@@ -263,6 +263,7 @@ function accountErrorRelay(nowFn = Date.now) {
         };
       }
 
+      if (held) flush?.(held.rawMessage);
       return message;
     },
   };
