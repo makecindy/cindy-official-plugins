@@ -170,3 +170,41 @@ test('finds the default branch itself when origin/HEAD is unset and a PR targets
   git(work, 'checkout', '-q', 'main');
   assert.match(preflight(work, { base: 'release' }).blocks.join('\n'), /default branch main/);
 });
+
+test('prints the post-publish pr_card handoff reminder in text output while keeping --json valid', (t) => {
+  const { work, git, commit } = repo(t);
+  git(work, 'checkout', '-q', '-b', 'fix');
+  commit('a.txt');
+  const script = fileURLToPath(new URL('../../cindy-github/skills/pr/scripts/pr-preflight.mjs', import.meta.url));
+  const textOut = execFileSync('node', [script, work], { encoding: 'utf8' });
+  assert.match(textOut, /After publishing or pushing/);
+  const groupIdx = textOut.indexOf('Group chat or unrelated source task');
+  const optOutIdx = textOut.indexOf('Publish-only or follow-up explicitly stopped');
+  const callIdx = textOut.indexOf('Owning PR task: call cindy-github `pr_card`');
+  assert.ok(groupIdx > 0 && optOutIdx > groupIdx && callIdx > optOutIdx,
+    'ownership check and following: false guard must appear before the first pr_card(published: true) instruction');
+  assert.match(textOut, /following: false/);
+  assert.match(textOut, /pr_follow_settings/);
+  assert.match(textOut, /pr_card.*published: true/);
+  const jsonOut = execFileSync('node', [script, work, '--json'], { encoding: 'utf8' });
+  assert.equal(JSON.parse(jsonOut).branch, 'fix');
+});
+
+test('pr SKILL.md stays concise and every referenced scenario doc exists', () => {
+  const skillDir = fileURLToPath(new URL('../../cindy-github/skills/pr', import.meta.url));
+  const skillText = fs.readFileSync(path.join(skillDir, 'SKILL.md'), 'utf8');
+  assert.ok(Buffer.byteLength(skillText, 'utf8') < 12 * 1024, 'main SKILL.md should stay concise via references/');
+  for (const heading of ['## 1. ', '## 2. ', '## 3. ', '## 4. ', '## 5. ', '## 6. ']) {
+    assert.ok(skillText.includes(heading), `SKILL.md must preserve ${heading}`);
+  }
+  const groupIdx = skillText.indexOf('Group chat or unrelated source task');
+  const optOutIdx = skillText.indexOf('Publish-only or follow-up explicitly stopped');
+  const callIdx = skillText.indexOf('3. Call `ghost_call` `cindy-github` / `pr_card`');
+  assert.ok(groupIdx > 0 && optOutIdx > groupIdx && callIdx > optOutIdx,
+    'SKILL.md checklist must place ownership and following: false guards before the first publish pr_card call');
+  const refs = [...new Set([...skillText.matchAll(/references\/([a-z0-9-]+\.md)/g)].map((m) => m[1]))];
+  assert.ok(refs.length >= 5, 'SKILL.md should route scenarios to references/');
+  for (const ref of refs) {
+    assert.ok(fs.existsSync(path.join(skillDir, 'references', ref)), `missing referenced file: references/${ref}`);
+  }
+});
