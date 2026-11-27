@@ -2631,24 +2631,8 @@ function manualFollowStop(card) {
   return !!card.scheduleId && card.manualStop !== false;
 }
 
-function isLegacyVerificationErrorText(text) {
-  if (!text) return false;
-  var locales = Object.keys(MESSAGES);
-  for (var i = 0; i < locales.length; i++) {
-    var table = MESSAGES[locales[i]];
-    var wrap = String(table.prScheduleFailed || '');
-    if (text === wrap.replace('{detail}', String(table.prOwnershipUnknown || '')) ||
-        text === wrap.replace('{detail}', String(table.prScheduleHookUnknown || ''))) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function isBoundStopError(card) {
-  if (!card.scheduleId || !card.scheduleError) return false;
-  if (card.scheduleErrorSource) return card.scheduleErrorSource === 'stop';
-  return !isLegacyVerificationErrorText(card.scheduleError);
+  return !!card.scheduleId && !!card.scheduleError && card.scheduleErrorSource === 'stop';
 }
 
 function boundHookUnverified(card) {
@@ -3546,11 +3530,7 @@ function setCardScheduleError(card, detail, source) {
 }
 
 function isPreservedCreateError(card) {
-  if (!card.scheduleError) return false;
-  if (card.scheduleErrorSource) return card.scheduleErrorSource === 'create';
-  // Legacy cards persisted before scheduleErrorSource existed: clear known
-  // verification errors in any locale once no blocking schedule remains.
-  return !card.followedEver && !isLegacyVerificationErrorText(card.scheduleError);
+  return !!card.scheduleError && card.scheduleErrorSource === 'create';
 }
 
 // Reconcile all ID-less legacy follow fields in one place, using only the
