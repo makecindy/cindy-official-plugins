@@ -38,6 +38,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { completeInitializeResult, isObject, isSessionOpen, normalizeMcpToolCall } = require('./agy-mcp.js');
+const { accountErrorRelay, classifyAccountErrorResponse } = require('./agy-account-errors.js');
 
 const REMOTE_WORKSPACE_ARG = '--cindy-remote-workspace';
 const GUEST_WORKSPACE_ARG = '--cindy-guest-workspace';
@@ -327,6 +328,8 @@ function startRemoteWorkspace(agyPath, host) {
     setTimeout(() => finish(stopCode), timings.signalGrace + 300).unref();
   };
 
+  const errorRelay = accountErrorRelay();
+
   const launch = (args) => {
     const child = spawnAgy(agyPath, args, { stdio: ['pipe', 'pipe', 'pipe'], cwd: dir });
     child.stderr.pipe(process.stderr, { end: false });
@@ -430,19 +433,40 @@ function startRemoteWorkspace(agyPath, host) {
     }
     if (phase === 'opening' && message.id === initRequest.id && message.method === undefined) {
       if (message.error) {
-        toClient({ jsonrpc: '2.0', id: sessionRequest.id, error: message.error }, agent.stdout);
+        toClient(classifyAccountErrorResponse({ jsonrpc: '2.0', id: sessionRequest.id, error: message.error }), agent.stdout);
       } else {
+        errorRelay.request(sessionRequest);
         toAgent(sessionRequest);
       }
       phase = 'session';
-      for (const pending of queued.splice(0)) toAgentLine(pending);
+      for (const pending of queued.splice(0)) {
+        const queuedMessage = parseLine(pending);
+        if (queuedMessage) errorRelay.request(queuedMessage);
+        toAgentLine(pending);
+      }
       return;
+    }
+    if (message.method === undefined && message.id !== undefined) {
+      const classified = errorRelay.response(message);
+      if (classified !== message) {
+        toClient(classified, agent.stdout);
+        return;
+      }
     }
     const params = isObject(message.params) ? message.params : null;
     const isPermission = message.method === 'session/request_permission' && message.id !== undefined;
     const update = message.method === 'session/update' && params && isObject(params.update) ? params.update : null;
     const isToolUpdate = Boolean(update) && (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update');
     if (!params || (!isPermission && !isToolUpdate)) {
+      if (update) {
+        const action = errorRelay.notification(message);
+        if (action) {
+          if (action.flush) {
+            for (const item of action.flush) toClient(item, agent.stdout);
+          }
+          if (action.hold) return;
+        }
+      }
       toClientLine(line, agent.stdout);
       return;
     }
@@ -459,8 +483,17 @@ function startRemoteWorkspace(agyPath, host) {
       );
       return;
     }
+    const outgoing = verdict.type === 'mcp'
+      ? { ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }
+      : message;
+    if (isToolUpdate) {
+      const action = errorRelay.notification(outgoing);
+      if (action?.flush) {
+        for (const item of action.flush) toClient(item, agent.stdout);
+      }
+    }
     if (verdict.type === 'mcp') {
-      toClient({ ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }, agent.stdout);
+      toClient(outgoing, agent.stdout);
       return;
     }
     toClientLine(line, agent.stdout);
@@ -476,6 +509,7 @@ function startRemoteWorkspace(agyPath, host) {
       return;
     }
     if (phase === 'session') {
+      if (message) errorRelay.request(message);
       toAgentLine(line);
       return;
     }
