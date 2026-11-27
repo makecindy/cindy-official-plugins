@@ -1,10 +1,10 @@
 # 预约里程碑 runbook
 
-本文是 Agent 的执行参考,不是默认用户回复模板。按 [预约里程碑手册](taptap-suite/references/taptap-reserve-milestone/MANUAL.md) 分流,仅阅读当前场景;用户明确要求技术用法时才展示调用细节。示例 ID、路径、人数和奖励不是业务默认值。
+只阅读已选的执行场景。示例 ID、路径、人数和奖励不是业务默认值。用户明确要求技术用法时才展示相关命令。
 
 所有方法属于 `reserve-milestone`,使用已确认的 `developer_id` / `app_id`,其余输入放 `data`。返回字段从 CLI 的 `data.result` 读取;查询历史返回 `list/page/page_size/total`。能力未出现时核对 `list_tools(category:"reserve-milestone")` 与方法 schema,不改用其他域或原始接口。
 
-玩法、名词解释、业务预览及结果措辞按 [用户指引](taptap-suite/references/taptap-reserve-milestone/references/reserve-milestone-guide.md);以下状态与字段用于内部执行,不直接展示给用户。
+以下状态与字段用于内部执行,面向用户时沿用业务手册中的回复口径。
 
 ## 信息确认与分步提问
 
@@ -109,7 +109,7 @@ call_tool(name:"reserve-milestone upload-reward-image", args:{
 
 成功返回 `bonus_icon`、`bonus_grayscale_url`、`width`、`height`、`size_bytes`。完整保存同一响应的两张图,只分配给已确认档位;没有 asset_id,不拼灰图 URL。上传成功只表示素材已准备,配置仍未提交。需要核实图片是否可用时,检查原图和灰图的可访问性、格式和尺寸;图片可用不代表已绑定到奖励档位。提审后还需按提交 ID 回读图片绑定。
 
-部分失败或结果未知时保留原文件与 key,停止依赖该图片的提交;该域没有独立素材查询能力,不能假称已经回读验证,也不自动换 key 重传。说明哪一对图片尚未确认齐备,再按实际可恢复信息处理。
+部分失败或结果未知时保留原文件、key 和已返回的信息。该域没有独立素材查询能力。图片对尚未确认齐备时,报告待核实,暂停重传及依赖该图片的提审。
 
 ## 场景 D:检查与提审
 

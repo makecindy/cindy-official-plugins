@@ -899,8 +899,8 @@ test('forum data statistics route through the data manual, not the post manual',
   );
   assert.match(
     routing,
-    /全论坛回复新增量[\s\S]*moment\.stat\.comments/,
-    'business routing must keep per-post reply totals on community-management',
+    /回复数[\s\S]*taptap-community-management/,
+    'business routing must keep reply content on community-management',
   );
 
   // The reference has to stay on the plugin path: call_tool, not a shell call.
@@ -963,10 +963,10 @@ test('the 2026.10.20 recovery guidance stays on the plugin path', () => {
 
   // Precheck is advisory: an HTTP 200 does not prove the business preconditions,
   // and a missing preaudit is not a client-side veto.
-  assert.match(appEdit, /预检 HTTP 200 不等于业务前置条件通过/);
-  assert.match(appEdit, /用户明确要求跳过预检或继续提交时允许 `app submit-app-review`/);
+  assert.match(appEdit, /预检按顶层 `ok` 判断是否执行成功/);
+  assert.match(appEdit, /按授权执行[，,]由提交接口做最终校验/);
   assert.match(audit, /且本次 `blockers` 明确为空时/);
-  assert.match(rules, /用户明确要求跳过预检并提交时可 `app submit-app-review`/);
+  assert.match(rules, /提审意图门禁/, 'the execution rules must hand the intent gate to app-edit');
   assert.match(rules, /完成判据按用户目标和同一资源核对/);
 
   // Version detail returns logs; a field snapshot is not part of the contract.
@@ -1039,7 +1039,7 @@ test('the 2026.11.2 sync keeps the new recovery contracts on the plugin path', a
 
   // Submission: an unknown outcome is read back, never replayed.
   assert.match(audit, /### 提审失败与重复调用防护/);
-  assert.match(audit, /结果未知时，先用 `list-app-versions` \/ `get-app-version` 读回状态/);
+  assert.match(audit, /结果未知时，先用 `list-versions` \/ `get-version` 读回状态/);
   assert.match(shared, /用已经返回的资源句柄只读核对/);
   assert.doesNotMatch(audit, /预审结果后仍需最终确认才进入 `submit-app-review`/,
     'the old always-confirm wording must be gone');
@@ -1086,6 +1086,7 @@ test('the 2026.11.4 sync keeps H5 creation, level upgrade and qualification boun
   const upgrade = read('taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md');
   const fields = read('taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md');
   const qualification = read('taptap-suite/references/taptap-qualification/MANUAL.md');
+  const audit = read('taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md');
   const qualDraft = read('taptap-suite/references/taptap-qualification/references/qualification-draft.md');
   const qualAnalysis = read('taptap-suite/references/taptap-qualification/references/qualification-analysis.md');
   const materials = read('taptap-suite/references/taptap-materials/MANUAL.md');
@@ -1128,7 +1129,7 @@ test('the 2026.11.4 sync keeps H5 creation, level upgrade and qualification boun
   // Qualification: the unavailable warning is not an all-clear, must-level is
   // derived from the saved identity, and small-game material is not filed here.
   assert.match(qualification, /H5、Spark、Tap 小游戏的隐私与 ICP/);
-  assert.match(qualification, /不能用 `qualification save-qualification-draft` 代替/);
+  assert.match(qualification, /不能用 `qualification save-draft` 代替/);
   assert.match(qualDraft, /## 小游戏域材料边界/);
   assert.match(qualDraft, /## 创建类型声明与恢复/);
 
@@ -1144,7 +1145,7 @@ test('the 2026.11.4 sync keeps H5 creation, level upgrade and qualification boun
   // snapshot they were built from, and the level-upgrade flow routes routine
   // privacy configuration to the developer site instead of the limited
   // "no personal data" declaration.
-  assert.match(qualification, /qualification get-qualification-assessment/);
+  assert.match(qualification, /qualification get-assessment/);
   assert.match(qualification, /read_state=partial\/unknown/);
   assert.match(qualification, /`effective_approved`/);
   assert.match(qualification, /expected_snapshot/);
@@ -1155,14 +1156,14 @@ test('the 2026.11.4 sync keeps H5 creation, level upgrade and qualification boun
   assert.match(levelUpgrade, /KIND_SELF_ICP/);
   assert.match(levelUpgrade, /常规隐私设置，以及隐私查询明确返回不支持的声明/);
   assert.match(levelUpgrade, /升级为独立游戏后无法转回关卡游戏/);
-  assert.match(levelUpgrade, /qualification get-qualification-assessment/);
-  assert.match(shared, /缺少该字段时，明确说明机审结论无法确认/);
+  assert.match(levelUpgrade, /qualification (?:get-qualification-assessment|get-assessment)/);
+  assert.match(audit, /缺少该字段时报告阻断项待核实/);
   assert.match(fieldMap, /按 qualification 手册的适龄流程/);
   // Eligibility is decided by the assessment and the real submission, not by a
   // plugin-side hard gate that would refuse a user-approved submit.
-  assert.match(appEdit, /不自行新增客户端硬门禁/);
+  assert.match(audit, /Agent 不自行增加本地硬门禁/);
   assert.doesNotMatch(appEdit, /未认证时按服务端 blocker 停止提审/);
-  assert.match(execRules, /不自行新增客户端硬门禁/);
+  assert.match(audit, /Agent 不自行增加本地硬门禁/);
   assert.doesNotMatch(execRules, /未认证时按服务端 blocker 停止提审/);
 
   assert.match(shared, /## 面向用户的用语/);
@@ -1329,8 +1330,8 @@ test('the 2026.10.28 sync keeps the new community write path on the plugin path'
     assert.match(callTool.description, /preview_url/, 'every carrier must state the draft exception');
   }
 
-  assert.match(shared, /发帖用的 `videoId`/);
-  assert.doesNotMatch(shared, /发帖用的 `video_id`/, 'the upload response field is camelCase videoId');
+  assert.match(community, /发帖用的 `videoId`|发帖可用的 `videoId`/);
+  assert.doesNotMatch(community, /上传响应字段是 `video_id`/, 'the upload response field is camelCase videoId');
   assert.match(community, /要拿发帖用的 `videoId`/);
   // The post detail payload keeps the server's snake_case field; only the
   // upload shortcut response is camelCase. Both spellings are correct in their
@@ -1373,22 +1374,21 @@ test('the 2026.10.28 sync keeps the new community write path on the plugin path'
     assert.doesNotMatch(text, /taptap-cli community-management/, `${label} must not hand over a shell command`);
   }
 
-  // Shared rules: the two community uploads are a domain-local exception, and
-  // the top-level routing names the posting-media path.
-  assert.match(shared, /域内上传例外是 `community-management \+upload-image` 与 `\+upload-video`/);
-  assert.match(shared, /社区 `\+upload-image` \/ `\+upload-video` 省略时按内容派生/);
-  assert.match(shared, /`unknown`（超时、5xx、连接中断、没拿到句柄）不能当成「没上传」直接重传/);
+  // Shared rules route uploads by business purpose; the posting-media details
+  // stay in the community manuals.
+  assert.match(shared, /按文件的业务用途选择上传入口/);
+  assert.match(shared, /结果仍未知时停止重传和依赖该结果的写入/);
+  assert.match(uploadImage, /没有 `assetId`/);
+  assert.match(uploadVideo, /不创建素材库记录/);
   assert.match(top, /一级回复只用图片 `\+upload-image`/);
-  assert.match(top, /\| 把本地图片或视频传成帖子素材[^|]*\| `community-management`/);
+  assert.match(top, /\| 上传帖子配图或帖子视频[^|]*\| `community-management`/);
   assert.match(handbooks, /发布后的社区发帖/);
 
   // Precheck: `preaudit_status` is the primary signal, and "unavailable" is a
   // third state rather than a failure or a content rejection.
   for (const [label, text] of [
-    ['shared', shared],
     ['audit', audit],
     ['app-edit', appEdit],
-    ['rules', rules],
     ['top', top],
   ]) {
     assert.match(text, /preaudit_status/, `${label} must use the tri-state signal`);
@@ -2064,7 +2064,7 @@ test('the 2026.11.16 sync keeps recovery, image metadata and card plans on the p
   for (const key of ['api/failed_precondition', 'QUALIFICATION_DOMAIN_UNSUPPORTED', '发布额度不足', '国内隐私维护资格']) {
     assert.match(prerequisite, new RegExp(key), `the recovery matrix must cover ${key}`);
   }
-  assert.doesNotMatch(prerequisite, /taptap-cli [a-z]/, 'the recovery page must stay on the call_tool path');
+  assert.doesNotMatch(prerequisite, /taptap-cli (?!update\b)[a-z]/, 'the recovery page must stay on the call_tool path');
 
   // Package type conflicts become a diagnosed, evidence-bound recovery.
   assert.match(boundary, /apk_mini_game_play/, 'the APK mini-game slot exception must be documented');
@@ -2157,6 +2157,81 @@ test('the 2026.11.19 reservation milestone sync keeps its gates on the plugin pa
       resource.description + resource.whenToUse,
       /预约里程碑|reservation-milestone|予約マイルストーン|예약 마일스톤/,
       `${locale} metadata must mention the milestone domain`,
+    );
+  }
+});
+
+test('the 2026.11.27 sync adds member management and the shortened review flow', () => {
+  // Upstream v2026.11.26/27 added the developer member domain, and the review
+  // flow moved from the three long command names to the shortened ones with
+  // the intent gate owned by app-edit. The plugin must route both without
+  // leaving a second vocabulary in shared execution.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const suite = read('taptap-suite/MANUAL.md');
+  const routing = read('taptap-suite/references/business-routing.md');
+  const shared = read('taptap-suite/references/shared-execution.md');
+  const prerequisite = read('taptap-suite/references/prerequisite-recovery.md');
+  const identity = read('taptap-suite/references/taptap-identity/MANUAL.md');
+  const member = read('taptap-suite/references/taptap-member/MANUAL.md');
+  const memberRef = read('taptap-suite/references/taptap-member/references/member-permissions.md');
+  const appEdit = read('taptap-suite/references/taptap-app-edit/MANUAL.md');
+  const audit = read('taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md');
+  const qualification = read('taptap-suite/references/taptap-qualification/MANUAL.md');
+  const qualificationAnalysis = read('taptap-suite/references/taptap-qualification/references/qualification-analysis.md');
+  const materials = read('taptap-suite/references/taptap-materials/MANUAL.md');
+  const uploadImage = read('taptap-suite/references/taptap-community-management/references/upload-image.md');
+  const uploadVideo = read('taptap-suite/references/taptap-community-management/references/upload-video.md');
+
+  // The member domain is reachable from the entry, identity and routing page.
+  assert.match(suite, /taptap-suite\/references\/taptap-member\/MANUAL\.md/, 'the suite entry must route to member');
+  assert.match(suite, /\| 查厂商成员[^|]*\| `member`/, 'the routing table must reach member management');
+  assert.match(routing, /成员权限与当前身份/, 'member and identity are different questions');
+  assert.match(identity, /taptap-member\/MANUAL\.md/, 'identity must hand member questions over');
+  assert.match(workerSource, /member: '厂商成员/, 'the catalogue drill-down needs a display description');
+  for (const command of ['check-access', '+export', 'set-alias', 'create-role', 'set-app-roles', 'remove', 'list-changes']) {
+    assert.ok((member + memberRef).includes('member ' + command), `the manual must name member ${command}`);
+  }
+  assert.match(member, /厂商主管理员/, 'member writes are gated on the developer admin role');
+  assert.match(memberRef, /idempotency_key/, 'member writes carry an idempotency key');
+  assert.match(memberRef, /region_filtered/, 'hidden regional roles must not be silently dropped');
+  assert.match(memberRef, /expected_version/, 'removal is guarded by the read version');
+  assert.doesNotMatch(member + memberRef, /taptap-cli member/, 'manuals stay on call_tool');
+
+  // Review intent lives in app-edit; shared execution no longer keeps a second list.
+  assert.match(audit, /#### 提审意图门禁/);
+  assert.match(audit, /precheck-review/);
+  assert.match(audit, /submit-review/);
+  assert.match(audit, /#### 提审前检查/);
+  assert.match(appEdit, /app analyze-status/);
+  assert.doesNotMatch(shared, /### 提审意图门禁/, 'the shared page must not keep a competing intent list');
+
+  // The gateway version gate has one recovery path: upgrade, then retry.
+  assert.match(shared, /compatibility\/upgrade_required/);
+  assert.match(prerequisite, /compatibility\/upgrade_required/);
+  assert.match(prerequisite, /taptap-cli update/, 'the 426 row must name the upgrade step');
+
+  // Qualification short names and the package network scan.
+  assert.match(qualification, /qualification get-assessment/);
+  assert.match(qualification, /qualification save-draft/);
+  assert.match(qualificationAnalysis, /## 包体联网检测/);
+  assert.match(qualificationAnalysis, /## 纠正已填事实/);
+  assert.match(qualificationAnalysis, /icp_gate_enabled/, 'the scan result must respect the ICP gate');
+
+  // Upload guidance now separates upload completion from downstream writes.
+  assert.match(materials, /六个端到端 shortcut 接收位置参数/);
+  assert.match(materials, /仅上传时,交付回执/);
+  assert.match(uploadImage, /仅上传时拿到/);
+  assert.match(uploadVideo, /networkRequests/);
+
+  for (const locale of ['zh-CN', 'en', 'ja', 'ko']) {
+    const resource = JSON.parse(
+      fs.readFileSync(path.join(root, 'taptap-cli', 'locales', `${locale}.json`), 'utf8'),
+    );
+    assert.match(
+      resource.description + resource.whenToUse,
+      /成员|member|メンバー|구성원/,
+      `${locale} metadata must mention member management`,
     );
   }
 });

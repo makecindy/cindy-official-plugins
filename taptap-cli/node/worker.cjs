@@ -530,6 +530,7 @@ const SERVICE_DESCRIPTIONS = {
   'whats-new': '活动/公告位排期、上下线、置顶、容量与失效巡检',
   'dashboard-stats': '下载、曝光、转化、预约、订单、评分等数据表现查询',
   developer: '开发者账号与厂商列表',
+  member: '厂商成员、角色、单游戏权限与权限变更',
   'package-management': '包体库、线上/待处理包、自测入口与小游戏能力',
   qualification: '上架资质分析、非敏感材料草稿、资质增量审核',
   'reserve-milestone': '预约里程碑档位、奖励图、提交审核与撤回',

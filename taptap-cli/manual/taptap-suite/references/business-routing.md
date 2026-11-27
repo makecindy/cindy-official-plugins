@@ -4,8 +4,9 @@
 
 ### 跨 skill 边界（防误路由 / 防混淆）
 
+- **成员权限与当前身份**：问当前登录账号可见哪些厂商或游戏，走 `taptap-identity`。问厂商有哪些成员、某人能否给指定游戏改资料或传包，以及添加、移除、改角色或查变更历史，走 [`taptap-member`](taptap-suite/references/taptap-member/MANUAL.md)。
 - **资料编辑 ≠ 创建游戏**：还没有 appId、只是要新建游戏时走 `taptap-publish-game`；已有 appId 后要改资料、换包体、提交审核或处理版本生命周期时走 `taptap-app-edit`
-- **准备上线 ≠ 提交审核**：上传、补资料、绑定包体、查询就绪度或“正式上线”目标都不能推断提审意图；只有用户明确说“提交审核 / 提审”后才可进入 `prepare-review-snapshot`，预审后仍要单独确认 `submit-app-review`
+- **准备上线与提交审核**：按用户请求推进当前准备阶段。用户明确要求提交游戏资料审核时，转 `taptap-app-edit` 处理提审
 - **包体管理 ≠ 资料草稿包体切换**：查"包体管理页 / 当前线上包 / Windows 或 H5 包列表 / 云玩或 TapPlay 用哪个包"走 `taptap-package-management`；改资料版本草稿绑定哪个包体走 `taptap-app-edit`
 - **包体管理以查询和上传入口为主**：包体管理状态查询走 `taptap-package-management`；唯一确认式写例外是小游戏包体库明确需要初始化 Tap 小游戏能力时，先询问用户并在确认后开通。H5 与小游戏互斥，H5 不通过该能力开通。上传走 CLI app-scope 上传命令；TapTap 制造 / Spark 包体由 TapTap 制造传入，已有 ready 版本的资料页主包绑定转 `taptap-app-edit`
 - **测试计划 ≠ 包体自测**：创建或管理测试计划、资格批次、激活码、报名用户走 `taptap-test-plan`；查看包体状态或生成可自测版本二维码走 `taptap-package-management`
@@ -14,8 +15,8 @@
 - **物料上传 ≠ 资料写入或包体绑定**：目录/zip 或多种本地物料走 `taptap-materials` 盘点和逐项上传；图片和视频再交给 `taptap-app-edit` 写入字段，包体先交给 `taptap-package-management` 查询状态，绑定由 `taptap-app-edit` 按包体槽位契约确认式完成
 - **敏感资质页面填写 ≠ CLI 已执行**：资质工具要求人工填写时，只给完整开发者后台链接并等待用户完成；不要调用前端卡片工具或声称已代填
 - **数据表现只读**：用户问下载量、PV、转化、订单、评分统计等经营数据时走 `taptap-dashboard-stats`；不要把数据查询结果当作资料字段或版本状态写回
-- **论坛数据统计 ≠ 论坛帖子/回复内容**：论坛访问量、活跃用户、内容发布/删除/移动、按时间区间的全论坛回复新增量、论坛关注与内容总数等统计走 `taptap-dashboard-stats` 的 `get-forum-stats`；某个帖子当前的回复总数（`moment.stat.comments`）、一级回复与子回复内容走 `taptap-community-management`。回复新增量与回复内容不是同一接口、同一口径，不能互相替代
-- **活动与公告 ≠ 签到/推送**：详情页与 PC 库上的展示条目（公告、反馈、活动、征稿、置顶、排期、上下线、失效检查）走 `taptap-whats-new`；签到活动的奖励、集卡、兑换码与提审走 `taptap-game-sign`，站内推送给关注用户走 `taptap-official-message-push`。系统同步类型（签到/礼包/新版本/抽奖）不能通过 `taptap-whats-new` 创建，只能调整排期、置顶和上下线。用户明确要求串联三个域时读 `interactive-operations-flow`。
+- **论坛数据统计 ≠ 论坛帖子/回复内容**：论坛访问量、活跃用户、内容发布/删除/移动、回复数、论坛关注与内容总数等统计走 `taptap-dashboard-stats` 的 `get-forum-stats`；论坛帖子正文、一级回复与子回复走 `taptap-community-management`。回复数与回复内容不是同一接口、同一口径，不能互相替代
+- **活动与公告 ≠ 签到/推送**：详情页与 PC 库上的展示条目（公告、反馈、活动、征稿、置顶、排期、上下线、失效检查）走 `taptap-whats-new`；签到活动的奖励、集卡、兑换码与提审走 `taptap-game-sign`，站内推送给关注用户走 `taptap-official-message-push`。系统同步类型（签到/礼包/新版本/抽奖）不能通过 `taptap-whats-new` 创建，只能调整排期、置顶和上下线
 - **评分统计 ≠ 评价正文**：评分/评价的统计指标、趋势和分布走 `taptap-dashboard-stats`；单条评价的正文、配图、作者和回复走 `taptap-player-feedback`。两者口径不同，不能用对方的数据替代；用户说「好评」时必须先区分是统计口径还是列表筛选口径
 - **预约里程碑 ≠ 签到**：预约里程碑按游戏预约人数配置阶梯奖励（档位、奖励图、提审/撤回）走 `taptap-reserve-milestone`；签到按玩家累计签到天数配置奖励、集卡与兑换码走 `taptap-game-sign`。两者奖励对象、人数口径和配置字段不同，不能互相套用问卷或库存设置
 - **玩家评价 ≠ 论坛帖子**：评分/评价的正文、配图、作者和回复走 `taptap-player-feedback`；论坛帖子（动态）的标题、正文、图片、一级回复和子回复走 `taptap-community-management`。两者是不同接口、不同口径，不能互相替代
@@ -23,4 +24,4 @@
 
 ### 跨 skill 串联（一次任务要换 skill 接力）
 
-- **创建游戏后的 handoff**：`taptap-publish-game` 创建成功后，下一步不再只是页面入口，也不是立刻输出最终资料缺口清单。先确认创建信息和首批物料已交接，读取并报告实际可见的 `region_flag_*`，再只展示当前包体可用的推进方式；正式上线资料走 `taptap-app-edit`，上架资质走 `taptap-qualification`，测试走 `taptap-test-plan`，包体状态与自测走 `taptap-package-management`，参考图片检索/收录走 `taptap-asset-library`。
+- **创建游戏后的 handoff**：`taptap-publish-game` 创建成功后，下一步不再只是页面入口，也不是立刻输出最终资料缺口清单。先确认创建信息和首批物料已交接，读取 `region_flag_*`，向用户说明各平台实际分发阶段，不展示字段名或状态数字，再只展示当前包体可用的推进方式；正式上线资料走 `taptap-app-edit`，上架资质走 `taptap-qualification`，测试走 `taptap-test-plan`，包体状态与自测走 `taptap-package-management`，参考图片检索/收录走 `taptap-asset-library`。

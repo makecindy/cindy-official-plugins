@@ -2,6 +2,8 @@
 
 本手册合并两个业务域:**本地物料盘点与端到端上传**(materials)与**图片/视频素材库检索收录、模型生图与本地校验**(asset-library)。上传类命令的命令行示例按 taptap-suite 手册的映射表转成 call_tool 调用(文件路径放 `_positional`)。
 
+开始前先读 [shared execution](taptap-suite/references/shared-execution.md),同一会话已读且内容未变化时直接沿用。
+
 ## 第一部分:本地物料盘点与上传
 
 本部分是六个端到端 upload shortcut(图片、视频、APK、Windows、H5、Tap 小游戏)的**执行入口**:资料与素材链路需要上传本地物料时一律转交到这里,不自行执行上传命令。它负责让本地物料取得可继续处理的远端句柄;不拥有资料字段写入、资料页包体槽位绑定、提审或发布。社区发帖的配图/视频不属于这六个 shortcut:走 `taptap-community-management` 的 `+upload-image` / `+upload-video`,不建素材库记录。
@@ -54,12 +56,12 @@ game.zip
 
 1. 对图片、视频、APK、Windows、H5、Tap 小游戏,显式缺 `developerId` / `appId` 且当前 profile 也没有可用 saved scope 时,先转 identity 手册;六个 upload shortcut 都是 app-scope 写操作。
 2. 包体先遵守[固定包体类型边界](taptap-suite/references/package-type-boundary.md)。用 `materials +inspect` 的 manifest 或用户明确提供的单文件路径建立计划。目录或 zip 中的未知项、歧义项、多个视频和 Windows branch 先让用户确认。
-3. 对图片、视频、APK、Windows、H5、Tap 小游戏文件先执行同一 shortcut 的 dry-run。用户确认后,以同一文件、scope 和业务意图执行 `yes:true`,两次调用复用同一个 `idempotency_key`。六个 shortcut 都接受该 flag(省略时由 CLI 自动派生),但图片上传必须显式提供稳定 key。**幂等键只用可打印 ASCII**(如 `image-cover-1`),不要把中文文件名或标题放进 key;CLI 会直接拒绝非 ASCII key,不会自动转码或替换。若旧请求已发出,先核对结果,不能换 key 重放。
-4. 图片、视频、APK、Windows、H5、Tap 小游戏只调用本部分的六个端到端 upload shortcut,不直接调用底层接口的 upload/complete/submit operation。单文件 shortcut 的输入是位置参数(`<file>` 放 `_positional`)、`app_id`、`dev_id` 和各自 flag;**不要传 `data`,不要手写 `file_name`、`file_size`、`sha256`、`upload_token` 或 complete request body。**`file_size` 是字节大小,H5 的 `screen_orientation` 也是协议字段;这些字段由 CLI workflow 按当前 schema 生成和校验。`<file>` 必须是**相对会话工作目录**的路径,且解析后落在该目录内;绝对路径与越出目录的路径都会被拒绝。素材不在会话工作目录时,先把文件复制进去,再传相对路径——`call_tool` 每次都按会话工作目录启动 CLI,在终端里 `cd` 不会改变下一次调用的路径基准。
+3. 先执行同一条 shortcut 的 `dry_run: true`。用户确认后,以同一文件、scope 和业务意图执行 `yes: true`。图片 `upload` 必须显式提供稳定 `idempotency_key`;其余五个 shortcut 省略时由 CLI 派生。显式传 key 时,预览、执行和同一意图的续跑都使用原值。**幂等键只用可打印 ASCII**(如 `image-cover-1`),不要把中文文件名或标题放进 key;CLI 会直接拒绝非 ASCII key,不会自动转码或替换。若此前的请求已发出,先核对结果,不能换 key 重放。
+4. 六个端到端 shortcut 接收位置参数(`<file>` 放 `_positional`)、`app_id`、`dev_id` 和各自 flag。上传的 init、直传、complete、解析轮询和登记由 CLI workflow 按当前 schema 执行;调用方只提交 shortcut 参数,不传 `data`,也不组装 `file_name`、`file_size`、`sha256`、`upload_token` 或 complete 请求。`<file>` 必须是**相对会话工作目录**的路径,且解析后落在该目录内;绝对路径与越出目录的路径都会被拒绝。素材不在会话工作目录时,先把文件复制进去,再传相对路径——`call_tool` 每次都按会话工作目录启动 CLI,在终端里 `cd` 不会改变下一次调用的路径基准。
 5. 成功以顶层 `ok=true` 或 exit code 0 判断;缺少 `yes` 的确认门禁是 exit code 10(插件返回 `CONFIRM_REQUIRED`);其它失败按返回的 error 停止和恢复,不把业务内字段当作成功。
-6. 单项部分失败时保留已返回的远端句柄,按文件记录结果。只重试没有远端句柄的失败项,不能整批重跑。H5 和 Tap 小游戏可用 `task +list|get|resume` 恢复已有任务;其下一步是否可执行完全由当前 Catalog 的 `enabled` / `disabled_reason` 决定。不得重构 upload token。
+6. 按文件记录结果,保留已返回的远端句柄,只回读或恢复未完成的阶段。没有远端句柄时,先确认原请求未生效再重试该文件;结果仍未知时停止写入。H5 和 Tap 小游戏有本地任务时,用 `task +list` / `task +get <task-id>` 找到原任务,再用 `task +resume <task-id>` 从已记录的阶段恢复。包体任务的 `+resume` 不带 `dry_run` 或 `yes`。CLI 按当前 Catalog 执行后续步骤,遇到 `disabled_reason` 按实际阻塞处理。
 7. 大文件上传超时返回 `TIMEOUT` 时,加大 `_timeout_seconds`(最大 870)重试,或用 `task` 类命令恢复;不要盲目重发完整上传。
-8. 完成上传后,按"上传结果 → 当前远端状态 → 用户确认 → 后续处理"的顺序交接;交接去向统一以上方「上传快速决策」表和本部分指出的交接目标为准,不在正文其他位置重复声明。图片交接必须同时给到 `upload` 返回的 `data.url` 与完整 `data.info`,由消费方按自己的 schema 取值:`app save-changes` 的图片新值是 `{"url": ..., "info": ...}` 对象,五项(`size`/`format`/`width`/`height`/`image_ave.rgb`)缺一项服务端就 400;以 URL 为值的下游(如资质草稿的 `{"type": "img", "url": ...}` 文件字段)仍只用 `data.url`;视频仍用 `upload-video` 返回的 `videoId`。不得在本部分自动执行 `save-changes`、`select-package`、`clear-package`、审核或发布。APK、Windows、H5 转 app-edit 手册后必须重新读取候选和当前 schema 声明时的 `package_slots`,不能复用上传前快照。
+8. 完成上传后,按"上传结果 → 当前远端状态 → 用户确认 → 后续处理"的顺序交接;交接去向统一以上方「上传快速决策」表和本部分指出的交接目标为准,不在正文其他位置重复声明。仅上传时,交付回执和已核实的状态;任务还包含资料回填、签到奖励配置或包体后续处理时,再按具体去向交接。图片交接必须同时给到 `upload` 返回的 `data.url` 与完整 `data.info`,由消费方按自己的 schema 取值:`app save-changes` 的图片新值是 `{"url": ..., "info": ...}` 对象,五项(`size`/`format`/`width`/`height`/`image_ave.rgb`)缺一项服务端就 400;以 URL 为值的下游(如资质草稿的 `{"type": "img", "url": ...}` 文件字段)仍只用 `data.url`;视频仍用 `upload-video` 返回的 `videoId`。不得在本部分自动执行 `save-changes`、`select-package`、`clear-package`、审核或发布。APK、Windows、H5 转 app-edit 手册后必须重新读取候选和当前 schema 声明时的 `package_slots`,不能复用上传前快照。
 
 ### 上传结果句柄
 
@@ -74,7 +76,7 @@ game.zip
 
 小游戏上传成功后不得再次 complete;`artifact_only` 不表示上传未完成。详见 [小游戏交接](taptap-suite/references/taptap-materials/references/mini-app-handoff.md)。
 
-dry-run 的 JSON 是预览,不包含上述远端句柄。图片、APK、PC、H5、小游戏预览不发网络请求;视频预览会读取目标字段的实时 `video_spec`,但不会上传文件。
+dry-run 的 JSON 是预览,不包含上述远端句柄。图片和四类包体的预览在本地完成。资料视频预览会读取目标字段的实时 `video_spec`。文件在确认执行后上传。
 
 ## 第二部分:图片/视频素材库检索、收录与模型生图
 

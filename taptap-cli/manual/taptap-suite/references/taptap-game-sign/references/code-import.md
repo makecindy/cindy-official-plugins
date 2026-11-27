@@ -4,7 +4,7 @@
 
 ## 前置条件与交接字段
 
-先读 [shared execution](taptap-suite/references/shared-execution.md)。需要本地 CSV、当前游戏 scope、`review_id`，以及互斥的 `award_id`/`card_id`；目标 ID 来自当前配置，卡片奖品须为 `REDEEM_CODE`。已有配置足以确认目标时不重新列活动。
+沿用本次已读的共享执行规范。直接打开本页且尚未读过当前版本时，先读 [共享执行规范](taptap-suite/references/shared-execution.md)。需要本地 CSV、当前游戏 scope、`review_id`，以及互斥的 `award_id`/`card_id`；目标 ID 来自当前配置，卡片奖品须为 `REDEEM_CODE`。已有配置足以确认目标时不重新列活动。
 
 | 阶段结果 | 后续用途 |
 | --- | --- |
@@ -18,7 +18,7 @@
 
 输入为无标题、无空行的单列 UTF-8 CSV（可含 BOM），每码 1–256 位 ASCII 字母/数字/_/-，最多 20 MiB、100000 行。首行类似 `code`、`redeem_code` 等表头时预览会给 warning，但仍按原文件计数和上传，不静默删除首行；出现提示先核实它是实际兑换码还是表头，若是表头则修正文件后重新预览。文件内重复会停止；不会自动去重、转换 xlsx 或覆盖原库存。服务端返回目标最近记录的 `success_count`/`failed_count`/`import_count`，不提供本文件独立的重复码统计。
 
-先读配置及库存，展示目标、当前库存、追加模式与预计数量；相同意图固定 `idempotency_key`。运行本地 dry-run，不发请求、不创建任务、不打印码内容：
+先读配置及库存，展示目标、当前库存、追加模式与预计数量。预览和执行都必须显式传入同一个稳定的 `idempotency_key`。导码只支持 JSON 输出。`dry_run: true` 在本地校验文件并生成预览，不调用签到导码接口、不创建任务，也不打印码内容：
 
 ```text
 call_tool(name:"game-sign +import-codes", args:{
