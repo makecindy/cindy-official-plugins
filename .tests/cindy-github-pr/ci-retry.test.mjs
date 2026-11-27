@@ -147,6 +147,50 @@ function guideArguments(values) {
   return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, encodingConfigArgs: typeof encodingConfigArgs === "undefined" ? undefined : encodingConfigArgs, committerIdentArgs: typeof committerIdentArgs === "undefined" ? undefined : committerIdentArgs, pushSigningConfigArgs: typeof pushSigningConfigArgs === "undefined" ? undefined : pushSigningConfigArgs, hookConfigArgs: typeof hookConfigArgs === "undefined" ? undefined : hookConfigArgs, hookListArgs: typeof hookListArgs === "undefined" ? undefined : hookListArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, shallowStateArgs: typeof shallowStateArgs === "undefined" ? undefined : shallowStateArgs, shallowPathArgs: typeof shallowPathArgs === "undefined" ? undefined : shallowPathArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs, lockPathArgs: typeof lockPathArgs === "undefined" ? undefined : lockPathArgs, refFormatArgs: typeof refFormatArgs === "undefined" ? undefined : refFormatArgs, urlRewriteConfigArgs: typeof urlRewriteConfigArgs === "undefined" ? undefined : urlRewriteConfigArgs })', values);
 }
 
+test('config-only environment overrides cannot stand in for execution configuration', async t => {
+  const guidePath = fileURLToPath(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url));
+  for (const locked of [false, true]) await t.test(locked ? 'notes failure after HEAD moved' : 'notes silently copied', t => {
+    const fx = fixture(t), work = path.join(fx.root, 'config-source-work'); fs.mkdirSync(work);
+    const global = path.join(fx.root, 'global'), alternate = path.join(fx.root, 'alternate');
+    fs.writeFileSync(global, ''); fs.writeFileSync(alternate, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1', GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' };
+    for (const key of Object.keys(env)) if (/^GIT_(?:CONFIG$|CONFIG_(?:COUNT|KEY_|VALUE_|PARAMETERS)|NOTES_)/i.test(key)) delete env[key];
+    const invoke = (args, actualEnv = env) => spawnSync('git', args, { cwd: work, env: actualEnv, encoding: 'utf8', shell: false });
+    const git = args => { const r = invoke(args); assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };
+    git(['init', '-b', 'main']);
+    for (const [key, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false'], ['core.hooksPath', path.join(fx.root, 'no-hooks')]]) git(['config', key, value]);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'original\n'); git(['add', '.']); git(['commit', '-s', '-m', 'original']);
+    const original = git(['rev-parse', 'HEAD']); git(['notes', '--ref=commits', 'add', '-m', 'fixture note', original]);
+    git(['config', 'notes.rewriteRef', 'refs/notes/commits']);
+    const notesBefore = git(['rev-parse', 'refs/notes/commits']);
+    if (locked) fs.writeFileSync(path.join(work, '.git', 'refs', 'notes', 'commits.lock'), 'occupied fixture');
+    const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    const actualEnv = { ...env, GIT_CONFIG: alternate, GIT_COMMITTER_DATE: '2026-01-02T00:00:00Z' };
+    const hidden = invoke(['--no-replace-objects', 'config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^notes[.]rewrite'], actualEnv);
+    assert.equal(hidden.status, 1); assert.equal(hidden.stdout + hidden.stderr, '');
+    assert.equal(git(['rev-parse', 'HEAD']), original); assert.equal(git(['rev-parse', 'refs/notes/commits']), notesBefore);
+    assert.equal(fs.existsSync(fx.retryDir), false, 'read-only inspection never calls budget operations');
+    // Native counterexample, not a recovery executor: the same environment
+    // hides repo config from config(1) but not commit(1). No remote/quota call.
+    const amended = invoke(plan.amendArgs, actualEnv), after = git(['rev-parse', 'HEAD']);
+    assert.notEqual(after, original);
+    if (locked) { assert.notEqual(amended.status, 0); assert.equal(git(['rev-parse', 'refs/notes/commits']), notesBefore); }
+    else { assert.equal(amended.status, 0, amended.stderr); assert.notEqual(git(['rev-parse', 'refs/notes/commits']), notesBefore); assert.equal(git(['notes', '--ref=commits', 'show', after]), 'fixture note'); }
+    assert.equal(fs.readFileSync(alternate, 'utf8'), ''); assert.equal(fs.existsSync(fx.retryDir), false);
+    const guide = fs.readFileSync(guidePath, 'utf8').replace(/\s+/g, ' ');
+    assert.ok(/Any defined GIT_CONFIG, including empty values, stops CI-only recovery/.test(guide), 'configuration-source boundary must be explicit');
+    assert.ok(/before any Git configuration, status\/object or remote read, budget status\/reservation, amend and push/.test(guide), 'configuration-source boundary must be explicit');
+  });
+  await t.test('defined empty, case-insensitive names and unknown environment are excluded', () => {
+    const guide = fs.readFileSync(guidePath, 'utf8').replace(/\s+/g, ' ');
+    assert.ok(/case-insensitive environment names on Windows/.test(guide), 'configuration-source boundary must be explicit');
+    assert.ok(/An unavailable or incomplete environment read stops; do not infer absence/.test(guide), 'configuration-source boundary must be explicit');
+    assert.ok(/Do not unset GIT_CONFIG, replace its file, or add a config-only scope override to qualify/.test(guide), 'configuration-source boundary must be explicit');
+    assert.ok(guide.indexOf('Any defined GIT_CONFIG') < guide.indexOf('const notesRewriteConfigArgs'), 'exclude source mismatch before the first config read plan');
+  });
+});
+
 test('notes rewrite eligibility excludes auxiliary-ref writes before quota or amend', async t => {
   const guidePath = new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url);
   for (const source of ['local', 'included glob', 'command', 'environment', 'disabled environment', 'locked notes']) await t.test(source, t => {

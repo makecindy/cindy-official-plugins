@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.71, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.72, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1707,3 +1707,23 @@ Before this round's one push, main moved fromfab1b273 to5d67a305a87a70c896813165
 Upstream Antigravity changes adapt negotiated native question/plan output and preserve remote tool restrictions; no new endpoint, credential or executable download was introduced by this inherited patch. These are inherited main changes, not this PR feature or new runtime evidence. Current source hook/target/model/timeout/cadence and all strict CI guards remain; version71 exceeds main49. Forge71 matches all35 tracked files (semantic manifest, exact other bytes): **285611 archive /811172 uncompressed bytes**; new package deleted and absence read back.
 
 Final71 mandatory four suites plus all three affected plugins: **796 passed /50 skipped /0 failed (310.89s)**. This combined batch includes the changed upstream AGY bridge code; the earlier optional50/1/4 batch remains an unreproduced initial failure, not a proven flake. The50 skips comprise the42 previously documented GitHub/environment cases plus8 upstream AGY cases; no skipped runtime behavior is claimed. Current-version real Cindy notes/helper refusal and all other runtime prerequisites remain unmet.
+
+
+## Configuration-source checkpoint — source1.5.72, not installed
+
+Invariant: no configuration query may authorize a write under a different effective configuration source. The existing Agent owns eligibility; no new environment resolver/executor, receipt field, store, lock or retry. Before any Git configuration/status/object/remote or budget read, and again before reserve/amend/push, any defined GIT_CONFIG (empty included), case-insensitive Windows spelling or incomplete/unknown child execution environment stops. Do not unset it, replace its file or add a scope-only override to qualify. Other shared Git config inputs remain subject to complete reads in the same environment. Signed/unsigned paths share the prerequisite. Observations are not atomic against later concurrent change.
+
+| Event / state | Required outcome |
+| --- | --- |
+| GIT_CONFIG defined, empty or unreadable/unknown environment before quota | Stop; no budget status/reserve, amend or push |
+| Environment changes after reservation | Stop, no refund |
+| Changed/unknown state after amend or earlier masked-config execution | Leave unpushed; read-only HEAD/suspected-effects reconciliation, no reset/restore/replay |
+| Confirmed absent and complete unchanged environment | Continue existing checks; absence alone never grants eligibility |
+
+Windows10.0.26100 /Node22.22.3 /Git2.54.0.windows.1 native isolated fixtures reproduce the same actual environment: an empty alternate GIT_CONFIG makes the documented notes query exit1/empty while commit still reads local notes settings. Unlocked amend succeeds and copies notes; locked notes make amend fail after HEAD moves. Before those counterexamples, readonly inspection preserves HEAD/notes and creates no budget; no remote or quota command is used. This is a native counterexample plus guide contract, NOT a real Cindy recovery-entry refusal or new mechanical CLI guard. Initial test draft had a local guidePath scope error, corrected before substantive red/green: unchanged71 guide0pass/4fail(3.66s), corrected new+existing notes12pass/0fail(10.50s). Pure guide contracts cover empty/case-insensitive/unknown states; no native empty-value execution or live signed recovery is claimed. [Git config environment](https://git-scm.com/docs/git-config#ENVIRONMENT) documents the config-only behavior.
+
+Merge main6a766a2b2ae29a83a098bbf0c387dd34bd152e3c/GitHub1.5.50 normally on the same branch. Only manifest/version assertion conflicts; main card-state retention, expired/failed lookup feedback, retryable stop UI and settled-baseline probe/backoff changes retained. main.js/gate/gate-test normalized patches exactly match upstream; full pacing/wait helpers, pacing tests and follow-up reference equal main. No task hook/target/model/timeout/cadence migration. Receipt I/O, slots/caps, CI argv and all prior guards unchanged; current UI/retention/stop/probe behavior needs real Cindy evidence. Source72 not installed; root installed version unread, feature-local45 historical only. Requested local preferences unavailable (namespace mismatch), rewrite authorization unknown/disabled. No real preference/config/credential/permission/quota change, retired fixture reuse, blocked cleanup retry or new validation copy.
+
+Forge72 exact-content audit passed: **35 tracked files /290138 archive bytes /827407 uncompressed bytes**; semantic manifest and every other byte match source, generated package deleted with absence readback. Budget-helper block, receipt owner, settings/worker and shared CI argv are byte-identical to71; only Agent eligibility text changed for the config-source guard. The actual task executor currently has GIT_CONFIG absent; fixture environments were isolated copies, never changes to user configuration.
+
+Final72 mandatory four suites plus GitHub plugin: **693 passed /42 skipped /0 failed (284.66s)**. The42 skips remain17 unsupported native full-directory-sync success paths plus25 inherited POSIX-only CLI cases. This run covers merged6a766a2b and the config-source guard; unchanged AGY paths reuse the prior71 combined passing evidence. No test predicate was weakened or production workaround added.

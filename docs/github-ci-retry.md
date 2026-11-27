@@ -138,3 +138,5 @@ native scheduling flow. Its existing source-checkout follower remains unchanged.
 
 See the [runtime evidence and remaining gaps](verification/github-ci-retry-2026-11-13.md),
 including cropped actual screenshots and separately labeled generated previews.
+
+The recovery workflow also refuses any defined `GIT_CONFIG` (including empty), or an unknown execution environment, before reading Git configuration or quota. That variable can redirect only `git config`, so its empty output cannot establish what amend will execute. The Agent does not clear or override it to qualify; the same rule applies before amend/push and to signed/unsigned commits. This is a workflow prerequisite, not a new Git executor.
