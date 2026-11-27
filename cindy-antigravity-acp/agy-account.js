@@ -4,17 +4,24 @@
  * Antigravity sign-in for Cindy's engine accounts, over ACP (the protocol Cindy uses for tasks).
  *
  * Sign-in stays with agy: `authenticate` with agy's Google method makes agy open the browser and
- * keep the token in its own store. Over ACP the plugin only learns whether agy is signed in and the
- * subscription tier name agy reports (`_meta.antigravity.tier`); agy 1.5.18 reports no account
- * identity there, so the identity of an account Cindy added comes from agy's token file in that
- * account's directory (agy-account-dir.js), never from the original login.
+ * keep the token in its own store. Over ACP the plugin learns whether agy is signed in and the
+ * subscription tier name agy reports (`_meta.antigravity.tier`). agy 1.5.18 reports no account
+ * identity there; it writes the signed-in email to its own log, so the sign-in check has agy write
+ * that run's log to a private temporary file and reads the email from it. The same works for agy's
+ * original login and for the accounts Cindy added. The plugin never opens agy's credential files.
  *
  * Verified with agy 1.5.12 (2026-11-19): `authenticate` returns once the browser sign-in finishes.
+ * Verified with agy 1.5.18 (2026-11-27): `agy acp --log-file <file>` logs
+ * "OAuth: authenticated successfully as <email>" once a request used the sign-in, and no token.
  * agy in a terminal shares the original sign-in. The plugin never signs agy out.
  */
 
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { killTree } = require('./resolve-agy.js');
-const { accountDirProblem, ensureAccountSubdirs, readAccountTokenMeta } = require('./agy-account-dir.js');
+const { accountDirProblem, ensureAccountSubdirs } = require('./agy-account-dir.js');
 const { isSignInRequired, openAgy, tierFromMeta } = require('./agy-client.js');
 const { probeFolder } = require('./agy-models.js');
 
@@ -49,6 +56,78 @@ function stopAgy(child) {
   child.once('exit', () => clearTimeout(timer));
 }
 
+const MAX_EMAIL = 254;
+/** Enough for the start of a run; the sign-in line comes with the first request that uses it. */
+const MAX_STATUS_LOG_BYTES = 1024 * 1024;
+const EMAIL_SHAPE = /^[^\s@<>"',;:]+@[^\s@<>"',;:]+\.[^\s@<>"',;:]+$/;
+const LOG_EMAIL_PATTERNS = [
+  /OAuth: authenticated successfully as (\S+)/g,
+  /applyAuthResult: email=([^,\s]+)/g,
+];
+
+/**
+ * The signed-in email in agy's log text (its last mention), or undefined. Anything that is not a
+ * plain email address is ignored, so a changed log format means "no identity", never a wrong one.
+ */
+function emailFromAgyLog(text) {
+  if (typeof text !== 'string') return undefined;
+  for (const pattern of LOG_EMAIL_PATTERNS) {
+    let found;
+    for (const match of text.matchAll(pattern)) found = match[1];
+    if (found && found.length <= MAX_EMAIL && EMAIL_SHAPE.test(found)) return found;
+  }
+  return undefined;
+}
+
+/** Stable digest of the account for Cindy's duplicate-login check; holds no credential. */
+function fingerprintOf(email) {
+  return crypto.createHash('sha256').update(`antigravity-google:${email.toLowerCase()}`).digest('hex').slice(0, 32);
+}
+
+/**
+ * A private temporary file for the log of one sign-in check: { file, readEmail(), remove() }, or
+ * null when it cannot be created (the check then runs without it and reports no identity).
+ */
+function openStatusLog() {
+  let dir;
+  try {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-agy-status-'));
+  } catch {
+    return null;
+  }
+  const file = path.join(dir, 'agy.log');
+  return {
+    file,
+    readEmail() {
+      let handle;
+      try {
+        handle = fs.openSync(file, 'r');
+        const buffer = Buffer.alloc(Math.min(fs.fstatSync(handle).size, MAX_STATUS_LOG_BYTES));
+        fs.readSync(handle, buffer, 0, buffer.length, 0);
+        return emailFromAgyLog(buffer.toString('utf8'));
+      } catch {
+        return undefined;
+      } finally {
+        if (handle !== undefined) fs.closeSync(handle);
+      }
+    },
+    remove() {
+      // agy may still hold the file for a moment after it was asked to stop (Windows refuses to delete it then).
+      fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }, () => {});
+    },
+  };
+}
+
+/** The log is written by agy, not by the reply: give the line a moment to reach the file. */
+async function readStatusEmail(log) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const email = log.readEmail();
+    if (email) return email;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return undefined;
+}
+
 function canSignIn(init) {
   return Array.isArray(init.authMethods)
     && init.authMethods.some((method) => method && method.id === GOOGLE_METHOD);
@@ -57,23 +136,44 @@ function canSignIn(init) {
 /**
  * Whether agy is signed in, and its tier. Resumes the plugin's model-list session when there is one
  * (that also returns the tier); otherwise lists sessions, which opens nothing.
- * @returns {Promise<{ supported: true, signedIn: boolean, tier?: { name: string } }
+ * @returns {Promise<{ supported: true, signedIn: boolean, tier?: { name: string }, email?: string }
  *   | { supported: false, reason: 'not-installed' }>}
  */
 async function status(params, options) {
-  const agy = await openAgy(options);
-  if (!agy) return { supported: false, reason: 'not-installed' };
+  let log = openStatusLog();
+  let agy;
+  try {
+    agy = await openAgy(log ? { ...options, logFile: log.file } : options);
+  } catch (error) {
+    if (!log || !error || error.code !== 'UNSAFE_PATH') {
+      if (log) log.remove();
+      throw error;
+    }
+    // The temporary folder cannot be passed to this agy (a cmd.exe shim): check without the identity.
+    log.remove();
+    log = null;
+    agy = await openAgy(options);
+  }
+  if (!agy) {
+    if (log) log.remove();
+    return { supported: false, reason: 'not-installed' };
+  }
   const { call, init } = agy;
   const base = { supported: true };
   const sessionCaps = (init.agentCapabilities && init.agentCapabilities.sessionCapabilities) || {};
   const sessionId = params && typeof params.sessionId === 'string' && params.sessionId ? params.sessionId : null;
+  const signedIn = async (tier) => {
+    const email = log ? await readStatusEmail(log) : undefined;
+    return { ...base, signedIn: true, ...(tier ? { tier } : {}), ...(email ? { email } : {}) };
+  };
   try {
     if (sessionId && sessionCaps.resume) {
       try {
         const result = await call('session/resume', { sessionId, cwd: probeFolder(), mcpServers: [] });
         const tier = tierFromMeta(result._meta);
+        const answer = await signedIn(tier);
         if (sessionCaps.close) await call('session/close', { sessionId }).catch(() => {});
-        return { ...base, signedIn: true, ...(tier ? { tier } : {}) };
+        return answer;
       } catch (error) {
         if (isSignInRequired(error)) return { ...base, signedIn: false };
         // The session is gone from agy's history: check without it.
@@ -81,13 +181,14 @@ async function status(params, options) {
     }
     try {
       await call('session/list', { cwd: probeFolder() });
-      return { ...base, signedIn: true };
+      return await signedIn();
     } catch (error) {
       if (isSignInRequired(error)) return { ...base, signedIn: false };
       throw error;
     }
   } finally {
     agy.close();
+    if (log) log.remove();
   }
 }
 
@@ -95,11 +196,11 @@ async function status(params, options) {
 const MAX_PLAN = 64;
 
 /**
- * The account status as Cindy's engine accounts read it (`accountStatus`): signed in or out,
- * identity (email/name when known from an isolated account's token metadata), fingerprint for
- * duplicate-login deduplication, and the subscription tier name as `plan`. Null when agy is
- * not installed or an explicit `accountDir` is unusable.
- * @returns {Promise<{ state: 'signed-in', identity?: { email?: string, name?: string }, plan?: string, fingerprint?: string } | { state: 'signed-out' } | null>}
+ * The account status as Cindy's engine accounts read it (`accountStatus`): signed in or out, the
+ * account's email as identity (from agy's log of this check, for the original login and for added
+ * accounts alike), its digest as fingerprint for duplicate-login deduplication, and the subscription
+ * tier name as `plan`. Null when agy is not installed or an explicit `accountDir` is unusable.
+ * @returns {Promise<{ state: 'signed-in', identity?: { email: string }, plan?: string, fingerprint?: string } | { state: 'signed-out' } | null>}
  */
 async function accountStatus(params, options) {
   const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : undefined;
@@ -107,21 +208,16 @@ async function accountStatus(params, options) {
   const current = await status(params, options);
   if (!current.supported) return null;
   if (!current.signedIn) return { state: 'signed-out' };
-  const meta = accountDir ? readAccountTokenMeta(accountDir) : {};
   const rawPlan = (current.tier && current.tier.name)
-    || meta.plan
     || (params && typeof params.fallbackPlan === 'string' ? params.fallbackPlan : undefined);
   const plan = typeof rawPlan === 'string' && !/[\u0000-\u001f\u007f-\u009f]/.test(rawPlan)
     ? rawPlan.slice(0, MAX_PLAN).trim()
     : '';
-  const identity = meta.email || meta.name
-    ? { ...(meta.email ? { email: meta.email } : {}), ...(meta.name ? { name: meta.name } : {}) }
-    : undefined;
   return {
     state: 'signed-in',
-    ...(identity ? { identity } : {}),
+    ...(current.email ? { identity: { email: current.email } } : {}),
     ...(plan ? { plan } : {}),
-    ...(meta.fingerprint ? { fingerprint: meta.fingerprint } : {}),
+    ...(current.email ? { fingerprint: fingerprintOf(current.email) } : {}),
   };
 }
 
@@ -193,4 +289,4 @@ function cancelLogin(options) {
   return { ok: true, cancelled: true };
 }
 
-module.exports = { GOOGLE_METHOD, accountStatus, cancelLogin, login, status };
+module.exports = { GOOGLE_METHOD, accountStatus, cancelLogin, emailFromAgyLog, login, status };

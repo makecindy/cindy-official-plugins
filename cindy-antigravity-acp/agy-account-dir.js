@@ -14,9 +14,11 @@
  *
  * The original (default) Antigravity login has no `accountDir` and continues using agy's
  * standard OS keyring and `~/.gemini` untouched.
+ *
+ * The plugin never opens agy's credential files: the account's identity comes from agy's own log of
+ * the sign-in check (agy-account.js).
  */
 
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -24,30 +26,16 @@ const ACCOUNT_DIR_ARG = '--cindy-account-dir';
 /** Account directory was missing or unusable; entry never falls back to the original login. */
 const ACCOUNT_DIR_EXIT_CODE = 77;
 const APP_DATA_DIR_NAME = 'antigravity-cli';
-const TOKEN_FILE_NAME = 'antigravity-oauth-token';
 const MODEL_SESSION_FILE_NAME = 'cindy-model-session.json';
 
 const MAX_DIR_LENGTH = 1024;
-const MAX_TOKEN_FILE_BYTES = 64 * 1024;
-const MAX_EMAIL = 254;
-const MAX_NAME = 80;
-const MAX_PLAN = 64;
-const MAX_SUB = 128;
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
-const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function pathLib(options) {
   return (options && options.platform) === 'win32' || (!options?.platform && process.platform === 'win32')
     ? path.win32
     : path.posix;
-}
-
-function cleanPlainText(value, max) {
-  if (typeof value !== 'string' || CONTROL_CHARS.test(value)) return undefined;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > max) return undefined;
-  return trimmed;
 }
 
 /**
@@ -104,10 +92,6 @@ function appDataDirOf(accountDir, options) {
   return pathLib(options).join(accountDir, '.gemini', APP_DATA_DIR_NAME);
 }
 
-function tokenFileOf(accountDir, options) {
-  return pathLib(options).join(accountDir, '.gemini', APP_DATA_DIR_NAME, TOKEN_FILE_NAME);
-}
-
 function accountModelSessionFileOf(accountDir, options) {
   return pathLib(options).join(accountDir, MODEL_SESSION_FILE_NAME);
 }
@@ -116,72 +100,15 @@ function ensureAccountSubdirs(accountDir) {
   fs.mkdirSync(appDataDirOf(accountDir), { recursive: true, mode: 0o700 });
 }
 
-function decodeJwtPayload(token) {
-  if (typeof token !== 'string') return null;
-  const parts = token.split('.');
-  if (parts.length !== 3 || !parts[1]) return null;
-  try {
-    const json = Buffer.from(parts[1], 'base64url').toString('utf8');
-    const parsed = JSON.parse(json);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function sha256Prefix(input) {
-  return crypto.createHash('sha256').update(input).digest('hex').slice(0, 32);
-}
-
-/**
- * Reads only non-secret account display metadata (`email`, `name`, `plan`, `fingerprint`)
- * from agy's isolated file-based token store (`<accountDir>/.gemini/antigravity-cli/antigravity-oauth-token`).
- * Never returns or logs OAuth credentials.
- */
-function readAccountTokenMeta(accountDir) {
-  if (typeof accountDir !== 'string' || !accountDir) return {};
-  const file = tokenFileOf(accountDir);
-  let data;
-  try {
-    const stat = fs.statSync(file);
-    if (!stat.isFile() || stat.size === 0 || stat.size > MAX_TOKEN_FILE_BYTES) return {};
-    data = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return {};
-  }
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
-  const claims = decodeJwtPayload(data.id_token);
-  const rawEmail = cleanPlainText(data.id_token_email, MAX_EMAIL)
-    || cleanPlainText(claims && claims.email, MAX_EMAIL);
-  const email = rawEmail && EMAIL_SHAPE.test(rawEmail) ? rawEmail : undefined;
-  const name = cleanPlainText(claims && claims.name, MAX_NAME);
-  const sub = cleanPlainText(claims && claims.sub, MAX_SUB);
-  const plan = cleanPlainText(data.tier_display_name, MAX_PLAN);
-  const fingerprint = email
-    ? sha256Prefix(`antigravity-google:${email.toLowerCase()}`)
-    : sub
-      ? sha256Prefix(`antigravity-google-sub:${sub}`)
-      : undefined;
-  return {
-    ...(email ? { email } : {}),
-    ...(name ? { name } : {}),
-    ...(plan ? { plan } : {}),
-    ...(fingerprint ? { fingerprint } : {}),
-  };
-}
-
 module.exports = {
   ACCOUNT_DIR_ARG,
   ACCOUNT_DIR_EXIT_CODE,
   APP_DATA_DIR_NAME,
   MODEL_SESSION_FILE_NAME,
-  TOKEN_FILE_NAME,
   accountDirProblem,
   accountModelSessionFileOf,
   appDataDirOf,
   ensureAccountSubdirs,
   geminiDirOf,
   parseAccountDirArg,
-  readAccountTokenMeta,
-  tokenFileOf,
 };

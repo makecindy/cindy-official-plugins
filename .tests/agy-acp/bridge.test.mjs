@@ -120,8 +120,11 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
   process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
   return;
 }
-// Every launch must pass the constant ACP args (including no paid credits and no telemetry).
-if (JSON.stringify(args) !== ${JSON.stringify(JSON.stringify(EXPECTED_ACP_ARGS))}) {
+// Every launch must pass the constant ACP args (including no paid credits and no telemetry). The
+// plugin's own sign-in check may add \`--log-file <file>\` after them, never anything else.
+const logFileAt = args.indexOf('--log-file');
+const acpArgs = logFileAt !== -1 && logFileAt === args.length - 2 ? args.slice(0, logFileAt) : args;
+if (JSON.stringify(acpArgs) !== ${JSON.stringify(JSON.stringify(EXPECTED_ACP_ARGS))}) {
   process.stderr.write('fake-agy: unexpected arguments ' + JSON.stringify(args) + '\\n');
   process.exit(2);
 }

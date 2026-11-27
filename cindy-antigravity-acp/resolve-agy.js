@@ -50,18 +50,39 @@ const ACP_ARGS = Object.freeze(['--settings', SESSION_SETTINGS, 'acp', '--disabl
 
 /**
  * ACP arguments for the default login (unchanged `ACP_ARGS`) or for an isolated Cindy account
- * directory (`--gemini-dir <dir>/.gemini --app-data-dir antigravity-cli`).
+ * directory (`--gemini-dir <dir>/.gemini --app-data-dir antigravity-cli`), plus `--log-file <file>`
+ * when the plugin's own sign-in check asks agy to write this run's log to a private file.
  */
 function acpArgsFor(options) {
   const accountDir = options && options.accountDir;
-  if (!accountDir) return ACP_ARGS;
-  const problem = accountDirProblem(accountDir, options);
-  if (problem) {
-    const error = new Error(problem);
-    error.code = 'INVALID_ACCOUNT_DIR';
+  let args = ACP_ARGS;
+  if (accountDir) {
+    const problem = accountDirProblem(accountDir, options);
+    if (problem) {
+      const error = new Error(problem);
+      error.code = 'INVALID_ACCOUNT_DIR';
+      throw error;
+    }
+    args = [...ACP_ARGS, '--gemini-dir', geminiDirOf(accountDir, options), '--app-data-dir', APP_DATA_DIR_NAME];
+  }
+  const logFile = logFileOf(options);
+  return logFile === null ? args : [...args, '--log-file', logFile];
+}
+
+/**
+ * The log file of this run, chosen by this package (agy-account.js: a file in a private temporary
+ * directory); null when none was asked for. Never a path from outside the package.
+ */
+function logFileOf(options) {
+  const file = options && typeof options.logFile === 'string' && options.logFile ? options.logFile : null;
+  if (file === null) return null;
+  // eslint-disable-next-line no-control-regex
+  if (!context(options).p.isAbsolute(file) || /[\u0000-\u001f\u007f]/.test(file)) {
+    const error = new Error('The agy log file path is not usable');
+    error.code = 'UNSAFE_PATH';
     throw error;
   }
-  return [...ACP_ARGS, '--gemini-dir', geminiDirOf(accountDir, options), '--app-data-dir', APP_DATA_DIR_NAME];
+  return file;
 }
 const WINDOWS_EXTENSIONS = ['.exe', '.cmd', '.bat'];
 const MAX_NVM_VERSIONS = 16;
@@ -456,7 +477,7 @@ function windowsSystemExe(env, name) {
 
 /**
  * Start agy with constant arguments (plus the validated `--gemini-dir <dir>/.gemini` pair when an
- * isolated account directory is configured). Windows `.cmd` / `.bat` shims (what npm creates) can
+ * isolated account directory is configured, and the package's own `--log-file <file>` pair). Windows `.cmd` / `.bat` shims (what npm creates) can
  * only run through cmd.exe; paths are quoted and rejected if they contain characters cmd.exe would
  * still expand inside quotes.
  */
@@ -473,11 +494,13 @@ function spawnAgy(agyPath, args, options) {
     }
     allowedGeminiDir = geminiDirOf(accountDir, options);
   }
+  const allowedLogFile = logFileOf(options);
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     const constant = typeof arg === 'string' && (SAFE_ARG.test(arg) || CONSTANT_ARGS.has(arg));
     const isGeminiDirArg = allowedGeminiDir !== null && index > 0 && args[index - 1] === '--gemini-dir' && arg === allowedGeminiDir;
-    if (!constant && !isGeminiDirArg) throw new Error('Refusing to pass a non-constant argument to agy');
+    const isLogFileArg = allowedLogFile !== null && index > 0 && args[index - 1] === '--log-file' && arg === allowedLogFile;
+    if (!constant && !isGeminiDirArg && !isLogFileArg) throw new Error('Refusing to pass a non-constant argument to agy');
   }
   const base = {
     env: childEnv(agyPath, options),
@@ -497,8 +520,13 @@ function spawnAgy(agyPath, args, options) {
       error.code = 'UNSAFE_PATH';
       throw error;
     }
+    if (allowedLogFile !== null && /["%!^&|<>\r\n]/.test(allowedLogFile)) {
+      const error = new Error('The agy log file path contains characters that cmd.exe cannot run safely');
+      error.code = 'UNSAFE_PATH';
+      throw error;
+    }
     const shell = windowsSystemExe(ctx.env, 'cmd.exe') || true;
-    const formatArg = (arg) => (arg === allowedGeminiDir ? '"' + arg + '"' : cmdArg(arg));
+    const formatArg = (arg) => (arg === allowedGeminiDir || arg === allowedLogFile ? '"' + arg + '"' : cmdArg(arg));
     return spawn(['"' + agyPath + '"', ...args.map(formatArg)].join(' '), { ...base, shell });
   }
   return spawn(agyPath, args, base);

@@ -19,8 +19,8 @@
  *     subscription tier name agy reports.
  *   accountStatus({ harnessId, accountDir? }) -> { state: 'signed-in', identity?, plan?, fingerprint? } | { state: 'signed-out' } | null
  *     Cindy's engine accounts (the engine publishes `accounts: { methods: [{ id: 'oauth-personal', kind: 'browser' }] }`):
- *     reads either the original agy login (no `accountDir`) or an isolated account directory Cindy created
- *     (file-based token storage under `<accountDir>/.gemini/antigravity-cli`).
+ *     reads either the original agy login (no `accountDir`) or an isolated account directory Cindy created.
+ *     `identity.email` and `fingerprint` come from agy's own log of the check, for both alike.
  *   accountLogin({ harnessId, accountDir?, methodId: 'oauth-personal' }) -> { ok: true } | { ok: false, error, message? }
  *     Runs agy's Google browser sign-in for the original login or `accountDir`, sending `progress`
  *     notifications every 10 s while waiting.
@@ -37,8 +37,8 @@
  *   accountLogin answers { ok: false, error: 'busy' } while a custom path is being saved: the account it
  *   would act on is the one of the executable being replaced. There is no sign-out: removing an account
  *   in Cindy only stops Cindy using it.
- *   OAuth tokens stay in agy's own storage; the worker only reads non-secret display metadata
- *   (email / tier) for Cindy's account picker and never returns credentials.
+ *   OAuth tokens stay in agy's own storage and the worker never opens agy's credential files; the
+ *   email it reports comes from agy's log, the tier from ACP.
  */
 
 const readline = require('node:readline');

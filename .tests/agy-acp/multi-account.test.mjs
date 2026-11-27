@@ -20,20 +20,17 @@ const {
   ACCOUNT_DIR_EXIT_CODE,
   accountDirProblem,
   parseAccountDirArg,
-  readAccountTokenMeta,
-  tokenFileOf,
 } = require(path.join(root, 'agy-account-dir.js'));
+const { emailFromAgyLog } = require(path.join(root, 'agy-account.js'));
 const { accountErrorRelay, classifyAccountErrorResponse } = require(path.join(root, 'agy-account-errors.js'));
 
-function makeJwt(payload) {
-  const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
-  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  return `${header}.${body}.sig`;
-}
+/** Where the fake agy keeps an isolated account's sign-in. The plugin itself never opens it. */
+const tokenFileOf = (accountDir) => path.join(accountDir, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
 
 /**
  * Fake `agy` supporting isolated `--gemini-dir` + `AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1`,
  * file-based OAuth tokens, per-account `/usage`, ACP error simulation, and `--agent cindy-remote`.
+ * Like agy 1.5.18, it names the signed-in account only in its log (`--log-file`), never over ACP.
  */
 const MULTI_FAKE_AGY = `'use strict';
 const fs = require('node:fs');
@@ -50,6 +47,13 @@ const geminiIdx = args.indexOf('--gemini-dir');
 const geminiDir = geminiIdx !== -1 ? args[geminiIdx + 1] : null;
 const appDataIdx = args.indexOf('--app-data-dir');
 const appDataName = appDataIdx !== -1 ? args[appDataIdx + 1] : 'antigravity-cli';
+const logIdx = args.indexOf('--log-file');
+const logFile = logIdx !== -1 ? args[logIdx + 1] : null;
+function logSignedIn(tok) {
+  if (!logFile || !tok || !tok.id_token_email) return;
+  fs.appendFileSync(logFile, 'I1127 15:13:05.876398      68 server_oauth.go:221] applyAuthResult: email=' + tok.id_token_email + ', authMethod=consumer, quotaProject=\\n'
+    + 'I1127 15:13:05.876413      68 server_oauth.go:226] OAuth: authenticated successfully as ' + tok.id_token_email + '\\n');
+}
 
 function tokenPath() {
   if (forceFile) {
@@ -154,6 +158,7 @@ process.stdin.on('data', (chunk) => {
       if (!tok) {
         send({ id, error: { code: -32000, message: 'Authentication required' } });
       } else {
+        logSignedIn(tok);
         send({ id, result: method === 'session/list' ? { sessions: [] }
           : { _meta: { antigravity: { tier: { name: tok.tier_display_name || 'Google AI Pro' } } } } });
       }
@@ -315,29 +320,28 @@ describe('agy-account-dir helpers', () => {
     assert.ok(accountDirProblem(`${dir}\nnewline`));
   });
 
-  test('readAccountTokenMeta reads non-secret identity, plan, and case-insensitive fingerprint without leaking tokens', (t) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-meta-'));
-    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const file = tokenFileOf(dir);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({
-      access_token: 'tok-secret-1',
-      refresh_token: 'ref-secret-1',
-      id_token: makeJwt({ email: 'Alice@Example.test', name: 'Alice', sub: 'sub-123' }),
-      tier_display_name: 'Google AI Ultra',
-    }));
-    const meta1 = readAccountTokenMeta(dir);
-    assert.equal(meta1.email, 'Alice@Example.test');
-    assert.equal(meta1.name, 'Alice');
-    assert.equal(meta1.plan, 'Google AI Ultra');
-    assert.match(meta1.fingerprint, /^[a-f0-9]{32}$/);
-    assert.equal(JSON.stringify(meta1).includes('tok-secret'), false);
-    assert.equal(JSON.stringify(meta1).includes('ref-secret'), false);
-
-    // Same email in different case produces the exact same fingerprint for deduplication.
-    fs.writeFileSync(file, JSON.stringify({ id_token_email: 'alice@example.test' }));
-    const meta2 = readAccountTokenMeta(dir);
-    assert.equal(meta2.fingerprint, meta1.fingerprint);
+  test('emailFromAgyLog reads the signed-in email agy logs and nothing that is not a plain address', () => {
+    const log = [
+      'I1127 15:13:05.100000      68 server.go:10] starting',
+      'I1127 15:13:05.876398      68 server_oauth.go:221] applyAuthResult: email=Alice@Example.test, authMethod=consumer, quotaProject=',
+      'I1127 15:13:05.876413      68 server_oauth.go:226] OAuth: authenticated successfully as Alice@Example.test',
+    ].join('\n');
+    assert.equal(emailFromAgyLog(log), 'Alice@Example.test');
+    // The last sign-in line wins; either line alone is enough.
+    assert.equal(emailFromAgyLog(log + '\nI1127 15:14:00.000000 68 server_oauth.go:226] OAuth: authenticated successfully as bob@example.test\n'), 'bob@example.test');
+    assert.equal(emailFromAgyLog('x] applyAuthResult: email=carol@example.test, authMethod=consumer'), 'carol@example.test');
+    // A changed log format means no identity, never a wrong one.
+    for (const text of ['', 'OAuth: authenticated successfully', 'OAuth: authenticated successfully as <redacted>',
+      'OAuth: authenticated successfully as not-an-address', 'OAuth: authenticated successfully as a@b', undefined, null]) {
+      assert.equal(emailFromAgyLog(text), undefined);
+    }
+    // The plugin has no code that opens agy's credential files.
+    const accountDirModule = require(path.join(root, 'agy-account-dir.js'));
+    assert.equal(accountDirModule.readAccountTokenMeta, undefined);
+    assert.equal(accountDirModule.tokenFileOf, undefined);
+    for (const file of ['agy-account.js', 'agy-account-dir.js', 'worker.js']) {
+      assert.doesNotMatch(fs.readFileSync(path.join(root, file), 'utf8'), /antigravity-oauth-token|id_token|refresh_token|access_token/, file);
+    }
   });
 });
 
@@ -430,6 +434,16 @@ describe('multi-account worker, ACP entry, remote workspace, and main.js', () =>
     assert.equal(status2.plan, 'Google AI Pro');
     assert.notEqual(status2.fingerprint, status1.fingerprint);
 
+    // agy's original login names its account the same way, so Cindy can tell that one Google account is
+    // both the original login and an added one (same fingerprint, whatever the letter case).
+    fs.writeFileSync(fx.defaultTokenFile, JSON.stringify({ id_token_email: 'One@Example.test' }));
+    const original = (await worker.call('accountStatus', { harnessId: 'agy' })).result;
+    assert.equal(original.state, 'signed-in');
+    assert.deepEqual(original.identity, { email: 'One@Example.test' });
+    assert.equal(original.fingerprint, status1.fingerprint);
+    assert.equal(JSON.stringify([original, status1, status2]).includes('secret-'), false, 'no credential leaves the worker');
+    fs.rmSync(fx.defaultTokenFile);
+
     // Per-account usage reads distinct remaining quotas without leaking across accounts.
     const uDefault = (await worker.call('usage', { harnessId: 'agy' })).result;
     const u1 = (await worker.call('usage', { harnessId: 'agy', accountDir: acct1 })).result;
@@ -453,6 +467,13 @@ describe('multi-account worker, ACP entry, remote workspace, and main.js', () =>
     assert.ok(acct1Launches.every((l) => l.forceFile === true && l.home === fx.homeDir && l.appDataName === 'antigravity-cli'));
     const defaultLaunches = launches.filter((l) => l.geminiDir === null);
     assert.ok(defaultLaunches.every((l) => l.forceFile === false));
+
+    // Each sign-in check had agy write its log to a private temporary file of its own, removed afterwards.
+    const statusLogs = launches.filter((l) => l.args.includes('--log-file')).map((l) => l.args[l.args.indexOf('--log-file') + 1]);
+    assert.ok(statusLogs.length >= 4);
+    assert.equal(new Set(statusLogs).size, statusLogs.length);
+    assert.ok(statusLogs.every((file) => path.basename(path.dirname(file)).startsWith('cindy-agy-status-')));
+    await waitFor(() => statusLogs.every((file) => !fs.existsSync(path.dirname(file))), 8_000, 'status logs removed');
   });
 
   test('worker accountLoginCancel cancels a hanging sign-in for the matching account directory', async (t) => {
