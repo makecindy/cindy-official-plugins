@@ -1614,3 +1614,23 @@ The merge retains main's scenario-based Skill references and publish-time follow
 Forge64 exact-content: **35 files, 272077 archive bytes, 764540 uncompressed bytes**; generated package removed and absence verified. This preparation does not supply actual Cindy publication-opt-out/Skill-routing, cache/UI/recovery or power-loss acceptance. Existing cleanup restrictions remain.
 
 Local64 continuation mandatory four suites plus plugin: **630 passed / 42 skipped / 0 failed (255.85 s)**. Skip scope remains17 unavailable native receipt positive cases and25 POSIX CLI cases. This is validated local source awaiting the next round delivery, not current public PR acceptance.
+
+
+## Notes rewrite exclusion and current base — 2026-11-27 (source1.5.65, not installed)
+
+This same checkout merges main1758878d5f2b48a5812bbb6b12518aa36bfece64 (GitHub1.5.43), including inherited follow-claim timeout/release, platform-specific quoted-hook recognition and unchanged antigravity quota-error fixes. Only manifest/version assertion conflicted; incoming main.js and follow-up guidance merge normally. Source64/dabd was local-only; it is delivered with this continuation rather than claimed as earlier public63 evidence. The task source hook, identity, cadence, preferences and runtime installations are unchanged.
+
+The failure-family invariant is: a CI-only amend may alter only the verified commit, never auxiliary notes refs. The existing Agent workflow remains its sole owner; the receipt I/O/slots/caps and Git amend/push argv are unchanged. Conservative eligibility excludes every effective notes.rewrite-prefixed config key plus defined GIT_NOTES_REWRITE_REF/MODE, including empty, nonmatching, disabled and unknown inputs; complete effective reads cover includes and all scopes. No notes resolver, extra lock/store/executor or config repair is added.
+
+| Event/state | Result |
+| --- | --- |
+| Defined/unknown notes input before budget | Stop before status/reservation or amend |
+| Changed input after reservation | Stop, no refund |
+| Changed input or failed notes update after amend | Leave local work unpushed, inspect HEAD and all suspected refs read-only |
+| Prior execution effects unknown | Report unknown, no replay/reset/ref restoration |
+
+Native isolated Windows/Node22/Git2.54 fixtures reproduce local/included multi-glob/command/env notes writes. A locked notes ref produces nonzero amend after HEAD changes while notes stays old. A disabled-amend control honors false on this Git; it remains conservatively excluded, not described as an environment override of false. New corrected cases first fail against unchanged source64 guide (0 pass/8 fail), then pass (8/8,8.44s). An earlier test expectation incorrectly assumed environment refs override amend=false and was corrected using this native control before red/green. No real quota, remote, runtime or retired fixture was used. This is native counterexample plus Agent-guide contract coverage, not mechanical refusal/Cindy/GitHub/power-loss acceptance. Official notes behavior: https://git-scm.com/docs/git-notes#CONFIGURATION .
+
+Current notes/config refusal, inherited claim/quote handling, current UI/read-order/disable/shared-consumer/signed-head/causal recovery remain unverified live. Source65 is not installed; green tests or resolved code threads do not waive these prerequisites. All previous blocked cleanup residuals remain untouched; temporary native fixtures clean themselves up.
+
+Intermediate65 mandatory four suites plus plugin: **652 passed / 42 skipped / 0 failed (294.51 s)**. Inherited antigravity account-error unit/integration suite:4/4 passed (1.91s), with its source exactly matching main175. Forge65 exact-content: **35 files, 277066 archive bytes, 780810 uncompressed bytes**; new package deleted and absence verified. These results precede the later mainf0bb5b2f preference change and are not final combined validation.

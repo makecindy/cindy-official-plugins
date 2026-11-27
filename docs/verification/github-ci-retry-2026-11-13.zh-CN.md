@@ -1061,3 +1061,23 @@ Forge1.5.62全内容核对通过：**30文件、包263521字节、解压748833�
 Forge64全内容：**35文件、包272077字节、解压764540字节**；生成包已删除并确认不存在。该准备不提供实际Cindy发布停用/Skill路由、缓存/UI/恢复或抗断电验收；已知清理限制不变。
 
 本地64续办规定四套加插件：**630通过 / 42跳过 / 0失败（255.85秒）**。跳过仍为17个不支持的原生receipt成功路径及25个POSIX CLI。这是等待下一轮交付的已验证本地源码，不是公开PR当前验收。
+
+
+## 排除 notes 重写并同步当前基线 — 2026-11-27（source1.5.65，未安装）
+
+同一 checkout 合入 main1758878d5f2b48a5812bbb6b12518aa36bfece64（GitHub1.5.43），保留上游跟进认领超时释放、按平台识别引用的 hook 和未改动的 antigravity 额度错误修复。仅清单/版本断言冲突；main.js、跟进说明正常自动合并。source64/dabd 之前仅本地存在，本轮一并交付，不当作早先公开63证据。任务 source hook、身份、周期、偏好与运行实例不变。
+
+同族不变量：CI-only amend 只能改变已核验提交，不得更新额外 notes refs。仍由现有 Agent 流程单一负责，回执 IO/槽/上限及 amend/push argv 不变。额度前保守排除所有有效 notes.rewrite 前缀配置及已定义 GIT_NOTES_REWRITE_REF/MODE，含空值、不匹配、禁用或未知输入；完整读取覆盖 includes 和所有作用域。不新增 notes 解析器、锁、存储、执行器或配置修复。
+
+| 事件/状态 | 结果 |
+| --- | --- |
+| 额度前存在或未知 notes 输入 | 不执行 status/reservation/amend |
+| 预留后输入变化 | 停止，不退还 |
+| amend 后输入变化或 notes 更新失败 | 保留本地未推送，只读核对 HEAD 与所有可疑 refs |
+| 先前执行效果不明 | 如实报告 unknown，不重试/reset/恢复 refs |
+
+Windows/Node22/Git2.54 隔离本机夹具复现 local/include 多值 glob/command/env notes 写入；notes ref 被锁时 amend 非零退出，但 HEAD 已变而 notes 保持原值。禁用 amend 对照在本机遵守 false；仍保守排除，不宣称环境 refs 覆盖 false。修正后的新用例对未改 source64 guide 先0通过/8失败，再8/8通过（8.44秒）。早先用例错误假定环境 refs 覆盖 amend=false，依据本机对照修正后才完成 red/green。无真实额度、远端、运行实例或退役夹具。这是本机反例与 Agent guide 契约覆盖，不是机械拒绝/Cindy/GitHub/断电验收。官方依据：https://git-scm.com/docs/git-notes#CONFIGURATION 。
+
+当前 notes/config 拒绝、上游认领/引用解析、当前 UI/读序/关闭恢复/共用 ref/签名 head/因果归类等真实验收仍缺；source65 未安装。绿色测试、代码线程处置不代替验收。既有被拒清理残留未触碰，本机临时夹具自行清理。
+
+中间65规定四套+插件：**652通过/42跳过/0失败（294.51秒）**。上游antigravity额度错误单元/集成用例4/4通过（1.91秒），其源码完全等于main175。Forge65完整内容：**35文件、包277066字节、解压780810字节**；新包已删除并确认不存在。这些结果早于其后mainf0bb5b2f的跟进偏好改动，不是最终组合验证。

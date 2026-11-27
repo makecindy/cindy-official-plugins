@@ -147,6 +147,82 @@ function guideArguments(values) {
   return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs, amendArgs: typeof amendArgs === "undefined" ? undefined : amendArgs, originalObjectArgs: typeof originalObjectArgs === "undefined" ? undefined : originalObjectArgs, replacementObjectArgs: typeof replacementObjectArgs === "undefined" ? undefined : replacementObjectArgs, encodingConfigArgs: typeof encodingConfigArgs === "undefined" ? undefined : encodingConfigArgs, committerIdentArgs: typeof committerIdentArgs === "undefined" ? undefined : committerIdentArgs, pushSigningConfigArgs: typeof pushSigningConfigArgs === "undefined" ? undefined : pushSigningConfigArgs, hookConfigArgs: typeof hookConfigArgs === "undefined" ? undefined : hookConfigArgs, hookListArgs: typeof hookListArgs === "undefined" ? undefined : hookListArgs, hooksPathArgs: typeof hooksPathArgs === "undefined" ? undefined : hooksPathArgs, graftPathArgs: typeof graftPathArgs === "undefined" ? undefined : graftPathArgs, replaceRefsArgs: typeof replaceRefsArgs === "undefined" ? undefined : replaceRefsArgs, shallowStateArgs: typeof shallowStateArgs === "undefined" ? undefined : shallowStateArgs, shallowPathArgs: typeof shallowPathArgs === "undefined" ? undefined : shallowPathArgs, originalSignatureArgs: typeof originalSignatureArgs === "undefined" ? undefined : originalSignatureArgs, signatureArgs: typeof signatureArgs === "undefined" ? undefined : signatureArgs, lockPathArgs: typeof lockPathArgs === "undefined" ? undefined : lockPathArgs, refFormatArgs: typeof refFormatArgs === "undefined" ? undefined : refFormatArgs, urlRewriteConfigArgs: typeof urlRewriteConfigArgs === "undefined" ? undefined : urlRewriteConfigArgs })', values);
 }
 
+test('notes rewrite eligibility excludes auxiliary-ref writes before quota or amend', async t => {
+  const guidePath = new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url);
+  for (const source of ['local', 'included glob', 'command', 'environment', 'disabled environment', 'locked notes']) await t.test(source, t => {
+    const fx = fixture(t), work = path.join(fx.root, 'notes-work'); fs.mkdirSync(work);
+    const global = path.join(fx.root, 'global'); fs.writeFileSync(global, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1',
+      GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' };
+    for (const key of Object.keys(env)) if (/^GIT_(?:NOTES_|CONFIG_(?:COUNT|KEY_|VALUE_|PARAMETERS))/.test(key)) delete env[key];
+    const invoke = (args, actualEnv = env) => spawnSync('git', args, { cwd: work, env: actualEnv, encoding: 'utf8', shell: false });
+    const git = args => { const r = invoke(args); assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };
+    git(['init', '-b', 'main']);
+    for (const [key, value] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false'], ['core.hooksPath', path.join(fx.root, 'no-hooks')]]) git(['config', key, value]);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'original\n'); git(['add', '.']); git(['commit', '-s', '-m', 'original']);
+    const original = git(['rev-parse', 'HEAD']);
+    git(['notes', '--ref=commits', 'add', '-m', 'fixture note', original]);
+    const notesBefore = git(['rev-parse', 'refs/notes/commits']);
+    const actualEnv = { ...env, GIT_COMMITTER_DATE: '2026-01-02T00:00:00Z' };
+    if (source === 'included glob') {
+      const include = path.join(fx.root, 'notes-include');
+      fs.writeFileSync(include, '[notes]\n rewriteRef = refs/notes/*\n rewriteRef = refs/notes/unused\n');
+      git(['config', 'include.path', include]);
+    } else if (source === 'command') {
+      actualEnv.GIT_CONFIG_COUNT = '1'; actualEnv.GIT_CONFIG_KEY_0 = 'notes.rewriteRef'; actualEnv.GIT_CONFIG_VALUE_0 = 'refs/notes/commits';
+    } else if (source === 'environment' || source === 'disabled environment') {
+      if (source === 'disabled environment') git(['config', 'notes.rewrite.amend', 'false']);
+      actualEnv.GIT_NOTES_REWRITE_REF = 'refs/notes/commits:refs/notes/unused';
+      actualEnv.GIT_NOTES_REWRITE_MODE = 'concatenate';
+    } else git(['config', 'notes.rewriteRef', 'refs/notes/commits']);
+    if (source === 'locked notes') fs.writeFileSync(path.join(work, '.git', 'refs', 'notes', 'commits.lock'), 'occupied fixture');
+    const plan = guideArguments({ verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    // Counterexample only: execute the existing risky amend in an isolated Git
+    // fixture, then check the Agent guide excludes this environment. No budget,
+    // remote or simulated mechanical recovery guard is involved.
+    const amended = invoke(plan.amendArgs, actualEnv), after = git(['rev-parse', 'HEAD']);
+    assert.notEqual(after, original, 'HEAD moves even when the later notes update fails');
+    if (source === 'locked notes') {
+      assert.notEqual(amended.status, 0, amended.stderr);
+      assert.equal(git(['rev-parse', 'refs/notes/commits']), notesBefore);
+    } else if (source === 'disabled environment') {
+      assert.equal(amended.status, 0, amended.stderr);
+      assert.equal(git(['rev-parse', 'refs/notes/commits']), notesBefore,
+        'this Git honors amend=false; the guide still excludes defined rewrite inputs');
+    } else {
+      assert.equal(amended.status, 0, amended.stderr);
+      assert.notEqual(git(['rev-parse', 'refs/notes/commits']), notesBefore);
+      assert.equal(git(['notes', '--ref=commits', 'show', after]), 'fixture note');
+    }
+    assert.equal(fs.existsSync(fx.retryDir), false, 'no quota operation in the native counterexample');
+    const guide = fs.readFileSync(guidePath, 'utf8').replace(/\s+/g, ' ');
+    assert.match(guide, /Any effective notes\.rewrite configuration stops CI-only recovery/);
+    assert.match(guide, /GIT_NOTES_REWRITE_REF.*GIT_NOTES_REWRITE_MODE.*including empty values/);
+    assert.match(guide, /before any Git status\/object work or budget status\/reservation, amend and push/);
+  });
+  await t.test('complete config read includes empty and nonmatching rules', t => {
+    const fx = fixture(t), work = path.join(fx.root, 'config-work'); fs.mkdirSync(work);
+    const global = path.join(fx.root, 'global'); fs.writeFileSync(global, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
+    for (const key of Object.keys(env)) if (/^GIT_CONFIG_(?:COUNT|KEY_|VALUE_|PARAMETERS)/.test(key)) delete env[key];
+    const git = args => spawnSync('git', args, { cwd: work, env, encoding: 'utf8', shell: false });
+    assert.equal(git(['init', '-b', 'main']).status, 0);
+    const guide = fs.readFileSync(guidePath, 'utf8');
+    const source = guide.match(/```js\n(\/\/ Argument lists for the existing task execution tool\.[\s\S]*?)\n```/)[1];
+    const read = runInNewContext(source + '\n(typeof notesRewriteConfigArgs === "undefined" ? undefined : notesRewriteConfigArgs)', {
+      verifiedBranch: 'main', verifiedRemote: 'origin', originalRemoteSha: oldHead, newSha: newHead, gatePath: gate,
+      prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    assert.ok(read, 'guide must define the effective notes rewrite read');
+    assert.deepEqual(Array.from(read), ['--no-replace-objects', 'config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^notes[.]rewrite']);
+    const absent = git(read); assert.equal(absent.status, 1); assert.equal(absent.stdout + absent.stderr, '');
+    for (const value of ['', 'refs/notes/not-present']) {
+      assert.equal(git(['config', 'notes.rewriteRef', value]).status, 0);
+      const found = git(read); assert.equal(found.status, 0); assert.match(found.stdout, /notes\.rewriteref/);
+    }
+  });
+});
+
 test('recovery guide passes dynamic refs, remotes and paths as literal argument data', () => {
   const branches = ['feature/plain', 'topic$(id)', 'topic;whoami', "topic'quoted", 'topic"quoted', 'topic`whoami`', 'topic&whoami', 'topic/日本語'];
   for (const verifiedBranch of branches) {

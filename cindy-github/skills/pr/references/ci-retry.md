@@ -55,6 +55,7 @@ const committerIdentArgs = ['--no-replace-objects', 'var', 'GIT_COMMITTER_IDENT'
 const pushSigningConfigArgs = ['--no-replace-objects', 'config', '--includes', '--type=bool', '--get', 'push.gpgSign'];
 const urlRewriteConfigArgs = ['--no-replace-objects', 'config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^url[.].*[.](pushinsteadof|insteadof)$'];
 const hookConfigArgs = ['--no-replace-objects', 'config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^hook[.]'];
+const notesRewriteConfigArgs = ['--no-replace-objects', 'config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^notes[.]rewrite'];
 const encodingConfigArgs = ['--no-replace-objects', 'config', '--includes', '--null', '--show-origin', '--show-scope', '--get-regexp', '^i18n[.](commitencoding|logoutputencoding)$'];
 const hookListArgs = ['pre-commit', 'prepare-commit-msg', 'commit-msg', 'post-commit',
   'post-rewrite', 'reference-transaction', 'post-index-change', 'pre-auto-gc', 'pre-push']
@@ -148,7 +149,34 @@ commit does not imply a usable signed-push capability or signer. Do not change
 configuration, pass `--no-signed`, sign a probe or query/execute a new transport
 to gain eligibility; an ordinary authorized contribution uses its own workflow.
 
-### Supported checkout: no effective hooks or history overlays
+### Supported checkout: no effective hooks, notes rewriting or history overlays
+
+Any effective notes.rewrite configuration stops CI-only recovery, including
+notes.rewriteRef (single, multiple, glob, empty or nonmatching), notes.rewriteMode
+and notes.rewrite.amend=false. Read `notesRewriteConfigArgs` in the actual
+checkout/environment before any Git status/object work or budget status/reservation,
+amend and push. Require a complete effective read covering every scope,
+includes/conditional includes, worktree and command/environment configuration.
+Only exit 1 with empty stdout and stderr establishes no matching keys; exit 0,
+failed/partial reads or unknown results stop. Also require complete inspection of
+the actual execution environment: any defined GIT_NOTES_REWRITE_REF or
+GIT_NOTES_REWRITE_MODE, including empty values, stops. An unavailable environment
+read is unknown, not absence. Recheck the same facts at every boundary.
+
+Do not infer safety from notes.rewrite.amend=false, an apparently unmatched glob,
+missing notes on the original commit, or presently unlocked notes refs. The
+environment can override the selected notes refs and rewrite mode. Do not parse/expand the selected refs,
+unset/override configuration or environment, add --no-post-rewrite, or run a
+probe amend to qualify. This excludes the whole notes-rewrite side-effect family
+without adding another ref resolver, lock owner or executor. See
+[Git notes configuration and environment](https://git-scm.com/docs/git-notes#CONFIGURATION).
+
+An amend may move HEAD before a notes update fails; a nonzero exit does not mean
+unexecuted. After reservation, changed/unknown facts stop with no refund; after
+amend, leave local work unpushed. If an earlier amend may have copied notes,
+read back HEAD and every suspected notes ref from its original configuration and
+environment without repeating the amend. Unknown destinations/effects remain
+unknown; do not restore/delete refs, replay notes, reset user work or refund quota.
 
 Any occupied or unreadable Git lock path stops before budget status/reservation,
 amend and push. First require `refFormatArgs` to succeed with exactly `files`;
