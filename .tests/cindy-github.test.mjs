@@ -102,7 +102,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.48');
+  assert.equal(manifest.version, '1.5.53');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -698,13 +698,16 @@ function createPrRuntime(options = {}) {
       if (message.op === 'write' && (typeof options.failWrites === 'function' ? options.failWrites() : options.failWrites)) return { ok: false, errorCode: 'IO_ERROR', message: 'disk full' };
       if (message.op === 'write') { files.set(message.path, message.content); return { ok: true, op: 'write', path: message.path }; }
       if (message.op === 'read') {
+        if (typeof options.failReads === 'function' ? options.failReads(message.path) : options.failReads) {
+          return { ok: false, errorCode: 'IO_ERROR', message: 'read error' };
+        }
         return files.has(message.path)
           ? { ok: true, op: 'read', path: message.path, content: files.get(message.path) }
           : { ok: false, errorCode: 'NOT_FOUND', message: 'missing' };
       }
       if (message.op === 'list') {
         const entries = [...files.keys()].filter((p) => p.startsWith(`${message.path}/`)).map((p, mtime) => ({ path: p, bytes: 1, mtime }));
-        return { ok: true, op: 'list', entries };
+        return { ok: true, op: 'list', entries, ...(options.listTruncated ? { truncated: true } : {}) };
       }
       if (message.op === 'delete') return { ok: true, op: 'delete', path: message.path, existed: files.delete(message.path) };
       throw new Error(`unexpected fs op ${message.op}`);
@@ -748,7 +751,9 @@ function createPrRuntime(options = {}) {
   return {
     files,
     agentRuns,
+    sent,
     get kv() { return kv; },
+    notices: () => sent.filter((m) => m.type === 'notify'),
     cards,
     lastCard: (callId) => cards(callId).at(-1),
     setGithub(github) { options.github = github; },
@@ -764,6 +769,201 @@ function createPrRuntime(options = {}) {
     }),
   };
 }
+
+function mergeablePrRuntime(options = {}) {
+  const pr = {
+    id: 'PR_node', number: 42, title: 'Mergeable PR', url: 'https://example.test/octo/repo/pull/42',
+    state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN',
+    headRefOid: 'a'.repeat(40), baseRefName: 'main', mergeQueue: null,
+    baseRef: { name: 'main', branchProtectionRule: null, rules: { nodes: [], pageInfo: { hasNextPage: false } } },
+  };
+  const repository = { id: 'REPO_node', viewerPermission: 'WRITE', viewerDefaultMergeMethod: 'SQUASH',
+    mergeCommitAllowed: true, squashMergeAllowed: true, rebaseMergeAllowed: false, pullRequest: pr };
+  const viewer = { id: 'VIEWER_node' };
+  const rulesets = new Map();
+  const writes = [];
+  let outcome = 'merged';
+  const runtime = createPrRuntime({
+    ...options,
+    github(request) {
+      if (request.method === 'PUT') {
+        assert.equal(request.url, 'https://api.github.com/repos/octo/repo/pulls/42/merge');
+        writes.push(JSON.parse(request.body));
+        if (outcome === 'unknown') return { ok: false, message: 'connection lost' };
+        if (outcome === 'conflict') return jsonResponse({ message: 'Head changed' }, 409);
+        pr.state = 'MERGED';
+        pr.merged = true;
+        return jsonResponse({ merged: true });
+      }
+      const rulesetMatch = /^https:\/\/api\.github\.com\/repos\/octo\/repo\/rulesets\/(\d+)$/.exec(request.url);
+      if (rulesetMatch) {
+        const entry = rulesets.get(Number(rulesetMatch[1]));
+        if (!entry) return jsonResponse({ message: 'Not Found' }, 404);
+        return typeof entry === 'function' ? entry(request) : jsonResponse(entry);
+      }
+      assert.equal(request.url, 'https://api.github.com/graphql');
+      const { query, variables } = JSON.parse(request.body);
+      assert.deepEqual(variables, { owner: 'octo', name: 'repo', number: 42 });
+      return jsonResponse({ data: query.includes('viewerDefaultMergeMethod') ? { viewer, repository } : { repository: { pullRequest: pr } } });
+    },
+  });
+  return { ...runtime, pr, repository, viewer, rulesets, writes, setOutcome(value) { outcome = value; } };
+}
+
+test('the PR merge button requires a clean direct merge and write permission on the base branch', async () => {
+  const runtime = mergeablePrRuntime();
+  runtime.repository.viewerPermission = 'READ';
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  const button = /data-ghost-action="pr:merge"/;
+  const dormant = /data-ghost-pr-merge-ready="octo\/repo#42"/;
+  assert.doesNotMatch(runtime.lastCard(cardId).html, button);
+  assert.doesNotMatch(runtime.lastCard(cardId).html, dormant);
+  runtime.repository.viewerPermission = 'WRITE';
+  await runtime.tool({ card_id: cardId });
+  assert.match(runtime.lastCard(cardId).html, button);
+  assert.match(runtime.lastCard(cardId).html, dormant);
+  // Not yet CLEAN (e.g. CI still running) keeps the active button off, but leaves a dormant
+  // merge-ready slot for newer hosts while keeping older hosts and mobile hidden.
+  runtime.pr.mergeStateStatus = 'BLOCKED';
+  await runtime.tool({ card_id: cardId });
+  assert.doesNotMatch(runtime.lastCard(cardId).html, button);
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-pr-merge-ready="octo\/repo#42" data-ghost-pr-merge-action="pr:merge"/);
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-pr-merge-ready="octo\/repo#42"[^>]*style="display:none;/);
+  runtime.pr.mergeStateStatus = 'CLEAN';
+  // Hard blockers and non-bypassable rules emit neither an active nor a dormant button.
+  for (const changes of [
+    { isDraft: true }, { state: 'CLOSED' },
+    { mergeQueue: { id: 'queue' } },
+    { baseRef: { ...runtime.pr.baseRef, branchProtectionRule: { restrictsPushes: true, lockBranch: false } } },
+    { baseRef: { ...runtime.pr.baseRef, rules: { nodes: [{ type: 'UPDATE' }], pageInfo: { hasNextPage: false } } } },
+    { baseRef: { ...runtime.pr.baseRef, rules: { nodes: [{ type: 'LOCK_BRANCH' }], pageInfo: { hasNextPage: false } } } },
+  ]) {
+    const original = Object.fromEntries(Object.keys(changes).map((key) => [key, runtime.pr[key]]));
+    Object.assign(runtime.pr, changes);
+    await runtime.tool({ card_id: cardId });
+    assert.doesNotMatch(runtime.lastCard(cardId).html, button);
+    assert.doesNotMatch(runtime.lastCard(cardId).html, dormant);
+    Object.assign(runtime.pr, original);
+  }
+  assert.equal(runtime.writes.length, 0);
+});
+
+test('an UPDATE ruleset allows the PR merge button only when the current account can bypass it', async () => {
+  const runtime = mergeablePrRuntime();
+  runtime.pr.baseRef = {
+    name: 'main',
+    branchProtectionRule: null,
+    rules: { nodes: [{ type: 'UPDATE', repositoryRuleset: { databaseId: 26112310 } }], pageInfo: { hasNextPage: false } },
+  };
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  // Ruleset lookup 404 fails closed.
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-pr-merge-ready=/);
+  for (const bypass of ['never', null, 'unknown']) {
+    runtime.rulesets.set(26112310, { id: 26112310, current_user_can_bypass: bypass });
+    await runtime.tool({ card_id: cardId });
+    assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge"/);
+    assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-pr-merge-ready=/);
+  }
+  for (const bypass of ['exempt', 'always', 'pull_requests_only']) {
+    runtime.rulesets.set(26112310, { id: 26112310, current_user_can_bypass: bypass });
+    await runtime.tool({ card_id: cardId });
+    assert.match(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge"/);
+  }
+  assert.equal(runtime.writes.length, 0);
+});
+
+test('clicking a host-revealed dormant PR merge button verifies live status before confirming', async () => {
+  const runtime = mergeablePrRuntime();
+  runtime.pr.mergeStateStatus = 'UNSTABLE';
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge"/);
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-pr-merge-action="pr:merge"/);
+  // Stale host reveal while GitHub is still not CLEAN refuses to confirm.
+  await runtime.click(cardId, 'pr:merge');
+  assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prMergeChanged));
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge-confirm:/);
+  // Once CI finishes on GitHub (CLEAN), clicking the revealed button refreshes and opens confirmation.
+  runtime.pr.mergeStateStatus = 'CLEAN';
+  runtime.pr.headRefOid = 'c'.repeat(40);
+  await runtime.click(cardId, 'pr:merge');
+  const confirmation = runtime.lastCard(cardId).html;
+  assert.match(confirmation, /data-ghost-action="pr:merge-confirm:1" aria-label="确认合并"/);
+  assert.ok(visibleText(confirmation).includes('将提交 cccccccccccc 合并到 main？ · 压缩合并'));
+  await runtime.click(cardId, 'pr:merge-confirm:1');
+  assert.deepEqual(runtime.writes, [{ sha: 'c'.repeat(40), merge_method: 'squash' }]);
+});
+
+test('clicking after a new commit refreshes a previously cached merge target before confirmation', async () => {
+  const runtime = mergeablePrRuntime();
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  runtime.pr.headRefOid = 'b'.repeat(40);
+  await runtime.click(cardId, 'pr:merge');
+  const confirmation = runtime.lastCard(cardId).html;
+  assert.match(confirmation, /data-ghost-action="pr:merge-confirm:1" aria-label="确认合并"/);
+  assert.ok(visibleText(confirmation).includes('将提交 bbbbbbbbbbbb 合并到 main？ · 压缩合并'));
+  assert.doesNotMatch(confirmation, /aaaaaaaaaaaa/);
+  await runtime.click(cardId, 'pr:merge-confirm:1');
+  assert.deepEqual(runtime.writes, [{ sha: 'b'.repeat(40), merge_method: 'squash' }]);
+});
+
+test('the PR merge confirmation is unique, checks the expected head and uses an allowed method', async () => {
+  const runtime = mergeablePrRuntime();
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  await runtime.click(cardId, 'pr:merge');
+  const confirmation = runtime.lastCard(cardId).html;
+  assert.match(confirmation, /data-ghost-action="pr:merge-confirm:1" aria-label="确认合并"/);
+  assert.ok(visibleText(confirmation).includes('将提交 aaaaaaaaaaaa 合并到 main？ · 压缩合并'));
+  assert.equal(runtime.writes.length, 0);
+  await runtime.click(cardId, 'pr:merge-cancel:1');
+  await runtime.click(cardId, 'pr:merge');
+  await runtime.click(cardId, 'pr:merge-confirm:1');
+  await runtime.click(cardId, 'pr:merge-confirm:2', { userActionToken: undefined });
+  assert.equal(runtime.writes.length, 0);
+  await Promise.all([runtime.click(cardId, 'pr:merge-confirm:2'), runtime.click(cardId, 'pr:merge-confirm:2')]);
+  assert.deepEqual(runtime.writes, [{ sha: runtime.pr.headRefOid, merge_method: 'squash' }]);
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-task-archive-state="merged"/);
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge/);
+  assert.equal(runtime.agentRuns.length, 0);
+});
+
+test('the PR merge confirmation is invalidated by a changed commit, base, account or permission', async () => {
+  for (const change of [
+    (runtime) => { runtime.pr.headRefOid = 'b'.repeat(40); },
+    (runtime) => { runtime.pr.baseRef.name = runtime.pr.baseRefName = 'release'; },
+    (runtime) => { runtime.viewer.id = 'DIFFERENT_viewer'; },
+    (runtime) => { runtime.repository.viewerPermission = 'READ'; },
+  ]) {
+    const runtime = mergeablePrRuntime();
+    const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+    await runtime.click(cardId, 'pr:merge');
+    change(runtime);
+    await runtime.click(cardId, 'pr:merge-confirm:1');
+    assert.equal(runtime.writes.length, 0);
+    assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prMergeChanged));
+  }
+});
+
+test('the PR merge card distinguishes definitive refusal from a lost receipt', async () => {
+  for (const outcome of ['conflict', 'unknown']) {
+    const runtime = mergeablePrRuntime();
+    const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+    runtime.setOutcome(outcome);
+    await runtime.click(cardId, 'pr:merge');
+    await runtime.click(cardId, 'pr:merge-confirm:1');
+    const expected = outcome === 'conflict' ? zhCopy.prMergeRejected : zhCopy.prMergeUnknown;
+    assert.ok(visibleText(runtime.lastCard(cardId).html).includes(expected));
+    assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge"/);
+    if (outcome === 'unknown') {
+      await runtime.click(cardId, 'pr:merge-recheck');
+      assert.ok(visibleText(runtime.lastCard(cardId).html).includes(expected));
+      runtime.pr.state = 'MERGED';
+      runtime.pr.merged = true;
+      await runtime.click(cardId, 'pr:merge-recheck');
+      assert.match(runtime.lastCard(cardId).html, /data-ghost-task-archive-state="merged"/);
+    }
+    assert.equal(runtime.writes.length, 1);
+  }
+});
 
 test('pr_card asks first, hands the click to the task agent, then updates the same card with the PR', async () => {
   const runtime = createPrRuntime({ github: prGraphql() });
@@ -1370,6 +1570,309 @@ test('card settings pick the auto-follow model with the host picker and hand its
   assert.deepEqual(runtime.kv.prCard.followModel, { route: codex, label: 'gpt-5.6' });
 });
 
+test('plugin-engine follow models require acp-plugin provider prefix and fastMode=false, and reach agent handoff', async () => {
+  const validRoute = { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: false };
+  const invalidRoutes = [
+    { agentKind: 'acp', providerId: 'plugin-provider', model: 'gemini-4-neon', effort: 'high', fastMode: false },
+    { agentKind: 'acp', providerId: 'acp-plugin:', model: 'gemini-4-neon', effort: 'high', fastMode: false },
+    { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: true },
+    { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: 'ultrafast' },
+  ];
+  for (const badRoute of invalidRoutes) {
+    const preseeded = createPrRuntime({
+      github: prGraphql({ number: 7 }),
+      kv: { prCard: { followModel: { route: badRoute, label: 'Bad ACP' } } },
+    });
+    const preOpened = await preseeded.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
+    assert.equal(preOpened.reply.result.settings.follow_model, undefined);
+
+    const runtime = createPrRuntime({
+      github: prGraphql({ number: 7 }),
+      pickModel: async () => ({ ok: true, route: badRoute }),
+    });
+    const opened = await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
+    await runtime.click(opened.reply.result.card_id, 'prui:settings');
+    await runtime.click(opened.reply.result.card_id, 'prset:model');
+    assert.equal(runtime.kv.prCard?.followModel, undefined);
+    assert.ok(visibleText(runtime.lastCard(opened.reply.result.card_id).html).some((line) => line.includes('INVALID_ROUTE')));
+  }
+
+  const runtime = createPrRuntime({
+    github: prGraphql({ number: 7 }),
+    pickModel: async () => ({ ok: true, route: validRoute }),
+    agentModels: [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon', providerId: 'acp-plugin:antigravity:agy', providerName: 'Antigravity' }],
+  });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' })).reply.result.card_id;
+  await runtime.click(cardId, 'prui:settings');
+  await runtime.click(cardId, 'prset:model');
+  assert.deepEqual(runtime.kv.prCard.followModel, { route: validRoute, label: 'Gemini 4 Neon · Antigravity' });
+
+  await runtime.tool({ card_id: cardId, pr: '7' });
+  await runtime.click(cardId, 'pr:follow');
+  assert.deepEqual(runtime.agentRuns.at(-1).event.follow_model, {
+    model_agent_kind: 'acp', provider_id: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fast_mode: false,
+    label: 'Gemini 4 Neon · Antigravity',
+  });
+
+  const remoteRoute = { ...validRoute, agentDeviceId: 'mac-mini' };
+  const remoteRuntime = createPrRuntime({
+    github: prGraphql({ number: 8 }),
+    kv: { prCard: { followModel: { route: remoteRoute, label: 'Gemini 4 Neon · Antigravity · Mac mini' } } },
+  });
+  const remoteCardId = (await remoteRuntime.tool({ repo: 'octo/repo', pr: '8' })).reply.result.card_id;
+  await remoteRuntime.click(remoteCardId, 'pr:follow');
+  assert.deepEqual(remoteRuntime.agentRuns.at(-1).event.follow_model, {
+    model_agent_kind: 'acp', provider_id: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fast_mode: false,
+    label: 'Gemini 4 Neon · Antigravity · Mac mini', agent_device_id: 'mac-mini',
+  });
+});
+
+test('plugin-engine models survive publication-time auto-follow scheduling without fallback notice when accepted', async () => {
+  const { hostApi, rows, createAttempts } = followScheduler();
+  const route = { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: false };
+  const runtime = createPrRuntime({
+    github: prGraphql({ number: 7 }),
+    hostApi,
+    kv: { prCard: {
+      autoFollow: true,
+      followModel: { route, label: 'Gemini 4 Neon · Antigravity' },
+    } },
+  });
+  const { callId } = await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
+  const result = (await runtime.tool({ card_id: callId, pr: 7, published: true })).reply.result;
+  assert.equal(result.follow_state, 'active');
+  assert.equal(result.follow_model_fallback, undefined);
+  assert.equal(runtime.agentRuns.length, 0);
+  assert.equal(createAttempts.length, 1);
+  assert.deepEqual(rows.get('sch-1'), {
+    ...rows.get('sch-1'),
+    agentKind: 'acp', modelAgentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: false,
+  });
+});
+
+test('bound ACP follow-up falls back to the task model with a card notice when the host rejects explicit ACP overrides', async () => {
+  const route = { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: false };
+  const hostRejections = [
+    { ok: false, message: 'A plugin engine schedule starts a new task each run' },
+    { ok: false, message: 'Plugin engines run on the automation host only' },
+    { ok: false, message: 'Explicit scheduled model Harness requires a supported Harness and model' },
+    { ok: false, message: 'Collaborative tasks cannot switch to or from a plugin engine' },
+    {
+      ok: false,
+      errorCode: 'INVALID_ARGS',
+      data: {
+        validation_errors: [
+          { path: ['modelAgentKind'], message: "Invalid enum value. Expected 'claude-code' | 'codex' | 'pi', received 'acp'" },
+        ],
+      },
+    },
+    {
+      ok: false,
+      errorCode: 'INVALID_ARGS',
+      message: 'Invalid tool arguments',
+      data: {
+        validation_errors: [
+          { path: ['modelAgentKind'], message: "Expected 'claude-code' | 'codex' | 'pi'" },
+        ],
+      },
+    },
+  ];
+  for (const rejection of hostRejections) {
+    const { hostApi, rows, createAttempts } = followScheduler({
+      onCreate(args) {
+        if (args.modelAgentKind === 'acp' && args.targetSessionId) return rejection;
+        return null;
+      },
+    });
+    let prState = 'OPEN';
+    const runtime = createPrRuntime({
+      github: () => jsonResponse({ data: { repository: { pullRequest: {
+        number: 7, title: 'Fix ACP follow', url: 'https://github.com/octo/repo/pull/7',
+        state: prState, isDraft: false, merged: prState === 'MERGED', mergeStateStatus: 'CLEAN',
+        reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] },
+      } } } }),
+      hostApi,
+      kv: { prCard: { autoFollow: true, followModel: { route, label: 'Gemini 4 Neon · Antigravity' } } },
+    });
+    const { callId } = await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
+    const result = (await runtime.tool({ card_id: callId, pr: 7, published: true })).reply.result;
+    assert.equal(result.follow_state, 'active');
+    assert.equal(result.follow_model_fallback, true);
+    assert.ok(result.note?.includes(zhCopy.prFollowModelFallback));
+    assert.ok(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prFollowModelFallback));
+    assert.equal(createAttempts.length, 2);
+    assert.equal(createAttempts[0].modelAgentKind, 'acp');
+    assert.equal(createAttempts[0].agentKind, 'acp');
+    assert.equal(createAttempts[0].targetSessionId, 's1');
+    assert.equal(createAttempts[1].agentKind, 'codex');
+    assert.equal(createAttempts[1].modelAgentKind, undefined);
+    assert.equal(createAttempts[1].model, undefined);
+    assert.equal(createAttempts[1].providerId, undefined);
+    assert.equal(createAttempts[1].modelAgentDeviceId, undefined);
+    assert.equal(createAttempts[1].fastMode, undefined);
+    assert.equal(createAttempts[1].effort, undefined);
+    assert.equal(createAttempts[1].targetSessionId, 's1');
+    assert.equal(rows.size, 1);
+    assert.equal(rows.get('sch-1').modelAgentKind, undefined);
+
+    // Refreshing while active preserves the fallback notice.
+    const refreshed = (await runtime.tool({ card_id: callId })).reply.result;
+    assert.equal(refreshed.follow_state, 'active');
+    assert.equal(refreshed.follow_model_fallback, true);
+    assert.ok(refreshed.note?.includes(zhCopy.prFollowModelFallback));
+
+    // Stopping from the card works directly (fallback baseline matches created schedule) and clears the notice.
+    await runtime.click(callId, 'pr:stop');
+    assert.equal(rows.size, 0);
+    assert.equal(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prFollowModelFallback), false);
+
+    // Clicking Follow again re-runs fallback; merging PR clears the notice while keeping the terminal schedule intact.
+    await runtime.click(callId, 'pr:follow');
+    assert.equal(rows.size, 1);
+    assert.ok(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prFollowModelFallback));
+    prState = 'MERGED';
+    const merged = (await runtime.tool({ card_id: callId })).reply.result;
+    assert.equal(merged.stage, 'merged');
+    assert.equal(merged.follow_model_fallback, undefined);
+    assert.equal(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prFollowModelFallback), false);
+
+    // Editing the fallback schedule in Automation to an explicit model locks manualStop and clears the notice on refresh.
+    prState = 'OPEN';
+    await runtime.tool({ card_id: callId });
+    rows.delete('sch-1');
+    await runtime.tool({ card_id: callId });
+    await runtime.click(callId, 'pr:follow');
+    assert.ok(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prFollowModelFallback));
+    rows.get('sch-1').modelAgentKind = 'codex';
+    rows.get('sch-1').model = 'gpt-5.6';
+    const afterOverride = (await runtime.tool({ card_id: callId })).reply.result;
+    assert.equal(afterOverride.follow_model_fallback, undefined);
+    assert.equal(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prFollowModelFallback), false);
+    // Because the schedule diverged from its fallback creation baseline, card stop stays protected (no schedule_delete).
+    await runtime.click(callId, 'pr:stop');
+    assert.equal(rows.size, 1);
+  }
+});
+
+test('bound ACP follow-up fails closed on non-compatibility errors, existing schedules, and non-ACP overrides', async () => {
+  const acpRoute = { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: false };
+  for (const errorBody of [
+    { ok: false, message: 'Plugin engine is currently unavailable' },
+    { ok: false, message: 'A plugin engine schedule cannot use a persistent session' },
+    { ok: false, errorCode: 'INVALID_ARGS', data: { validation_errors: [{ path: ['cronExpr'], message: 'Invalid cron' }] } },
+  ]) {
+    const { hostApi, rows, createAttempts } = followScheduler({ onCreate: () => errorBody });
+    const runtime = createPrRuntime({
+      github: prGraphql({ number: 7 }),
+      hostApi,
+      kv: { prCard: { autoFollow: true, followModel: { route: acpRoute, label: 'Gemini 4 Neon · Antigravity' } } },
+    });
+    const { callId } = await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
+    const result = (await runtime.tool({ card_id: callId, pr: 7, published: true })).reply.result;
+    assert.equal(result.follow_state, 'failed');
+    assert.equal(result.follow_model_fallback, undefined);
+    assert.equal(createAttempts.length, 1);
+    assert.equal(rows.size, 0);
+  }
+
+  // Do not create a second schedule when another task's PR follow-up already exists after rejection:
+  // hand off cleanly to existing_task instead of falling back or surfacing a generic ownership error.
+  const race = followScheduler({
+    onCreate(args, rows) {
+      rows.set('other-1', { ...args, id: 'other-1', targetSessionId: 'session-other', status: 'active', updatedAt: 1000 });
+      return { ok: false, message: 'A plugin engine schedule starts a new task each run' };
+    },
+  });
+  const raceRuntime = createPrRuntime({
+    github: prGraphql({ number: 7 }),
+    hostApi: race.hostApi,
+    kv: { prCard: { autoFollow: true, followModel: { route: acpRoute, label: 'Gemini 4 Neon · Antigravity' } } },
+  });
+  const raceAsk = await raceRuntime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
+  const raceResult = (await raceRuntime.tool({ card_id: raceAsk.callId, pr: 7, published: true })).reply.result;
+  assert.equal(raceResult.disposition, 'existing_task');
+  assert.equal(raceResult.owner_session_id, 'session-other');
+  assert.equal(raceResult.follow_claimed, false);
+  assert.equal(raceResult.follow_model_fallback, undefined);
+  assert.equal(race.createAttempts.length, 1);
+  assert.equal(race.rows.size, 1);
+
+  // An unrecognized custom schedule mentioning the PR URL after rejection still fails closed without retrying.
+  const customRace = followScheduler({
+    onCreate(args, rows) {
+      rows.set('other-custom', { ...args, id: 'other-custom', targetSessionId: 'session-other', preRunHook: 'echo custom', status: 'active', updatedAt: 1000 });
+      return { ok: false, message: 'A plugin engine schedule starts a new task each run' };
+    },
+  });
+  const customRaceRuntime = createPrRuntime({
+    github: prGraphql({ number: 7 }),
+    hostApi: customRace.hostApi,
+    kv: { prCard: { autoFollow: true, followModel: { route: acpRoute, label: 'Gemini 4 Neon · Antigravity' } } },
+  });
+  const customRaceAsk = await customRaceRuntime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
+  const customRaceResult = (await customRaceRuntime.tool({ card_id: customRaceAsk.callId, pr: 7, published: true })).reply.result;
+  assert.equal(customRaceResult.follow_state, 'failed');
+  assert.equal(customRaceResult.follow_model_fallback, undefined);
+  assert.equal(customRace.createAttempts.length, 1);
+  assert.equal(customRace.rows.size, 1);
+
+  // Non-ACP overrides never fall back even if the error string resembles an ACP rejection.
+  const codexRoute = { agentKind: 'codex', providerId: 'openai', model: 'gpt-5.6', effort: 'high', fastMode: false };
+  const codexSched = followScheduler({
+    onCreate: () => ({ ok: false, message: 'A plugin engine schedule starts a new task each run' }),
+  });
+  const codexRuntime = createPrRuntime({
+    github: prGraphql({ number: 7 }),
+    hostApi: codexSched.hostApi,
+    kv: { prCard: { autoFollow: true, followModel: { route: codexRoute, label: 'GPT-5.6' } } },
+  });
+  const codexAsk = await codexRuntime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
+  const codexResult = (await codexRuntime.tool({ card_id: codexAsk.callId, pr: 7, published: true })).reply.result;
+  assert.equal(codexResult.follow_state, 'failed');
+  assert.equal(codexResult.follow_model_fallback, undefined);
+  assert.equal(codexSched.createAttempts.length, 1);
+  assert.equal(codexSched.rows.size, 0);
+});
+
+test('marking a draft PR ready falls back to the task model when the host rejects bound ACP overrides', async () => {
+  const route = { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: false };
+  let draft = true;
+  const { hostApi, rows, createAttempts } = followScheduler({
+    onCreate(args) {
+      if (args.modelAgentKind === 'acp' && args.targetSessionId) {
+        return { ok: false, message: 'A plugin engine schedule starts a new task each run' };
+      }
+      return null;
+    },
+  });
+  const runtime = createPrRuntime({
+    github(request) {
+      const { query } = JSON.parse(request.body);
+      if (query.startsWith('mutation')) {
+        draft = false;
+        return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } });
+      }
+      if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+      return jsonResponse({ data: { repository: { pullRequest: {
+        number: 9, title: 'Draft ACP', url: 'https://github.com/octo/repo/pull/9',
+        state: 'OPEN', isDraft: draft, merged: false, mergeStateStatus: 'CLEAN',
+        reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] },
+      } } } });
+    },
+    hostApi,
+    kv: { prCard: { autoFollow: true, followModel: { route, label: 'Gemini 4 Neon · Antigravity' } } },
+  });
+  const { callId } = await runtime.tool({ repo: 'octo/repo', head: 'fix/draft', base: 'main' });
+  await runtime.tool({ card_id: callId, pr: 9, published: true });
+  assert.equal(rows.size, 0);
+  await runtime.click(callId, 'pr:ready');
+  assert.equal(createAttempts.length, 2);
+  assert.equal(createAttempts[0].modelAgentKind, 'acp');
+  assert.equal(createAttempts[1].modelAgentKind, undefined);
+  assert.equal(rows.size, 1);
+  assert.ok(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prFollowModelFallback));
+});
+
 // Remote providers: the card dropdown can pick a model on another computer or from a shared provider.
 // The card names where it runs, and the agent gets the location to set on the follow-up schedule.
 test('a follow model on another computer or a shared provider keeps its location', async () => {
@@ -1585,6 +2088,271 @@ test('active follow reservations are not pruned when card history exceeds retent
   assert.ok(runtime.files.has(`pr-cards/${first.callId}.json`));
   const other = await runtime.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's2' } });
   assert.equal(other.reply.result.disposition, 'existing_task');
+});
+
+test('draft and open PR cards survive heavy merged/closed card and dead-alias churn and remain clickable', async () => {
+  let isDraft = true;
+  const runtime = createPrRuntime({
+    github: (request) => {
+      const { query, variables } = JSON.parse(request.body);
+      if (query.includes('markPullRequestReadyForReview')) {
+        isDraft = false;
+        return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } });
+      }
+      if (query.includes('{id}}}')) {
+        return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_kwDO_draft' } } } });
+      }
+      if (variables?.name === 'other') {
+        return prGraphql({ repo: 'other', number: 99, draft: false })(request);
+      }
+      return prGraphql({ number: 12453, draft: isDraft })(request);
+    },
+  });
+  const draft = await runtime.tool({ repo: 'octo/repo', pr: 12453, published: true });
+  const openIdle = await runtime.tool({ repo: 'octo/other', pr: 99, session_context: { session_id: 's2' } });
+  const ask = await runtime.tool({ repo: 'octo/other', head: 'feat/pending', session_context: { session_id: 's3' } });
+  assert.equal(draft.reply.ok, true);
+  assert.equal(openIdle.reply.ok, true);
+  assert.equal(ask.reply.ok, true);
+
+  // Populate dead aliases and 210 newer merged/closed cards (including moved merged cards with live aliases).
+  for (let i = 0; i < 30; i++) {
+    runtime.files.set(`pr-cards/dangling-${i}.json`, JSON.stringify({ id: `dangling-${i}`, alias: `gone-${i}` }));
+  }
+  for (let i = 0; i < 210; i++) {
+    const id = `ended-${i}`;
+    const anchor = `ended-anchor-${i}`;
+    runtime.files.set(`pr-cards/${id}.json`, JSON.stringify({ id, repo: 'other/repo', stage: i % 2 ? 'merged' : 'closed', anchor }));
+    runtime.files.set(`pr-cards/${anchor}.json`, JSON.stringify({ id: anchor, alias: id }));
+  }
+
+  await runtime.tool({ repo: 'other/repo', head: 'trigger-prune', session_context: { session_id: 's4' } });
+
+  // All dangling aliases are cleaned up; old draft/open/ask cards survive; finished cards and their live aliases were evicted atomically.
+  for (let i = 0; i < 30; i++) assert.equal(runtime.files.has(`pr-cards/dangling-${i}.json`), false);
+  assert.ok(runtime.files.has(`pr-cards/${draft.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${openIdle.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${ask.callId}.json`));
+  assert.ok(runtime.files.size <= 200);
+  // Every evicted finished card also deleted its live alias (zero dangling aliases left behind).
+  for (let i = 0; i < 210; i++) {
+    assert.equal(runtime.files.has(`pr-cards/ended-${i}.json`), runtime.files.has(`pr-cards/ended-anchor-${i}.json`));
+  }
+
+  // Clicking "Mark ready for review" on the surviving draft PR card works normally.
+  await runtime.click(draft.callId, 'pr:ready');
+  assert.equal(isDraft, false);
+  assert.equal(JSON.parse(runtime.files.get(`pr-cards/${draft.callId}.json`)).pr.draft, false);
+  assert.equal(runtime.notices().length, 0);
+});
+
+test('repeated to_latest moves remove superseded aliases and roll back the new alias on save failure', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const first = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const cardId = first.callId;
+  const move1 = await runtime.tool({ card_id: cardId, pr: 42, to_latest: true });
+  assert.ok(runtime.files.has(`pr-cards/${cardId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${move1.callId}.json`));
+
+  // Moving a second time deletes move1's now-superseded alias while keeping cardId and move2.
+  const move2 = await runtime.tool({ card_id: cardId, pr: 42, to_latest: true });
+  assert.ok(runtime.files.has(`pr-cards/${cardId}.json`));
+  assert.equal(runtime.files.has(`pr-cards/${move1.callId}.json`), false);
+  assert.ok(runtime.files.has(`pr-cards/${move2.callId}.json`));
+  assert.equal(runtime.files.size, 2);
+
+  // If savePrCard fails after writing the new alias, roll back the new alias and preserve move2.
+  let writes = 0;
+  const rollbackRuntime = createPrRuntime({
+    github: prGraphql(),
+    files: new Map(runtime.files),
+    failWrites: () => ++writes === 2,
+  });
+  const failedMove = await rollbackRuntime.tool({ card_id: cardId, pr: 42, to_latest: true });
+  assert.equal(failedMove.reply.ok, false);
+  assert.ok(rollbackRuntime.files.has(`pr-cards/${cardId}.json`));
+  assert.ok(rollbackRuntime.files.has(`pr-cards/${move2.callId}.json`));
+  assert.equal(rollbackRuntime.files.has(`pr-cards/${failedMove.callId}.json`), false);
+});
+
+test('pruning preserves live anchor aliases of active and open cards and cleans superseded aliases', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const active = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const activeMove = await runtime.tool({ card_id: active.callId, pr: 42, to_latest: true });
+  // Plant an older superseded alias from a pre-fix version pointing at active.
+  runtime.files.set('pr-cards/old-superseded.json', JSON.stringify({ id: 'old-superseded', alias: active.callId }));
+  for (let i = 0; i < 205; i++) {
+    runtime.files.set(`pr-cards/closed-${i}.json`, JSON.stringify({ id: `closed-${i}`, repo: 'other/repo', stage: 'closed' }));
+  }
+
+  await runtime.tool({ repo: 'other/repo', head: 'fresh', session_context: { session_id: 's2' } });
+  assert.equal(runtime.files.has('pr-cards/old-superseded.json'), false);
+  assert.ok(runtime.files.has(`pr-cards/${active.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${activeMove.callId}.json`), 'live anchor alias must never be pruned while owner survives');
+
+  await runtime.click(activeMove.callId, 'pr:stop');
+  assert.equal(runtime.agentRuns.at(-1).event.card_id, active.callId);
+});
+
+test('clicking a moved card whose anchor alias was previously pruned self-heals by anchor lookup', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const active = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const moved = await runtime.tool({ card_id: active.callId, pr: 42, to_latest: true });
+  // Simulate an older version's pruning having deleted the live anchor alias file.
+  runtime.files.delete(`pr-cards/${moved.callId}.json`);
+  assert.equal(runtime.files.has(`pr-cards/${moved.callId}.json`), false);
+
+  // A cross-session click must stay rejected without repairing or mutating disk state.
+  await runtime.click(moved.callId, 'pr:stop', { sessionId: 'other-session' });
+  assert.equal(runtime.files.has(`pr-cards/${moved.callId}.json`), false);
+  assert.equal(runtime.notices().length, 0);
+  assert.equal(runtime.agentRuns.length, 0);
+
+  await runtime.click(moved.callId, 'pr:stop');
+  assert.equal(runtime.agentRuns.at(-1).event.card_id, active.callId);
+  assert.equal(runtime.notices().length, 0);
+  // The missing alias file was restored for O(1) subsequent clicks.
+  assert.deepEqual(JSON.parse(runtime.files.get(`pr-cards/${moved.callId}.json`)), { id: moved.callId, alias: active.callId });
+});
+
+test('pruning fails closed for aliases pointing to unreadable records or truncated listings', async () => {
+  for (const mode of ['unreadable', 'truncated']) {
+    const runtime = createPrRuntime({
+      github: prGraphql(),
+      failReads: mode === 'unreadable' ? (path) => path === 'pr-cards/unreadable-owner.json' : false,
+      listTruncated: mode === 'truncated',
+    });
+    if (mode === 'unreadable') {
+      runtime.files.set('pr-cards/unreadable-owner.json', JSON.stringify({ id: 'unreadable-owner', repo: 'o/r', stage: 'open', anchor: 'alias-keep' }));
+    }
+    runtime.files.set('pr-cards/alias-keep.json', JSON.stringify({ id: 'alias-keep', alias: 'unreadable-owner' }));
+    for (let i = 0; i < 205; i++) {
+      runtime.files.set(`pr-cards/closed-${i}.json`, JSON.stringify({ id: `closed-${i}`, repo: 'other/repo', stage: 'closed' }));
+    }
+    await runtime.tool({ repo: 'other/repo', head: 'trigger', session_context: { session_id: 's2' } });
+    assert.ok(runtime.files.has('pr-cards/alias-keep.json'), `${mode}: alias to unverified target must not be deleted`);
+  }
+});
+
+test('hard ceiling evicts finished, then ask, then idle open cards while never evicting active or in-flight cards', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const active = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const activeMove = await runtime.tool({ card_id: active.callId, pr: 42, to_latest: true });
+  const publishing = await runtime.tool({ repo: 'octo/repo', head: 'feat/publishing', session_context: { session_id: 's-pub' } });
+  const publishingMove = await runtime.tool({ card_id: publishing.callId, commits: 1, to_latest: true, session_context: { session_id: 's-pub' } });
+  await runtime.click(publishingMove.callId, 'pr:publish', { sessionId: 's-pub' });
+  assert.equal(JSON.parse(runtime.files.get(`pr-cards/${publishing.callId}.json`)).stage, 'publishing');
+  runtime.files.set('pr-cards/unreconciled-sched.json', JSON.stringify({ id: 'unreconciled-sched', repo: 'o/r', stage: 'open', scheduleAction: 'start', pr: { number: 7001, draft: false } }));
+  runtime.files.set('pr-cards/uncertain-ready.json', JSON.stringify({ id: 'uncertain-ready', repo: 'o/r', stage: 'open', readyUncertain: true, pr: { number: 7002, draft: true } }));
+  // Fill past PR_CARD_MAX (1000): 40 finished + 500 ask + 500 idle open + protected cards.
+  for (let i = 0; i < 40; i++) {
+    runtime.files.set(`pr-cards/fin-${i}.json`, JSON.stringify({ id: `fin-${i}`, repo: 'o/r', stage: 'merged' }));
+  }
+  for (let i = 0; i < 500; i++) {
+    runtime.files.set(`pr-cards/ask-${i}.json`, JSON.stringify({ id: `ask-${i}`, repo: 'o/r', stage: 'ask' }));
+  }
+  for (let i = 0; i < 500; i++) {
+    runtime.files.set(`pr-cards/open-${i}.json`, JSON.stringify({ id: `open-${i}`, repo: 'o/r', stage: 'open', pr: { number: i + 1, draft: true } }));
+  }
+
+  await runtime.tool({ repo: 'other/repo', head: 'overflow', session_context: { session_id: 's2' } });
+  assert.ok(runtime.files.size <= 1000);
+  // Active and in-flight cards (including publishing + its live alias) survive.
+  assert.ok(runtime.files.has(`pr-cards/${active.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${activeMove.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${publishing.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${publishingMove.callId}.json`));
+  assert.ok(runtime.files.has('pr-cards/unreconciled-sched.json'));
+  assert.ok(runtime.files.has('pr-cards/uncertain-ready.json'));
+  // All 40 finished cards and the oldest ask cards were evicted before touching any open draft card.
+  for (let i = 0; i < 40; i++) assert.equal(runtime.files.has(`pr-cards/fin-${i}.json`), false);
+  assert.equal(runtime.files.has('pr-cards/ask-0.json'), false);
+  assert.ok(runtime.files.has('pr-cards/open-0.json'));
+
+  // Even when idle open cards alone exceed PR_CARD_MAX, oldest idle open cards are trimmed while active and in-flight cards survive.
+  for (let i = 500; i < 1100; i++) {
+    runtime.files.set(`pr-cards/open-${i}.json`, JSON.stringify({ id: `open-${i}`, repo: 'o/r', stage: 'open', pr: { number: i + 1, draft: true } }));
+  }
+  await runtime.tool({ repo: 'other/repo', head: 'overflow-2', session_context: { session_id: 's3' } });
+  assert.ok(runtime.files.size <= 1000);
+  assert.ok(runtime.files.has(`pr-cards/${active.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${activeMove.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${publishing.callId}.json`));
+  assert.ok(runtime.files.has(`pr-cards/${publishingMove.callId}.json`));
+  assert.ok(runtime.files.has('pr-cards/unreconciled-sched.json'));
+  assert.ok(runtime.files.has('pr-cards/uncertain-ready.json'));
+  assert.equal(runtime.files.has('pr-cards/open-0.json'), false);
+  assert.ok(runtime.files.has('pr-cards/open-1099.json'));
+});
+
+test('a newly shown ask or merged card is never immediately evicted by its own prune when open cards saturate PR_CARD_MAX', async () => {
+  const runtime = createPrRuntime({ github: prGraphql({ merged: true }) });
+  for (let i = 0; i < 1000; i++) {
+    runtime.files.set(`pr-cards/open-${i}.json`, JSON.stringify({ id: `open-${i}`, repo: 'o/r', stage: 'open', pr: { number: i + 1, draft: true } }));
+  }
+
+  // Creating a new ask card evicts the oldest idle open card instead of the card just shown.
+  const ask = await runtime.tool({ repo: 'octo/repo', head: 'feat/new-ask', session_context: { session_id: 's-ask' } });
+  assert.equal(ask.reply.ok, true);
+  assert.ok(runtime.files.has(`pr-cards/${ask.callId}.json`));
+  assert.equal(runtime.files.has('pr-cards/open-0.json'), false);
+  assert.ok(runtime.files.size <= 1000);
+  await runtime.click(ask.callId, 'pr:publish', { sessionId: 's-ask' });
+  assert.equal(runtime.notices().length, 0);
+  assert.equal(runtime.agentRuns.at(-1).event.card_id, ask.callId);
+
+  // Creating a new merged card under the same saturation also keeps the newly shown card usable.
+  const merged = await runtime.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's-merged' } });
+  assert.equal(merged.reply.ok, true);
+  assert.ok(runtime.files.has(`pr-cards/${merged.callId}.json`));
+  assert.equal(runtime.files.has('pr-cards/open-1.json'), false);
+  await runtime.click(merged.callId, 'prui:settings', { sessionId: 's-merged' });
+  assert.equal(runtime.notices().length, 0);
+});
+
+test('recent merged cards stay available for settings clicks while under the hard ceiling', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  for (let i = 0; i < 210; i++) {
+    runtime.files.set(`pr-cards/open-${i}.json`, JSON.stringify({ id: `open-${i}`, repo: 'o/r', stage: 'open', pr: { number: i + 1, draft: true } }));
+  }
+  for (let i = 0; i < 5; i++) {
+    runtime.files.set(`pr-cards/recent-merged-${i}.json`, JSON.stringify({ id: `recent-merged-${i}`, repo: 'o/r', stage: 'merged', sessionId: 's1', pr: { number: 900 + i, url: `https://github.com/o/r/pull/${900 + i}` } }));
+  }
+  await runtime.tool({ repo: 'other/repo', head: 'new-branch', session_context: { session_id: 's2' } });
+  for (let i = 0; i < 5; i++) {
+    assert.ok(runtime.files.has(`pr-cards/recent-merged-${i}.json`));
+  }
+});
+
+test('clicking an expired or unreadable PR card notifies the user without overwriting card HTML', async () => {
+  const mobilePageId = '12345678-1234-1234-1234-123456789abc';
+  for (const locale of hostLocales) {
+    const runtime = createPrRuntime({ locale });
+    const missingId = 'a2ac04c1-139e-449b-befa-40463de1d251';
+    await runtime.click(missingId, 'pr:ready', { mobilePageId });
+    assert.equal(runtime.cards(missingId).length, 0, 'must not destroy original card HTML');
+    assert.equal(runtime.notices().length, 1);
+    assert.equal(runtime.notices()[0].tone, 'warning');
+    assert.equal(runtime.notices()[0].mobilePageId, mobilePageId);
+    assert.ok(runtime.notices()[0].text.length > 0 && runtime.notices()[0].text.length <= 200);
+    if (locale === 'ko') assert.doesNotMatch(runtime.notices()[0].text, hanRe);
+
+    const errRuntime = createPrRuntime({ locale, failReads: true });
+    await errRuntime.click(missingId, 'pr:ready');
+    assert.equal(errRuntime.cards(missingId).length, 0);
+    assert.equal(errRuntime.notices().length, 1);
+    assert.equal(errRuntime.notices()[0].tone, 'error');
+    assert.equal(errRuntime.notices()[0].mobilePageId, undefined);
+    assert.ok(errRuntime.notices()[0].text.length > 0 && errRuntime.notices()[0].text.length <= 200);
+    if (locale === 'ko') assert.doesNotMatch(errRuntime.notices()[0].text, hanRe);
+  }
+
+  // Cross-session click on an existing card stays silently rejected without notifying.
+  const cross = createPrRuntime({ github: prGraphql() });
+  const owned = await cross.tool({ repo: 'octo/repo', pr: 42 });
+  await cross.click(owned.callId, 'pr:follow', { sessionId: 'other-session' });
+  assert.equal(cross.notices().length, 0);
+  assert.equal(cross.agentRuns.length, 0);
 });
 
 test('other-task refresh reuses its local card and reads status without changing the follower', async () => {
@@ -1879,6 +2647,7 @@ function followScheduler(options = {}) {
   const rows = new Map();
   const runs = new Map();
   const calls = [];
+  const createAttempts = [];
   const hostApi = {
     host: { async call(server, tool, args) {
       assert.equal(server, 'cindy_scheduler');
@@ -1886,6 +2655,11 @@ function followScheduler(options = {}) {
       calls.push(tool);
       let data;
       if (tool === 'schedule_create') {
+        createAttempts.push(JSON.parse(JSON.stringify(args)));
+        if (options.onCreate) {
+          const override = options.onCreate(args, rows, createAttempts);
+          if (override) return { content: [{ type: 'text', text: JSON.stringify(override) }] };
+        }
         if (options.createRace) {
           data = { ...args, id: 'other-entry', status: 'active', updatedAt: 1000 };
           rows.set(data.id, data);
@@ -1912,18 +2686,60 @@ function followScheduler(options = {}) {
         if (options.failDelete) throw new Error('cannot delete schedule');
         data = { deleted: args.id };
         rows.delete(args.id);
+      } else if (tool === 'schedule_resume') {
+        if (options.beforeResume) options.beforeResume(rows, args.id);
+        if (options.failResume) throw new Error('resume unavailable');
+        const row = rows.get(args.id);
+        if (!row) throw new Error('not found');
+        if (options.rejectResumeStatus) {
+          row.status = options.rejectResumeStatus;
+        } else {
+          row.status = 'active';
+        }
+        data = { ...row };
+        if (options.loseResumeReceipt) throw new Error('lost resume receipt');
       } else throw new Error('unexpected ' + tool);
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, data }) }] };
     } },
     node: { async request({ method }) {
       assert.equal(method, 'followSkillDir');
+      if (options.beforeDir) options.beforeDir(rows);
       if (options.failDir) throw new Error('skill directory temporarily unavailable');
       const dir = options.skillDir ?? '/approved skills/agent-skills/skills/_root__cindy-github--pr';
       return { ok: true, result: options.platform === undefined ? dir : { dir, platform: options.platform } };
     } },
   };
-  return { hostApi, calls, rows, runs };
+  return { hostApi, calls, rows, runs, createAttempts };
 }
+
+test('a merge from the PR card preserves the existing follow-up for the terminal round', async () => {
+  for (const outcome of ['merged', 'unknown']) {
+    const { hostApi, calls, rows } = followScheduler();
+    const runtime = mergeablePrRuntime({ hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await runtime.tool({ repo: 'octo/repo', pr: 42, published: true });
+    const cardId = opened.reply.result.card_id;
+    assert.equal(opened.reply.result.follow_state, 'active');
+
+    runtime.setOutcome(outcome);
+    await runtime.click(cardId, 'pr:merge');
+    await runtime.click(cardId, 'pr:merge-confirm:1');
+    if (outcome === 'unknown') {
+      runtime.pr.state = 'MERGED';
+      runtime.pr.merged = true;
+      await runtime.click(cardId, 'pr:merge-recheck');
+    }
+    assert.match(runtime.lastCard(cardId).html, /data-ghost-task-archive-state="merged"/);
+    assert.equal(rows.get('sch-1').status, 'active');
+    assert.equal(calls.includes('schedule_delete'), false);
+    assert.equal(calls.filter(call => call === 'schedule_create').length, 1);
+    assert.equal((await runtime.tool({ card_id: cardId })).reply.result.stage, 'merged');
+    assert.equal(rows.get('sch-1').status, 'active');
+
+    rows.delete('sch-1');
+    const finished = await runtime.tool({ card_id: cardId, following: false });
+    assert.equal(finished.reply.result.follow_state, 'stopped');
+  }
+});
 
 test('first card selection before publishing sets the model on the first follow-up', async () => {
   const { hostApi, rows } = followScheduler();
@@ -2151,7 +2967,9 @@ test('owning card reports an active old hook only, never rewrites it or touches 
   assert.deepEqual(rows.get('sch-1').preRunHook, oldFollowHook(url));
   assert.equal(calls.includes('schedule_update'), false);
   await rt.click(opened.callId, 'pr:stop');
-  assert.equal(rows.size, 0);
+  assert.equal(rows.size, 1);
+  assert.equal(calls.includes('schedule_delete'), false);
+  assert.deepEqual(rows.get('sch-1').preRunHook, oldFollowHook(url));
 });
 
 test('same-name project script, custom shell command and terminal PR remain untouched', async () => {
@@ -2804,6 +3622,123 @@ test('a bound card whose schedule_delete is rejected keeps the stop error across
   }
 });
 
+test('a bound card whose Stop fails transiently on read keeps Stop retryable and re-verifies ownership and hook on retry', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  for (const scenario of [
+    'fail-get-retry-stop',
+    'fail-get-and-list-retry-stop',
+    'fail-dir-retry-stop',
+    'mutated-hook-before-retry',
+    'mutated-ownership-before-retry',
+  ]) {
+    const fault = {};
+    const { hostApi, calls, rows } = followScheduler(fault);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_state, 'active', scenario);
+
+    if (scenario === 'fail-dir-retry-stop') {
+      fault.failDir = true;
+    } else {
+      fault.failGet = true;
+      if (scenario === 'fail-get-and-list-retry-stop') fault.failList = true;
+    }
+
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(rows.has('sch-1'), true, scenario);
+    assert.equal(calls.includes('schedule_delete'), false, scenario);
+    let card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(card.scheduleId, 'sch-1', scenario);
+    assert.equal(card.following, false, scenario);
+    assert.equal(card.scheduleStatus, 'unverified', scenario);
+    assert.equal(card.pending, null, scenario);
+    assert.equal(card.scheduleAction, null, scenario);
+    assert.equal(card.scheduleErrorSource, 'read', scenario);
+    assert.match(rt.lastCard(opened.callId).html, /跟进待核实/, scenario);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /正在停止/, scenario);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-live-label=/, scenario);
+    assert.match(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, scenario);
+
+    // Recover reads without calling pr_card refresh, then retry Stop directly on the original card.
+    fault.failGet = false;
+    fault.failList = false;
+    fault.failDir = false;
+
+    if (scenario === 'mutated-hook-before-retry') {
+      const customHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 };
+      rows.get('sch-1').preRunHook = customHook;
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(calls.includes('schedule_delete'), false, scenario);
+      assert.deepEqual(rows.get('sch-1').preRunHook, customHook, scenario);
+      card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      assert.equal(card.scheduleErrorSource, 'verify', scenario);
+      assert.match(card.scheduleError, /无法确认这条调度仍使用插件生成的前置检查/, scenario);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, scenario);
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(calls.includes('schedule_delete'), false, scenario);
+    } else if (scenario === 'mutated-ownership-before-retry') {
+      rows.get('sch-1').targetSessionId = 'other-session';
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(calls.includes('schedule_delete'), false, scenario);
+      assert.equal(rows.get('sch-1').targetSessionId, 'other-session', scenario);
+      card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      assert.equal(card.scheduleErrorSource, 'verify', scenario);
+      assert.match(card.scheduleError, /无法确认 PR 卡片所属任务/, scenario);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, scenario);
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(calls.includes('schedule_delete'), false, scenario);
+    } else {
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(rows.size, 0, scenario);
+      assert.equal(calls.filter((c) => c === 'schedule_delete').length, 1, scenario);
+      card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      assert.equal(card.scheduleId, null, scenario);
+      assert.equal(card.following, false, scenario);
+      assert.equal(card.scheduleStatus, null, scenario);
+      assert.equal(card.scheduleError, null, scenario);
+      assert.equal(card.scheduleErrorSource, null, scenario);
+      assert.equal(card.note, null, scenario);
+      const afterStop = await rt.tool({ card_id: opened.callId });
+      assert.equal(afterStop.reply.result.follow_state, 'stopped', scenario);
+      assert.equal(afterStop.reply.result.note, undefined, scenario);
+    }
+  }
+});
+
+test('bound Stop reads skill dir before the final schedule_get so edits during dir lookup block deletion', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  for (const edit of ['hook', 'ownership']) {
+    const fault = {};
+    const { hostApi, calls, rows } = followScheduler(fault);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_state, 'active', edit);
+
+    const customHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 };
+    fault.beforeDir = (liveRows) => {
+      const row = liveRows.get('sch-1');
+      if (!row) return;
+      if (edit === 'hook') row.preRunHook = customHook;
+      else row.targetSessionId = 'edited-session';
+    };
+
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(calls.filter((c) => c === 'schedule_delete').length, 0, edit);
+    assert.equal(rows.has('sch-1'), true, edit);
+    if (edit === 'hook') assert.deepEqual(rows.get('sch-1').preRunHook, customHook, edit);
+    else assert.equal(rows.get('sch-1').targetSessionId, 'edited-session', edit);
+
+    const card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(card.scheduleId, 'sch-1', edit);
+    assert.equal(card.following, false, edit);
+    assert.equal(card.scheduleStatus, 'unverified', edit);
+    assert.equal(card.pending, null, edit);
+    assert.equal(card.scheduleAction, null, edit);
+    assert.equal(card.scheduleErrorSource, 'verify', edit);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, edit);
+  }
+});
+
 test('a failed creation error survives passive and transient-read refreshes without claiming followedEver and clears on explicit stop', async () => {
   const fault = { reject: true };
   const { hostApi } = followScheduler(fault);
@@ -3411,6 +4346,806 @@ test('paused follow-up refreshes, retains its reservation and shows terminal PR 
   rt.setGithub(prGraphql({ merged: true }));
   const merged = await rt.tool({ card_id: opened.callId });
   assert.equal(merged.reply.result.stage, 'merged');
+});
+
+test('paused PR card offers one-click resume for both card-created and adopted schedules', async () => {
+  for (const adopted of [false, true]) {
+    const { hostApi, rows, calls } = followScheduler();
+    const url = 'https://github.com/octo/repo/pull/42';
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: !adopted } } });
+    let opened;
+    let id;
+    if (adopted) {
+      opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+      id = 'adopted-1';
+      rows.set(id, {
+        id, targetSessionId: 's1', status: 'paused', recurring: true, intervalMs: 600000,
+        preRunHook: { command: oldFollowHook(url).command.replace('pr-heartbeat-gate.mjs"', 'pr-node.cjs" pr-heartbeat-gate.mjs'), timeoutMs: 98765 },
+      });
+    } else {
+      opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+      id = 'sch-1';
+      rows.get(id).status = 'paused';
+    }
+    const paused = await rt.tool({ card_id: opened.callId });
+    assert.equal(paused.reply.result.follow_state, 'paused');
+    const pausedHtml = rt.lastCard(opened.callId).html;
+    assert.match(visibleText(pausedHtml).join('\n'), /跟进已暂停/);
+    assert.match(pausedHtml, /<button data-ghost-action="pr:resume" aria-label="继续跟进"/);
+    if (adopted) assert.doesNotMatch(pausedHtml, /<button data-ghost-action="pr:stop"/);
+    else assert.match(pausedHtml, /<button data-ghost-action="pr:stop"/);
+
+    // Without a userActionToken, resume must never execute.
+    await rt.click(opened.callId, 'pr:resume', { userActionToken: undefined });
+    assert.equal(rows.get(id).status, 'paused');
+    assert.equal(calls.includes('schedule_resume'), false);
+
+    // Genuine user click resumes natively without an agent turn.
+    await rt.click(opened.callId, 'pr:resume');
+    assert.equal(rows.get(id).status, 'active');
+    assert.equal(calls.filter(c => c === 'schedule_resume').length, 1);
+    assert.equal(rt.agentRuns.length, 0);
+    const resumedCard = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(resumedCard.following, true);
+    assert.equal(resumedCard.scheduleStatus, null);
+    assert.equal(resumedCard.pending, null);
+    assert.equal(resumedCard.manualStop, adopted);
+    const activeHtml = rt.lastCard(opened.callId).html;
+    assert.match(activeHtml, /data-ghost-live-label="跟进中"/);
+    assert.doesNotMatch(activeHtml, /data-ghost-action="pr:resume"/);
+    if (adopted) {
+      assert.equal(rows.get(id).intervalMs, 600000);
+      assert.equal(rows.get(id).preRunHook.timeoutMs, 98765);
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(calls.includes('schedule_delete'), false);
+    }
+  }
+});
+
+test('resuming a paused legacy-hook schedule activates it and surfaces repair only when Node 18+ is unverified', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  // Unverified legacy hook surfaces repair panel after resume without auto-editing the schedule.
+  {
+    const { hostApi, rows, calls } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    rows.get('sch-1').preRunHook = oldFollowHook(url);
+    rows.get('sch-1').status = 'paused';
+    assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'paused');
+
+    await rt.click(opened.callId, 'pr:resume');
+    assert.equal(rows.get('sch-1').status, 'active');
+    assert.deepEqual(rows.get('sch-1').preRunHook, oldFollowHook(url));
+    assert.equal(calls.includes('schedule_resume'), true);
+    assert.equal(calls.includes('schedule_update'), false);
+    const html = rt.lastCard(opened.callId).html;
+    const text = visibleText(html).join('\n');
+    assert.match(text, /跟进待修复/);
+    assert.match(text, /pr-node\.cjs" pr-heartbeat-gate\.mjs https:\/\/github\.com\/octo\/repo\/pull\/42/);
+  }
+  // Legacy hook already confirmed on Node 18+ in scheduler runs resumes cleanly to active without repair banner.
+  {
+    const { hostApi, rows, runs } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    rows.set('sch-1', { ...rows.get('sch-1'), preRunHook: oldFollowHook(url), status: 'paused', updatedAt: 1000, lastFiredAt: 2000 });
+    runs.set('sch-1', [verifiedNodeRun('sch-1', { firedAt: 2000 })]);
+    assert.equal((await rt.tool({ card_id: opened.callId })).reply.result.follow_state, 'paused');
+
+    await rt.click(opened.callId, 'pr:resume');
+    const html = rt.lastCard(opened.callId).html;
+    assert.match(html, /data-ghost-live-label="跟进中"/);
+    assert.doesNotMatch(html, /跟进待修复|pr-node\.cjs/);
+  }
+});
+
+test('pr:resume validates ownership, hook, draft/terminal state and reconciles races and retries', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+
+  // Draft and merged/closed PRs never show or run pr:resume, even when clicked directly on a stale paused card.
+  for (const prOpts of [{ draft: true }, { merged: true }, { state: 'CLOSED' }]) {
+    for (const stale of [false, true]) {
+      const { hostApi, rows, calls } = followScheduler();
+      const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+      const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+      rows.get('sch-1').status = 'paused';
+      await rt.tool({ card_id: opened.callId });
+      rt.setGithub(prGraphql(prOpts));
+      if (!stale) {
+        await rt.tool({ card_id: opened.callId });
+        assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-action="pr:resume"/);
+      }
+      await rt.click(opened.callId, 'pr:resume');
+      assert.equal(calls.includes('schedule_resume'), false);
+      assert.equal(rows.get('sch-1').status, 'paused');
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-action="pr:resume"/);
+      const saved = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      if (prOpts.merged) assert.equal(saved.stage, 'merged');
+      else if (prOpts.state === 'CLOSED') assert.equal(saved.stage, 'closed');
+      else assert.equal(saved.pr.draft, true);
+    }
+  }
+
+  // If the PR turned draft/merged AND the schedule was resumed in Automation with a custom hook,
+  // clicking pr:resume on the stale paused card must neither call schedule_resume nor report active follow-up.
+  for (const prOpts of [{ draft: true }, { merged: true }]) {
+    const { hostApi, rows, calls } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    rows.get('sch-1').status = 'paused';
+    await rt.tool({ card_id: opened.callId });
+    rt.setGithub(prGraphql(prOpts));
+    rows.get('sch-1').status = 'active';
+    rows.get('sch-1').preRunHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 };
+
+    await rt.click(opened.callId, 'pr:resume');
+    assert.equal(calls.includes('schedule_resume'), false);
+    const saved = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(saved.following, false);
+    assert.equal(saved.scheduleStatus, 'unverified');
+    assert.equal(saved.scheduleErrorSource, 'verify');
+    const html = rt.lastCard(opened.callId).html;
+    assert.doesNotMatch(html, /data-ghost-live-label="跟进中"/);
+    assert.doesNotMatch(html, /data-ghost-action="pr:resume"/);
+    assert.doesNotMatch(html, /<button data-ghost-action="pr:stop"/);
+    assert.match(visibleText(html).join('\n'), /跟进待核实/);
+    assert.match(html, /无法确认这条调度仍使用插件生成的前置检查/);
+    const refreshed = await rt.tool({ card_id: opened.callId });
+    assert.equal(refreshed.reply.result.follow_state, 'unverified');
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-live-label="跟进中"/);
+  }
+
+  // If GitHub cannot be read when clicking pr:resume, do not resume; keep the button retryable.
+  {
+    const { hostApi, rows, calls } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    rows.get('sch-1').status = 'paused';
+    await rt.tool({ card_id: opened.callId });
+    rt.setGithub(() => jsonResponse({ message: 'GitHub unavailable' }, 503));
+    await rt.click(opened.callId, 'pr:resume');
+    assert.equal(calls.includes('schedule_resume'), false);
+    assert.equal(rows.get('sch-1').status, 'paused');
+    assert.match(rt.lastCard(opened.callId).html, /data-ghost-action="pr:resume"/);
+    assert.match(rt.lastCard(opened.callId).html, /读取 PR 信息失败/);
+    rt.setGithub(prGraphql());
+    await rt.click(opened.callId, 'pr:resume');
+    assert.equal(rows.get('sch-1').status, 'active');
+    assert.equal(calls.filter(c => c === 'schedule_resume').length, 1);
+  }
+
+  // Custom hook, foreign owner, or expired status blocks schedule_resume.
+  for (const kind of ['custom-hook', 'rebound', 'expired']) {
+    const { hostApi, rows, calls } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    rows.get('sch-1').status = 'paused';
+    await rt.tool({ card_id: opened.callId });
+    if (kind === 'custom-hook') rows.get('sch-1').preRunHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 };
+    else if (kind === 'rebound') rows.get('sch-1').targetSessionId = 's2';
+    else rows.get('sch-1').status = 'expired';
+    await rt.click(opened.callId, 'pr:resume');
+    assert.equal(calls.includes('schedule_resume'), false, kind);
+    const saved = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(saved.following, false, kind);
+    assert.equal(saved.pending, null, kind);
+    assert.ok(saved.note, kind);
+  }
+
+  // Already active or already deleted in Automation settles cleanly without calling schedule_resume.
+  for (const external of ['active', 'deleted']) {
+    const { hostApi, rows, calls } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    rows.get('sch-1').status = 'paused';
+    await rt.tool({ card_id: opened.callId });
+    if (external === 'active') rows.get('sch-1').status = 'active';
+    else rows.delete('sch-1');
+    await rt.click(opened.callId, 'pr:resume');
+    assert.equal(calls.includes('schedule_resume'), false, external);
+    assert.equal(calls.filter(c => c === 'schedule_create').length, 1, external);
+    const saved = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(saved.following, external === 'active', external);
+    assert.equal(saved.scheduleId, external === 'active' ? 'sch-1' : null, external);
+    if (external === 'deleted') assert.match(rt.lastCard(opened.callId).html, /data-ghost-action="pr:follow"/);
+    else assert.match(rt.lastCard(opened.callId).html, /data-ghost-live-label="跟进中"/);
+  }
+
+  // Transient failure on schedule_resume leaves button retryable; retry succeeds.
+  {
+    const fault = { failResume: true };
+    const { hostApi, rows, calls } = followScheduler(fault);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    rows.get('sch-1').status = 'paused';
+    await rt.tool({ card_id: opened.callId });
+    await rt.click(opened.callId, 'pr:resume');
+    assert.equal(rows.get('sch-1').status, 'paused');
+    assert.match(rt.lastCard(opened.callId).html, /data-ghost-action="pr:resume"/);
+    assert.match(rt.lastCard(opened.callId).html, /resume unavailable/);
+    fault.failResume = false;
+    await rt.click(opened.callId, 'pr:resume');
+    assert.equal(rows.get('sch-1').status, 'active');
+    assert.equal(calls.filter(c => c === 'schedule_resume').length, 2);
+  }
+
+  // Transient pre-write failure on initial schedule_get during pr:resume keeps button retryable
+  // without requiring a separate pr_card refresh, and re-verifies ownership and hook on retry.
+  for (const afterRecovery of ['retry-ok', 'mutated-hook', 'mutated-owner']) {
+    const fault = {};
+    const { hostApi, rows, calls } = followScheduler(fault);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    rows.get('sch-1').status = 'paused';
+    await rt.tool({ card_id: opened.callId });
+
+    fault.failGet = true;
+    await rt.click(opened.callId, 'pr:resume');
+    assert.equal(calls.includes('schedule_resume'), false, afterRecovery);
+    assert.equal(rows.get('sch-1').status, 'paused', afterRecovery);
+    const failedCard = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(failedCard.pending, null, afterRecovery);
+    assert.equal(failedCard.scheduleAction, null, afterRecovery);
+    assert.equal(failedCard.scheduleStatus, 'paused', afterRecovery);
+    assert.equal(failedCard.scheduleError, null, afterRecovery);
+    const failHtml = rt.lastCard(opened.callId).html;
+    assert.match(failHtml, /cannot verify/, afterRecovery);
+    assert.match(failHtml, /<button data-ghost-action="pr:resume"/, afterRecovery);
+
+    fault.failGet = false;
+    if (afterRecovery === 'mutated-hook') {
+      rows.get('sch-1').preRunHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 };
+    } else if (afterRecovery === 'mutated-owner') {
+      rows.get('sch-1').targetSessionId = 's2';
+    }
+    await rt.click(opened.callId, 'pr:resume');
+    if (afterRecovery === 'retry-ok') {
+      assert.equal(calls.filter(c => c === 'schedule_resume').length, 1, afterRecovery);
+      assert.equal(rows.get('sch-1').status, 'active', afterRecovery);
+      assert.match(rt.lastCard(opened.callId).html, /data-ghost-live-label="跟进中"/, afterRecovery);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /cannot verify/, afterRecovery);
+    } else {
+      assert.equal(calls.includes('schedule_resume'), false, afterRecovery);
+      assert.equal(rows.get('sch-1').status, 'paused', afterRecovery);
+      const blocked = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      assert.equal(blocked.scheduleStatus, 'unverified', afterRecovery);
+      assert.equal(blocked.scheduleErrorSource, 'verify', afterRecovery);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:resume"/, afterRecovery);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, afterRecovery);
+    }
+  }
+
+  // Lost receipt with unreadable scheduler keeps pending resume until refresh reconciles;
+  // terminal PR on refresh settles read-only without calling schedule_resume again.
+  for (const mergedBeforeRefresh of [false, true]) {
+    const fault = {};
+    const { hostApi, rows, calls } = followScheduler(fault);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    rows.get('sch-1').status = 'paused';
+    await rt.tool({ card_id: opened.callId });
+    fault.loseResumeReceipt = true;
+    fault.beforeResume = () => { fault.failGet = true; };
+    if (mergedBeforeRefresh) {
+      fault.failResume = true;
+      fault.loseResumeReceipt = false;
+    }
+    await rt.click(opened.callId, 'pr:resume');
+    const pending = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(pending.scheduleAction, 'resume');
+    assert.equal(pending.pending, 'resume');
+    fault.failGet = false;
+    fault.failResume = false;
+    fault.loseResumeReceipt = false;
+    fault.beforeResume = null;
+    const resumeCallsBefore = calls.filter(c => c === 'schedule_resume').length;
+    if (mergedBeforeRefresh) rt.setGithub(prGraphql({ merged: true }));
+    const refreshed = await rt.tool({ card_id: opened.callId });
+    assert.equal(calls.filter(c => c === 'schedule_resume').length, resumeCallsBefore);
+    assert.equal(refreshed.reply.result.follow_state, mergedBeforeRefresh ? 'paused' : 'active');
+    assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleAction, null);
+  }
+
+  // Hook verification failure on post-resume read-back (normal read-back, immediate lost-receipt read-back,
+  // and deferred refresh read-back after lost receipt) must stay unverified and never report active follow-up.
+  const customHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 };
+  for (const mode of ['normal-hook-change', 'lost-receipt-hook-change', 'lost-receipt-fail-dir', 'deferred-refresh-hook-change', 'deferred-refresh-fail-dir']) {
+    const fault = {};
+    const { hostApi, rows, calls } = followScheduler(fault);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    const key = `pr-cards/${opened.callId}.json`;
+    const originalHook = structuredClone(rows.get('sch-1').preRunHook);
+    rows.get('sch-1').status = 'paused';
+    await rt.tool({ card_id: opened.callId });
+
+    fault.beforeResume = (map, id) => {
+      if (mode.includes('hook-change')) map.get(id).preRunHook = structuredClone(customHook);
+      if (mode === 'lost-receipt-fail-dir') fault.failDir = true;
+      if (mode.startsWith('deferred-refresh-')) fault.failGet = true;
+    };
+    if (mode !== 'normal-hook-change') fault.loseResumeReceipt = true;
+
+    await rt.click(opened.callId, 'pr:resume');
+    const resumeCallsAfterClick = calls.filter(c => c === 'schedule_resume').length;
+    assert.equal(resumeCallsAfterClick, 1, mode);
+
+    if (mode.startsWith('deferred-refresh-')) {
+      const pending = JSON.parse(rt.files.get(key));
+      assert.equal(pending.pending, 'resume', mode);
+      assert.equal(pending.scheduleAction, 'resume', mode);
+      fault.failGet = false;
+      fault.loseResumeReceipt = false;
+      fault.beforeResume = null;
+      if (mode === 'deferred-refresh-fail-dir') fault.failDir = true;
+      const settled = await rt.tool({ card_id: opened.callId });
+      assert.equal(settled.reply.result.follow_state, 'unverified', mode);
+      assert.equal(calls.filter(c => c === 'schedule_resume').length, 1, mode);
+    }
+
+    const saved = JSON.parse(rt.files.get(key));
+    assert.equal(saved.following, false, mode);
+    assert.equal(saved.scheduleStatus, 'unverified', mode);
+    assert.equal(saved.pending, null, mode);
+    assert.equal(saved.scheduleAction, null, mode);
+    const html = rt.lastCard(opened.callId).html;
+    assert.match(visibleText(html).join('\n'), /跟进待核实/, mode);
+    assert.doesNotMatch(html, /data-ghost-live-label="跟进中"/, mode);
+    assert.doesNotMatch(html, /data-ghost-action="pr:resume"/, mode);
+    if (mode.includes('hook-change')) {
+      assert.doesNotMatch(html, /<button data-ghost-action="pr:stop"/, mode);
+      assert.match(html, /无法确认这条调度仍使用插件生成的前置检查/, mode);
+    } else {
+      assert.equal(saved.scheduleErrorSource, 'read', mode);
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(calls.includes('schedule_delete'), false, mode);
+      assert.equal(rows.has('sch-1'), true, mode);
+    }
+
+    // Subsequent ordinary refresh while hook remains custom or skill dir unavailable must keep unverified.
+    const stillUnverified = await rt.tool({ card_id: opened.callId });
+    assert.equal(stillUnverified.reply.result.follow_state, 'unverified', mode);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-live-label="跟进中"/, mode);
+    assert.match(visibleText(rt.lastCard(opened.callId).html).join('\n'), /跟进待核实/, mode);
+
+    // Once the hook is restored / skill dir recovers, ordinary refresh cleanly recovers to active.
+    fault.failDir = false;
+    rows.get('sch-1').preRunHook = originalHook;
+    const recovered = await rt.tool({ card_id: opened.callId });
+    assert.equal(recovered.reply.result.follow_state, 'active', mode);
+    assert.match(rt.lastCard(opened.callId).html, /data-ghost-live-label="跟进中"/, mode);
+  }
+});
+
+test('older host without card scheduler checks live PR state and instructs following=true on pr:resume handoff', async () => {
+  const { MESSAGES } = createRuntime().context;
+  for (const locale of ['zh-CN', 'en', 'ja', 'ko']) {
+    assert.match(MESSAGES[locale].prClickResume, /following=true/, `${locale}: prClickResume must require following=true`);
+  }
+
+  const { hostApi, rows } = followScheduler();
+  const modern = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+  const opened = await modern.tool({ repo: 'octo/repo', pr: 42, published: true });
+  rows.get('sch-1').status = 'paused';
+  await modern.tool({ card_id: opened.callId });
+
+  // Stale paused card on older host must not hand off resume if GitHub fails or PR is merged.
+  const legacyUnavailable = createPrRuntime({ github: () => jsonResponse({ message: 'down' }, 503), files: new Map(modern.files) });
+  await legacyUnavailable.click(opened.callId, 'pr:resume');
+  assert.equal(legacyUnavailable.agentRuns.length, 0);
+
+  const legacyMerged = createPrRuntime({ github: prGraphql({ merged: true }), files: new Map(modern.files) });
+  await legacyMerged.click(opened.callId, 'pr:resume');
+  assert.equal(legacyMerged.agentRuns.length, 0);
+  assert.equal(JSON.parse(legacyMerged.files.get(`pr-cards/${opened.callId}.json`)).stage, 'merged');
+
+  const legacy = createPrRuntime({ github: prGraphql(), files: new Map(modern.files) });
+  await legacy.click(opened.callId, 'pr:resume');
+  assert.equal(legacy.agentRuns.length, 1);
+  assert.equal(legacy.agentRuns[0].event.action, 'resume');
+  assert.equal(legacy.agentRuns[0].event.schedule_id, 'sch-1');
+  assert.match(legacy.agentRuns[0].userMessage, /sch-1/);
+  assert.match(legacy.agentRuns[0].userMessage, /following=true/);
+  assert.match(legacy.lastCard(opened.callId).html, /正在恢复跟进/);
+  const updated = await legacy.tool({ card_id: opened.callId, following: true });
+  assert.equal(updated.reply.ok, true);
+  assert.equal(updated.reply.result.follow_state, 'active');
+  const saved = JSON.parse(legacy.files.get(`pr-cards/${opened.callId}.json`));
+  assert.equal(saved.pending, null);
+  assert.equal(saved.scheduleStatus, null);
+
+  // If the agent fails or omits following=true on an older host, pending='resume' must not spin forever:
+  // pure old host settles to unverified after TTL (still accepting a late following=true), query-only host
+  // settles from schedule_get (paused/stopped/unverified), and an upgraded host reconciles immediately.
+  {
+    const key = `pr-cards/${opened.callId}.json`;
+    // 1) Pure old host without scheduler bridge: settles to unverified after TTL.
+    const stuck = createPrRuntime({ github: prGraphql(), files: new Map(modern.files) });
+    await stuck.click(opened.callId, 'pr:resume');
+    const rec = JSON.parse(stuck.files.get(key));
+    assert.equal(rec.pending, 'resume');
+    assert.equal(typeof rec.claimedAt, 'number');
+    rec.claimedAt = Date.now() - 11 * 60 * 1000;
+    stuck.files.set(key, JSON.stringify(rec));
+    const settled = await stuck.tool({ card_id: opened.callId });
+    assert.equal(settled.reply.result.follow_state, 'unverified');
+    const afterTtl = JSON.parse(stuck.files.get(key));
+    assert.equal(afterTtl.pending, null);
+    assert.equal(afterTtl.following, false);
+    assert.equal(afterTtl.scheduleStatus, 'unverified');
+    const stuckHtml = stuck.lastCard(opened.callId).html;
+    assert.doesNotMatch(stuckHtml, /正在恢复跟进|data-ghost-live-label="跟进中"/);
+    assert.match(visibleText(stuckHtml).join('\n'), /跟进待核实/);
+    // Late explicit agent report still settles cleanly on an old host.
+    const lateReport = await stuck.tool({ card_id: opened.callId, following: true });
+    assert.equal(lateReport.reply.result.follow_state, 'active');
+
+    // 2) Query-only host (host.call without node worker): paused -> retryable, active -> unverified, deleted -> stopped.
+    for (const outcome of ['paused', 'active', 'deleted']) {
+      const q = followScheduler();
+      const qInit = createPrRuntime({ github: prGraphql(), hostApi: q.hostApi, kv: { prCard: { autoFollow: true } } });
+      const qOpen = await qInit.tool({ repo: 'octo/repo', pr: 42, published: true });
+      q.rows.get('sch-1').status = 'paused';
+      await qInit.tool({ card_id: qOpen.callId });
+      const queryOnly = createPrRuntime({ github: prGraphql(), hostApi: { host: q.hostApi.host }, files: new Map(qInit.files) });
+      await queryOnly.click(qOpen.callId, 'pr:resume');
+      const qKey = `pr-cards/${qOpen.callId}.json`;
+      const qRec = JSON.parse(queryOnly.files.get(qKey));
+      qRec.claimedAt = Date.now() - 11 * 60 * 1000;
+      queryOnly.files.set(qKey, JSON.stringify(qRec));
+      if (outcome === 'active') q.rows.get('sch-1').status = 'active';
+      else if (outcome === 'deleted') q.rows.delete('sch-1');
+      const res = await queryOnly.tool({ card_id: qOpen.callId });
+      assert.equal(res.reply.result.follow_state, outcome === 'active' ? 'unverified' : outcome === 'deleted' ? 'stopped' : 'paused', outcome);
+      assert.equal(JSON.parse(queryOnly.files.get(qKey)).pending, null, outcome);
+      assert.doesNotMatch(queryOnly.lastCard(qOpen.callId).html, /正在恢复跟进/, outcome);
+      if (outcome === 'paused') assert.match(queryOnly.lastCard(qOpen.callId).html, /data-ghost-action="pr:resume"/);
+    }
+
+    // 3) Upgraded modern host reconciles pending='resume' immediately on ordinary refresh.
+    const u = followScheduler();
+    const uInit = createPrRuntime({ github: prGraphql(), hostApi: u.hostApi, kv: { prCard: { autoFollow: true } } });
+    const uOpen = await uInit.tool({ repo: 'octo/repo', pr: 42, published: true });
+    u.rows.get('sch-1').status = 'paused';
+    await uInit.tool({ card_id: uOpen.callId });
+    const uOld = createPrRuntime({ github: prGraphql(), files: new Map(uInit.files) });
+    await uOld.click(uOpen.callId, 'pr:resume');
+    u.rows.get('sch-1').status = 'active';
+    const uModern = createPrRuntime({ github: prGraphql(), hostApi: u.hostApi, files: new Map(uOld.files) });
+    const uRes = await uModern.tool({ card_id: uOpen.callId });
+    assert.equal(uRes.reply.result.follow_state, 'active');
+    assert.equal(JSON.parse(uModern.files.get(`pr-cards/${uOpen.callId}.json`)).pending, null);
+
+    // 4) Restarting an older host AFTER pending='resume' already expired settles automatically on wake
+    //    without requiring any manual card refresh.
+    const bootPureSrc = createPrRuntime({ github: prGraphql(), files: new Map(modern.files) });
+    await bootPureSrc.click(opened.callId, 'pr:resume');
+    const bootPureRec = JSON.parse(bootPureSrc.files.get(key));
+    bootPureRec.claimedAt = Date.now() - 11 * 60 * 1000;
+    bootPureSrc.files.set(key, JSON.stringify(bootPureRec));
+    const bootPure = createPrRuntime({ github: prGraphql(), files: new Map(bootPureSrc.files) });
+    await flushAsync();
+    const bootPureSaved = JSON.parse(bootPure.files.get(key));
+    assert.equal(bootPureSaved.pending, null);
+    assert.equal(bootPureSaved.following, false);
+    assert.equal(bootPureSaved.scheduleStatus, 'unverified');
+    const bootPureHtml = bootPure.lastCard(opened.callId)?.html || '';
+    assert.doesNotMatch(bootPureHtml, /正在恢复跟进|data-ghost-live-label="跟进中"/);
+    assert.match(visibleText(bootPureHtml).join('\n'), /跟进待核实/);
+    const bootPureLate = await bootPure.tool({ card_id: opened.callId, following: true });
+    assert.equal(bootPureLate.reply.result.follow_state, 'active');
+
+    const bq = followScheduler();
+    const bqInit = createPrRuntime({ github: prGraphql(), hostApi: bq.hostApi, kv: { prCard: { autoFollow: true } } });
+    const bqOpen = await bqInit.tool({ repo: 'octo/repo', pr: 42, published: true });
+    bq.rows.get('sch-1').status = 'paused';
+    await bqInit.tool({ card_id: bqOpen.callId });
+    const bqOld = createPrRuntime({ github: prGraphql(), hostApi: { host: bq.hostApi.host }, files: new Map(bqInit.files) });
+    await bqOld.click(bqOpen.callId, 'pr:resume');
+    const bqKey = `pr-cards/${bqOpen.callId}.json`;
+    const bqRec = JSON.parse(bqOld.files.get(bqKey));
+    bqRec.claimedAt = Date.now() - 11 * 60 * 1000;
+    bqOld.files.set(bqKey, JSON.stringify(bqRec));
+    const bqRestarted = createPrRuntime({ github: prGraphql(), hostApi: { host: bq.hostApi.host }, files: new Map(bqOld.files) });
+    await flushAsync();
+    const bqSaved = JSON.parse(bqRestarted.files.get(bqKey));
+    assert.equal(bqSaved.pending, null);
+    assert.equal(bqSaved.scheduleStatus, 'paused');
+    const bqHtml = bqRestarted.lastCard(bqOpen.callId)?.html || '';
+    assert.doesNotMatch(bqHtml, /正在恢复跟进/);
+    assert.match(bqHtml, /<button data-ghost-action="pr:resume"/);
+  }
+});
+
+test('cards without a trusted creation baseline stay manualStop fail-closed, while baselined cards verify live config before Stop', async () => {
+  // Old cards lacking scheduleDefaults (pre-1.5.37 missing manualStop, or pre-1.5.49 with manualStop=false
+  // but no baseline snapshot) MUST keep manual stop and issue zero schedule_delete calls — even when a
+  // pre-migration user edit happens to match the current default model and timezone.
+  const currentDefaultModel = { route: { agentKind: 'cc', providerId: 'chosen', model: 'sonnet', effort: 'high', fastMode: 'ultrafast', agentDeviceId: 'remote' } };
+  for (const variant of ['missing-manualStop-and-defaults', 'manualStop-false-without-defaults', 'edited-before-migration-matches-current-default']) {
+    for (const flow of ['refresh-then-stop', 'direct-stop-active', 'direct-stop-paused']) {
+      const { hostApi, rows, calls } = followScheduler();
+      const rt = createPrRuntime({
+        github: prGraphql(),
+        hostApi,
+        kv: { prCard: { autoFollow: true, ...(variant === 'edited-before-migration-matches-current-default' ? { followModel: currentDefaultModel } : {}) } },
+      });
+      const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+      const key = `pr-cards/${opened.callId}.json`;
+      const old = JSON.parse(rt.files.get(key));
+      delete old.scheduleDefaults;
+      if (variant === 'missing-manualStop-and-defaults') delete old.manualStop;
+      else old.manualStop = false;
+      if (flow === 'direct-stop-paused') {
+        old.following = false;
+        old.scheduleStatus = 'paused';
+        rows.get('sch-1').status = 'paused';
+      }
+      rt.files.set(key, JSON.stringify(old));
+      const before = structuredClone(rows.get('sch-1'));
+
+      if (flow === 'refresh-then-stop') {
+        const refreshed = await rt.tool({ card_id: opened.callId });
+        assert.equal(refreshed.reply.result.follow_state, 'active', `${variant}:${flow}`);
+        assert.equal(JSON.parse(rt.files.get(key)).manualStop, true, `${variant}:${flow}`);
+        const html = rt.lastCard(opened.callId).html;
+        assert.doesNotMatch(html, /<button data-ghost-action="pr:stop"/, `${variant}:${flow}`);
+        assert.match(html, /<button data-ghost-action="pr:manual-stop" aria-label="手动停止"/, `${variant}:${flow}`);
+        assert.doesNotMatch(html, /已有调度请在自动化设置手动停止/, `${variant}:${flow}`);
+      }
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(calls.filter(c => c === 'schedule_delete').length, 0, `${variant}:${flow}`);
+      assert.equal(rows.size, 1, `${variant}:${flow}`);
+      assert.deepEqual(structuredClone(rows.get('sch-1')), before, `${variant}:${flow}`);
+      assert.equal(JSON.parse(rt.files.get(key)).manualStop, true, `${variant}:${flow}`);
+      const stopHtml = rt.lastCard(opened.callId).html;
+      assert.doesNotMatch(stopHtml, /<button data-ghost-action="pr:stop"/, `${variant}:${flow}`);
+      assert.match(stopHtml, /<button data-ghost-action="pr:manual-stop" aria-label="手动停止"/, `${variant}:${flow}`);
+      assert.match(stopHtml, /已有调度请在自动化设置手动停止（ID：sch-1）/, `${variant}:${flow}`);
+      if (flow === 'direct-stop-paused') {
+        assert.match(stopHtml, /<button data-ghost-action="pr:resume"/, `${variant}:${flow}`);
+        await rt.click(opened.callId, 'pr:resume');
+        assert.equal(rows.get('sch-1').status, 'active', `${variant}:${flow}`);
+        assert.equal(JSON.parse(rt.files.get(key)).manualStop, true, `${variant}:${flow}`);
+        assert.equal(calls.filter(c => c === 'schedule_delete').length, 0, `${variant}:${flow}`);
+      }
+    }
+  }
+
+  // Baselined card-created schedule edited in Automation locks to manualStop=true on refresh or direct Stop
+  // without deleting, while still allowing pr:resume when paused.
+  for (const mutation of [
+    'prompt', 'interval', 'timeout', 'name', 'silentWhenIdle',
+    'notify-desktop', 'notify-feishu', 'notify-extra',
+    'prTrigger-change', 'manual', 'useWorktree', 'persistentSession',
+    'workingDir', 'webhookTrigger', 'expireAt', 'executionMode',
+    'model', 'timezone', 'effort', 'fastMode', 'agentKind',
+  ]) {
+    for (const via of ['refresh', 'direct-stop']) {
+      const { hostApi, rows, calls } = followScheduler();
+      const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+      const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+      const key = `pr-cards/${opened.callId}.json`;
+      const row = rows.get('sch-1');
+      row.status = 'paused';
+      await rt.tool({ card_id: opened.callId });
+      assert.equal(JSON.parse(rt.files.get(key)).manualStop, false, `${mutation}:${via}`);
+
+      if (mutation === 'prompt') row.prompt = 'Custom user prompt for https://github.com/octo/repo/pull/42';
+      else if (mutation === 'interval') row.intervalMs = 600000;
+      else if (mutation === 'timeout') row.preRunHook = { ...row.preRunHook, timeoutMs: 90000 };
+      else if (mutation === 'name') row.name = 'Custom PR #42';
+      else if (mutation === 'silentWhenIdle') row.silentWhenIdle = false;
+      else if (mutation === 'notify-desktop') row.notify = { desktop: false, feishu: false };
+      else if (mutation === 'notify-feishu') row.notify = { desktop: true, feishu: true };
+      else if (mutation === 'notify-extra') row.notify = { desktop: true, feishu: false, wecomGroup: 'g1' };
+      else if (mutation === 'prTrigger-change') row.prTrigger = { ...row.prTrigger, change: 'ci' };
+      else if (mutation === 'manual') row.manual = true;
+      else if (mutation === 'useWorktree') row.useWorktree = true;
+      else if (mutation === 'persistentSession') row.persistentSession = true;
+      else if (mutation === 'workingDir') row.workingDir = '/tmp/custom';
+      else if (mutation === 'webhookTrigger') row.webhookTrigger = { source: { preset: 'custom' } };
+      else if (mutation === 'expireAt') row.expireAt = 9999999999999;
+      else if (mutation === 'executionMode') row.executionMode = 'script';
+      else if (mutation === 'model') { row.model = 'claude-opus-4-6'; row.providerId = 'anthropic'; row.modelAgentKind = 'claude-code'; }
+      else if (mutation === 'timezone') row.timezone = row.timezone === 'UTC' ? 'America/New_York' : 'UTC';
+      else if (mutation === 'effort') row.effort = 'high';
+      else if (mutation === 'fastMode') row.fastMode = true;
+      else row.agentKind = 'claude-code';
+      const before = structuredClone(row);
+
+      if (via === 'refresh') await rt.tool({ card_id: opened.callId });
+      else await rt.click(opened.callId, 'pr:stop');
+
+      assert.equal(rows.size, 1, `${mutation}:${via}`);
+      assert.equal(calls.includes('schedule_delete'), false, `${mutation}:${via}`);
+      assert.deepEqual(structuredClone(rows.get('sch-1')), before, `${mutation}:${via}`);
+      const after = JSON.parse(rt.files.get(key));
+      assert.equal(after.manualStop, true, `${mutation}:${via}`);
+      assert.equal(after.scheduleDefaults, undefined, `${mutation}:${via}`);
+      const html = rt.lastCard(opened.callId).html;
+      assert.doesNotMatch(html, /<button data-ghost-action="pr:stop"/, `${mutation}:${via}`);
+      assert.match(html, /<button data-ghost-action="pr:manual-stop" aria-label="手动停止"/, `${mutation}:${via}`);
+      if (via === 'direct-stop') {
+        assert.equal((html.match(/已有调度请在自动化设置手动停止/g) || []).length, 1, `${mutation}:${via}`);
+      } else {
+        assert.doesNotMatch(html, /已有调度请在自动化设置手动停止/, `${mutation}:${via}`);
+      }
+      assert.match(html, /<button data-ghost-action="pr:resume"/, `${mutation}:${via}`);
+
+      // Resume still works and preserves user edits + manualStop=true.
+      await rt.click(opened.callId, 'pr:resume');
+      assert.equal(rows.get('sch-1').status, 'active', `${mutation}:${via}`);
+      assert.equal(JSON.parse(rt.files.get(key)).manualStop, true, `${mutation}:${via}`);
+    }
+  }
+
+  // Schedule created with followModel + fastMode (false, true, 'ultrafast') deletes when untouched,
+  // and preserves the schedule when model, timezone, or fastMode speed tier (true <-> 'ultrafast') changes.
+  for (const [initialFast, edit, editedFast] of [
+    [false, 'none', false],
+    [true, 'none', true],
+    ['ultrafast', 'none', 'ultrafast'],
+    [false, 'model', false],
+    [false, 'timezone', false],
+    [true, 'fastMode', 'ultrafast'],
+    ['ultrafast', 'fastMode', true],
+    [true, 'fastMode', false],
+  ]) {
+    const label = `${String(initialFast)}:${edit}:${String(editedFast)}`;
+    const { hostApi, rows, calls } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: {
+      autoFollow: true,
+      followModel: { route: { agentKind: 'cc', providerId: 'chosen', model: 'sonnet', effort: 'high', fastMode: initialFast, agentDeviceId: 'remote' } },
+    } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    const row = rows.get('sch-1');
+    if (edit === 'model') row.model = 'opus';
+    else if (edit === 'timezone') row.timezone = row.timezone === 'UTC' ? 'Asia/Tokyo' : 'UTC';
+    else if (edit === 'fastMode') row.fastMode = editedFast;
+    const before = structuredClone(row);
+    await rt.click(opened.callId, 'pr:stop');
+    if (edit === 'none') {
+      assert.equal(calls.includes('schedule_delete'), true, label);
+      assert.equal(rows.size, 0, label);
+    } else {
+      assert.equal(calls.includes('schedule_delete'), false, label);
+      assert.equal(rows.size, 1, label);
+      assert.deepEqual(structuredClone(rows.get('sch-1')), before, label);
+      assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).manualStop, true, label);
+    }
+  }
+
+  // Transient failDir on a baselined card does not delete and does not permanently lock manualStop=true.
+  {
+    const fault = { failDir: false };
+    const { hostApi, rows, calls } = followScheduler(fault);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    const key = `pr-cards/${opened.callId}.json`;
+    fault.failDir = true;
+    await rt.tool({ card_id: opened.callId });
+    assert.equal(JSON.parse(rt.files.get(key)).manualStop, false);
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(rows.size, 1);
+    assert.equal(calls.includes('schedule_delete'), false);
+    assert.equal(JSON.parse(rt.files.get(key)).manualStop, false);
+    fault.failDir = false;
+    const recovered = await rt.tool({ card_id: opened.callId });
+    assert.equal(recovered.reply.result.follow_state, 'active');
+    assert.equal(JSON.parse(rt.files.get(key)).manualStop, false);
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(rows.size, 0);
+    assert.equal(calls.includes('schedule_delete'), true);
+  }
+
+  // Edits made in Automation AFTER schedule_create succeeds but BEFORE the initial schedule_get
+  // read-back must NOT be recorded as scheduleDefaults: the card locks to manualStop=true immediately
+  // and Stop issues zero schedule_delete calls while preserving the edited schedule.
+  for (const earlyEdit of ['model', 'timezone', 'fastMode-true-to-ultrafast', 'prompt', 'notify', 'preRunPlugin']) {
+    let mutated = false;
+    const { hostApi, rows, calls } = followScheduler({
+      beforeGet(liveRows, id) {
+        if (mutated) return;
+        const row = liveRows.get(id);
+        if (!row) return;
+        mutated = true;
+        if (earlyEdit === 'model') { row.model = 'claude-opus-4-6'; row.providerId = 'anthropic'; row.modelAgentKind = 'claude-code'; }
+        else if (earlyEdit === 'timezone') row.timezone = row.timezone === 'UTC' ? 'America/New_York' : 'UTC';
+        else if (earlyEdit === 'fastMode-true-to-ultrafast') row.fastMode = 'ultrafast';
+        else if (earlyEdit === 'prompt') row.prompt = 'Edited before first read-back for https://github.com/octo/repo/pull/42';
+        else if (earlyEdit === 'notify') row.notify = { desktop: true, feishu: true };
+        else row.preRunPlugin = { pluginId: 'other-plugin', onFailure: 'block' };
+      },
+    });
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: {
+      autoFollow: true,
+      ...(earlyEdit === 'fastMode-true-to-ultrafast'
+        ? { followModel: { route: { agentKind: 'cc', providerId: 'chosen', model: 'sonnet', effort: 'high', fastMode: true, agentDeviceId: 'remote' } } }
+        : {}),
+    } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_state, 'active', earlyEdit);
+    const key = `pr-cards/${opened.callId}.json`;
+    const createdCard = JSON.parse(rt.files.get(key));
+    assert.equal(createdCard.manualStop, true, earlyEdit);
+    assert.equal(createdCard.scheduleDefaults, undefined, earlyEdit);
+    const openHtml = rt.lastCard(opened.callId).html;
+    assert.doesNotMatch(openHtml, /<button data-ghost-action="pr:stop"/, earlyEdit);
+    assert.match(openHtml, /<button data-ghost-action="pr:manual-stop" aria-label="手动停止"/, earlyEdit);
+
+    const beforeStop = structuredClone(rows.get('sch-1'));
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(calls.filter(c => c === 'schedule_delete').length, 0, earlyEdit);
+    assert.equal(rows.size, 1, earlyEdit);
+    assert.deepEqual(structuredClone(rows.get('sch-1')), beforeStop, earlyEdit);
+    assert.match(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止（ID：sch-1）/, earlyEdit);
+  }
+
+  // Changing a card-created schedule's hook command to the legacy direct Node command still keeps
+  // legacy hook identification and repair hints, but revokes Stop deletion authority (0 schedule_delete).
+  for (const flow of ['direct-stop', 'refresh-then-stop', 'early-before-first-get']) {
+    const legacyHook = oldFollowHook('https://github.com/octo/repo/pull/42');
+    let earlyMutated = false;
+    const { hostApi, rows, calls } = followScheduler(flow === 'early-before-first-get' ? {
+      beforeGet(liveRows, id) {
+        if (earlyMutated) return;
+        const row = liveRows.get(id);
+        if (!row) return;
+        earlyMutated = true;
+        row.preRunHook = structuredClone(legacyHook);
+      },
+    } : {});
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    const key = `pr-cards/${opened.callId}.json`;
+    if (flow !== 'early-before-first-get') {
+      rows.get('sch-1').preRunHook = structuredClone(legacyHook);
+    }
+    const beforeStop = structuredClone(rows.get('sch-1'));
+
+    if (flow === 'refresh-then-stop') {
+      const refreshed = await rt.tool({ card_id: opened.callId });
+      assert.equal(refreshed.reply.result.follow_state, 'unverified', flow);
+      assert.equal(refreshed.reply.result.legacy_hook_repair.schedule_id, 'sch-1', flow);
+      assert.equal(JSON.parse(rt.files.get(key)).manualStop, true, flow);
+      const html = rt.lastCard(opened.callId).html;
+      assert.match(visibleText(html).join('\n'), /跟进待修复/, flow);
+      assert.doesNotMatch(html, /<button data-ghost-action="pr:stop"/, flow);
+      assert.match(html, /<button data-ghost-action="pr:manual-stop" aria-label="手动停止"/, flow);
+    } else if (flow === 'early-before-first-get') {
+      assert.equal(opened.reply.result.legacy_hook_repair.schedule_id, 'sch-1', flow);
+      assert.equal(JSON.parse(rt.files.get(key)).manualStop, true, flow);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, flow);
+    }
+
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(calls.filter(c => c === 'schedule_delete').length, 0, flow);
+    assert.equal(rows.size, 1, flow);
+    assert.deepEqual(structuredClone(rows.get('sch-1')), beforeStop, flow);
+    const afterStop = JSON.parse(rt.files.get(key));
+    assert.equal(afterStop.manualStop, true, flow);
+    assert.equal(afterStop.scheduleDefaults, undefined, flow);
+    const stopHtml = rt.lastCard(opened.callId).html;
+    assert.doesNotMatch(stopHtml, /<button data-ghost-action="pr:stop"/, flow);
+    assert.match(stopHtml, /<button data-ghost-action="pr:manual-stop" aria-label="手动停止"/, flow);
+    assert.match(stopHtml, /已有调度请在自动化设置手动停止（ID：sch-1）/, flow);
+  }
+
+  // Legacy host without card scheduler stays fail-closed on cards without a trusted creation baseline.
+  {
+    const { hostApi } = followScheduler();
+    const modern = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await modern.tool({ repo: 'octo/repo', pr: 42, published: true });
+    const key = `pr-cards/${opened.callId}.json`;
+    const old = JSON.parse(modern.files.get(key));
+    delete old.manualStop;
+    delete old.scheduleDefaults;
+    modern.files.set(key, JSON.stringify(old));
+    const legacy = createPrRuntime({ github: prGraphql(), files: new Map(modern.files) });
+    await legacy.click(opened.callId, 'pr:stop');
+    assert.equal(legacy.agentRuns.length, 0);
+  }
 });
 
 function statusWatchFixture(initial = {}, options = {}) {
@@ -4760,4 +6495,193 @@ test('pr Skill allows simulator/sanitized screenshots directly while gating real
   assert.match(publish, /simulator\/emulator, mock, fixture, or redacted\/sanitized data[\s\S]{0,160}may be attached directly without asking first/);
   assert.match(publish, /real or unredacted user, account, machine, or private\/sensitive data/);
   assert.match(publish, /never push, open\/update the PR, or post while waiting for the answer/);
+});
+
+test('source task heals a stale pre-upgrade peer card and switches to read-only reference instead of prOwnershipUnknown', async () => {
+  const skillDir = '/approved skills/agent-skills/skills/_root__cindy-github--pr';
+  const posixSingleHook = {
+    command: `node '${skillDir}/scripts/pr-node.cjs' pr-heartbeat-gate.mjs ${PR42}`,
+    timeoutMs: 180000,
+  };
+  for (const mode of ['click-follow', 'refresh-card']) {
+    const { hostApi, calls, rows } = followScheduler({ skillDir, platform: 'darwin' });
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+
+    // Source task opened the PR with following: false (later stuck on prOwnershipUnknown),
+    // while the dedicated task's card was left with a pre-upgrade single-quote hook error.
+    const orig = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, following: false, session_context: { session_id: 's-orig' } });
+    const follow = await rt.tool({ repo: 'octo/repo', pr: 42, following: true, session_context: { session_id: 's-follow' } });
+
+    const origKey = `pr-cards/${orig.callId}.json`;
+    const followKey = `pr-cards/${follow.callId}.json`;
+    const origSaved = JSON.parse(rt.files.get(origKey));
+    origSaved.scheduleError = fill(zhCopy.prScheduleFailed, { detail: zhCopy.prOwnershipUnknown });
+    origSaved.scheduleErrorSource = 'verify';
+    origSaved.note = origSaved.scheduleError;
+    rt.files.set(origKey, JSON.stringify(origSaved));
+
+    const followSaved = JSON.parse(rt.files.get(followKey));
+    followSaved.following = false;
+    followSaved.followedEver = true;
+    followSaved.scheduleId = null;
+    followSaved.scheduleStatus = null;
+    followSaved.scheduleError = fill(zhCopy.prScheduleFailed, { detail: zhCopy.prScheduleHookUnknown });
+    followSaved.note = followSaved.scheduleError;
+    delete followSaved.scheduleErrorSource;
+    rt.files.set(followKey, JSON.stringify(followSaved));
+
+    rows.set('sch-follow', {
+      id: 'sch-follow', prompt: 'Follow ' + PR42, targetSessionId: 's-follow',
+      recurring: true, status: 'active', prTrigger: { url: PR42, change: 'any' },
+      preRunHook: posixSingleHook,
+    });
+
+    if (mode === 'click-follow') {
+      await rt.click(orig.callId, 'pr:follow', { sessionId: 's-orig' });
+      const origHtml = rt.lastCard(orig.callId).html;
+      assert.match(origHtml, /其他任务正在跟进/, mode);
+      assert.match(origHtml, /data-ghost-session-link="cindy:\/\/session\/s-follow"/, mode);
+      assert.doesNotMatch(origHtml, /无法确认 PR 卡片所属任务/, mode);
+      assert.doesNotMatch(origHtml, /data-ghost-action="pr:follow"/, mode);
+    } else {
+      const refreshed = await rt.tool({ card_id: orig.callId, pr: 42, to_latest: true, session_context: { session_id: 's-orig' } });
+      assert.equal(refreshed.reply.ok, true, mode);
+      assert.equal(refreshed.reply.result.disposition, 'existing_task', mode);
+      assert.equal(refreshed.reply.result.card_id, orig.callId, mode);
+      assert.equal(refreshed.reply.result.owner_card_id, follow.callId, mode);
+      assert.equal(refreshed.reply.result.owner_session_id, 's-follow', mode);
+      assert.equal(refreshed.reply.result.task_url, 'cindy://session/s-follow', mode);
+      assert.equal(refreshed.reply.result.follow_claimed, false, mode);
+      const movedHtml = rt.lastCard(refreshed.callId).html;
+      assert.match(movedHtml, /其他任务正在跟进/, mode);
+      assert.match(movedHtml, /data-ghost-session-link="cindy:\/\/session\/s-follow"/, mode);
+      assert.doesNotMatch(movedHtml, /无法确认 PR 卡片所属任务/, mode);
+    }
+
+    // Both cards converged cleanly: source card cleared its stale error and peer card self-healed.
+    const origAfter = savedCard(rt, orig.callId);
+    assert.equal(origAfter.scheduleError, null, mode);
+    assert.equal(origAfter.scheduleErrorSource, null, mode);
+    assert.equal(origAfter.note, null, mode);
+
+    const followAfter = savedCard(rt, follow.callId);
+    assert.equal(followAfter.following, true, mode);
+    assert.equal(followAfter.scheduleId, 'sch-follow', mode);
+    assert.equal(followAfter.scheduleError, null, mode);
+    assert.equal(followAfter.note, null, mode);
+    assert.match(rt.lastCard(follow.callId).html, /data-ghost-live-label=/, mode);
+
+    assert.equal(calls.includes('schedule_create'), false, mode);
+    assert.equal(rt.agentRuns.length, 0, mode);
+  }
+});
+
+test('live follow-up schedule in another task renders read-only existing_task even without an active peer card', async () => {
+  const customHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + PR42, timeoutMs: 180000 };
+  for (const variant of ['missing-peer-card', 'custom-hook-peer-card', 'paused-other-task']) {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+
+    let peerCardId = null;
+    if (variant === 'custom-hook-peer-card') {
+      const peer = await rt.tool({ repo: 'octo/repo', pr: 42, following: true, session_context: { session_id: 's-follow' } });
+      peerCardId = peer.callId;
+      rows.set('sch-b', taskSchedule('sch-b', 's-follow', customHook));
+      const failed = await rt.tool({ card_id: peerCardId, session_context: { session_id: 's-follow' } });
+      assert.equal(failed.reply.result.follow_state, 'failed', variant);
+    } else {
+      const row = taskSchedule('sch-b', 's-follow');
+      if (variant === 'paused-other-task') row.status = 'paused';
+      rows.set('sch-b', row);
+    }
+
+    // Fresh open PR view in another task immediately recognizes the live schedule owner.
+    const viewed = await rt.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's-orig' } });
+    assert.equal(viewed.reply.result.disposition, 'existing_task', variant);
+    assert.equal(viewed.reply.result.owner_session_id, 's-follow', variant);
+    assert.equal(viewed.reply.result.task_url, 'cindy://session/s-follow', variant);
+    assert.equal(viewed.reply.result.owner_card_id, peerCardId || undefined, variant);
+    assert.equal(viewed.reply.result.follow_claimed, false, variant);
+    assert.match(rt.lastCard(viewed.callId).html, /其他任务正在跟进/, variant);
+    assert.match(rt.lastCard(viewed.callId).html, /data-ghost-session-link="cindy:\/\/session\/s-follow"/, variant);
+
+    // Legacy client fallback click on "Open follow-up task" resolves the live owner too.
+    await rt.click(viewed.callId, 'pr:open-task', { sessionId: 's-orig' });
+    assert.equal(rt.agentRuns.length, 1, variant);
+    assert.equal(rt.agentRuns[0].event.action, 'open-task', variant);
+    assert.equal(rt.agentRuns[0].event.task_url, 'cindy://session/s-follow', variant);
+
+    // Explicit claim_follow or published: true in a third task also returns existing_task without creating duplicates.
+    const claimed = await rt.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's-third' } });
+    assert.equal(claimed.reply.result.disposition, 'existing_task', variant);
+    assert.equal(claimed.reply.result.follow_claimed, false, variant);
+    const published = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, session_context: { session_id: 's-fourth' } });
+    assert.equal(published.reply.result.disposition, 'existing_task', variant);
+
+    // Clicking pr:follow on an already-saved idle card (both viewed and publishedHere) redirects instead of erroring or handing off.
+    const idleCard = savedCard(rt, viewed.callId);
+    idleCard.publishedHere = true;
+    rt.files.set(`pr-cards/${viewed.callId}.json`, JSON.stringify(idleCard));
+    await rt.click(viewed.callId, 'pr:follow', { sessionId: 's-orig' });
+    assert.equal(rt.agentRuns.length, 1, variant);
+    assert.match(rt.lastCard(viewed.callId).html, /其他任务正在跟进/, variant);
+    assert.doesNotMatch(rt.lastCard(viewed.callId).html, /无法确认 PR 卡片所属任务/, variant);
+
+    if (variant === 'custom-hook-peer-card') {
+      // Peer card with custom hook must remain unverified/not-following rather than gaining Stop authority.
+      const peerAfter = savedCard(rt, peerCardId);
+      assert.equal(peerAfter.following, false, variant);
+      assert.equal(peerAfter.scheduleId, null, variant);
+    }
+    assert.equal(calls.includes('schedule_create'), false, variant);
+  }
+});
+
+test('start adopts a same-session paused schedule and fails closed when a foreign schedule is deleted mid-check or ambiguous', async () => {
+  // 1) Same-session paused schedule discovered on pr:follow adopts paused state instead of throwing prOwnershipUnknown.
+  {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: false } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    rows.set('paused-mine', { ...taskSchedule('paused-mine', 's1'), status: 'paused' });
+    await rt.click(opened.callId, 'pr:follow');
+    const card = savedCard(rt, opened.callId);
+    assert.equal(card.scheduleId, 'paused-mine');
+    assert.equal(card.following, false);
+    assert.equal(card.scheduleStatus, 'paused');
+    assert.equal(card.scheduleError, null);
+    assert.match(rt.lastCard(opened.callId).html, /跟进已暂停/);
+    assert.match(rt.lastCard(opened.callId).html, /data-ghost-action="pr:resume"/);
+    assert.equal(calls.includes('schedule_create'), false);
+    assert.equal(calls.includes('schedule_resume'), false);
+  }
+
+  // 2) Foreign schedule deleted between schedule_list and schedule_get must not produce a ghost existing_task reference.
+  {
+    const { hostApi, rows } = followScheduler({
+      beforeGet(liveRows, id) {
+        if (id === 'vanishing') liveRows.delete(id);
+      },
+    });
+    rows.set('vanishing', taskSchedule('vanishing', 's-other'));
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: false } } });
+    const viewed = await rt.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's-orig' } });
+    assert.equal(viewed.reply.result.disposition, undefined);
+    assert.doesNotMatch(rt.lastCard(viewed.callId).html, /其他任务正在跟进/);
+  }
+
+  // 3) Multiple schedules or an expired foreign schedule never redirect as a single active owner.
+  for (const [label, list] of [
+    ['ambiguous', [taskSchedule('a', 's-other'), taskSchedule('b', 's-other-2')]],
+    ['expired', [{ ...taskSchedule('exp', 's-other'), status: 'expired' }]],
+  ]) {
+    const { hostApi, calls, rows } = followScheduler();
+    for (const r of list) rows.set(r.id, r);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, session_context: { session_id: 's-orig' } });
+    assert.equal(opened.reply.result.disposition, undefined, label);
+    assert.equal(opened.reply.result.follow_state, 'failed', label);
+    assert.match(opened.reply.result.note, /无法确认 PR 卡片所属任务/, label);
+    assert.equal(calls.includes('schedule_create'), false, label);
+  }
 });

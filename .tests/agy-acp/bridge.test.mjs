@@ -8,10 +8,11 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -93,7 +94,9 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
       lines = lines.slice(index + 1);
       if (!line.trim()) continue;
       const message = JSON.parse(line);
-      if (message.method === 'initialize') {
+      if (message.method === 'initialize' && process.env.FAKE_AGY_REMOTE_INIT_ERROR === '1') {
+        send({ id: message.id, error: { code: -32603, message: 'agy could not start' } });
+      } else if (message.method === 'initialize') {
         send({ id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [] } });
       } else if (message.method === 'session/new' || message.method === 'session/resume') {
         record({ method: message.method, session: message.params });
@@ -522,6 +525,146 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
       [['tool_call', 'Bash', 'execute'], ['tool_call_update', 'Bash', 'execute']]);
     bridge.child.stdin.end();
     assert.equal((await bridge.closed).code, 0);
+  });
+
+  // Why: agy leaves out MCP servers that are not connected within five seconds, and here every handshake
+  // crosses the device link. session/new must reach agy only after the warm-up, naming the local relay
+  // for a server that was warmed (mcp-warmup.test.mjs covers the relay itself).
+  /** A loopback MCP server like Cindy's tunnel, answering after `delayMs`; `sessions` lists the open ones. */
+  const tunnelServer = async (t, delayMs = 300) => {
+    const sessions = new Set();
+    const counts = { requests: 0 };
+    let created = 0;
+    const mcp = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        counts.requests += 1;
+        const message = body ? JSON.parse(body) : {};
+        const sid = req.headers['mcp-session-id'];
+        // The session exists on the server as soon as initialize arrives, before its answer is sent.
+        const id = !sid && message.method === 'initialize' ? `s${created++}` : null;
+        if (id) sessions.add(id);
+        setTimeout(() => {
+          if (req.method === 'GET') return res.writeHead(405).end();
+          if (req.method === 'DELETE') {
+            sessions.delete(sid);
+            return res.writeHead(200).end();
+          }
+          if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+          if (id) {
+            res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
+            return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id,
+              result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
+          }
+          if (message.id === undefined) return res.writeHead(202).end();
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [] } }));
+        }, delayMs);
+      });
+    });
+    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
+    t.after(() => mcp.close());
+    return { sessions, counts, url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec` };
+  };
+
+  /**
+   * Makes the entry's start of the session process fail: `throw` throws from spawn itself, `missing`
+   * starts a program that does not exist (spawn reports it asynchronously). Preloaded into the entry only.
+   */
+  const failSessionLaunch = (t, mode) => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agy-acp-spawn-')), 'fail-launch.cjs');
+    t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }));
+    fs.writeFileSync(file, `'use strict';
+if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
+  const childProcess = require('node:child_process');
+  const spawn = childProcess.spawn;
+  childProcess.spawn = function (command, args, options) {
+    if (Array.isArray(args) && args.includes('--agent')) {
+      if (${JSON.stringify(mode)} === 'throw') throw new Error('spawn failed');
+      return spawn.call(this, '/nonexistent/agy-for-test', args, options);
+    }
+    return spawn.apply(this, arguments);
+  };
+}
+`);
+    return { NODE_OPTIONS: `--require=${file}` };
+  };
+
+  if (official) test('remote-workspace mode hands agy its MCP servers only after their handshake is done', async (t) => {
+    const { sessions, url } = await tunnelServer(t);
+    const { launchFile, bridge, send, reply, server } = remoteSession(t);
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    const exec = { ...server('cindy_exec'), url };
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec, server('cindy')] } });
+    await reply(1, 'session/new answer');
+    const { session } = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
+    assert.equal(sessions.size, 1, 'the server was warmed before agy got session/new');
+    assert.match(session.mcpServers[0].url, /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{32}\/0$/);
+    assert.deepEqual(session.mcpServers[0].headers, exec.headers);
+    assert.deepEqual(session.mcpServers[1], server('cindy'), 'a server that could not be warmed keeps its own address');
+    // The task ends before agy connected (the fake never does): its warmed session must not stay on the other computer.
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.equal(sessions.size, 0, 'the warmed session agy never took over was ended before the entry exited');
+  });
+
+  // Why: when agy itself cannot start, nobody will take over the warmed sessions; they must be ended at
+  // once, not left on the other computer while the task stays open.
+  if (official) test('remote-workspace mode ends the warmed sessions when agy fails to start', async (t) => {
+    const { sessions, url } = await tunnelServer(t, 50);
+    const { bridge, send, reply, server } = remoteSession(t, { FAKE_AGY_REMOTE_INIT_ERROR: '1' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    assert.equal((await reply(1, 'session/new answer')).error.message, 'agy could not start');
+    await waitFor(() => sessions.size === 0, 3_000, 'the warmed session to be ended while the task is still open');
+    assert.equal(bridge.child.exitCode, null, 'released without waiting for the task to end');
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  // Why: the task can end while a handshake is still on its way. The server may already have created the
+  // session; the entry waits for the answer that names it and ends it before exiting.
+  // The answer takes longer than a short exit wait would allow: the entry's wait covers the warm-up's close budget.
+  if (official) test('remote-workspace mode ends a session whose handshake was still on its way at exit', async (t) => {
+    const { sessions, url } = await tunnelServer(t, 1_800);
+    const { bridge, send, reply, server } = remoteSession(t);
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    await waitFor(() => sessions.size === 1, 3_000, 'the server to create the session');
+    bridge.child.stdin.end(); // before the initialize answer arrives
+    assert.equal((await bridge.closed).code, 0);
+    assert.equal(sessions.size, 0, 'the session was ended before the entry exited');
+  });
+
+  // Why: starting the session process can fail synchronously (spawnAgy refuses unsafe paths or arguments)
+  // or asynchronously (the program is gone). Either way agy never runs, so no warmed session may stay.
+  if (official) test('remote-workspace mode leaves no warm-up running when agy cannot be started', async (t) => {
+    const { counts, url } = await tunnelServer(t, 50);
+    const { bridge, send, reply, server } = remoteSession(t, failSessionLaunch(t, 'throw'));
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    assert.match((await reply(1, 'session/new answer')).error.message, /could not be started/);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(counts.requests, 0, 'no handshake was started for an agy that never ran');
+    bridge.child.stdin.end();
+    await bridge.closed;
+  });
+
+  if (official) test('remote-workspace mode ends the warmed sessions when the agy program is gone', async (t) => {
+    const { sessions, url } = await tunnelServer(t, 50);
+    const { bridge, send, reply, server } = remoteSession(t, failSessionLaunch(t, 'missing'));
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    await bridge.closed;
+    assert.match(bridge.stderr.text(), /Could not start Antigravity/);
+    // Whether the handshake got as far as creating a session or was stopped before it, none is left.
+    assert.equal(sessions.size, 0, 'no warmed session is left on the other computer');
   });
 
   test('remote-workspace mode does not start a session without Cindy’s file and command tools', async (t) => {
@@ -1863,10 +2006,9 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     const checksBeforeReset = cliActions.filter((a) => a === 'check').length;
     element('custom-path-reset').click();
     await waitFor(() => element('version').textContent === '1.5.9', 3_000, 'reset to auto-detect');
-    // The reset starts an update check of its own. Let its answer arrive before the update below: arriving
-    // later, its "not active" state unlocked the controls again between two polls (seen on a slow CI runner).
-    await waitFor(() => cliActions.filter((a) => a === 'check').length > checksBeforeReset, 3_000, 'update check after the reset');
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Wait for the reset-triggered CLI update check to settle so its active:false reply cannot race the update lock below.
+    await waitFor(() => cliActions.filter((a) => a === 'check').length > checksBeforeReset
+      && element('cli-status').textContent === 'Up to date', 8_000, 'reset CLI update check settled');
     assert.equal(element('custom-path-reset').hidden, true);
     assert.deepEqual(savedPaths, ['bad', '/opt/custom/agy', '/gone/agy', '']);
 
@@ -1874,18 +2016,19 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     // active install/update locks the custom path controls.
     const checksBefore = cliActions.filter((a) => a === 'check').length;
     main.postMessage({ type: 'cli-state', reqId: 'inst-1', action: 'update', active: true });
-    await waitFor(() => element('custom-path-input').disabled === true, 3_000, 'path locked during update');
+    await waitFor(() => element('custom-path-input').disabled === true, 8_000, 'path locked during update');
     assert.equal(element('custom-path-save').disabled, true);
     assert.equal(element('custom-path-reset').disabled, true);
     main.postMessage({ type: 'cli-state', reqId: 'inst-1', action: 'update', active: false, result: { state: 'installed', version: '2.0.0' } });
-    await waitFor(() => element('cli-status').textContent === 'Installed 2.0.0', 3_000, 'installed status shown');
+    await waitFor(() => element('cli-status').textContent === 'Installed 2.0.0', 8_000, 'installed status shown');
     assert.equal(element('custom-path-input').disabled, false);
 
     element('custom-path-input').value = '/opt/older/agy';
     element('custom-path-input').listeners.input();
     element('custom-path-save').click();
-    await waitFor(() => cliActions.filter((a) => a === 'check').length > checksBefore, 3_000, 'fresh check triggered after switching from installed binary');
-    assert.notEqual(element('cli-status').textContent, 'Installed 2.0.0');
+    await waitFor(() => cliActions.filter((a) => a === 'check').length > checksBefore, 8_000, 'fresh check triggered after switching from installed binary');
+    // The page clears the status asynchronously; on a loaded CI runner an earlier check can move the counter first.
+    await waitFor(() => element('cli-status').textContent !== 'Installed 2.0.0', 8_000, '"Installed" cleared after switching binary');
   });
 
   test('worker.js serializes overlapping setCustomPath calls and cancels active login on path switch', async (t) => {
@@ -3363,4 +3506,472 @@ test('adapts Antigravity update_steps into ACP plan updates and normalizes ask_q
     status: 'in_progress',
   }, { elicitationForm: false, seenSteps });
   assert.equal(askWithoutForm, null);
+});
+
+describe('Antigravity remote-workspace steering', () => {
+  const remoteSteerHarness = (t, { version = '1.5.14', args = ['--cindy-remote-workspace'], mode = 'steer' } = {}) => {
+    const fixture = makeFixture(t);
+    const logFile = path.join(fixture.dir, 'remote-steer.log');
+    const script = `'use strict';
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args.length === 1 && args[0] === '--version') {
+  process.stdout.write('agy ${version}\\n');
+  process.exit(0);
+}
+const restricted = args.includes('--agent');
+if (restricted) fs.writeFileSync(${JSON.stringify(fixture.pidFile)}, String(process.pid), 'utf8');
+const send = (message) => process.stdout.write(JSON.stringify(Object.assign({ jsonrpc: '2.0' }, message)) + '\\n');
+let lines = '';
+let promptCount = 0;
+let pendingLoadId = null;
+let firstPromptId = null;
+let steer1Id = null;
+let steer2Id = null;
+process.stdin.on('data', (chunk) => {
+  lines += chunk.toString('utf8');
+  let index;
+  while ((index = lines.indexOf('\\n')) !== -1) {
+    const line = lines.slice(0, index);
+    lines = lines.slice(index + 1);
+    if (!line.trim()) continue;
+    const message = JSON.parse(line);
+    if (restricted) fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify(message) + '\\n');
+    if (message.method === 'initialize') {
+      const answer = () => send({
+        id: message.id,
+        result: {
+          protocolVersion: 1,
+          agentInfo: { name: 'Antigravity ACP Server', version: ${JSON.stringify(version)} },
+          agentCapabilities: { loadSession: true },
+          _meta: { retained: true },
+          authMethods: [],
+        },
+      });
+      if (restricted && ${JSON.stringify(mode)} === 'fail-open') {
+        setTimeout(() => {
+          fs.writeSync(1, JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: 'restricted init failed' } }) + '\\n');
+          process.exit(1);
+        }, 80);
+      } else if (restricted && ${JSON.stringify(mode)} === 'slow-open') {
+        setTimeout(answer, 80);
+      } else {
+        answer();
+      }
+    } else if (message.method === 'session/new' || message.method === 'session/resume' || message.method === 'session/load') {
+      if (restricted && ${JSON.stringify(mode)} === 'fail-session-open') {
+        send({
+          id: 'perm-stale',
+          method: 'session/request_permission',
+          params: {
+            sessionId: 'sess-known',
+            toolCall: {
+              sessionUpdate: 'tool_call', status: 'pending', toolCallId: 'mcp-stale-1',
+              name: 'call_mcp_tool', kind: 'execute', title: 'MCP Tool Bash',
+              rawInput: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+              args: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+            },
+            options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+          },
+        });
+        setTimeout(() => send({ id: message.id, error: { code: -32004, message: 'session not found' } }), 80);
+      } else if (restricted && ${JSON.stringify(mode)} === 'load-with-callback') {
+        pendingLoadId = message.id;
+        send({
+          id: 'perm-load',
+          method: 'session/request_permission',
+          params: {
+            sessionId: 'sess-r',
+            toolCall: {
+              sessionUpdate: 'tool_call', status: 'pending', toolCallId: 'mcp-load-1',
+              name: 'call_mcp_tool', kind: 'execute', title: 'MCP Tool Bash',
+              rawInput: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+              args: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+            },
+            options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+          },
+        });
+      } else {
+        send({ id: message.id, result: { sessionId: 'sess-r', configOptions: [] } });
+      }
+    } else if (message.method === undefined && message.id === 'perm-load' && pendingLoadId !== null) {
+      const loadId = pendingLoadId;
+      pendingLoadId = null;
+      send({ id: loadId, result: { configOptions: [] } });
+    } else if (message.method === 'session/prompt') {
+      promptCount += 1;
+      if (promptCount === 1) {
+        firstPromptId = message.id;
+        send({ method: 'session/update', params: { sessionId: 'sess-r', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'working' } } } });
+      } else if (promptCount === 2) {
+        steer1Id = message.id;
+        if (${JSON.stringify(mode)} === 'native-during-steer') {
+          send({ method: 'session/update', params: { sessionId: 'sess-r', update: { sessionUpdate: 'tool_call', toolCallId: 'native-steer', name: 'write_to_file', kind: 'edit', title: 'escape.txt', status: 'in_progress' } } });
+          return;
+        }
+        send({ id: firstPromptId, result: { stopReason: 'end_turn' } });
+        if (${JSON.stringify(mode)} === 'slow-open' || ${JSON.stringify(mode)} === 'load-with-callback') {
+          send({ id: steer1Id, result: { stopReason: 'end_turn', usage: { outputTokens: 11 } } });
+          return;
+        }
+        if (${JSON.stringify(mode)} === 'combined') {
+          send({ method: 'session/update', params: { sessionId: 'sess-r', update: { sessionUpdate: 'tool_call', toolCallId: 'c-steps',
+            name: 'update_steps', kind: 'edit', title: 'Run update_steps', status: 'in_progress',
+            rawInput: { steps: [{ title: 'Steered step', status: 'done' }] } } } });
+          send({ method: 'session/update', params: { sessionId: 'sess-r', update: { sessionUpdate: 'tool_call', toolCallId: 'c-ask',
+            name: 'ask_question', kind: 'execute', title: 'Run ask_question', status: 'in_progress' } } });
+          send({ id: steer1Id, result: { stopReason: 'end_turn', usage: { outputTokens: 13 } } });
+          return;
+        }
+        send({
+          id: 'perm-steer',
+          method: 'session/request_permission',
+          params: {
+            sessionId: 'sess-r',
+            toolCall: {
+              sessionUpdate: 'tool_call', status: 'pending', toolCallId: 'mcp-steer-1',
+              name: 'call_mcp_tool', kind: 'execute', title: 'MCP Tool Bash',
+              rawInput: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+              args: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+            },
+            options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+          },
+        });
+      } else if (promptCount === 3) {
+        steer2Id = message.id;
+        send({ id: steer1Id, result: { stopReason: 'end_turn' } });
+        send({ method: 'session/update', params: { sessionId: 'sess-r', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'done' } } } });
+        send({ id: steer2Id, result: { stopReason: 'end_turn', usage: { outputTokens: 9 } } });
+      }
+    }
+  }
+});
+process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
+`;
+    fs.writeFileSync(path.join(fixture.dir, 'fake-agy.js'), script, 'utf8');
+    const bridge = startBridge(fixture.env, args);
+    t.after(() => bridge.child.kill());
+    const messages = () => bridge.stdout.text().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    const send = (message) => bridge.child.stdin.write(JSON.stringify(message) + '\n');
+    const reply = async (id, what) => {
+      await waitFor(() => messages().some((m) => m.id === id && !m.method), 8_000, what);
+      return messages().find((m) => m.id === id && !m.method);
+    };
+    const serverMessages = () => (fs.existsSync(logFile)
+      ? fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
+      : []);
+    const execServer = {
+      type: 'http', name: 'cindy_exec', url: 'http://example.test/mcp/cindy_exec', headers: [],
+    };
+    return { fixture, bridge, messages, send, reply, serverMessages, execServer };
+  };
+
+  test('advertises steering and merges concurrent prompts while normalizing MCP tools in remote and guest workspaces', async (t) => {
+    const { bridge, messages, send, reply, serverMessages, execServer } = remoteSteerHarness(t, {
+      args: ['--cindy-remote-workspace', '--cindy-guest-workspace'],
+    });
+    bridge.child.stdin.write(INITIALIZE);
+    const init = await reply(0, 'initialize answer');
+    assert.deepEqual(init.result.agentCapabilities.mcpCapabilities, { http: true });
+    assert.deepEqual(init.result._meta, { retained: true, steering: { supported: true } });
+
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    assert.deepEqual((await reply(1, 'session/new answer')).result, { sessionId: 'sess-r', configOptions: [] });
+
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'first' }] } });
+    await waitFor(() => messages().some((m) => m.method === 'session/update'), 8_000, 'first turn update');
+
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'steer 1' }] } });
+    assert.deepEqual((await reply(3, 'first steer ack')).result, { outcome: 'injected' });
+    await waitFor(() => messages().some((m) => m.method === 'session/request_permission'), 8_000, 'MCP permission during steer');
+    const perm = messages().find((m) => m.method === 'session/request_permission');
+    assert.deepEqual({ title: perm.params.toolCall.title, kind: perm.params.toolCall.kind, rawInput: perm.params.toolCall.rawInput },
+      { title: 'Bash', kind: 'execute', rawInput: { command: 'pwd' } });
+    assert.equal(messages().some((m) => m.id === 2 && !m.method), false, 'original prompt stays open after first prompt settles');
+
+    send({ jsonrpc: '2.0', id: 4, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'steer 2' }] } });
+    assert.deepEqual((await reply(4, 'second steer ack')).result, { outcome: 'injected' });
+    const finalTurn = await reply(2, 'merged final prompt reply');
+    assert.deepEqual(finalTurn.result, { stopReason: 'end_turn', usage: { outputTokens: 9 } });
+
+    // No running turn left: steering asks Cindy to send a regular prompt instead.
+    send({ jsonrpc: '2.0', id: 5, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'late' }] } });
+    assert.deepEqual((await reply(5, 'idle steer reply')).result, { outcome: 'promptRequired', reason: 'noRunningTurn' });
+
+    // Guest isolation still blocks session/list.
+    send({ jsonrpc: '2.0', id: 6, method: 'session/list', params: {} });
+    assert.equal((await reply(6, 'guest session/list refusal')).error.code, -32601);
+
+    const promptsSeen = serverMessages().filter((m) => m.method === 'session/prompt');
+    assert.equal(promptsSeen.length, 3, 'late steer was not forwarded as a prompt');
+    assert.deepEqual(promptsSeen.map((m) => m.params.prompt[0].text), ['first', 'steer 1', 'steer 2']);
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  test('does not advertise steering in remote-workspace mode on prerelease agy versions', async (t) => {
+    const { bridge, reply } = remoteSteerHarness(t, { version: '1.5.14-beta.1' });
+    bridge.child.stdin.write(INITIALIZE);
+    const init = await reply(0, 'initialize answer');
+    assert.deepEqual(init.result.agentCapabilities.mcpCapabilities, { http: true });
+    assert.deepEqual(init.result._meta, { retained: true });
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  test('tracks a prompt queued during the opening phase so steering still attaches to it', async (t) => {
+    const { bridge, send, reply, execServer } = remoteSteerHarness(t, { mode: 'slow-open' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    // Send session/prompt immediately while the restricted agent is still answering its own initialize.
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-first' }] } });
+    await reply(1, 'session/new answer');
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-steer' }] } });
+    assert.deepEqual((await reply(3, 'steer ack after queued prompt')).result, { outcome: 'injected' });
+    assert.deepEqual((await reply(2, 'merged prompt reply')).result, { stopReason: 'end_turn', usage: { outputTokens: 11 } });
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  test('ends the failed open terminally and settles queued requests when restricted initialize fails and exits', async (t) => {
+    const { fixture, bridge, send, reply, serverMessages, execServer } = remoteSteerHarness(t, { mode: 'fail-open' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    // Queue both a prompt and a steering request while the restricted agent is still answering initialize.
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-first' }] } });
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-steer' }] } });
+
+    const openErr = await reply(1, 'failed session/new answer');
+    assert.equal(openErr.error.code, -32000);
+    assert.equal(openErr.error.message, 'restricted init failed');
+    if (official) assert.deepEqual(openErr.error.data, { _meta: { cindy: { kind: 'auth-required' } } });
+    const queuedPromptErr = await reply(2, 'settled queued prompt');
+    assert.equal(queuedPromptErr.error.code, -32600);
+    const queuedSteerErr = await reply(3, 'settled queued steering');
+    assert.equal(queuedSteerErr.error.code, -32600);
+    assert.equal(queuedSteerErr.result, undefined);
+
+    const restrictedPid = readPid(fixture.pidFile);
+    assert.ok(restrictedPid, 'the restricted process had started');
+    await waitFor(() => !isAlive(restrictedPid), 4_000, 'failed restricted agy to exit');
+
+    // After a failed open (even when the child exited immediately), the connection stays terminal until closed:
+    // subsequent prompts, steering, and reopen attempts are all refused without spawning a second child.
+    send({ jsonrpc: '2.0', id: 4, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    send({ jsonrpc: '2.0', id: 5, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'after-fail' }] } });
+    send({ jsonrpc: '2.0', id: 6, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'after-fail-steer' }] } });
+    assert.equal((await reply(4, 'post-failure reopen refusal')).error.code, -32600);
+    assert.equal((await reply(5, 'post-failure prompt refusal')).error.code, -32600);
+    const postSteer = await reply(6, 'post-failure steering refusal');
+    assert.equal(postSteer.error.code, -32600);
+    assert.equal(postSteer.result, undefined);
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.deepEqual(serverMessages().map((m) => m.method), ['initialize']);
+  });
+
+  test('settles queued requests and drops late permission replies when session open is rejected', async (t) => {
+    const { fixture, bridge, messages, send, reply, serverMessages, execServer } = remoteSteerHarness(t, { mode: 'fail-session-open' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/resume', params: { sessionId: 'sess-known', cwd: '/shadow/p', mcpServers: [execServer] } });
+    // Queue prompt and steering for the known sessionId while session/resume is still in flight.
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-known', prompt: [{ type: 'text', text: 'queued-first' }] } });
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-known', prompt: [{ type: 'text', text: 'queued-steer' }] } });
+
+    await waitFor(() => messages().some((m) => m.method === 'session/request_permission' && m.id === 'perm-stale'), 8_000, 'opening permission request');
+    const openErr = await reply(1, 'rejected session/resume answer');
+    assert.deepEqual(openErr.error, { code: -32004, message: 'session not found' });
+    const queuedPromptErr = await reply(2, 'settled queued prompt');
+    assert.equal(queuedPromptErr.error.code, -32600);
+    const queuedSteerErr = await reply(3, 'settled queued steering');
+    assert.equal(queuedSteerErr.error.code, -32600);
+    assert.equal(queuedSteerErr.result, undefined);
+
+    const restrictedPid = readPid(fixture.pidFile);
+    assert.ok(restrictedPid, 'the restricted process had started');
+    await waitFor(() => !isAlive(restrictedPid), 4_000, 'failed restricted agy to stop');
+
+    // A late permission reply from the failed open is dropped silently, and reopen on the failed connection is refused.
+    send({ jsonrpc: '2.0', id: 'perm-stale', result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
+    send({ jsonrpc: '2.0', id: 4, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    assert.equal((await reply(4, 'post-failure reopen refusal')).error.code, -32600);
+    assert.equal(messages().some((m) => m.id === 'perm-stale' && !m.method), false, 'late reply gets no bogus error');
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.deepEqual(serverMessages().map((m) => m.method), ['initialize', 'session/resume']);
+  });
+
+  test('forwards bidirectional replies during session open before replaying queued prompt and steering requests', async (t) => {
+    const { bridge, messages, send, reply, serverMessages, execServer } = remoteSteerHarness(t, { mode: 'load-with-callback' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/load', params: { sessionId: 'sess-r', cwd: '/shadow/p', mcpServers: [execServer] } });
+    // Queue prompt and steering while session/load is waiting on a bidirectional permission callback.
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-first' }] } });
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-steer' }] } });
+
+    await waitFor(() => messages().some((m) => m.method === 'session/request_permission' && m.id === 'perm-load'), 8_000, 'opening permission request');
+    const perm = messages().find((m) => m.method === 'session/request_permission' && m.id === 'perm-load');
+    assert.deepEqual({ title: perm.params.toolCall.title, kind: perm.params.toolCall.kind, rawInput: perm.params.toolCall.rawInput },
+      { title: 'Bash', kind: 'execute', rawInput: { command: 'pwd' } });
+    assert.equal(messages().some((m) => (m.id === 1 || m.id === 3) && !m.method), false, 'queued requests wait for session/load to succeed');
+
+    // Reply to the child's callback while still in opening-session; it must pass straight through.
+    send({ jsonrpc: '2.0', id: 'perm-load', result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
+    assert.deepEqual((await reply(1, 'session/load answer')).result, { configOptions: [] });
+    assert.deepEqual((await reply(3, 'replayed steer ack')).result, { outcome: 'injected' });
+    assert.deepEqual((await reply(2, 'replayed merged prompt reply')).result, { stopReason: 'end_turn', usage: { outputTokens: 11 } });
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.deepEqual(
+      serverMessages().map((m) => m.method ?? `reply:${m.id}`),
+      ['initialize', 'session/load', 'reply:perm-load', 'session/prompt', 'session/prompt'],
+    );
+  });
+
+  test('still abandons the remote-workspace task if agy invokes a local tool during a steered prompt', async (t) => {
+    const { bridge, messages, send, reply, execServer } = remoteSteerHarness(t, { mode: 'native-during-steer' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    await reply(1, 'session/new answer');
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'first' }] } });
+    await waitFor(() => messages().some((m) => m.method === 'session/update'), 8_000, 'first turn update');
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'write locally' }] } });
+    const closed = await Promise.race([bridge.closed, new Promise((resolve) => setTimeout(() => resolve(null), 8_000))]);
+    assert.ok(closed, 'the entry ended the task');
+    assert.equal(closed.code, 78);
+    assert.match(bridge.stderr.text(), /its own tool "write_to_file"/);
+  });
+
+  if (official) test('combines MCP warm-up, same-turn steering, and native card adaptation in one remote-workspace session', async (t) => {
+    const authHeader = `Bearer ${randomUUID()}`;
+    const warmedSessions = new Set();
+    const mcp = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => setTimeout(() => {
+        if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
+        const message = body ? JSON.parse(body) : {};
+        const sid = req.headers['mcp-session-id'];
+        if (req.method === 'GET') return res.writeHead(405).end();
+        if (req.method === 'DELETE') {
+          warmedSessions.delete(sid);
+          return res.writeHead(200).end();
+        }
+        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+        if (!sid) {
+          const id = `warm-${warmedSessions.size}`;
+          warmedSessions.add(id);
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
+          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
+        }
+        if (message.id === undefined) return res.writeHead(202).end();
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [{ name: 'Bash', inputSchema: { type: 'object' } }] } }));
+      }, 60));
+    });
+    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
+    t.after(() => mcp.close());
+
+    const { bridge, messages, send, reply, serverMessages } = remoteSteerHarness(t, { mode: 'combined' });
+    send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { elicitation: { form: {} } } },
+    });
+    const init = await reply(0, 'initialize answer');
+    assert.deepEqual(init.result.agentCapabilities.mcpCapabilities, { http: true });
+    assert.deepEqual(init.result._meta, { retained: true, steering: { supported: true } });
+
+    const exec = {
+      type: 'http',
+      name: 'cindy_exec',
+      url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
+      headers: [{ name: 'Authorization', value: authHeader }],
+    };
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec] } });
+    await reply(1, 'session/new answer');
+    const openMsg = serverMessages().find((m) => m.method === 'session/new');
+    assert.equal(warmedSessions.size, 1, 'MCP warm-up completed before session/new reached agy');
+    assert.match(openMsg.params.mcpServers[0].url, /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{32}\/0$/);
+
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'start' }] } });
+    await waitFor(() => messages().some((m) => m.method === 'session/update'), 8_000, 'first turn update');
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'steer with cards' }] } });
+    assert.deepEqual((await reply(3, 'steer ack')).result, { outcome: 'injected' });
+    assert.deepEqual((await reply(2, 'merged prompt reply')).result, { stopReason: 'end_turn', usage: { outputTokens: 13 } });
+
+    const updates = messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates.slice(1), [
+      { sessionUpdate: 'plan', entries: [{ content: 'Steered step', priority: 'medium', status: 'completed' }] },
+      { sessionUpdate: 'tool_call', toolCallId: 'c-ask', name: 'AskUserQuestion', kind: 'execute', title: 'AskUserQuestion', status: 'in_progress' },
+    ]);
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  // Why: if MCP warm-up succeeded before session/resume was rejected (agy never consumed the warmed session),
+  // failOpen must delete that unhanded upstream session once and closing the bridge must not delete it again.
+  if (official) test('deletes unhanded warmed MCP sessions once when remote session open fails', async (t) => {
+    const authHeader = `Bearer ${randomUUID()}`;
+    const activeSessions = new Set();
+    const deletedSessions = [];
+    const mcp = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
+        const sid = req.headers['mcp-session-id'];
+        if (req.method === 'GET') return res.writeHead(405).end();
+        if (req.method === 'DELETE') {
+          deletedSessions.push(sid);
+          activeSessions.delete(sid);
+          return res.writeHead(200).end();
+        }
+        const message = body ? JSON.parse(body) : {};
+        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+        if (!sid) {
+          const id = `warm-fail-${activeSessions.size}`;
+          activeSessions.add(id);
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
+          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
+        }
+        if (message.id === undefined) return res.writeHead(202).end();
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [{ name: 'Bash', inputSchema: { type: 'object' } }] } }));
+      });
+    });
+    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
+    t.after(() => mcp.close());
+
+    const { bridge, send, reply } = remoteSteerHarness(t, { mode: 'fail-session-open' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    const exec = {
+      type: 'http',
+      name: 'cindy_exec',
+      url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
+      headers: [{ name: 'Authorization', value: authHeader }],
+    };
+    send({ jsonrpc: '2.0', id: 1, method: 'session/resume', params: { sessionId: 'sess-known', cwd: '/shadow/p', mcpServers: [exec] } });
+    const openErr = await reply(1, 'rejected session/resume answer');
+    assert.equal(openErr.error.code, -32004);
+    await waitFor(() => deletedSessions.length === 1, 4_000, 'unhanded warmed MCP session deleted on failOpen');
+    assert.equal(activeSessions.size, 0, 'warmed upstream session was closed');
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(deletedSessions.length, 1, 'closing the bridge did not send a duplicate DELETE');
+  });
 });
