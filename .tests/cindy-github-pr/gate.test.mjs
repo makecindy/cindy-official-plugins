@@ -363,7 +363,8 @@ test('a partially failed batch reports its final result once even with no new fa
   let first = await fx.run();
   assert.equal(first.code, 0);
   assert.match(first.stdout, /checks-failed/);
-  assert.match(first.stdout, /notify the user \(schedule_notify_current_run\)/);
+  assert.doesNotMatch(first.stdout, /schedule_notify_current_run/);
+  assert.match(first.stdout, /stay silent if you fix and push for CI/);
   assert.equal((await fx.run(['--resume', 'Inspected the initial failure.'])).code, 0);
   fx.advance(5);
   fx.setSnapshot({ ...red, checks: [red.checks[0], check('lint'), red.checks[2]] });
@@ -375,7 +376,8 @@ test('a partially failed batch reports its final result once even with no new fa
   assert.equal(final.code, 0);
   assert.match(final.stdout, /checks-finished/);
   assert.match(final.stdout, /All 3 checks finished.*1 still failed/);
-  assert.match(final.stdout, /notify the user \(schedule_notify_current_run\)/);
+  assert.doesNotMatch(final.stdout, /schedule_notify_current_run/);
+  assert.match(final.stdout, /stay silent if you fix and push for CI/);
   fx.advance(5);
   assert.match((await fx.run()).stdout, /retry-unacked/);
   assert.equal((await fx.run(['--resume', 'Reported the final failure.'])).code, 0);
@@ -388,6 +390,34 @@ test('a partially failed batch reports its final result once even with no new fa
   assert.equal((await fresh.run(['--resume', 'Reported the failure.'])).code, 0);
   fresh.advance(5);
   assert.equal((await fresh.run()).code, 2);
+});
+
+test('a check failure stuck across backoff cycles still notifies without a contradictory stay-silent hint', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fx.setSnapshot(red);
+  // 3 normal unacked attempts (spaced >= 6 min so each counts as a real run).
+  for (let i = 0; i < 3; i += 1) {
+    if (i > 0) fx.advance(10);
+    const res = await fx.run();
+    assert.equal(res.code, 0);
+    assert.doesNotMatch(res.stdout, /schedule_notify_current_run/);
+  }
+  // Backoff cycles 1 and 2: still below STUCK_NOTIFY_BACKOFF_CYCLES (3).
+  for (let cycle = 1; cycle <= 2; cycle += 1) {
+    fx.advance(35);
+    const res = await fx.run();
+    assert.equal(res.code, 0);
+    assert.match(res.stdout, /retry-backoff-attempt/);
+    assert.doesNotMatch(res.stdout, /schedule_notify_current_run/);
+  }
+  // Backoff cycle 3: crosses stuck threshold, must instruct notification and omit stay-silent.
+  fx.advance(35);
+  const stuck = await fx.run();
+  assert.equal(stuck.code, 0);
+  assert.match(stuck.stdout, /schedule_notify_current_run/);
+  assert.doesNotMatch(stuck.stdout, /stay silent if you fix and push for CI/);
 });
 
 test('a new schedule observes an existing failure even if a stopped follower had acknowledged it', async (t) => {
