@@ -247,7 +247,7 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     const list = await agyRequest(given.url, { message: { jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }, sid: init.sid });
     assert.deepEqual(list.body.result.tools.map((tool) => tool.name), ['Bash']);
     assert.deepEqual(log.slice(-1)[0], { method: 'POST', rpc: 'tools/list', sid: init.sid, id: 3 }, 'tools/list was not answered from the warm-up');
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    for (let i = 0; i < 60 && sessions.has(warmedSession); i += 1) await new Promise((resolve) => setTimeout(resolve, 50));
     assert.ok(!sessions.has(warmedSession), 'the unused warmed session was ended');
   });
 
@@ -256,7 +256,7 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     const warmup = warmMcpServers([entry]);
     t.after(() => warmup.close());
     assert.deepEqual(await warmup.ready, [entry], 'agy connects directly');
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    for (let i = 0; i < 60 && sessions.size > 0; i += 1) await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(sessions.size, 0, 'no session is left open on the other computer');
     assert.equal(log.at(-1).method, 'DELETE');
   });
