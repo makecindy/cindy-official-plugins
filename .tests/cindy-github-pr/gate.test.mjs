@@ -16,6 +16,8 @@ import {
   normalizeConflicting,
   parseTarget,
   passAdvisories,
+  canSkipWithProbe,
+  mustFullReadBeforeProbe,
   probeAllowsSkip,
   stateFilePath,
   adoptLegacyStateFile,
@@ -58,6 +60,7 @@ function createFixture(t) {
   let probe = null;
   let trigger = null;
   let snapshotRuns = 0;
+  let probeRuns = 0;
 
   // 端到端用例按分钟推进时钟;默认关掉最小放行间隔判据,它有专门用例。
   const gateArgs = (extraArgs) => [
@@ -90,6 +93,7 @@ function createFixture(t) {
     },
     now: () => clock,
     snapshotRuns: () => snapshotRuns,
+    probeRuns: () => probeRuns,
     readState() {
       return JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'));
     },
@@ -121,7 +125,10 @@ function createFixture(t) {
             stderr: env.FAKE_SNAPSHOT_STDERR ?? '',
           };
         },
-        runProbe: async () => (probe ? { code: 0, stdout: JSON.stringify(probe), stderr: '' } : { code: 1, stdout: '', stderr: '' }),
+        runProbe: async () => {
+          probeRuns += 1;
+          return probe ? { code: 0, stdout: JSON.stringify(probe), stderr: '' } : { code: 1, stdout: '', stderr: '' };
+        },
         readTrigger: async () => trigger,
         out: (text) => { stdout += text; },
         err: (text) => { stderr += text; },
@@ -3213,4 +3220,163 @@ process.exit(2);
   );
   assert.equal(diagFresh.status, 0, diagFresh.stderr);
   assert.equal(fs.existsSync(freshDir), false, 'diagnostic run must not create inherited CINDY_PR_STATE_DIR');
+});
+
+test('replay: settled baseline wait paces at 15m, uses probe, absorbs subsequent base commits, and wakes on news or deadline', async (t) => {
+  const fx = createFixture(t);
+  const s = baselineBlocked();
+  const baseProbe = { status: 'OPEN false MERGEABLE aaa1111  FAILURE:1,SUCCESS:1', remarks: '0  0  0 0', base: 'base-0' };
+  fx.setProbe(baseProbe);
+  fx.setSnapshot(s);
+  assert.equal((await fx.run(['--pacing', '--json'])).code, 0);
+  // Step 0 (15m) -> expire -> Step 1 (30m) -> expire -> Step 2 (60m) -> expire -> Step 3 (120m)
+  for (let step = 0; step < 3; step += 1) {
+    const set = (await fx.run(['--wait', fx.writeWait(baselinePlan(s)), '--json'])).json();
+    fx.advance((set.wait.until - fx.now()) / MIN);
+    assert.equal((await fx.run(['--pacing', '--json'])).json().reason, 'wait-expired');
+  }
+  const long = (await fx.run(['--wait', fx.writeWait(baselinePlan(s)), '--json'])).json();
+  assert.equal(long.wait.until - fx.now(), 120 * MIN);
+  // Ensure we have a fresh probe baseline after the wait-expired full read (which skipped probe).
+  fx.writeState({ probe: baseProbe, lastFullReadAt: fx.now() });
+
+  // 5m and 10m ticks are skipped immediately with 0 probes and 0 snapshots.
+  let snaps = fx.snapshotRuns();
+  let probes = fx.probeRuns();
+  for (const step of [5, 5]) {
+    fx.advance(step);
+    const r = await fx.run(['--pacing', '--json']);
+    assert.equal(r.code, 2);
+    assert.equal(r.json().reason, 'not-due');
+    assert.match(r.json().detail, /pace=backoff/);
+  }
+  assert.equal(fx.probeRuns(), probes, 'not-due ticks must not call probe');
+  assert.equal(fx.snapshotRuns(), snaps, 'not-due ticks must not call snapshot');
+
+  // 15m tick: unchanged probe skips full snapshot (1 probe, 0 snapshots).
+  fx.advance(5);
+  let r = await fx.run(['--pacing', '--json']);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().reason, 'unchanged');
+  assert.equal(fx.probeRuns(), probes + 1);
+  assert.equal(fx.snapshotRuns(), snaps);
+
+  // First base commit arrives on the next 15m tick: must pierce probe so baseMovedAt & 60m clamp are recorded.
+  fx.advance(10);
+  assert.equal((await fx.run(['--pacing', '--json'])).json().reason, 'not-due');
+  fx.advance(5);
+  fx.setProbe({ ...baseProbe, base: 'base-1' });
+  fx.setSnapshot({ ...s, baseCommitOid: 'base-1' });
+  snaps = fx.snapshotRuns();
+  probes = fx.probeRuns();
+  r = await fx.run(['--pacing', '--json']);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().reason, 'waiting');
+  assert.equal(fx.snapshotRuns(), snaps + 1, 'first base move reads in full to record baseMovedAt');
+  assert.ok(fx.readState().wait.baseMovedAt, 'baseMovedAt recorded on first base move');
+  const clampedUntil = fx.readState().wait.until;
+  assert.equal(clampedUntil, fx.now() + 60 * MIN, '120m wait pulled within 60m of first base move');
+
+  // Subsequent base commit 15m later is absorbed right at the probe without a full snapshot.
+  fx.advance(15);
+  fx.setProbe({ ...baseProbe, base: 'base-2' });
+  fx.setSnapshot({ ...s, baseCommitOid: 'base-2' });
+  snaps = fx.snapshotRuns();
+  probes = fx.probeRuns();
+  r = await fx.run(['--pacing', '--json']);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().reason, 'unchanged');
+  assert.equal(fx.probeRuns(), probes + 1);
+  assert.equal(fx.snapshotRuns(), snaps, 'subsequent base commit absorbed at probe');
+
+  // New human comment still pierces probe immediately at the next 15m tick and wakes the agent.
+  fx.advance(15);
+  fx.setProbe({ ...baseProbe, base: 'base-2', remarks: '1 2026-10-20T15:00:00Z 0  0 0' });
+  fx.setSnapshot({ ...s, baseCommitOid: 'base-2', comments: [comment('c-new', 'reviewer', iso(fx.now()), 'Please rebase now')] });
+  r = await fx.run(['--pacing', '--json']);
+  assert.equal(r.code, 0);
+  assert.equal(r.json().reason, 'changed');
+  assert.match(r.json().report, /Please rebase now/);
+});
+
+test('replay: skips redundant probe when state already requires a full read', async (t) => {
+  const fx = createFixture(t);
+  const p0 = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0 0', base: 'base-0' };
+  fx.setProbe(p0);
+
+  // 1. inFlight (checks running): skips probe on subsequent ticks while CI runs.
+  const running = snap({ checks: [check('build', 'pending', { required: true })], verdict: 'WAITING_CI' });
+  fx.setSnapshot({ ...running, probe: p0 });
+  await fx.run(['--json']);
+  assert.equal(fx.readState().inFlight, true);
+  assert.equal(fx.readState().snapshotProvidesProbe, true);
+  let probes = fx.probeRuns();
+  let snaps = fx.snapshotRuns();
+  fx.advance(5);
+  assert.equal((await fx.run(['--pacing', '--json'])).code, 2);
+  assert.equal(fx.probeRuns(), probes, 'inFlight must skip redundant probe');
+  assert.equal(fx.snapshotRuns(), snaps + 1);
+
+  // 2. pendingWatch (unacked event): skips probe on retry.
+  const green = snap({ verdict: 'READY', probe: p0 });
+  fx.setSnapshot(green);
+  fx.advance(5);
+  assert.equal((await fx.run(['--pacing', '--json'])).code, 0);
+  assert.ok(fx.readState().pendingWatch);
+  probes = fx.probeRuns();
+  snaps = fx.snapshotRuns();
+  fx.advance(5);
+  assert.equal((await fx.run(['--pacing', '--json'])).json().reason, 'retry-unacked');
+  assert.equal(fx.probeRuns(), probes, 'pendingWatch retry must skip redundant probe');
+  assert.equal(fx.snapshotRuns(), snaps + 1);
+  assert.equal((await fx.run(['--ack'])).code, 0);
+
+  // 3. 30m full reread when snapshot embeds snap.probe: skips probe AND refreshes probe baseline.
+  const p1 = { ...p0, status: 'OPEN false MERGEABLE aaa1111  SUCCESS:3' };
+  fx.setProbe(p1);
+  fx.setSnapshot({ ...green, probe: p1 });
+  probes = fx.probeRuns();
+  snaps = fx.snapshotRuns();
+  fx.advance(31);
+  assert.equal((await fx.run(['--pacing', '--json'])).code, 2);
+  assert.equal(fx.probeRuns(), probes, '30m reread skips probe when snapshotProvidesProbe is true');
+  assert.equal(fx.snapshotRuns(), snaps + 1);
+  assert.deepEqual(fx.readState().probe, p1, 'probe baseline refreshed from snap.probe');
+
+  // Next tick within 30m still uses probe and skips full snapshot.
+  fx.writeState({ lastPassAt: fx.now() - 10 * MIN }); // active window so 5m tick is due
+  probes = fx.probeRuns();
+  snaps = fx.snapshotRuns();
+  fx.advance(5);
+  const skipped = await fx.run(['--pacing', '--json']);
+  assert.equal(skipped.code, 2);
+  assert.equal(skipped.json().reason, 'unchanged');
+  assert.equal(fx.probeRuns(), probes + 1);
+  assert.equal(fx.snapshotRuns(), snaps);
+
+  // 4. Open bot settle window: skips probe.
+  fx.writeState({ settleUntil: fx.now() + 15 * MIN });
+  probes = fx.probeRuns();
+  snaps = fx.snapshotRuns();
+  fx.advance(5);
+  await fx.run(['--pacing', '--json']);
+  assert.equal(fx.probeRuns(), probes, 'settling window must skip redundant probe');
+  assert.equal(fx.snapshotRuns(), snaps + 1);
+
+  // 5. Due wait deadline: skips probe and goes straight to full snapshot.
+  fx.writeState({ settleUntil: undefined, wait: { kind: 'retry', headSha: 'aaa1111', reason: 'recheck', createdAt: fx.now() - 15 * MIN, until: fx.now(), checks: [], threads: [], reviewDecision: green.reviewDecision, blockers: green.blockers, threadStates: [] } });
+  probes = fx.probeRuns();
+  snaps = fx.snapshotRuns();
+  const expired = await fx.run(['--pacing', '--json']);
+  assert.equal(expired.json().reason, 'wait-expired');
+  assert.equal(fx.probeRuns(), probes, 'due wait must skip redundant probe');
+  assert.equal(fx.snapshotRuns(), snaps + 1);
+
+  // 6. Pure unit checks on mustFullReadBeforeProbe / canSkipWithProbe.
+  const quiet = { watch: freshWatch(green, T0), probe: p1, lastFullReadAt: T0, lastPassAt: T0 };
+  assert.equal(mustFullReadBeforeProbe(quiet, T0 + 5 * MIN), false);
+  assert.equal(canSkipWithProbe(quiet, T0 + 5 * MIN), true);
+  assert.equal(mustFullReadBeforeProbe({ ...quiet, merged: true }, T0 + 5 * MIN), true);
+  assert.equal(canSkipWithProbe(quiet, T0 + 31 * MIN), false);
+  assert.equal(mustFullReadBeforeProbe(quiet, T0 + 31 * MIN), false, '30m reread handled separately so legacy snapshots keep refreshing probe');
 });
