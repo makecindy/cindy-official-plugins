@@ -586,3 +586,180 @@ process.exit(2);
   const calls = fs.readFileSync(logFile, 'utf8').trim().split('\n').map(line => JSON.parse(line));
   assert.deepEqual(calls, [['--version'], ['api', 'repos/acme/game/pulls/54']]);
 });
+
+nodeTest('ghJsonConditional handles HTTP 200 ETag and HTTP 304 Not Modified without retries or exit', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim / symlink' : false }, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-cond-etag-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const logFile = path.join(dir, 'calls.log');
+  fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + '\\n');
+const hIdx = args.indexOf('-H');
+const ifNoneMatch = hIdx >= 0 ? args[hIdx + 1] : '';
+if (ifNoneMatch === 'If-None-Match: W/"v1"') {
+  process.stdout.write('HTTP/2.0 304 Not Modified\\r\\nETag: W/"v1"\\r\\nX-RateLimit-Remaining: 4999\\r\\n\\r\\n');
+  process.stderr.write('gh: HTTP 304\\n');
+  process.exit(1);
+}
+process.stdout.write('HTTP/2.0 200 OK\\r\\nETag: W/"v1"\\r\\nContent-Type: application/json\\r\\n\\r\\n{"ok":true}');
+process.exit(0);
+`, { mode: 0o755 });
+  const moduleUrl = new URL('../../cindy-github/skills/pr/scripts/lib/gh.mjs', import.meta.url).href;
+  const run = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import { ghJsonConditional } from ${JSON.stringify(moduleUrl)};
+    const first = await ghJsonConditional('repos/acme/game/pulls/1');
+    const second = await ghJsonConditional('repos/acme/game/pulls/1', { etag: first.etag });
+    process.stdout.write(JSON.stringify({ first, second }));
+  `], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, GH_LOG: logFile },
+  });
+  assert.equal(run.status, 0, run.stderr);
+  const { first, second } = JSON.parse(run.stdout);
+  assert.equal(first.notModified, false);
+  assert.equal(first.etag, 'W/"v1"');
+  assert.deepEqual(first.data, { ok: true });
+  assert.equal(second.notModified, true);
+  assert.equal(second.etag, 'W/"v1"');
+  assert.equal(second.data, null);
+  const calls = fs.readFileSync(logFile, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(calls.length, 2, '304 must not trigger retries');
+  assert.ok(calls[1].includes('If-None-Match: W/"v1"'));
+});
+
+nodeTest('pr-snapshot --state-dir revalidates REST pulls and shared repo branch rules via live ETag 304 without staleness', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim / symlink' : false }, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-snapshot-etag-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const logFile = path.join(dir, 'gh.log');
+  const cfgFile = path.join(dir, 'cfg.json');
+  fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+const cfg = JSON.parse(fs.readFileSync(process.env.CFG_FILE, 'utf8'));
+if (args[0] === '--version') process.exit(0);
+const hIdx = args.indexOf('-H');
+const ifNoneMatch = hIdx >= 0 ? args[hIdx + 1] : '';
+const record = (kind, status) => fs.appendFileSync(process.env.GH_LOG, JSON.stringify({ kind, path: args[1] ?? '', ifNoneMatch, status }) + '\\n');
+if (args[0] === 'pr' && args[1] === 'view') {
+  record('pr-view', 200);
+  process.stdout.write(JSON.stringify({ headRefOid: cfg.headSha, statusCheckRollup: cfg.rollup }));
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1] === 'graphql') {
+  record('graphql', 200);
+  process.stdout.write(JSON.stringify({
+    data: {
+      viewer: { login: cfg.viewer },
+      repository: {
+        pullRequest: {
+          state: 'OPEN', headRefOid: cfg.headSha, mergeStateStatus: 'CLEAN', baseRefName: 'main',
+          baseRef: { target: { oid: 'base-1' }, branchProtectionRule: null },
+          reviewThreads: { nodes: [] }, mergeQueueEntry: null, timelineItems: { nodes: [] },
+        },
+      },
+    },
+  }));
+  process.exit(0);
+}
+if (args[0] === 'api' && /^repos\\/acme\\/game\\/pulls\\/\\d+$/.test(args[1])) {
+  const expected = 'If-None-Match: ' + cfg.pullEtag;
+  if (ifNoneMatch === expected) {
+    record('pull', 304);
+    process.stdout.write('HTTP/2.0 304 Not Modified\\nETag: ' + cfg.pullEtag + '\\n\\n');
+    process.stderr.write('gh: HTTP 304\\n');
+    process.exit(1);
+  }
+  record('pull', 200);
+  process.stdout.write(
+    'HTTP/2.0 200 OK\\nETag: ' + cfg.pullEtag + '\\n\\n' +
+    JSON.stringify({
+      base: { sha: 'base-1' }, head: { sha: cfg.headSha }, mergeable: true, state: 'open',
+      html_url: 'https://github.com/acme/game/pull/' + args[1].split('/').pop(),
+    }),
+  );
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1].includes('/rules/branches/')) {
+  if (cfg.rulesError) {
+    record('rules', 500);
+    process.stderr.write(cfg.rulesError + '\\n');
+    process.exit(1);
+  }
+  const expected = 'If-None-Match: ' + cfg.rulesEtag;
+  if (ifNoneMatch === expected) {
+    record('rules', 304);
+    process.stdout.write('HTTP/2.0 304 Not Modified\\nETag: ' + cfg.rulesEtag + '\\n\\n');
+    process.stderr.write('gh: HTTP 304\\n');
+    process.exit(1);
+  }
+  record('rules', 200);
+  process.stdout.write('HTTP/2.0 200 OK\\nETag: ' + cfg.rulesEtag + '\\n\\n' + JSON.stringify(cfg.rules));
+  process.exit(0);
+}
+process.stderr.write('Unexpected gh call: ' + args.join(' ') + '\\n');
+process.exit(2);
+`, { mode: 0o755 });
+
+  const runSnap = (prNumber, cfg, extraArgs = [], expectedStatus = 0) => {
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg));
+    fs.writeFileSync(logFile, '');
+    const res = spawnSync(process.execPath, [script, `https://github.com/acme/game/pull/${prNumber}`, '--state-dir', stateDir, ...extraArgs], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, GH_LOG: logFile, CFG_FILE: cfgFile },
+    });
+    assert.equal(res.status, expectedStatus, res.stderr);
+    const calls = fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+    return { snap: JSON.parse(res.stdout), calls };
+  };
+
+  const baseCfg = {
+    viewer: 'alice',
+    headSha: 'head-1',
+    pullEtag: 'W/"pull-v1"',
+    rulesEtag: 'W/"rules-v1"',
+    rules: [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'late-test' }] } }],
+    rollup: [{ __typename: 'CheckRun', name: 'PR check', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+  };
+
+  // 1. First snapshot of PR #54 primes both pull and shared repo rules caches (200).
+  const r1 = runSnap(54, baseCfg);
+  assert.equal(r1.snap.verdict, 'WAITING_CI');
+  assert.equal(r1.calls.find(c => c.kind === 'pull').status, 200);
+  assert.equal(r1.calls.find(c => c.kind === 'rules').status, 200);
+
+  // 2. Second snapshot of PR #54 hits 304 for both pull and rules (including under --strict-exit live revalidation).
+  // --strict-exit exits 10 for WAITING_CI while still printing the snapshot JSON.
+  const r2 = runSnap(54, baseCfg, ['--expect-head', 'head-1', '--strict-exit'], 10);
+  assert.equal(r2.snap.verdict, 'WAITING_CI');
+  assert.equal(r2.calls.find(c => c.kind === 'pull').status, 304);
+  assert.equal(r2.calls.find(c => c.kind === 'rules').status, 304);
+
+  // 3. Another PR (#55) in the same repo & viewer reuses the shared rules ETag immediately (rules 304, pull 200).
+  const r3 = runSnap(55, baseCfg);
+  assert.equal(r3.snap.verdict, 'WAITING_CI');
+  assert.equal(r3.calls.find(c => c.kind === 'pull').status, 200);
+  assert.equal(r3.calls.find(c => c.kind === 'rules').status, 304);
+
+  // 4. Different viewer does NOT reuse alice's rules cache entry (viewer isolation).
+  const r4 = runSnap(55, { ...baseCfg, viewer: 'bob' });
+  assert.equal(r4.calls.find(c => c.kind === 'rules').ifNoneMatch, '');
+  assert.equal(r4.calls.find(c => c.kind === 'rules').status, 200);
+
+  // 5. When rules change on GitHub (new ETag), live revalidation gets 200 immediately (zero staleness).
+  const r5 = runSnap(54, { ...baseCfg, rulesEtag: 'W/"rules-v2"', rules: [] });
+  assert.equal(r5.snap.verdict, 'READY');
+  assert.equal(r5.calls.find(c => c.kind === 'rules').status, 200);
+
+  // 6. When pull changes (new head & ETag), pull gets 200 and updates cache.
+  const r6 = runSnap(54, { ...baseCfg, headSha: 'head-2', pullEtag: 'W/"pull-v2"', rulesEtag: 'W/"rules-v2"', rules: [] });
+  assert.equal(r6.snap.latestCommitOid, 'head-2');
+  assert.equal(r6.calls.find(c => c.kind === 'pull').status, 200);
+  assert.equal(r6.calls.find(c => c.kind === 'rules').status, 304);
+
+  // 7. Rules error is never masked by cached rules.
+  const r7 = runSnap(54, { ...baseCfg, headSha: 'head-2', pullEtag: 'W/"pull-v2"', rulesError: 'gh: Resource not accessible (HTTP 403)' });
+  assert.equal(r7.snap.gate.requiredChecksUnavailable, true);
+  assert.notEqual(r7.snap.verdict, 'READY');
+});

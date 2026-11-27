@@ -2538,3 +2538,104 @@ test('replay refuses to call a trace complete when a recorded round is missing',
   const holed = await replay([lines[0], lines[1], lines[3]]);
   assert.equal(holed.complete, false); assert.equal(holed.gaps, 1);
 });
+
+test('reconcile watch trigger bypasses pacing but runs lightweight probe first; real status watch still reads in full', async (t) => {
+  const fx = createFixture(t);
+  const s = snap();
+  const baseProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0 0', base: 'base-1' };
+  fx.setSnapshot(s);
+  fx.setProbe(baseProbe);
+  assert.equal((await fx.run(['--json'])).code, 0);
+  assert.equal((await fx.run(['--ack', '--json'])).code, 0);
+  // Seed lastProbe so probeAllowsSkip can match.
+  fx.writeState({ probe: baseProbe });
+  const runsAfterAck = fx.snapshotRuns();
+
+  // Within the 30-min waiting pace (5 min later), an ordinary tick would be not-due.
+  // A host `reconcile` watch trigger bypasses pacing, runs --probe, sees unchanged, and skips with 0 full snapshots.
+  fx.advance(5);
+  fx.setTrigger({ kind: 'watch', source: 'pr-status', detail: PR_URL, reason: 'reconcile' });
+  const unchanged = await fx.run(['--pacing', '--json']);
+  assert.equal(unchanged.code, 2);
+  assert.equal(unchanged.json().reason, 'unchanged');
+  assert.equal(fx.snapshotRuns(), runsAfterAck, 'unchanged reconcile trigger must not run a full snapshot');
+
+  // If the probe actually changed (e.g. a new comment arrived during webhook overflow), reconcile runs the full snapshot.
+  fx.advance(5);
+  fx.setProbe({ ...baseProbe, remarks: '1 2026-10-20T10:09:00Z 0  0 0' });
+  fx.setSnapshot(snap({ comments: [comment('C-missed', 'reviewer', iso(fx.now()), 'missed comment')] }));
+  const changed = await fx.run(['--pacing', '--json']);
+  assert.equal(changed.code, 0);
+  assert.equal(fx.snapshotRuns(), runsAfterAck + 1);
+  assert.match(changed.json().report, /missed comment/);
+  assert.equal((await fx.run(['--ack', '--json'])).code, 0);
+  const updatedProbe = { ...baseProbe, remarks: '1 2026-10-20T10:09:00Z 0  0 0' };
+  fx.writeState({ probe: updatedProbe });
+
+  // A non-reconcile watch trigger (explicit pr-status change such as mergeStateStatus -> BEHIND)
+  // still skips the probe and runs a full snapshot even when the probe fingerprint is unchanged.
+  fx.advance(5);
+  fx.setTrigger({ kind: 'watch', source: 'pr-status', detail: PR_URL });
+  const runsBeforeWatch = fx.snapshotRuns();
+  fx.setSnapshot(snap({
+    comments: [comment('C-missed', 'reviewer', iso(fx.now() - 5 * MIN), 'missed comment')],
+    mergeStateStatus: 'BEHIND',
+  }));
+  const explicitWatch = await fx.run(['--pacing', '--json']);
+  assert.equal(explicitWatch.code, 2);
+  assert.equal(fx.snapshotRuns(), runsBeforeWatch + 1, 'real pr-status change must still read full snapshot');
+});
+
+test('real CLI preserves trigger.reason=reconcile from host stdin and passes --state-dir to pr-snapshot', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-gate-reconcile-cli-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const argvLog = path.join(dir, 'snap-argv.log');
+  const fakeSnap = path.join(dir, 'fake-snap.mjs');
+  const s = snap();
+  const baseProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0 0', base: 'base-1' };
+  fs.writeFileSync(fakeSnap, `
+import fs from 'node:fs';
+fs.appendFileSync(${JSON.stringify(argvLog)}, JSON.stringify(process.argv.slice(2)) + '\\n');
+if (process.argv.includes('--probe')) {
+  process.stdout.write(${JSON.stringify(JSON.stringify(baseProbe))});
+} else {
+  process.stdout.write(${JSON.stringify(JSON.stringify(s))});
+}
+`, 'utf8');
+
+  const invoke = (extra = [], payload = null) => spawnSync(
+    process.execPath,
+    [gatePath, PR_URL, '--state-dir', stateDir, '--snapshot', fakeSnap, '--min-pass-spacing-minutes', '0', ...extra],
+    { encoding: 'utf8', input: payload ? JSON.stringify(payload) : '', env: { ...process.env, CINDY_PR_TRACE: '0' } },
+  );
+
+  // First full snapshot should receive --state-dir <stateDir>.
+  const first = invoke(['--no-pacing', '--json']);
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(invoke(['--ack', '--json']).status, 0);
+  const firstCalls = fs.readFileSync(argvLog, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  assert.ok(firstCalls.some(argv => !argv.includes('--probe') && argv.includes('--state-dir') && argv.includes(stateDir)),
+    'full snapshot invocation must receive --state-dir');
+
+  // Seed probe to match fakeSnap's probe output, then send host reconcile trigger via stdin.
+  const statePath = stateFilePath(stateDir, REPO, NUMBER);
+  const saved = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  saved.probe = baseProbe;
+  fs.writeFileSync(statePath, JSON.stringify(saved));
+  fs.writeFileSync(argvLog, '');
+
+  const rec = invoke(['--pacing', '--json'], {
+    event: 'schedule-pre-run',
+    scheduleId: 'sched-1',
+    runId: 'run-2',
+    lastFinishedAt: Date.now() - 60_000,
+    firedAt: Date.now(),
+    trigger: { kind: 'watch', source: 'pr-status', detail: PR_URL, reason: 'reconcile' },
+  });
+  assert.equal(rec.status, 2, rec.stderr);
+  assert.equal(JSON.parse(rec.stdout).reason, 'unchanged');
+  const recCalls = fs.readFileSync(argvLog, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  assert.equal(recCalls.length, 1, 'reconcile trigger should only run --probe when unchanged');
+  assert.ok(recCalls[0].includes('--probe'));
+});

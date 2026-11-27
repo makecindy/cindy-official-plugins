@@ -1314,11 +1314,13 @@ function promotePending(state, now) {
 }
 
 /** 跑快照。永不 throw:把退出码与输出原样交回,由调用方翻译成协议语义。 */
-function runSnapshot(snapshotPath, repo, number) {
+function runSnapshot(snapshotPath, repo, number, stateDir = null) {
   return new Promise((resolve) => {
+    const argv = [snapshotPath, String(number), '--repo', repo];
+    if (stateDir) argv.push('--state-dir', stateDir);
     execFile(
       process.execPath,
-      [snapshotPath, String(number), '--repo', repo],
+      argv,
       { encoding: 'utf8', maxBuffer: SNAPSHOT_MAX_BUFFER },
       (err, stdout, stderr) => {
         resolve({
@@ -1638,7 +1640,11 @@ async function gateMain(argv, ctx) {
     emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
     return EXIT_SKIP;
   }
-  // 宿主看到这个 PR 的状态变了而提前触发的一轮:不看节奏,也不做探测(宿主已经知道有变化)。
+  const isReconcileWatch = hookTrigger?.kind === 'watch' && hookTrigger?.reason === 'reconcile';
+  const targetedWait = Boolean(previous?.wait && (previous.wait.checks.length > 0 || previous.wait.threads.length > 0));
+  // 宿主看到这个 PR 的状态变了而提前触发的一轮:不看节奏;明确状态变化直接完整读取,
+  // 但 overflow/重连补查 (reason='reconcile') 先走轻量 --probe 验证是否真有评论或状态变化,
+  // 避免未变化的 PR 在补查扫表时反复拉全量快照。
   const triggered = args.triggered || (hookTrigger?.kind === 'watch') || newFollow || diagnostic;
   // Neither an idle tick nor an unchanged summary proves that a failed snapshot recovered.
   const recovering = previous?.consecutiveSnapshotFailures > 0;
@@ -1661,10 +1667,12 @@ async function gateMain(argv, ctx) {
   // 先问一句「有没有变」:一个很小的查询,与上次完整读取时一致就不做三四个接口的完整读取。
   // Counts alone cannot reveal a named check's rerun or a thread being resolved/replied to.
   // While explicitly waiting on those items, inspect them each tick rather than waiting 30 minutes.
-  const targetedWait = previous?.wait && (previous.wait.checks.length > 0 || previous.wait.threads.length > 0);
-  const probeRun = triggered || targetedWait || recovering ? null : await ctx.runProbe(args.snapshot, args.repo, args.number);
+  const skipProbe = args.triggered || newFollow || diagnostic
+    || (hookTrigger?.kind === 'watch' && !isReconcileWatch)
+    || targetedWait || recovering;
+  const probeRun = skipProbe ? null : await ctx.runProbe(args.snapshot, args.repo, args.number);
   const probe = parseProbe(probeRun);
-  if (!triggered && probeAllowsSkip(previous, probe, now, args.maxSilenceMs)) {
+  if (!skipProbe && probeAllowsSkip(previous, probe, now, args.maxSilenceMs)) {
     const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'unchanged', detail: 'probe matches the last full read', checkedAt: now };
     persist(file, { ...previous, lastProbeAt: now, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
     emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
@@ -1678,7 +1686,7 @@ async function gateMain(argv, ctx) {
   );
   const run = probeRateLimited
     ? { code: probeRun.code, stdout: '', stderr: String(probeRun.stderr ?? '') }
-    : await ctx.runSnapshot(args.snapshot, args.repo, args.number);
+    : await ctx.runSnapshot(args.snapshot, args.repo, args.number, args.stateDir);
 
   let snap = null;
   if (run.code === 0) {
@@ -2011,9 +2019,17 @@ export async function runGate(argv, {
         let trigger = null;
         if (event?.kind === 'watch') {
           // Keep replay deterministic without retaining arbitrary event details.
-          trigger = { kind: 'watch' };
+          trigger = {
+            kind: 'watch',
+            ...(event.reason === 'reconcile' ? { reason: 'reconcile' } : {}),
+          };
           if (event.source === 'pr-status' && typeof event.detail === 'string' && event.detail.toLowerCase() === url.toLowerCase()) {
-            trigger = { kind: 'watch', source: 'pr-status', detail: url };
+            trigger = {
+              kind: 'watch',
+              source: 'pr-status',
+              detail: url,
+              ...(event.reason === 'reconcile' ? { reason: 'reconcile' } : {}),
+            };
           }
         }
         if (typeof event?.firstScheduleId === 'string' && event.firstScheduleId) {

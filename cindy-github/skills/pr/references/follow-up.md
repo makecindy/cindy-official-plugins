@@ -23,7 +23,7 @@ Before any GitHub call the check asks whether a look is due, from what its last 
 | Waiting: only a human approval or the merge is left (`READY`, `BLOCKED_HUMAN`, or an explicit `human` wait after recent activity cools down) | about every 30 minutes |
 | Quiet: a draft, or nothing changed for 6 hours | about every hour |
 
-**Cindy fires it early.** When the title-bar PR status (refreshed about every 90 seconds while someone looks at Cindy) shows a change for this PR, Cindy runs the schedule at once and tells the check through the hook's stdin (`trigger: { kind: 'watch', … }`). Such a run skips both the pace and the probe and reads the PR in full. For ordinary checks, `--triggered` simulates a change and `--no-pacing` disables stage pacing.
+**Cindy fires it early.** When the title-bar PR status (refreshed about every 90 seconds while someone looks at Cindy) shows a change for this PR, Cindy runs the schedule at once and tells the check through the hook's stdin (`trigger: { kind: 'watch', … }`). Such a run skips pacing; explicit status changes also skip the probe and read the PR in full, while reconcile sweeps (`reason: 'reconcile'`, emitted after webhook overflow or reconnect) still run the lightweight probe first and skip the full snapshot when nothing changed. For ordinary checks, `--triggered` simulates a change and `--no-pacing` disables stage pacing.
 
 After repeated DNS or connection timeouts, scheduled checks wait 30 minutes. A status change from Cindy for this same PR can prompt an earlier full read. If it still cannot read the PR, further changes share one retry per five minutes and the scheduled retry keeps its original time. A complete read clears the warning. Rate limits and sign-in failures keep their own retry times.
 
@@ -212,8 +212,10 @@ Rules-read failures do not discard checks or feedback. After two consecutive fai
 resume/ack and brief recoveries, and repeats at most daily once acknowledged; normal new events still wake. Unacknowledged
 notices retain the existing retry/backoff. Do not report ready with unreadable rules. Ordinary check completion still wakes, and human
 approval waits remain available during the outage. Transient rule calls retain one retry. No stale rules
-cache or new polling loop is added. The lightweight probe may defer a rules-only change until the
-existing full-read cadence; the final snapshot always reads rules again.
+cache or new polling loop is added: when `--state-dir` is passed, REST pull and per-repo branch-rules
+reads still revalidate live on every full snapshot via conditional HTTP `ETag` (`If-None-Match` / `304`),
+saving REST rate-limit quota on unchanged responses without serving stale data. The lightweight probe may
+defer a rules-only change until the existing full-read cadence; the final snapshot always revalidates rules live.
 
 The bot settle window accepts completed SUCCESS checks from the expected reviewer's exact App
 slug on the current commit. Latest attempts per app/check are considered. Failed/cancelled/skipped
