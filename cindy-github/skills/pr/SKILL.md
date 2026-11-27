@@ -30,12 +30,12 @@ For commits and pull requests you create with AI assistance in this workflow, us
 - Never push or open a pull request until the user explicitly asks for one or clicks the PR card's button. Approving a plan does not count, even one that mentions a PR. Never approve, merge, enable auto-merge, re-enqueue a merge queue, or take a PR out of draft unless the user authorised it for this repository. Authorisation for one repository never carries to another.
 - Never stash, reset, clean, revert or overwrite the user's uncommitted changes. Never force-push.
 - Public replies stay short, factual and traceable. Ask before posting anything that takes a product position, discloses sensitive material, or attaches screenshots.
-- Requires the GitHub CLI signed in (`gh auth status`) and Node.js. If GitHub is not signed in, call Cindy's `connect_account` with `kind: "plugin"` and this plugin's id: Cindy opens its own GitHub sign-in on this computer (`GITHUB_SIGN_IN_REQUIRED`), so tell the user to finish it there and check `gh auth status` again; never ask for a token in chat. If that is unavailable, Node.js or `gh` is missing, or the repository is not on GitHub, say exactly that; you can still do the local work.
+- Requires the GitHub CLI signed in (`gh auth status`) and Node.js 18 or newer on PATH. The bundled `pr-node.cjs` launcher selects a supported Node even if an older system Node is first on PATH. If GitHub is not signed in, call Cindy's `connect_account` with `kind: "plugin"` and this plugin's id: Cindy opens its own GitHub sign-in on this computer (`GITHUB_SIGN_IN_REQUIRED`), so tell the user to finish it there and check `gh auth status` again; never ask for a token in chat. If that is unavailable, Node.js or `gh` is missing, or the repository is not on GitHub, say exactly that; you can still do the local work.
 
 ## Where to start
 
 - **No PR yet** (a change to make or finish): read `references/publish.md` (sections 1 and 2).
-- **An existing PR** (a link or number, `/pr <link>`, "follow <link>", or the current branch's PR): first show its PR card if this task has none (section 4), do a fix round only if something stands in the way (section 3), then start following it in the background (section 4). Following is the default here; skip it only when the user said to just check or look.
+- **An existing PR** (a link or number, `/pr <link>`, "follow <link>", or the current branch's PR): first show its PR card if this task has none (section 4), start following it in the background (section 4) before any fix round that might need a user decision. Following is the default here; skip it only when the user said to just check or look. Apply the continuing-follow decision rule in `references/background-round.md` to the first handoff and any reused owner's foreground fix round too.
 - **Stopping follow-up or changing draft state in the foreground** (e.g. "stop following", "mark ready", "turn back into draft"): read only the `## Ending following` / `## Draft and ready` subsections of `references/background-round.md` — do not run the full background-round steps.
 - **A background round** (the prompt says so): read `references/background-round.md` (section 5).
 - **An issue to fix** (a link to an issue): start the work as in section 1 (`references/publish.md`) and link the issue in the PR. Claim or comment on the issue only if the repository's CONTRIBUTING asks for it, and ask the user before posting.
@@ -47,7 +47,7 @@ Isolate the change in its own task worktree (`cindy_helper` → `create_task_wor
 
 ## 2. Open the pull request
 
-Follow `references/publish.md` §2 to explain the change, run `pr-preflight.mjs`, create the PR, and complete the post-publish handoff.
+Follow `references/publish.md` §2 to explain the change, run `pr-node.cjs pr-preflight.mjs`, create the PR, and complete the post-publish handoff.
 
 **Mandatory publish exit checklist (never skip before replying):**
 
@@ -57,7 +57,7 @@ Follow `references/publish.md` §2 to explain the change, run `pr-preflight.mjs`
    - **Publish-only or follow-up explicitly stopped:** pass `following: false` on the very first `pr_card(..., published: true)` call so saved `auto_follow: true` does not start a schedule.
    - **IM or failed card delivery:** call `pr_follow_settings` instead of repeating a failed card call.
 3. Call `ghost_call` `cindy-github` / `pr_card` in the owning PR task with `repo`, `pr`, and `published: true` (plus `card_id` if one exists, and `following: false` when publish-only or stopped).
-4. If `pr_card` returns `follow_state`, the card owns follow-up setup — do not create a second schedule. Only when `follow_state` is absent and follow-up is enabled, follow `references/follow-up-setup.md`. Apply `auto_rename: true` via `cindy_helper` `set_current_session_title` (never rename a group chat).
+4. If `pr_card` returns `legacy_hook_repair`, report its exact schedule ID and replacement command so the user can update only the command in Automation settings (never rewrite or duplicate it). If `pr_card` returns `follow_state`, the card owns follow-up setup — do not create a second schedule. Only when `follow_state` is absent and follow-up is enabled, follow `references/follow-up-setup.md`. Apply `auto_rename: true` via `cindy_helper` `set_current_session_title` (never rename a group chat).
 5. Report the actual follow-up state alongside the PR link — never end with only "waiting for CI/review".
 
 ## 3. A fix round
@@ -70,8 +70,8 @@ Read `references/follow-up-setup.md` whenever you need to establish, hand off (g
 
 ## 5. Background round
 
-Read `references/background-round.md` and follow every step (verify ownership via `pr_card`, handle new work via `references/fix-round.md`, refresh the card, finish once with `pr-heartbeat-gate.mjs` `--wait` / `--resume` / `--ack`, and apply stop/notification rules).
+Read `references/background-round.md` and follow every step (verify ownership via `pr_card`, handle new work via `references/fix-round.md`, refresh the card, finish once with `pr-node.cjs pr-heartbeat-gate.mjs` `--wait` / `--resume` / `--ack`, and apply stop/notification rules).
 
 ## 6. Cleanup after merge or close
 
-Read `references/cleanup.md` and run `pr-cleanup-plan.mjs` from the primary checkout.
+Read `references/cleanup.md` and run `pr-node.cjs pr-cleanup-plan.mjs` from the primary checkout.
