@@ -2683,7 +2683,8 @@ test('legacy persisted errors recover after upgrade and locale switch while expl
     assert.match(en.lastCard(opened.callId).html, /Follow-up unverified/);
     assert.match(en.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/);
   }
-  // 3) Pre-upgrade ID-less card with transient schedule_list read error (no scheduleErrorSource) recovers on empty refresh and allows claim_follow.
+  // 3) Pre-upgrade ID-less card with transient schedule_list read error (no scheduleErrorSource) recovers status/claim
+  // while keeping non-blocking last-operation feedback until claimed or explicitly stopped.
   {
     const fault = {};
     const { hostApi } = followScheduler(fault);
@@ -2703,56 +2704,100 @@ test('legacy persisted errors recover after upgrade and locale switch while expl
     zh.files.set(key, JSON.stringify(legacy));
 
     const en = createPrRuntime({ github: prGraphql(), hostApi, files: zh.files, kv: { prCard: { autoFollow: true } }, locale: 'en' });
-    const recovered = await en.tool({ card_id: opened.callId, claim_follow: true });
-    const card = JSON.parse(en.files.get(key));
+    const recovered = await en.tool({ card_id: opened.callId });
+    let card = JSON.parse(en.files.get(key));
     assert.equal(recovered.reply.result.follow_state, 'stopped');
-    assert.equal(recovered.reply.result.follow_claimed, true);
-    assert.equal(recovered.reply.result.note, undefined);
+    assert.match(recovered.reply.result.note, /cannot list schedules/);
     assert.equal(card.scheduleError, null);
-    assert.equal(card.scheduleErrorSource, null);
+    assert.match(card.legacyScheduleNotice, /cannot list schedules/);
+
+    const claimed = await en.tool({ card_id: opened.callId, claim_follow: true });
+    card = JSON.parse(en.files.get(key));
+    assert.equal(claimed.reply.result.follow_claimed, true);
+    assert.equal(claimed.reply.result.note, undefined);
+    assert.equal(card.legacyScheduleNotice, null);
   }
-  // 4) Pre-upgrade bound card whose Stop hit a transient schedule_get error before delete (no scheduleErrorSource) recovers to active once verified.
-  {
-    const fault = { failGet: true };
+  // 4) Pre-upgrade ID-less card with creation failure (first follow or restart, no scheduleErrorSource) recovers
+  // status and claim_follow while preserving the creation failure note across refreshes until stopped or retried.
+  for (const afterEarlierFollow of [false, true]) {
+    const fault = {};
+    const { hostApi, rows } = followScheduler(fault);
+    const zh = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } }, locale: 'zh-CN' });
+    let opened;
+    if (afterEarlierFollow) {
+      opened = await zh.tool({ repo: 'octo/repo', pr: 42, published: true });
+      await zh.click(opened.callId, 'pr:stop');
+      assert.equal(rows.size, 0);
+      fault.reject = true;
+      await zh.click(opened.callId, 'pr:follow');
+    } else {
+      fault.reject = true;
+      opened = await zh.tool({ repo: 'octo/repo', pr: 42, published: true });
+    }
+    const key = `pr-cards/${opened.callId}.json`;
+    const legacy = JSON.parse(zh.files.get(key));
+    delete legacy.scheduleErrorSource;
+    zh.files.set(key, JSON.stringify(legacy));
+
+    const en = createPrRuntime({ github: prGraphql(), hostApi, files: zh.files, kv: { prCard: { autoFollow: true } }, locale: 'en' });
+    for (let i = 0; i < 2; i++) {
+      const refreshed = await en.tool({ card_id: opened.callId });
+      const card = JSON.parse(en.files.get(key));
+      assert.equal(refreshed.reply.result.follow_state, 'stopped');
+      assert.match(refreshed.reply.result.note, /scheduler unavailable/);
+      assert.equal(card.scheduleError, null);
+      assert.match(card.legacyScheduleNotice, /scheduler unavailable/);
+    }
+    const stopped = await en.tool({ card_id: opened.callId, following: false });
+    assert.equal(stopped.reply.result.follow_state, 'stopped');
+    assert.equal(stopped.reply.result.note, undefined);
+    assert.equal(JSON.parse(en.files.get(key)).legacyScheduleNotice, null);
+  }
+  // 5) Pre-upgrade bound card whose Stop failed (transient schedule_get or rejected schedule_delete, no scheduleErrorSource)
+  // recovers live active state while preserving previous operation feedback until deleted or Stop succeeds.
+  for (const mode of ['failGet', 'failDelete']) {
+    const fault = {};
     const { hostApi, calls, rows } = followScheduler(fault);
     const zh = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } }, locale: 'zh-CN' });
-    fault.failGet = false;
     const opened = await zh.tool({ repo: 'octo/repo', pr: 42, published: true });
-    fault.failGet = true;
+    fault[mode] = true;
     await zh.click(opened.callId, 'pr:stop');
-    assert.equal(calls.includes('schedule_delete'), false);
-    assert.equal(rows.has('sch-1'), true);
+    assert.equal(rows.has('sch-1'), true, mode);
     const key = `pr-cards/${opened.callId}.json`;
-    // Simulate exact pre-upgrade 66e2bfc7 record (no scheduleErrorSource, following remained true).
     const legacy = JSON.parse(zh.files.get(key));
-    assert.equal(legacy.scheduleErrorSource, 'read');
     delete legacy.scheduleErrorSource;
     legacy.following = true;
     legacy.scheduleStatus = null;
     zh.files.set(key, JSON.stringify(legacy));
 
-    fault.failGet = false;
+    fault[mode] = false;
     const en = createPrRuntime({ github: prGraphql(), hostApi, files: zh.files, kv: { prCard: { autoFollow: true } }, locale: 'en' });
-    const recovered = await en.tool({ card_id: opened.callId });
-    const card = JSON.parse(en.files.get(key));
-    assert.equal(recovered.reply.result.follow_state, 'active');
-    assert.equal(recovered.reply.result.note, undefined);
-    assert.equal(card.scheduleError, null);
-    assert.equal(card.scheduleErrorSource, null);
-    assert.equal(card.following, true);
-    assert.match(en.lastCard(opened.callId).html, /data-ghost-live-label="Following"/);
+    const deletesBeforeRefresh = calls.filter(c => c === 'schedule_delete').length;
+    for (let i = 0; i < 2; i++) {
+      const recovered = await en.tool({ card_id: opened.callId });
+      const card = JSON.parse(en.files.get(key));
+      assert.equal(recovered.reply.result.follow_state, 'active', mode);
+      assert.match(recovered.reply.result.note, mode === 'failGet' ? /cannot verify/ : /cannot delete schedule/, mode);
+      assert.equal(card.scheduleError, null, mode);
+      assert.equal(card.following, true, mode);
+      assert.match(card.legacyScheduleNotice, mode === 'failGet' ? /cannot verify/ : /cannot delete schedule/, mode);
+      assert.match(en.lastCard(opened.callId).html, /data-ghost-live-label="Following"/, mode);
+      assert.match(en.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, mode);
+    }
+    assert.equal(calls.filter(c => c === 'schedule_delete').length, deletesBeforeRefresh, mode);
 
-    // Stopping the upgraded legacy card and hitting a rejected restart still preserves the creation diagnostic.
+    // Retrying Stop clears the preserved legacy notice once deletion succeeds, and a later rejected restart keeps its create error.
     await en.click(opened.callId, 'pr:stop');
-    assert.equal(rows.size, 0);
+    assert.equal(rows.size, 0, mode);
+    assert.equal(JSON.parse(en.files.get(key)).legacyScheduleNotice, null, mode);
     fault.reject = true;
     await en.click(opened.callId, 'pr:follow');
     const afterRestartFail = await en.tool({ card_id: opened.callId });
-    assert.equal(afterRestartFail.reply.result.follow_state, 'failed');
-    assert.match(afterRestartFail.reply.result.note, /scheduler unavailable/);
-    assert.equal(JSON.parse(en.files.get(key)).scheduleErrorSource, 'create');
+    assert.equal(afterRestartFail.reply.result.follow_state, 'failed', mode);
+    assert.match(afterRestartFail.reply.result.note, /scheduler unavailable/, mode);
+    assert.equal(JSON.parse(en.files.get(key)).scheduleErrorSource, 'create', mode);
   }
-  // 5) Pre-upgrade ID-less card with Chinese prOwnershipUnknown (no scheduleErrorSource), restarted in English after deletion.
+  // 6) Pre-upgrade ID-less card with Chinese prOwnershipUnknown (no scheduleErrorSource), restarted in English after deletion.
   {
     const { hostApi, rows } = followScheduler();
     rows.set('foreign', { id: 'foreign', prompt: 'Follow ' + url, targetSessionId: 'other', status: 'active' });
@@ -2768,8 +2813,10 @@ test('legacy persisted errors recover after upgrade and locale switch while expl
     const recovered = await en.tool({ card_id: opened.callId });
     const card = JSON.parse(en.files.get(key));
     assert.equal(recovered.reply.result.follow_state, 'stopped');
+    assert.equal(recovered.reply.result.note, undefined);
     assert.equal(card.scheduleError, null);
     assert.equal(card.scheduleErrorSource, null);
+    assert.equal(card.legacyScheduleNotice, null);
   }
 });
 

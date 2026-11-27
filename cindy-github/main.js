@@ -3524,9 +3524,43 @@ function clearCardScheduleError(card) {
   card.scheduleErrorSource = null;
 }
 
+function clearLegacyScheduleNotice(card) {
+  card.legacyScheduleNotice = null;
+}
+
 function setCardScheduleError(card, detail, source) {
   card.scheduleError = t('prScheduleFailed', { detail: detail });
   card.scheduleErrorSource = source;
+  card.legacyScheduleNotice = null;
+}
+
+function isLegacyVerificationErrorText(text) {
+  if (!text) return false;
+  var locales = Object.keys(MESSAGES);
+  for (var i = 0; i < locales.length; i++) {
+    var table = MESSAGES[locales[i]];
+    var wrap = String(table.prScheduleFailed || '');
+    if (text === wrap.replace('{detail}', String(table.prOwnershipUnknown || '')) ||
+        text === wrap.replace('{detail}', String(table.prScheduleHookUnknown || ''))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Pre-upgrade records had no scheduleErrorSource: once live reads recover,
+// clear known verification messages completely, and demote other unsourced
+// errors to non-blocking last-operation feedback so status and claims recover
+// without erasing why the earlier create/delete failed.
+function settleUnsourcedLegacyError(card) {
+  if (card.scheduleError && !card.scheduleErrorSource && !isLegacyVerificationErrorText(card.scheduleError)) {
+    card.legacyScheduleNotice = card.scheduleError;
+  }
+  clearCardScheduleError(card);
+}
+
+function deriveCardNote(card) {
+  return card.scheduleError || card.legacyScheduleNotice || (card.legacyHookRepair ? t('prLegacyHookRepair') : null);
 }
 
 function isPreservedCreateError(card) {
@@ -3589,10 +3623,13 @@ async function reconcileLegacyFollow(card, readError, hadClaim, clearOnStop) {
     // or explicitly stopped on a healthy read.
   } else if (error) {
     setCardScheduleError(card, error, errorSource);
-  } else {
+  } else if (row || clearOnStop) {
     clearCardScheduleError(card);
+    clearLegacyScheduleNotice(card);
+  } else {
+    settleUnsourcedLegacyError(card);
   }
-  card.note = card.scheduleError || (card.legacyHookRepair ? t('prLegacyHookRepair') : null);
+  card.note = deriveCardNote(card);
 }
 
 async function createCardSchedule(card, settings) {
@@ -3702,8 +3739,9 @@ async function syncCardSchedule(card, settings, start) {
     card.following = start;
     card.pending = card.scheduleAction = null;
     clearCardScheduleError(card);
+    clearLegacyScheduleNotice(card);
     card.legacyHookRepair = repair;
-    card.note = repair ? t('prLegacyHookRepair') : null;
+    card.note = deriveCardNote(card);
   } catch (err) {
     setCardScheduleError(card, String(err.message || err).slice(0, 160), errorSource);
     card.note = card.scheduleError;
@@ -3843,6 +3881,7 @@ async function prCardTool(args, callId) {
         card.pending = card.scheduleAction = null;
         card.managedFollow = true;
         clearCardScheduleError(card);
+        clearLegacyScheduleNotice(card);
       }
       if (!currentSchedule) {
         if (a.following === true) return fail(t('prScheduleFailed', { detail: 'schedule_get' }));
@@ -3851,13 +3890,14 @@ async function prCardTool(args, callId) {
         card.manualStop = false;
         card.scheduleId = null;
         clearCardScheduleError(card);
+        clearLegacyScheduleNotice(card);
       } else {
         if (card.scheduleError || card.scheduleStatus === 'unverified') {
           var checkDir;
           try { checkDir = await cardFollowSkillDir(); } catch (_) {}
           var verifiedHook = checkDir ? exactFollowHook(currentSchedule, card, checkDir) : null;
           if (verifiedHook && !isBoundStopError(card)) {
-            clearCardScheduleError(card);
+            settleUnsourcedLegacyError(card);
           } else if (checkDir && !verifiedHook) {
             setCardScheduleError(card, t('prScheduleHookUnknown'), 'verify');
           }
@@ -3875,20 +3915,26 @@ async function prCardTool(args, callId) {
   var deferFollowing = hasCardScheduler() && status && (legacyFollow || retryScheduleError);
   if (typeof a.following === 'boolean') {
     if (!a.following) {
-      if (unverifiedLegacyFollow(card) || !deferFollowing) clearCardScheduleError(card);
+      if (unverifiedLegacyFollow(card) || !deferFollowing) {
+        clearCardScheduleError(card);
+        clearLegacyScheduleNotice(card);
+      }
       card.following = false;
       card.scheduleId = card.scheduleStatus = null;
       card.manualStop = false;
     } else if (!unverifiedLegacyFollow(card) && !boundFollowUnverified(card) && !deferFollowing) {
       card.following = true;
       card.followedEver = true;
-      if (!hasCardScheduler() || !card.scheduleId) clearCardScheduleError(card);
+      if (!hasCardScheduler() || !card.scheduleId) {
+        clearCardScheduleError(card);
+        clearLegacyScheduleNotice(card);
+      }
     }
     card.scheduleAction = null;
     if (card.pending === 'follow' || card.pending === 'stop') card.pending = null;
   }
-  card.note = card.scheduleError || null;
   card.legacyHookRepair = null;
+  card.note = deriveCardNote(card);
 
   // A blocked old Node cannot start the agent that would inspect its hook.
   // The owning task's card can identify the exact old command and report the
@@ -3897,7 +3943,7 @@ async function prCardTool(args, callId) {
     try {
       if (card.stage === 'open' && !status.err && currentSchedule && currentSchedule.status === 'active' && !card.scheduleError) {
         card.legacyHookRepair = await legacyFollowRepair(currentSchedule, card);
-        if (card.legacyHookRepair) card.note = t('prLegacyHookRepair');
+        card.note = deriveCardNote(card);
       } else if (legacyFollow || (retryScheduleError && !status.err)) {
         await reconcileLegacyFollow(card, status.err, legacyFollow, a.following === false);
       }
@@ -3909,6 +3955,8 @@ async function prCardTool(args, callId) {
   var pendingBefore = card.pending;
   if (!legacyFollow && a.claim_follow === true && a.following !== false && card.stage === 'open' && card.pending !== 'stop' && !card.following && !card.scheduleId && !card.scheduleError) {
     card.pending = 'follow';
+    clearLegacyScheduleNotice(card);
+    card.note = deriveCardNote(card);
   }
 
   var settings = await readPrSettings();
