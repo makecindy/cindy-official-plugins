@@ -2,7 +2,7 @@
 
 # GitHub CI 恢复运行证据 — 2026-11-13
 
-当前发布方案：**1.5.61，未安装**；任何有效 hook 或不支持完整目录持久性的环境均停止恢复。下方 local 1.5.45 实测有版本限制，见末节。
+当前发布方案：**1.5.62，未安装**；任何有效 hook 或不支持完整目录持久性的环境均停止恢复。下方 local 1.5.45 实测有版本限制，见末节。
 
 环境：Cindy 0.1.136 Beta、Windows 10.0.26100、Node v22.22.3。
 仅安装/更新隔离的 `local` GitHub 开发实例，市场版及其偏好保持原样。
@@ -960,7 +960,7 @@ Windows10.0.26100 / Node22.22.3 / Git2.54.0.windows.1 夹具用本地 hash-objec
 最终规定四套加插件：**578 通过 / 38 跳过 / 0 失败（307.70秒）**；38项仍为17个不支持原生目录同步成功路径、19个既有跳过及2个继承POSIX-only命令行用例。Forge全内容核对：**30文件，包254107字节 / 解压716496字节**；新包删除并确认不存在。外部Linux复现见[原审查](https://github.com/makecindy/cindy-official-plugins/pull/332#discussion_r4711100278)。未安装或声称新的runtime验收。
 
 
-## 文件绑定、身份表示范围与额度前 Git 锁 — 2026-11-27 Asia/Shanghai (source1.5.61, not installed)
+## 文件绑定、身份表示范围与额度前 Git 锁 — 2026-11-27 Asia/Shanghai (source1.5.62, not installed)
 
 源码1.5.58集中处理三个边界，不新增回执格式、别名账本、锁owner或重试机制。
 
@@ -1026,3 +1026,16 @@ Source1.5.61把main5f5dae7090c8e5d0c0ef35947f3bb13d3470d0fa（GitHub主干1.5.38
 Forge1.5.61全包内容核对通过：**30文件、包260186字节、解压736696字节**。新包已删除并确认不存在；未安装或重试受阻清理。
 
 合并内容最终规定四套加插件：**616通过 / 39跳过 / 0失败（271.23秒）**。39项为17个不支持原生完整目录同步的成功路径、19个既有跳过、2个此前继承POSIX-only命令行用例及1个新继承fake-gh/symlink的snapshot-probe指纹/时间错位CLI用例。Gate/pacing回归实际运行；新增POSIX快照命令行路径未在Windows执行，不冒充原生Linux或实际Cindy终态/probe验收。
+
+
+## 同步main的REST条件读取 — 2026-11-27 Asia/Shanghai（source1.5.62，未安装）
+
+Source1.5.62把main5ae074b197cf8adeda373179c9cec7c63108349a（GitHub主干1.5.39）合入同一功能分支。仅ghost.json版本/说明和版本断言两处冲突；版本62高于main39，两侧说明保留。source Skill、严格CI预算helper/指南/IO/回归、UI/settings和四语言与61逐字节一致；本任务hook、超时、模型、目标和频率不迁移。
+
+保留已在main合入的观察优化：REST pull/rules通过HTTP ETag/If-None-Match/304实时重验，只在配置的观察目录保存快照实际使用的字段投影。规则按viewer/base分键；未知/不完整规则仍拒绝，每次仍实时重验。投影不保存正文、reviewer列表、嵌套仓库payload、token或响应headers。诊断snapshot子进程移除CINDY_PR_STATE_DIR，不写该缓存。reconcile补查可先probe；明确状态事件、定向等待和恢复保留完整读取。这是main继承的观察缓存，与未变的持久额度分离；本轮不新增CI执行器/回执存储/锁/恢复重试或凭证/权限。
+
+四个继承文件（snapshot测试、follow-up、gh helper和snapshot脚本）与main完全一致；gate/gate-test实际增删行与其补丁完全一致。预算入口仍先于观察trigger元数据返回。原上限/槽/raw保存/旧根及链接拒绝/ID代际排除/URL/锁/hook/签名/编码/committer/消息/唯一消费者/完整目录同步前提保留。清单能力及凭证声明除版本/说明外不变。未安装、改真实偏好/配置/权限/token/额度，未使用退役夹具或重试受阻清理。
+
+Forge1.5.62全内容核对通过：**30文件、包263521字节、解压748833字节**；新包删除并确认不存在。没有候选副本或新一次性运行环境。source62未安装；继承的条件缓存/reconcile/诊断行为尚未在本任务实际Cindy中验收，既有恢复/UI/pacing/共享消费者/签名head/归因运行缺口和受阻残留仍在。
+
+合并内容最终规定四套加插件：**618通过 / 42跳过 / 0失败（271.40秒）**。跳过为17个本环境不支持的原生receipt契约成功路径及25个POSIX-only命令行用例。新继承三项跳过覆盖HTTP200/304、pull/跨PR规则最小字段条件缓存、诊断缓存写入抑制。reconcile/gate回归实际运行；这些fake-gh/symlink CLI用例未在Windows执行，不证明真实304或Cindy验收。

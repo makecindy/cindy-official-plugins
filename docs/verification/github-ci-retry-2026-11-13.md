@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.61, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.62, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1579,3 +1579,16 @@ This synchronization requires new-head CI/review. The inherited terminal/probe/p
 Forge1.5.61 exact-content verification passed: **30 files, 260186 archive bytes, 736696 uncompressed bytes**. New package removed and absence verified; no live installation or cleanup retry.
 
 Final mandatory four suites plus plugin on merged content: **616 passed / 39 skipped / 0 failed (271.23 s)**. The 39 skips are 17 unsupported native full-directory-sync success paths, 19 earlier skips, two previously inherited POSIX-only CLI cases and one newly inherited fake-gh/symlink snapshot-probe fingerprint/skew CLI case. Gate/pacing regressions ran; the new POSIX snapshot invocation did not run on Windows. No native Linux or actual Cindy terminal/probe acceptance is implied.
+
+
+## Synchronize conditional REST reads from main — 2026-11-27 Asia/Shanghai (source1.5.62, not installed)
+
+Source1.5.62 merges main5ae074b197cf8adeda373179c9cec7c63108349a (GitHub main1.5.39) into the same feature branch. Only ghost.json version/release notes and the version assertion conflicted. Version62 exceeds main39 and retains feature and upstream notes. Source Skill, strict CI budget helpers/guide/I/O/regressions, UI/settings and four locales remain byte-identical to61; no task hook, timeout, model, target or cadence migration.
+
+The already-merged upstream observation optimization is retained: REST pull/rules reads revalidate through HTTP ETag/If-None-Match/304 and persist only projected fields actually used by the snapshot in its configured observation state directory. Rule entries are keyed by viewer/base; unknown/incomplete rules still fail, and responses are revalidated live. Bodies, reviewer lists, nested repository payloads, tokens and response headers are not persisted in those projections. Diagnostic snapshot children have CINDY_PR_STATE_DIR removed and do not write this cache. Reconcile sweeps can probe first; explicit status events, targeted waits and recovery retain full-read behavior. This is inherited observation caching from main, separate from unchanged durable CI quota; no CI executor/receipt store/lock/recovery retry or new credentials/permissions are added here.
+
+Four inherited files (snapshot tests, follow-up reference, gh helper and snapshot script) exactly match main; normalized gate/gate-test changes exactly match its patch. The budget route still returns before observation-trigger metadata. Existing caps/slots, raw preservation, old-root/link refusal, identity-epoch exclusion, URL/lock/hook/signing/encoding/committer/message/sole-consumer/full-directory-sync prerequisites remain. Manifest capabilities and credential declarations are unchanged except version/release notes. No installation, live preference/configuration/permission/token/real quota changes, retired fixtures or cleanup retry.
+
+Forge1.5.62 exact-content verification passed: **30 files, 263521 archive bytes, 748833 uncompressed bytes**. New package deleted and absence verified. No candidate copy or new disposable runtime setup. Source62 is not installed. Inherited conditional-cache/reconcile/diagnostic behavior has not been accepted through actual Cindy in this task; existing current recovery/UI/pacing/shared-consumer/signed-head/causal runtime gaps and blocked cleanup residuals remain.
+
+Final mandatory four suites plus plugin on merged content: **618 passed / 42 skipped / 0 failed (271.40 s)**. Skips are 17 native receipt-contract success paths unavailable on this environment and 25 POSIX-only command-line cases. Three newly inherited skips cover HTTP200/304, minimal cross-PR rules/pull conditional caching, and diagnostic cache-write suppression. Reconcile/gate regressions ran; those fake-gh/symlink CLI cases did not run on Windows and do not establish live304 or Cindy acceptance.
