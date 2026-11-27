@@ -2906,6 +2906,162 @@ process.stdout.write('', () => process.exit(0));
     assert.equal(updatesWithoutForm[1].name, 'ask_question');
   });
 
+  test('local relay keeps follow-up short-name update_steps and ask_question updates on their registered MCP tool rows', async (t) => {
+    const relay = await localRelay(t);
+    relay.request(1, 'initialize', { clientCapabilities: { elicitation: { form: {} } } });
+    relay.response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+    relay.request(2, 'session/new', {
+      cwd: '/repo',
+      mcpServers: [{ type: 'http', name: 'partner', url: 'http://127.0.0.1:4711/mcp/partner' }],
+    });
+    relay.response(2, { sessionId: 'one' });
+
+    // External MCP update_steps starts with direct name, then follows up with short name `update_steps`.
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'mcp-steps-1',
+          name: 'mcp_partner_update_steps',
+          kind: 'other',
+          title: 'Run mcp_partner_update_steps',
+          status: 'in_progress',
+          rawInput: { steps: [{ title: 'Partner step', status: 'in_progress' }], toolSummary: 'update steps' },
+        },
+      },
+    });
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'mcp-steps-1',
+          name: 'update_steps',
+          kind: 'other',
+          title: 'Run update_steps',
+          status: 'completed',
+          rawInput: { steps: [{ title: 'Partner step', status: 'done' }] },
+        },
+      },
+    });
+
+    // External MCP ask_question starts via nested call_mcp_tool (or direct name), then follows up with short name `ask_question`.
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'mcp-ask-1',
+          name: 'call_mcp_tool',
+          kind: 'other',
+          title: 'MCP Tool ask_question',
+          status: 'in_progress',
+          rawInput: { ServerName: 'partner', ToolName: 'ask_question', Arguments: { prompt: 'Partner question' } },
+        },
+      },
+    });
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'mcp-ask-1',
+          name: 'ask_question',
+          kind: 'other',
+          title: 'Run ask_question',
+          status: 'completed',
+        },
+      },
+    });
+
+    // Native Antigravity update_steps and ask_question in the same session still adapt normally.
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'native-steps-1',
+          name: 'update_steps',
+          kind: 'other',
+          title: 'Run update_steps',
+          status: 'in_progress',
+          rawInput: { steps: [{ title: 'Native step', status: 'in_progress' }] },
+        },
+      },
+    });
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'native-ask-1',
+          name: 'ask_question',
+          kind: 'other',
+          title: 'Run ask_question',
+          status: 'in_progress',
+        },
+      },
+    });
+
+    const updates = relay.client.filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates, [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'mcp-steps-1',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'in_progress',
+        rawInput: { steps: [{ title: 'Partner step', status: 'in_progress' }] },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'mcp-steps-1',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'completed',
+        rawInput: { steps: [{ title: 'Partner step', status: 'done' }] },
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'mcp-ask-1',
+        name: 'mcp__partner__ask_question',
+        kind: 'other',
+        title: 'mcp__partner__ask_question',
+        status: 'in_progress',
+        rawInput: { prompt: 'Partner question' },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'mcp-ask-1',
+        name: 'mcp__partner__ask_question',
+        kind: 'other',
+        title: 'mcp__partner__ask_question',
+        status: 'completed',
+      },
+      {
+        sessionUpdate: 'plan',
+        entries: [{ content: 'Native step', priority: 'medium', status: 'in_progress' }],
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'native-ask-1',
+        name: 'AskUserQuestion',
+        kind: 'other',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+    ]);
+  });
+
   test('exits right after Cindy has read the last notification, not after the flush timeout', { timeout: 40_000 }, async (t) => {
     const flushTimeoutMs = 2_000;
     let bridge = null;

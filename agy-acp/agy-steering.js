@@ -84,6 +84,8 @@ function attachSteering(input, output, child, stop) {
     const toolCall = normalizeMcpToolCall(params[key], session.seen, session.serverNames);
     if (toolCall) return { ...message, params: { ...params, [key]: toolCall } };
     if (key === 'update') {
+      const id = typeof params.update?.toolCallId === 'string' ? params.update.toolCallId : null;
+      if (id && session.seen.has(id)) return undefined;
       const adapted = adaptAgyNativeToolUpdate(params.update, { elicitationForm, seenSteps: session.seenSteps });
       if (adapted?.action === 'drop') return null;
       if (adapted?.action === 'replace') return { ...message, params: { ...params, update: adapted.update } };

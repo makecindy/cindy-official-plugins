@@ -137,13 +137,13 @@ function normalizeMcpToolCall(toolCall, seen, serverNames, { allowLegacyEnvelope
   const call = nested || direct;
   if (call) {
     const identity = toolIdentity?.(call) ?? { title: `mcp__${call.server}__${call.tool}`, kind: 'other' };
-    known = { ...identity, sourceName: name };
+    known = { ...identity, sourceName: name, toolName: call.tool };
     if (id) {
       if (seen.size >= MAX_TRACKED_CALLS && !seen.has(id)) seen.delete(seen.keys().next().value);
       seen.set(id, known);
     }
   }
-  if (!known || (!allowLegacyEnvelope && name !== known.sourceName)) return null;
+  if (!known || (!allowLegacyEnvelope && name !== known.sourceName && name !== known.toolName)) return null;
 
   const next = { ...toolCall };
   if ('title' in next) next.title = known.title;
