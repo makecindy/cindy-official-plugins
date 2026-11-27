@@ -120,8 +120,9 @@ function attachSteering(input, output, child, stop, errorRelay, verification) {
     }
 
     const turn = requests.get(message.id);
+    const flushHeld = item => toClient.push(encode(item));
     if (!turn) {
-      const classified = errorRelay ? errorRelay.response(message) : message;
+      const classified = errorRelay ? errorRelay.response(message, flushHeld) : message;
       return classified !== message ? encode(classified) : line;
     }
     requests.delete(message.id);
@@ -129,7 +130,7 @@ function attachSteering(input, output, child, stop, errorRelay, verification) {
     if (--turn.pending !== 0) return null;
     turns.delete(turn.sessionId);
     const finalMessage = { ...turn.result, id: turn.originalId };
-    const classified = errorRelay ? errorRelay.response(finalMessage) : finalMessage;
+    const classified = errorRelay ? errorRelay.response(finalMessage, flushHeld) : finalMessage;
     return encode(classified);
   });
 
