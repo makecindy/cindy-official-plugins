@@ -1,0 +1,36 @@
+{
+  "$comment": "Repository-backed ownership registry for the L1 Owner Fast-Lane. Listed maintainers (for any existing plugin) and plugin owners (for their own plugin) go through fast-lane merge when CI is green, automated review finds no P0/P1 defects, and no L2/L3 boundaries expand. Security redlines and CI gates apply equally to everyone.",
+  "maintainers": [
+    "zqchris",
+    "dashhuang",
+    "GaoWeiLiuXD",
+    "MagicLizi",
+    "xxxxxccc",
+    "nanaco666",
+    "xd-bobo",
+    "xdanger",
+    "cofyc",
+    "Jchen-oss"
+  ],
+  "plugins": {
+    "agentcompass": ["akiiwa-games"],
+    "agy-acp": ["zqchris"],
+    "cindy-academic-skills": ["1254084397"],
+    "cindy-antigravity-acp": ["dashhuang", "xuzini-xzn", "zqchris"],
+    "cindy-art": ["GaoWeiLiuXD"],
+    "cindy-contacts": ["zqchris"],
+    "cindy-github": ["dashhuang", "zqchris"],
+    "cindy-ping": ["GaoWeiLiuXD"],
+    "cindy-simulator": ["GaoWeiLiuXD", "dashhuang"],
+    "decision-gate": ["zqchris"],
+    "dsh-acp": ["zqchris"],
+    "herdr": ["joei4cm"],
+    "my-browser": ["ericluo", "dashhuang"],
+    "open-artifact": ["GaoWeiLiuXD"],
+    "opendesign-trial": ["zqchris"],
+    "podcast-insights": ["Liuliuuu0710", "dashhuang"],
+    "taptap-cli": ["shengyongkang-dot"],
+    "taptap-maker": ["liangdong-ttm"],
+    "tongcheng-chengxin": ["shenjiacheng-sudo"]
+  }
+}
