@@ -22,6 +22,7 @@ import {
   snapshotFailurePlan,
 } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
 import { classifyMergeQueue } from '../../cindy-github/skills/pr/scripts/lib/merge-queue.mjs';
+import { pacingDue } from '../../cindy-github/skills/pr/scripts/lib/follow-pacing.mjs';
 
 const gatePath = fileURLToPath(new URL('../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs', import.meta.url));
 
@@ -727,12 +728,121 @@ test('decide:空放行(宿主顺延、agent 没跑)照常放行但不消耗重�
   assert.equal(decide({ snap: red, previous: { ...previous, lastPassAt: T0 - 11 * MIN }, now: T0 }).nextPendingCount, 2);
 });
 
-test('decide:merged / closed 每轮放行;截断的快照放行且不推进基线', () => {
+test('decide:merged / closed 前 N 次快速放行后进入递增退避且跨 --ack 保留，重开后清零;截断的快照放行且不推进基线', () => {
+  const at = (m) => T0 + m * MIN;
   const watch = seenWatch(snap());
-  const merged = decide({ snap: snap({ merged: true }), previous: { watch }, now: T0 });
-  assert.equal(merged.reason, 'terminal');
-  const again = decide({ snap: snap({ merged: true }), previous: { watch, pendingWatch: merged.nextPendingWatch, pendingKey: 'terminal', pendingPassCount: 9 }, now: T0 });
-  assert.equal(again.exitCode, 0, '收口不受重试上限约束');
+  const mergedSnap = snap({ merged: true });
+  const d1 = decide({ snap: mergedSnap, previous: { watch }, now: at(0), maxPassAttempts: 2, retryBackoffMs: 30 * MIN });
+  assert.equal(d1.exitCode, 0);
+  assert.equal(d1.reason, 'terminal');
+  assert.equal(d1.nextTerminalPassCount, 1);
+
+  // Host-deferred empty pass (< minPassSpacingMs) does not consume a terminal cleanup attempt.
+  const empty = decide({
+    snap: mergedSnap,
+    previous: { watch, pendingWatch: d1.nextPendingWatch, pendingKey: 'terminal', pendingPassCount: 1, terminalPassCount: 1, lastPassAt: at(0) },
+    now: at(1.5),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(empty.exitCode, 0);
+  assert.equal(empty.reason, 'terminal');
+  assert.equal(empty.nextTerminalPassCount, 1);
+
+  const d2 = decide({
+    snap: mergedSnap,
+    previous: { watch, pendingWatch: d1.nextPendingWatch, pendingKey: 'terminal', pendingPassCount: 1, terminalPassCount: 1, lastPassAt: at(0) },
+    now: at(5),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(d2.exitCode, 0);
+  assert.equal(d2.reason, 'terminal');
+  assert.equal(d2.nextTerminalPassCount, 2);
+
+  // Even after --ack cleared pending*, terminalPassCount survives and enters 30m backoff on next tick.
+  const d3 = decide({
+    snap: mergedSnap,
+    previous: { watch, terminalPassCount: 2, lastPassAt: at(5) },
+    now: at(10),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(d3.exitCode, 2);
+  assert.equal(d3.reason, 'terminal-backoff');
+  assert.equal(d3.nextTerminalPassCount, 2);
+  assert.equal(d3.nextTerminalBackoffUntil, at(35));
+
+  // Once backoff expires, wakes with user-notification guidance and escalates to 2h.
+  const d4 = decide({
+    snap: mergedSnap,
+    previous: { watch, terminalPassCount: 2, terminalBackoffUntil: at(35), lastPassAt: at(5) },
+    now: at(35),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(d4.exitCode, 0);
+  assert.equal(d4.reason, 'terminal-backoff-attempt');
+  assert.match(d4.detail, /schedule_notify_current_run/);
+  assert.equal(d4.nextTerminalPassCount, 3);
+  assert.equal(d4.nextTerminalBackoffUntil, at(35 + 120));
+
+  // Host-deferred retry of an unacknowledged terminal-backoff-attempt keeps notify guidance & backoff deadline.
+  const d4Retry = decide({
+    snap: mergedSnap,
+    previous: {
+      watch,
+      merged: true,
+      pendingWatch: d4.nextPendingWatch,
+      pendingKey: 'terminal',
+      pendingPassCount: d4.nextPendingCount,
+      lastDecisionReason: 'terminal-backoff-attempt',
+      terminalPassCount: d4.nextTerminalPassCount,
+      terminalBackoffUntil: d4.nextTerminalBackoffUntil,
+      lastPassAt: at(35),
+    },
+    now: at(36.5),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(d4Retry.exitCode, 0);
+  assert.equal(d4Retry.reason, 'terminal-backoff-attempt');
+  assert.match(d4Retry.detail, /schedule_notify_current_run/);
+  assert.equal(d4Retry.nextTerminalPassCount, 3);
+  assert.equal(d4Retry.nextTerminalBackoffUntil, at(35 + 120));
+
+  // Once acknowledged (pendingWatch cleared), even a tick within minPassSpacingMs stays in terminal-backoff.
+  const d4AfterAck = decide({
+    snap: mergedSnap,
+    previous: {
+      watch,
+      merged: true,
+      lastDecisionReason: 'terminal-backoff-attempt',
+      terminalPassCount: d4.nextTerminalPassCount,
+      terminalBackoffUntil: d4.nextTerminalBackoffUntil,
+      lastPassAt: at(35),
+    },
+    now: at(36.5),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(d4AfterAck.exitCode, 2);
+  assert.equal(d4AfterAck.reason, 'terminal-backoff');
+  assert.equal(d4AfterAck.nextPendingWatch, null);
+  assert.equal(d4AfterAck.nextTerminalPassCount, 3);
+  assert.equal(d4AfterAck.nextTerminalBackoffUntil, at(35 + 120));
+
+  // Reopening a closed PR clears terminal backoff state.
+  const reopened = decide({
+    snap: snap({ closed: false, merged: false }),
+    previous: { watch, closed: true, terminalPassCount: 3, terminalBackoffUntil: at(35 + 120), lastPassAt: at(35) },
+    now: at(40),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(reopened.nextTerminalPassCount, undefined);
+  assert.equal(reopened.nextTerminalBackoffUntil, undefined);
+
   const truncated = decide({ snap: snap({ gate: { truncated: true } }), previous: { watch }, now: T0 });
   assert.equal(truncated.reason, 'truncated');
   assert.equal(truncated.nextPendingWatch, watch);
@@ -922,6 +1032,144 @@ test('低成本探测:与上次完整读取一致时不做完整快照;有理由
   const activeHumanWait = { kind: 'human', headSha: 'aaa1111', reason: 'wait merge', createdAt: now - 48 * 60 * MIN, until: null, checks: [], threads: [] };
   assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['ci_failing'], wait: activeHumanWait, lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, '未到点的 wait 不应被静默门禁强拉完整快照');
   assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['ci_failing'], nextAllowAt: now + 30 * MIN, lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, '未到点的 defer 不应被静默门禁强拉完整快照');
+  // Base-branch churn briefly flips mergeable to UNKNOWN while GitHub recalculates; keep skipping
+  // when everything else matches, while real transitions (CONFLICTING / UNKNOWN->MERGEABLE) still miss.
+  const knownProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0', base: 'base-1' };
+  const transientUnknown = { ...knownProbe, status: 'OPEN false UNKNOWN aaa1111  SUCCESS:2 ', base: 'base-2' };
+  const conflicted = { ...knownProbe, status: 'OPEN false CONFLICTING aaa1111  SUCCESS:2 ', base: 'base-2' };
+  const settledKnown = { ...settled, probe: knownProbe };
+  assert.equal(probeAllowsSkip(settledKnown, transientUnknown, now + MIN), true, '瞬态 UNKNOWN 不应打穿已知 MERGEABLE 探测');
+  assert.equal(probeAllowsSkip(settledKnown, conflicted, now + MIN), false, 'MERGEABLE → CONFLICTING 必须完整读取');
+  assert.equal(probeAllowsSkip({ ...settledKnown, probe: transientUnknown }, knownProbe, now + MIN), false, '上次未知变为已知必须完整读取');
+  assert.equal(
+    probeAllowsSkip({ ...settledKnown, watch: { ...settledKnown.watch, baseSha: 'base-1' } }, transientUnknown, now + MIN),
+    false,
+    '失败期间 base 前进仍须完整读取',
+  );
+});
+
+test('终态退避端到端: 复用调度 --ack 后不每 5 分钟空转，且退避期内零 API 调用', async (t) => {
+  const fx = createFixture(t);
+  fx.setSnapshot(snap({ merged: true, verdict: 'MERGED_CLEANUP_READY' }));
+  for (let i = 0; i < 3; i += 1) {
+    const r = await fx.run(['--json']);
+    assert.equal(r.code, 0);
+    assert.equal(r.json().reason, 'terminal');
+    assert.equal((await fx.run(['--ack'])).code, 0);
+    fx.advance(5);
+  }
+  // 4th tick enters terminal-backoff (30 min from 3rd pass), skipping without waking agent.
+  const b1 = await fx.run(['--json']);
+  assert.equal(b1.code, 2);
+  assert.equal(b1.json().reason, 'terminal-backoff');
+
+  // With pacing enabled (production default), ticks inside terminalBackoffUntil skip with zero GitHub calls.
+  fx.advance(5);
+  assert.equal(pacingDue(fx.readState(), fx.now()).due, false);
+  assert.equal(pacingDue(fx.readState(), fx.now()).reason, 'terminal-backoff');
+  assert.equal(pacingDue(fx.readState(), fx.now(), { triggered: true }).due, true, '宿主事件触发仍可穿透以检测重开');
+
+  // Even with --no-pacing, decide() stays in terminal-backoff without waking the agent.
+  const b2 = await fx.run(['--json']);
+  assert.equal(b2.code, 2);
+  assert.equal(b2.json().reason, 'terminal-backoff');
+
+  // Once the 30-minute window passes, pacing becomes due and gate emits terminal-backoff-attempt with notify directive, escalating to 2h.
+  fx.advance(25);
+  assert.equal(pacingDue(fx.readState(), fx.now()).due, true);
+  const b3 = await fx.run(['--pacing', '--json']);
+  assert.equal(b3.code, 0);
+  assert.equal(b3.json().reason, 'terminal-backoff-attempt');
+  assert.match(b3.json().detail, /schedule_notify_current_run/);
+  assert.equal(fx.readState().terminalPassCount, 4);
+  const nextDeadline = fx.now() + 120 * MIN;
+  assert.equal(fx.readState().terminalBackoffUntil, nextDeadline);
+
+  // If the host defers that terminal-backoff-attempt (e.g. user-active) and retries ~90s later
+  // with pacing enabled (default minPassSpacingMinutes=5), pacing must let it through so decide()
+  // replays the unexecuted reminder with the notify directive and unchanged deadline.
+  fx.advance(1.5);
+  const retryArgs = ['--pacing', '--min-pass-spacing-minutes', '5', '--json'];
+  assert.equal(pacingDue(fx.readState(), fx.now()).due, true);
+  const b3Retry = await fx.run(retryArgs);
+  assert.equal(b3Retry.code, 0);
+  assert.equal(b3Retry.json().reason, 'terminal-backoff-attempt');
+  assert.match(b3Retry.json().detail, /schedule_notify_current_run/);
+  assert.equal(fx.readState().terminalPassCount, 4);
+  assert.equal(fx.readState().terminalBackoffUntil, nextDeadline);
+
+  // Once the agent actually runs and acknowledges (--ack), even a tick 90s later stays in
+  // terminal-backoff with zero GitHub calls.
+  assert.equal((await fx.run(['--ack'])).code, 0);
+  fx.advance(1.5);
+  const readsBeforeAckSkip = fx.snapshotRuns();
+  const b3PostAck = await fx.run(retryArgs);
+  assert.equal(b3PostAck.code, 2);
+  assert.equal(b3PostAck.json().reason, 'not-due');
+  assert.match(b3PostAck.json().detail, /pace=terminal-backoff/);
+  assert.equal(fx.snapshotRuns(), readsBeforeAckSkip, '已确认后在退避期内不得调用 GitHub');
+});
+
+test('宿主触发完整快照会用 snap.probe 刷新探测基线，下一轮普通巡检直接命中 unchanged', async (t) => {
+  const fx = createFixture(t);
+  const freshProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0', base: 'base-1' };
+  fx.setProbe(freshProbe);
+  fx.setSnapshot({ ...snap(), probe: freshProbe });
+  // Triggered run skips runProbe(), yet persists snap.probe into state.
+  assert.equal((await fx.run(['--triggered'])).code, 0);
+  assert.equal((await fx.run(['--ack'])).code, 0);
+  assert.deepEqual(fx.readState().probe, freshProbe);
+
+  fx.advance(10);
+  const reads = fx.snapshotRuns();
+  const next = await fx.run(['--json']);
+  assert.equal(next.code, 2);
+  assert.equal(next.json().reason, 'unchanged');
+  assert.equal(fx.snapshotRuns(), reads, '命中刷新后的 probe，不再补拉完整快照');
+});
+
+test('快照检查与 GraphQL 探测错位 (probe: null) 时不缓存新探针且下轮按 5 分钟强制完整重读', async (t) => {
+  const fx = createFixture(t);
+  const greenProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0', base: 'base-1' };
+  const failedProbe = { status: 'OPEN false MERGEABLE aaa1111  FAILURE:1,SUCCESS:2 ', remarks: '0  0  0', base: 'base-1' };
+  const greenSnap = snap({ verdict: 'READY' });
+  fx.setProbe(greenProbe);
+  fx.setSnapshot({ ...greenSnap, probe: greenProbe });
+  assert.equal((await fx.run(['--pacing'])).code, 0);
+  assert.equal((await fx.run(['--ack'])).code, 0);
+  // Cool down past 1h so the PR is in waiting pace (30 min).
+  fx.writeState({ lastPassAt: fx.now() - 120 * MIN });
+
+  // A check reruns and fails between gh pr view and GraphQL: probe already sees FAILURE:1,
+  // while snap.checks still carries the older green rollup, so pr-snapshot emits probe: null.
+  fx.advance(30);
+  fx.setProbe(failedProbe);
+  fx.setSnapshot({ ...greenSnap, probe: null });
+  const skewed = await fx.run(['--pacing', '--json']);
+  assert.equal(skewed.code, 2);
+  assert.equal(fx.readState().probe, undefined, '错位快照不得缓存新的或旧的 probe 基线');
+  assert.equal(fx.readState().inFlight, true, '错位快照标记 inFlight，促使下一轮 5 分钟完整重读');
+
+  // 5 minutes later (not 30 minutes!), pacing is due and forces a full snapshot that catches the failure.
+  fx.advance(5);
+  fx.setSnapshot({
+    ...snap({ checks: [check('build', 'passed', { required: true }), check('lint', 'failed', { required: true })], verdict: 'NEEDS_WORK', blockers: ['ci_failing'] }),
+    probe: failedProbe,
+  });
+  const readsBefore = fx.snapshotRuns();
+  const caught = await fx.run(['--pacing', '--json']);
+  assert.equal(caught.code, 0, caught.stdout);
+  assert.equal(fx.snapshotRuns(), readsBefore + 1);
+  assert.match(caught.json().detail, /events=\[checks-failed\]/);
+  assert.deepEqual(fx.readState().probe, failedProbe);
+  assert.equal(fx.readState().inFlight, false);
+
+  // Unavailable checks must also never cache a probe baseline even on legacy snapshots without snap.probe.
+  const fx2 = createFixture(t);
+  fx2.setProbe(failedProbe);
+  fx2.setSnapshot(snap({ checksSummary: { unavailable: true } }));
+  await fx2.run();
+  assert.equal(fx2.readState().probe, undefined, 'checks unavailable 不得持久化 probe 基线');
 });
 
 test('超过 24 小时的人工等待在探测一致时跳过完整快照；首次 gh api 未登录报错仍诊断为 auth', async (t) => {
