@@ -16,6 +16,8 @@ import {
   normalizeConflicting,
   parseTarget,
   passAdvisories,
+  canSkipWithProbe,
+  mustFullReadBeforeProbe,
   probeAllowsSkip,
   stateFilePath,
   adoptLegacyStateFile,
@@ -58,6 +60,7 @@ function createFixture(t) {
   let probe = null;
   let trigger = null;
   let snapshotRuns = 0;
+  let probeRuns = 0;
 
   // 端到端用例按分钟推进时钟;默认关掉最小放行间隔判据,它有专门用例。
   const gateArgs = (extraArgs) => [
@@ -90,6 +93,7 @@ function createFixture(t) {
     },
     now: () => clock,
     snapshotRuns: () => snapshotRuns,
+    probeRuns: () => probeRuns,
     readState() {
       return JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'));
     },
@@ -121,7 +125,10 @@ function createFixture(t) {
             stderr: env.FAKE_SNAPSHOT_STDERR ?? '',
           };
         },
-        runProbe: async () => (probe ? { code: 0, stdout: JSON.stringify(probe), stderr: '' } : { code: 1, stdout: '', stderr: '' }),
+        runProbe: async () => {
+          probeRuns += 1;
+          return probe ? { code: 0, stdout: JSON.stringify(probe), stderr: '' } : { code: 1, stdout: '', stderr: '' };
+        },
         readTrigger: async () => trigger,
         out: (text) => { stdout += text; },
         err: (text) => { stderr += text; },
@@ -1776,6 +1783,168 @@ test('仓库里常见的 bot reviewer 也要等;没有见过任何 bot 的仓库
   assert.deepEqual(Object.keys(plain.readRepoState().reviewerBots), []);
 });
 
+test('只提交 APPROVED 的自动合并 bot 不写入仓库评审名单,也不拖住后续 PR 的收齐窗口', async (t) => {
+  const fx = createFixture(t);
+  // 先遇到一条由自动合并 bot 批准过的 PR(例如模型目录自动晋升 PR),同时有普通 CI 和 Greptile 评审。
+  const autoMergeReview = {
+    id: 'R-auto',
+    author: 'cindy-auto-merge-bot',
+    authorIsBot: true,
+    state: 'APPROVED',
+    body: 'Catalog 范围与必需检查已由自动发布门禁核对。',
+    submittedAt: iso(T0 - 5 * MIN),
+    url: 'https://gh/R-auto',
+    commitOid: 'aaa1111',
+  };
+  const first = snap({
+    reviews: [autoMergeReview, botReview('R-grep', 'greptile-apps', 'aaa1111', iso(T0 - 4 * MIN))],
+    reviewerChecks: [
+      { name: 'CI', appSlug: 'github-actions', appId: 15368, headSha: 'aaa1111', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: iso(T0 - 6 * MIN), completedAt: iso(T0 - 5 * MIN) },
+    ],
+  });
+  fx.setSnapshot(first);
+  await fx.run();
+  assert.equal((await fx.run(['--ack'])).code, 0);
+  assert.deepEqual(Object.keys(fx.readRepoState().reviewerBots), ['greptile-apps']);
+  assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
+
+  // 推新提交且 CI 失败:只要 Greptile 答复就立刻放行,不再死等 cindy-auto-merge-bot 满 20 分钟。
+  fx.advance(2);
+  const red = { latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], verdict: 'NEEDS_WORK' };
+  fx.setSnapshot(snap({ ...first, ...red }));
+  let r = await fx.run(['--json']);
+  assert.equal(r.code, 2, r.stdout);
+  assert.equal(r.json().reason, 'settling');
+  assert.match(r.json().detail, /held until greptile-apps answer/);
+
+  fx.advance(3);
+  const greptileNext = botReview('R-grep-2', 'greptile-apps', 'bbb2222', iso(fx.now()));
+  fx.setSnapshot(snap({ ...first, ...red, reviews: [...first.reviews, greptileNext] }));
+  r = await fx.run(['--json']);
+  assert.equal(r.code, 0, r.stdout);
+  assert.match(r.json().detail, /events=\[checks-failed,remarks\]/);
+});
+
+test('升级路径:窗口到期与迁移解耦,整轮无当前证据时跨两次推送仍保留旧评审,待可区分证据到达再迁移 v2', async (t) => {
+  const fx = createFixture(t);
+  const autoMergeReview = {
+    id: 'R-auto',
+    author: 'cindy-auto-merge-bot',
+    authorIsBot: true,
+    state: 'APPROVED',
+    body: 'Catalog 范围与必需检查已由自动发布门禁核对。',
+    submittedAt: iso(T0 - 20 * 24 * 60 * MIN),
+    url: 'https://gh/R-auto',
+    commitOid: 'aaa1111',
+  };
+  const oldGreptileApproved = {
+    id: 'R-grep-ok',
+    author: 'greptile-apps',
+    authorIsBot: true,
+    state: 'APPROVED',
+    body: 'LGTM',
+    submittedAt: iso(T0 - 20 * 24 * 60 * MIN),
+    url: 'https://gh/R-grep-ok',
+    commitOid: 'aaa1111',
+  };
+  const first = snap({
+    reviews: [oldGreptileApproved],
+    reviewerChecks: [
+      { name: 'Greptile Review', appSlug: 'greptile-apps', appId: 99, headSha: 'aaa1111', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: iso(T0 - 20 * 24 * 60 * MIN), completedAt: iso(T0 - 20 * 24 * 60 * MIN) },
+    ],
+  });
+  fx.setSnapshot(first);
+  await fx.run();
+  assert.equal((await fx.run(['--ack'])).code, 0);
+
+  // 模拟旧版留下的单 PR 状态(无 reviewerBotsVersion)且仓库 14 天缓存已过期。
+  fx.writeRepoState({ reviewerBots: {} });
+  fx.writeState({ reviewerBots: ['greptile-apps'], reviewerBotsVersion: undefined });
+
+  // 1) 第一次推送 bbb2222:整轮收齐窗口内 Greptile 都没有注册当前 head 检查。
+  //    窗口内保持 settling;到期后本轮正常结束等待并放行,但不移除未确认的旧评审、不提前迁至 v2。
+  fx.advance(2);
+  const redPush1 = { latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], reviewerChecks: [], verdict: 'NEEDS_WORK' };
+  fx.setSnapshot(snap({ ...first, ...redPush1 }));
+  let r = await fx.run(['--json']);
+  assert.equal(r.code, 2, r.stdout);
+  assert.equal(r.json().reason, 'settling');
+  assert.match(r.json().detail, /held until greptile-apps answer/);
+  assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
+  assert.equal(fx.readState().reviewerBotsVersion, 1);
+
+  fx.advance(20);
+  r = await fx.run(['--json']);
+  assert.equal(r.code, 0, r.stdout);
+  assert.match(r.json().detail, /events=\[checks-failed\]/);
+  assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
+  assert.equal(fx.readState().reviewerBotsVersion, 1);
+  assert.equal((await fx.run(['--resume', 'pushed fix'])).code, 0);
+
+  // 2) 第二次推送 ccc3333:Greptile 尚未登记检查前仍保留在名单中继续等待,不会在意见到达前提前启动跟进。
+  fx.advance(5);
+  const redPush2 = { latestCommitOid: 'ccc3333', checks: [check('lint', 'failed', { required: true })], reviewerChecks: [], verdict: 'NEEDS_WORK' };
+  fx.setSnapshot(snap({ ...first, ...redPush2 }));
+  r = await fx.run(['--json']);
+  assert.equal(r.code, 2, r.stdout);
+  assert.equal(r.json().reason, 'settling');
+  assert.match(r.json().detail, /held until greptile-apps answer/);
+  assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
+  assert.equal(fx.readState().reviewerBotsVersion, 1);
+
+  // 3) Greptile 在 ccc3333 注册自有 App 检查并批准后,凭可区分当前证据立刻迁至 v2 并放行。
+  fx.advance(3);
+  const greptileOnPush2 = {
+    ...first,
+    ...redPush2,
+    reviews: [
+      oldGreptileApproved,
+      { id: 'R-grep-2', author: 'greptile-apps', authorIsBot: true, state: 'APPROVED', body: 'LGTM', submittedAt: iso(fx.now()), url: 'https://gh/R-grep-2', commitOid: 'ccc3333' },
+    ],
+    reviewerChecks: [
+      { name: 'Greptile Review', appSlug: 'greptile-apps', appId: 99, headSha: 'ccc3333', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: iso(fx.now() - MIN), completedAt: iso(fx.now()) },
+    ],
+  };
+  fx.setSnapshot(snap(greptileOnPush2));
+  r = await fx.run(['--json']);
+  assert.equal(r.code, 0, r.stdout);
+  assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
+  assert.equal(fx.readState().reviewerBotsVersion, 2);
+
+  // 4) 可区分的当前证据证明自动审批 bot 无自有 App 检查(当前 head APPROVED):立刻移除并迁至 v2,不再等满 20 分钟。
+  const autoCurrent = createFixture(t);
+  const autoCurrentReview = { ...autoMergeReview, commitOid: 'bbb2222' };
+  const autoCurrentSnap = snap({ reviews: [autoCurrentReview] });
+  autoCurrent.setSnapshot(autoCurrentSnap);
+  await autoCurrent.run();
+  assert.equal((await autoCurrent.run(['--ack'])).code, 0);
+  autoCurrent.writeRepoState({ reviewerBots: {} });
+  autoCurrent.writeState({ reviewerBots: ['cindy-auto-merge-bot'], reviewerBotsVersion: undefined });
+  autoCurrent.advance(2);
+  autoCurrent.setSnapshot(snap({ ...autoCurrentSnap, ...redPush1 }));
+  r = await autoCurrent.run(['--json']);
+  assert.equal(r.code, 0, r.stdout);
+  assert.match(r.json().detail, /events=\[checks-failed\]/);
+  assert.deepEqual(autoCurrent.readState().reviewerBots, []);
+  assert.equal(autoCurrent.readState().reviewerBotsVersion, 2);
+
+  // 5) 快照不完整(如 reviewThreads.truncated)时保守保留旧名单且暂不升至 v2。
+  const incomplete = createFixture(t);
+  incomplete.setSnapshot(autoCurrentSnap);
+  await incomplete.run();
+  assert.equal((await incomplete.run(['--ack'])).code, 0);
+  incomplete.writeRepoState({ reviewerBots: {} });
+  incomplete.writeState({ reviewerBots: ['greptile-apps'], reviewerBotsVersion: undefined });
+  incomplete.advance(2);
+  incomplete.setSnapshot(snap({ ...autoCurrentSnap, ...redPush1, reviewThreads: { totalCount: 1, fetchedCount: 0, unresolvedCount: 0, activeUnresolvedCount: 0, outdatedUnresolvedCount: 0, truncated: true, nodes: [] } }));
+  r = await incomplete.run(['--json']);
+  assert.equal(r.code, 2, r.stdout);
+  assert.equal(r.json().reason, 'settling');
+  assert.match(r.json().detail, /held until greptile-apps answer/);
+  assert.deepEqual(incomplete.readState().reviewerBots, ['greptile-apps']);
+  assert.equal(incomplete.readState().reviewerBotsVersion, 1);
+});
+
 test('按阶段节奏:只等人审时 30 分钟才看一次,不到时间不调用 GitHub;宿主触发立刻看', async (t) => {
   const fx = createFixture(t);
   const probe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0 0' };
@@ -3051,4 +3220,163 @@ process.exit(2);
   );
   assert.equal(diagFresh.status, 0, diagFresh.stderr);
   assert.equal(fs.existsSync(freshDir), false, 'diagnostic run must not create inherited CINDY_PR_STATE_DIR');
+});
+
+test('replay: settled baseline wait paces at 15m, uses probe, absorbs subsequent base commits, and wakes on news or deadline', async (t) => {
+  const fx = createFixture(t);
+  const s = baselineBlocked();
+  const baseProbe = { status: 'OPEN false MERGEABLE aaa1111  FAILURE:1,SUCCESS:1', remarks: '0  0  0 0', base: 'base-0' };
+  fx.setProbe(baseProbe);
+  fx.setSnapshot(s);
+  assert.equal((await fx.run(['--pacing', '--json'])).code, 0);
+  // Step 0 (15m) -> expire -> Step 1 (30m) -> expire -> Step 2 (60m) -> expire -> Step 3 (120m)
+  for (let step = 0; step < 3; step += 1) {
+    const set = (await fx.run(['--wait', fx.writeWait(baselinePlan(s)), '--json'])).json();
+    fx.advance((set.wait.until - fx.now()) / MIN);
+    assert.equal((await fx.run(['--pacing', '--json'])).json().reason, 'wait-expired');
+  }
+  const long = (await fx.run(['--wait', fx.writeWait(baselinePlan(s)), '--json'])).json();
+  assert.equal(long.wait.until - fx.now(), 120 * MIN);
+  // Ensure we have a fresh probe baseline after the wait-expired full read (which skipped probe).
+  fx.writeState({ probe: baseProbe, lastFullReadAt: fx.now() });
+
+  // 5m and 10m ticks are skipped immediately with 0 probes and 0 snapshots.
+  let snaps = fx.snapshotRuns();
+  let probes = fx.probeRuns();
+  for (const step of [5, 5]) {
+    fx.advance(step);
+    const r = await fx.run(['--pacing', '--json']);
+    assert.equal(r.code, 2);
+    assert.equal(r.json().reason, 'not-due');
+    assert.match(r.json().detail, /pace=backoff/);
+  }
+  assert.equal(fx.probeRuns(), probes, 'not-due ticks must not call probe');
+  assert.equal(fx.snapshotRuns(), snaps, 'not-due ticks must not call snapshot');
+
+  // 15m tick: unchanged probe skips full snapshot (1 probe, 0 snapshots).
+  fx.advance(5);
+  let r = await fx.run(['--pacing', '--json']);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().reason, 'unchanged');
+  assert.equal(fx.probeRuns(), probes + 1);
+  assert.equal(fx.snapshotRuns(), snaps);
+
+  // First base commit arrives on the next 15m tick: must pierce probe so baseMovedAt & 60m clamp are recorded.
+  fx.advance(10);
+  assert.equal((await fx.run(['--pacing', '--json'])).json().reason, 'not-due');
+  fx.advance(5);
+  fx.setProbe({ ...baseProbe, base: 'base-1' });
+  fx.setSnapshot({ ...s, baseCommitOid: 'base-1' });
+  snaps = fx.snapshotRuns();
+  probes = fx.probeRuns();
+  r = await fx.run(['--pacing', '--json']);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().reason, 'waiting');
+  assert.equal(fx.snapshotRuns(), snaps + 1, 'first base move reads in full to record baseMovedAt');
+  assert.ok(fx.readState().wait.baseMovedAt, 'baseMovedAt recorded on first base move');
+  const clampedUntil = fx.readState().wait.until;
+  assert.equal(clampedUntil, fx.now() + 60 * MIN, '120m wait pulled within 60m of first base move');
+
+  // Subsequent base commit 15m later is absorbed right at the probe without a full snapshot.
+  fx.advance(15);
+  fx.setProbe({ ...baseProbe, base: 'base-2' });
+  fx.setSnapshot({ ...s, baseCommitOid: 'base-2' });
+  snaps = fx.snapshotRuns();
+  probes = fx.probeRuns();
+  r = await fx.run(['--pacing', '--json']);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().reason, 'unchanged');
+  assert.equal(fx.probeRuns(), probes + 1);
+  assert.equal(fx.snapshotRuns(), snaps, 'subsequent base commit absorbed at probe');
+
+  // New human comment still pierces probe immediately at the next 15m tick and wakes the agent.
+  fx.advance(15);
+  fx.setProbe({ ...baseProbe, base: 'base-2', remarks: '1 2026-10-20T15:00:00Z 0  0 0' });
+  fx.setSnapshot({ ...s, baseCommitOid: 'base-2', comments: [comment('c-new', 'reviewer', iso(fx.now()), 'Please rebase now')] });
+  r = await fx.run(['--pacing', '--json']);
+  assert.equal(r.code, 0);
+  assert.equal(r.json().reason, 'changed');
+  assert.match(r.json().report, /Please rebase now/);
+});
+
+test('replay: skips redundant probe when state already requires a full read', async (t) => {
+  const fx = createFixture(t);
+  const p0 = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0 0', base: 'base-0' };
+  fx.setProbe(p0);
+
+  // 1. inFlight (checks running): skips probe on subsequent ticks while CI runs.
+  const running = snap({ checks: [check('build', 'pending', { required: true })], verdict: 'WAITING_CI' });
+  fx.setSnapshot({ ...running, probe: p0 });
+  await fx.run(['--json']);
+  assert.equal(fx.readState().inFlight, true);
+  assert.equal(fx.readState().snapshotProvidesProbe, true);
+  let probes = fx.probeRuns();
+  let snaps = fx.snapshotRuns();
+  fx.advance(5);
+  assert.equal((await fx.run(['--pacing', '--json'])).code, 2);
+  assert.equal(fx.probeRuns(), probes, 'inFlight must skip redundant probe');
+  assert.equal(fx.snapshotRuns(), snaps + 1);
+
+  // 2. pendingWatch (unacked event): skips probe on retry.
+  const green = snap({ verdict: 'READY', probe: p0 });
+  fx.setSnapshot(green);
+  fx.advance(5);
+  assert.equal((await fx.run(['--pacing', '--json'])).code, 0);
+  assert.ok(fx.readState().pendingWatch);
+  probes = fx.probeRuns();
+  snaps = fx.snapshotRuns();
+  fx.advance(5);
+  assert.equal((await fx.run(['--pacing', '--json'])).json().reason, 'retry-unacked');
+  assert.equal(fx.probeRuns(), probes, 'pendingWatch retry must skip redundant probe');
+  assert.equal(fx.snapshotRuns(), snaps + 1);
+  assert.equal((await fx.run(['--ack'])).code, 0);
+
+  // 3. 30m full reread when snapshot embeds snap.probe: skips probe AND refreshes probe baseline.
+  const p1 = { ...p0, status: 'OPEN false MERGEABLE aaa1111  SUCCESS:3' };
+  fx.setProbe(p1);
+  fx.setSnapshot({ ...green, probe: p1 });
+  probes = fx.probeRuns();
+  snaps = fx.snapshotRuns();
+  fx.advance(31);
+  assert.equal((await fx.run(['--pacing', '--json'])).code, 2);
+  assert.equal(fx.probeRuns(), probes, '30m reread skips probe when snapshotProvidesProbe is true');
+  assert.equal(fx.snapshotRuns(), snaps + 1);
+  assert.deepEqual(fx.readState().probe, p1, 'probe baseline refreshed from snap.probe');
+
+  // Next tick within 30m still uses probe and skips full snapshot.
+  fx.writeState({ lastPassAt: fx.now() - 10 * MIN }); // active window so 5m tick is due
+  probes = fx.probeRuns();
+  snaps = fx.snapshotRuns();
+  fx.advance(5);
+  const skipped = await fx.run(['--pacing', '--json']);
+  assert.equal(skipped.code, 2);
+  assert.equal(skipped.json().reason, 'unchanged');
+  assert.equal(fx.probeRuns(), probes + 1);
+  assert.equal(fx.snapshotRuns(), snaps);
+
+  // 4. Open bot settle window: skips probe.
+  fx.writeState({ settleUntil: fx.now() + 15 * MIN });
+  probes = fx.probeRuns();
+  snaps = fx.snapshotRuns();
+  fx.advance(5);
+  await fx.run(['--pacing', '--json']);
+  assert.equal(fx.probeRuns(), probes, 'settling window must skip redundant probe');
+  assert.equal(fx.snapshotRuns(), snaps + 1);
+
+  // 5. Due wait deadline: skips probe and goes straight to full snapshot.
+  fx.writeState({ settleUntil: undefined, wait: { kind: 'retry', headSha: 'aaa1111', reason: 'recheck', createdAt: fx.now() - 15 * MIN, until: fx.now(), checks: [], threads: [], reviewDecision: green.reviewDecision, blockers: green.blockers, threadStates: [] } });
+  probes = fx.probeRuns();
+  snaps = fx.snapshotRuns();
+  const expired = await fx.run(['--pacing', '--json']);
+  assert.equal(expired.json().reason, 'wait-expired');
+  assert.equal(fx.probeRuns(), probes, 'due wait must skip redundant probe');
+  assert.equal(fx.snapshotRuns(), snaps + 1);
+
+  // 6. Pure unit checks on mustFullReadBeforeProbe / canSkipWithProbe.
+  const quiet = { watch: freshWatch(green, T0), probe: p1, lastFullReadAt: T0, lastPassAt: T0 };
+  assert.equal(mustFullReadBeforeProbe(quiet, T0 + 5 * MIN), false);
+  assert.equal(canSkipWithProbe(quiet, T0 + 5 * MIN), true);
+  assert.equal(mustFullReadBeforeProbe({ ...quiet, merged: true }, T0 + 5 * MIN), true);
+  assert.equal(canSkipWithProbe(quiet, T0 + 31 * MIN), false);
+  assert.equal(mustFullReadBeforeProbe(quiet, T0 + 31 * MIN), false, '30m reread handled separately so legacy snapshots keep refreshing probe');
 });

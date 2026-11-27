@@ -65,39 +65,24 @@ For large prebuilt dependencies, follow the [dependency guide](docs/binary-depen
 retain local outputs for debugging, commit only source/declarations/licenses,
 and let CI download and package. Python is not a local development prerequisite.
 You may open a Ready PR to obtain test packages from **Verify pull request**
-Artifacts. They expire after 7 days, are unreviewed and never go to Platform/OSS.
-Tests and packaging must pass. CI no longer fails on a device checkbox or exempts
-authors by identity. Reviewers assess actual runtime evidence for affected paths;
-authors or maintainers may supply it. Green CI does not prove runtime testing.
+Artifacts (retained 7 days, unreviewed, never pushed to Platform/OSS).
 
 **What happens after submission:**
 
-- **Verify pull request** runs on source pushes with read-only permissions and no
-  publishing secrets. A first-time fork run may need maintainer approval; this is
-  a maintainer action, not a code change for the author.
-- **PR contributor guidance** maintains one comment for DCO and fork-run actions,
-  recomputing from current commits and accepting DCO remediation without rewriting
-  history. It reads metadata only and never executes PR code.
-- PR edits refresh guidance and validation (including target-branch changes).
-  Put verification in the body or a linked comment: actual version/environment,
-  exercised paths and gaps. No fixed wording, checkbox or copied artifact hash is
-  required. Explain applicability across the full diff since reused evidence;
-  affected behavior still needs verification.
-- Once required checks, effective review, and runtime evidence are satisfied,
-  already-authorized merge automation may execute without asking again.
-  Packaging scripts, dependency updates, or images do not require manual
-  approval just because of their paths. Admission and audience that fit the
-  standard below need no separate maintainer approval. Real permission,
-  credential, or publish-trust widening, undisclosed network access, and
-  renaming or deleting a published plugin still need the maintainers' explicit
-  decision for that scope. A plugin pull request also records any Cindy host
-  authorization it uses: which grant, whether the platform has approved it, and
-  whether a host release contains it. If that grant changed or is not ready, do
-  not merge. Other changes that fit the existing standard are still judged
-  directly.
-- Before merging, verify the current target and combined result. Retargeting a PR
-  requires fresh validation; checks for its previous target are insufficient.
-  Merge and public release are separate stages.
+- **Verify pull request** runs with read-only permissions (no publishing
+  secrets) and checks manifest contracts, locales, provisioning, changed-plugin
+  tests, and dry-run packaging. First-time fork runs may wait for maintainer
+  workflow approval.
+- **PR contributor guidance** maintains one comment for DCO and fork-run status.
+  It reads metadata only and never executes PR code.
+- **Tiered merge (L1 / L2 / L3)**: routine updates to existing plugins (L1 —
+  especially by maintainers or plugin owners listed in
+  `.github/plugin-owners.json`) merge directly once CI is green, Greptile
+  approves, and Codex reports no P0/P1 defects. Manual Cindy device testing is
+  not a merge gate; release QA happens on Global Plugin Platform after merge.
+  Boundary changes (L2: new plugins, `audience: "all"`, widened permissions/hosts,
+  or unready OAuth/host grants) and repo governance changes (L3) require
+  maintainer confirmation.
 
 See the [review contract](.greptile/rules.md) for the complete decision rules.
 
@@ -168,20 +153,16 @@ do not edit the generated `dist/maker.js` by hand.
    for version updates. If included, use a plain-text string describing the
    changes; missing or empty notes do not block validation or publication.
    See the [release-note reference](docs/plugin-authoring.md#release-notes-optional-recommended).
-4. Explain the Agent-facing impact of changed tool declarations. Supply actual
-   verification for affected paths; reuse valid evidence for unaffected ones,
-   with accurate environments and compatibility limitations. Lowering/removing
-   `minCindyVersion` still needs the maintainers' review and old-version evidence.
-   Besides scopes the plugin itself requests, name any Cindy host authorization
-   it uses or depends on, whether the platform has approved it, and whether a
-   host release contains it. If that grant changed or is not ready, do not
-   merge. Plan the scopes that still need requesting together, and do not
-   request unused ones. Only this platform-gated authorization waits.
+4. When changing tool declarations, note any Agent-facing behavior changes and
+   include the automated tests you ran. Manual Cindy client verification is not
+   a merge gate for routine updates. If you change OAuth scopes or depend on an
+   unready Cindy host authorization, list the scope, platform approval, and host
+   release status in the PR description.
 
 Every non-draft PR's **Verify pull request** runs the Server/Desktop contract,
 localization, provisioning, changed-plugin tests and actual dry-run packaging.
-There is no device-checkbox parsing or identity exemption. CN uploads remain
-removed; merging or manually dispatching from main submits Global pending releases.
+CN uploads remain removed; merging or manually dispatching from main submits
+Global pending releases.
 
 5. Review the complete diff and confirm it contains no credentials, unrelated
    generated files, or an accidentally committed `node_modules`.
@@ -193,11 +174,11 @@ removed; merging or manually dispatching from main submits Global pending releas
    counterpart must update both files in the same pull request, and vice
    versa. A pull request that updates only one side will not be merged.
 
-Bug fixes and small improvements are welcome as direct PRs. New plugins,
-built-in providers, and audience changes are judged by the standard below. A
-match needs no separate maintainer approval. A proposal issue or Draft PR may
-record design notes; it is not an approval gate, and no duplicate proposal is
-required.
+Bug fixes and small improvements are welcome as direct PRs (L1 fast-lane).
+New plugins, built-in providers, and audience changes require **no prior
+proposal approval** — you can open a PR directly (a proposal issue or Draft PR
+is optional), and maintainers confirm the L2 boundary during PR review against
+the standard below.
 
 ### Admission and audience
 
@@ -215,10 +196,12 @@ it as opt-in instead of waiting for a case-by-case decision.
    something the agent can already do directly without a plugin.
 
 The `author` field must be the real author, not an impersonation of the official
-team. A mismatch is a concrete review finding. Only a genuine boundary expansion
-needs the maintainers' explicit decision: real permission, credential, or
-publish-trust widening; undisclosed network access; renaming or deleting a
-published plugin.
+team. A mismatch is a concrete review finding. L2 boundary confirmations (new
+plugins, widening to `all`, permission/credential/autonomous-host/subprocess
+widening) and L3 repository governance changes (`.github/workflows/**`,
+`.greptile/**`, `AGENTS.md`, `.github/plugin-owners.json`, weakening `.tests/`
+gates, renaming or deleting a published plugin) require maintainer confirmation
+or approval before merge.
 
 ## Licensing of contributions (DCO)
 
