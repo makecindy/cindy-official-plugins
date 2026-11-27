@@ -4,7 +4,8 @@
   "name": "X Manager",
   "description": "在 X(Twitter)上搜舆情、发帖。搜索经 xAI 的 x_search 服务端工具,Grok 订阅 OAuth 与 xAI API key 双通道自动降级;发帖走 X 官方 API v2(需你自备 developer app)。用量取 API 回报的真实数字,不做估算。",
   "whenToUse": "需要搜 X / Twitter 上的舆情、讨论、风向,查某个账号最近说了什么、某话题近几天的走势,或需要以用户身份在 X 上发帖 / 回帖时找我。先调 x_status 看凭证与路由是否就绪,再决定用我还是改用浏览器。",
-  "version": "1.0.15",
+  "version": "1.0.16",
+  "releaseNotes": "Grok 订阅登录新增支持 OAuth 设备码流程（RFC 8628）并补齐 accounts.x.ai 域名白名单，修复授权页跨源回调被拦截及跨设备远程连接卡在复制 code 页面无法完成的问题；旧版 Cindy 仍兼容原有浏览器授权流程。",
   "minCindyVersion": "0.1.64",
   "icon": "assets/icon.png",
   "entry": "main.js",
@@ -102,6 +103,7 @@
   "network": {
     "hosts": [
       "auth.x.ai",
+      "accounts.x.ai",
       "cli-chat-proxy.grok.com",
       "api.x.ai",
       "x.com",
@@ -122,6 +124,7 @@
         },
         "oauth": {
           "authorizeUrl": "https://auth.x.ai/oauth2/authorize",
+          "deviceAuthorizationUrl": "https://auth.x.ai/oauth2/device/code",
           "tokenUrl": "https://auth.x.ai/oauth2/token",
           "clientId": "b1a00492-073a-47ea-816f-4c329264a828",
           "scopes": [
