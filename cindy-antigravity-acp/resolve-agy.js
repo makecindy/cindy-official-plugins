@@ -436,6 +436,13 @@ function spawnAgy(agyPath, args, options) {
     const constant = typeof arg === 'string' && (SAFE_ARG.test(arg) || CONSTANT_ARGS.has(arg));
     if (!constant) throw new Error('Refusing to pass a non-constant argument to agy');
   }
+  // Created by the relay in a private temp directory. Keep the task's original working directory.
+  const logFile = options?.logFile;
+  if (logFile !== undefined) {
+    if (!ctx.p.isAbsolute(logFile) || /[\x00-\x1f\x7f]/.test(logFile) ||
+        (ctx.win && /["%!^&|<>]/.test(logFile))) throw new Error('Invalid private agy log path');
+    args = ['--log-file', logFile, ...args];
+  }
   const base = {
     env: childEnv(agyPath, options),
     stdio: (options && options.stdio) || 'pipe',
@@ -450,7 +457,7 @@ function spawnAgy(agyPath, args, options) {
       throw error;
     }
     const shell = windowsSystemExe(ctx.env, 'cmd.exe') || true;
-    return spawn(['"' + agyPath + '"', ...args.map(cmdArg)].join(' '), { ...base, shell });
+    return spawn(['"' + agyPath + '"', ...args.map(arg => arg === logFile ? '"' + logFile + '"' : cmdArg(arg))].join(' '), { ...base, shell });
   }
   return spawn(agyPath, args, base);
 }
