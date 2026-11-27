@@ -306,6 +306,8 @@ const I18N = {
     taskStatus: 'Task status',
     disclosure: 'Data handed to models: the board snapshot (companion, task and agent status) is sent to the analysis, patrol, automation and chat tasks; the patrol log is stored on this machine. Terminal text is only included when you enable it below.',
     termText: 'Include Herdr terminal text in snapshots (off by default)',
+    termOn: 'Terminal text will be included in snapshots.',
+    termOff: 'Terminal text excluded from snapshots.',
     enterFailedCheck: 'Text sent but Enter failed — check the pane: {e}',
 
   },
@@ -352,6 +354,8 @@ const I18N = {
     taskStatus: '任务状态',
     disclosure: '交给模型的内容：看板快照（伙伴、任务、agent 状态）会发送给分析、巡检、自动机制与聊天任务；巡检记录只存在本机。下方开关控制是否附带 Herdr 终端正文。',
     termText: '看板快照附带 Herdr 终端正文（默认关闭）',
+    termOn: '已开启：快照会附带 Herdr 终端正文。',
+    termOff: '已关闭：快照不含终端正文。',
     enterFailedCheck: '文字已发送，但回车失败，请检查 pane：{e}',
 
   },
@@ -1410,6 +1414,15 @@ document.querySelector('#idle-busy').onchange = async () => {
   try {
     const r = await call('board_policy', { op: 'set', herdrIdleAsBusy: on });
     if (!r.ok) toast(t('saveFailed', { e: '' }), true);
+  } catch (e) { toast(t('saveFailed', { e: e?.message ?? e }), true); }
+};
+
+document.querySelector('#term-text').onchange = async () => {
+  const on = document.querySelector('#term-text').checked;
+  try {
+    const r = await call('board_policy', { op: 'set', includeTerminalText: on });
+    if (!r.ok) toast(t('saveFailed', { e: r.message ?? '' }), true);
+    else status.textContent = on ? t('termOn') : t('termOff');
   } catch (e) { toast(t('saveFailed', { e: e?.message ?? e }), true); }
 };
 

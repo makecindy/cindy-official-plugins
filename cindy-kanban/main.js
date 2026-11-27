@@ -474,22 +474,15 @@ async function chat(args) {
       } catch { /* 忽略，继续新建 */ }
     }
     if (!task) {
-      chatCreating = (async () => {
+      const created = await (chatCreating = (async () => {
         const create = { requestKey: `kanban-chat-${Date.now()}-create`, title: '看板指挥', autoTitle: false };
         if (args.route) create.route = args.route;
-        const created = await cindy.tasks.create(create);
-        await kvWrite(kv => { kv.chatTaskId = created.taskId; return null; });
-        return created;
-      })();
-      try {
-        task = await chatCreating;
-        taskId = task.taskId;
-        first = true;
-      } catch (e) {
-        return kvFailure(e);
-      } finally {
-        chatCreating = null;
-      }
+        return cindy.tasks.create(create);
+      })());
+      chatCreating = null;
+      task = created;
+      taskId = task.taskId;
+      first = true;
     }
   }
   let fullText = text;
@@ -507,16 +500,25 @@ async function chat(args) {
   }
   const revision = task.revision ?? task.task?.revision;
   try {
+    // 只追加用户消息；绑定等首条消息受理后再写（见下方 send 成功后）。
     await kvWrite(kv => {
       const history = Array.isArray(kv.chat) ? kv.chat : [];
       history.push({ role: 'user', text, at: Date.now() });
       kv.chat = history.slice(-30);
-      kv.chatTaskId = taskId;
       return null;
     });
   } catch (e) { return kvFailure(e); }
 
-  const run = await cindy.tasks.send({ taskId, expectedRevision: revision, requestKey: `kanban-chat-${Date.now()}-send`, text: fullText });
+  let run;
+  try {
+    run = await cindy.tasks.send({ taskId, expectedRevision: revision, requestKey: `kanban-chat-${Date.now()}-send`, text: fullText });
+  } catch (e) {
+    return { ok: false, errorCode: e?.code ?? 'SEND_FAILED', message: String(e?.message ?? e) };
+  }
+  // 首次消息受理后再写绑定，避免留下没有对话的空任务绑定。
+  try {
+    await kvWrite(kv => { kv.chatTaskId = taskId; return null; });
+  } catch { /* 绑定失败不阻断本轮 */ }
   const done = await waitRun(taskId, run.runId);
   try {
     const history = await kvWrite(kv => {
