@@ -219,6 +219,8 @@ var MESSAGES = {
     prBadPr: 'pr 需要是 GitHub PR 链接或编号',
     prBadCardId: 'card_id 无效',
     prCardNotFound: '找不到 card_id 对应的卡片，已新建一张',
+    prCardExpired: '这张 PR 卡片的本地状态已过期，请让 Agent 刷新卡片，或直接在 GitHub 操作',
+    prCardReadFailed: '暂时读不到这张 PR 卡片的状态，请稍后再试',
     prMovedBelow: '最新状态在下方',
     prFetchFailed: '读取 PR 信息失败({detail})，卡片按已知信息显示',
     prNextAsk: '卡片已显示。等用户点击或在对话里明确说要发，不要再用文字重复询问；点击会以本插件代发的消息送达。创建 PR 后用 card_id 和 pr 再调用 pr_card，renamed / following 只填已经完成的动作。',
@@ -228,6 +230,8 @@ var MESSAGES = {
     prClaimExpired: '认领后 {minutes} 分钟内没有开启跟进，已恢复为未跟进',
     prTodoRename: '根据「{title}」提炼简短主题，用 cindy_helper 的 set_current_session_title 把当前任务改名为「#编号 简短主题」；保留编号和核心含义，去掉 PR、跟进等流程前缀及冗余描述，不照搬完整 PR 标题',
     prTodoFollow: '按 pr 技能开始后台跟进 {url}',
+    prFollowWorkflowRead: 'entry 和 checker 是插件包内相对路径。从当前会话可用 Skills 中找到同一 namespace 的 cindy-github 插件 pr 技能，按列出的实际文件路径读取 SKILL.md；checker 位于该技能目录的 scripts/pr-heartbeat-gate.mjs。',
+    prFollowWorkflowFallback: '若 ghost_manual 仅返回未声明手册，仍按上述入口读取随包技能和跟进检查器。不要在业务仓库搜索，不要另写、复制或内联实现跟进脚本。若技能入口不可用，报告具体缺口；本回执只提供读取入口，不代表已获跟进或合并授权。',
     prClickPublish: '用户在 PR 卡片上点了「发 PR」。按 pr 技能现在提交、推送并创建这个 PR；创建后按事件里的 settings 处理改名和跟进，再用 card_id 调用 pr_card 更新卡片。',
     prClickPublishDraft: '用户在 PR 卡片上点了「发成草稿」。按 pr 技能现在提交、推送并创建 draft PR；创建后按事件里的 settings 处理改名，再用 card_id 调用 pr_card 更新卡片。',
     prClickFollow: '用户在 PR 卡片上点了「自动跟进到合并」。按 pr 技能开始后台跟进 {url}（第 4 节），核实归属和调度后用 card_id 调用 pr_card，following=true。已有失败也必须接手：按第 4 节安排首次检查，由归属任务处理并汇报实际结果或具体阻塞，不要只创建调度等待 GitHub 新事件。',
@@ -375,6 +379,8 @@ var MESSAGES = {
     prBadPr: 'pr must be a GitHub pull request URL or number',
     prBadCardId: 'Invalid card_id',
     prCardNotFound: 'No card matches card_id, so a new one was created',
+    prCardExpired: 'This PR card’s saved state has expired. Ask the agent to refresh the card, or use GitHub directly.',
+    prCardReadFailed: 'Could not read this PR card’s state right now. Try again in a moment.',
     prMovedBelow: 'Latest status is below',
     prFetchFailed: 'Could not read the pull request ({detail}); the card shows what is known',
     prNextAsk: 'The card is shown. Wait for the user to click or explicitly ask to open it, and do not ask again in text; clicks arrive as messages sent by this plugin. After creating the PR, call pr_card again with card_id and pr; set renamed / following only for actions already done.',
@@ -384,6 +390,8 @@ var MESSAGES = {
     prClaimExpired: 'Follow-up was not started within {minutes} minutes of the claim, so the card is back to not following',
     prTodoRename: 'Condense "{title}" into "#number short topic" and rename the current task with cindy_helper set_current_session_title; preserve the number and core meaning, omit workflow prefixes such as PR or Follow and redundant wording, and do not copy the full PR title',
     prTodoFollow: 'Start following {url} in the background with the pr Skill',
+    prFollowWorkflowRead: 'entry and checker are relative to the plugin package. Find the pr Skill of the cindy-github plugin with the same namespace in this session\'s available Skills and read SKILL.md at its listed file path; checker is scripts/pr-heartbeat-gate.mjs inside that Skill directory.',
+    prFollowWorkflowFallback: 'If ghost_manual only reports that no manual is declared, use the bundled Skill and follow-up checker through the entry above. Do not search the business repository or write, copy or inline a replacement follow-up script. If the Skill entry is unavailable, report the specific gap. This receipt provides reading locations only, not authorization to follow or merge.',
     prClickPublish: 'The user clicked "Open PR" on the PR card. Commit, push and open this pull request now with the pr Skill; afterwards handle renaming and following as the event settings say, then call pr_card with card_id to update the card.',
     prClickPublishDraft: 'The user clicked "Open as draft" on the PR card. Commit, push and open a draft pull request now with the pr Skill; afterwards handle renaming as the event settings say, then call pr_card with card_id to update the card.',
     prClickFollow: 'The user clicked "Auto-follow until merged" on the PR card. Start following {url} with section 4 of the pr Skill, verify ownership and the schedule, then call pr_card with card_id and following=true. Take over existing failures too: follow the initial-round rule in section 4 so the owning task handles and reports current results or the specific blocker; do not merely create a schedule and wait for a new GitHub event.',
@@ -531,6 +539,8 @@ var MESSAGES = {
     prBadPr: 'pr には GitHub の PR URL か番号を指定してください',
     prBadCardId: 'card_id が無効です',
     prCardNotFound: 'card_id に対応するカードがないため、新しく作成しました',
+    prCardExpired: 'この PR カードの保存状態は期限切れです。エージェントにカードの更新を依頼するか、GitHub で直接操作してください',
+    prCardReadFailed: 'この PR カードの状態を読み込めませんでした。しばらくしてからもう一度お試しください',
     prMovedBelow: '最新の状態は下にあります',
     prFetchFailed: 'PR 情報を取得できませんでした({detail})。分かっている情報でカードを表示します',
     prNextAsk: 'カードを表示しました。ユーザーのクリックか会話での明確な依頼を待ち、テキストで重ねて確認しないでください。クリックはこのプラグインが送るメッセージとして届きます。PR を作成したら card_id と pr を付けて pr_card を再度呼び、renamed / following には完了済みの操作だけを指定してください。',
@@ -540,6 +550,8 @@ var MESSAGES = {
     prClaimExpired: '確保から {minutes} 分以内にフォローが開始されなかったため、未フォローに戻しました',
     prTodoRename: '「{title}」から短いテーマをまとめ、cindy_helper の set_current_session_title で現在のタスク名を「#番号 短いテーマ」に変更する。番号と核心を保ち、PR・フォローなどの手順の接頭辞や冗長な説明を省き、PR タイトル全体をそのまま使わない',
     prTodoFollow: 'pr スキルで {url} のバックグラウンドフォローを開始する',
+    prFollowWorkflowRead: 'entry と checker はプラグインパッケージ内の相対パスです。この会話の利用可能な Skills から同じ namespace の cindy-github プラグインの pr スキルを探し、表示された実際のファイルパスで SKILL.md を読んでください。checker はそのスキル内の scripts/pr-heartbeat-gate.mjs です。',
+    prFollowWorkflowFallback: 'ghost_manual がマニュアル未宣言のみを返した場合も、上記の入口から同梱スキルとフォロー用チェックを読んでください。作業対象リポジトリを検索したり、代替フォロースクリプトを新規作成・コピー・インライン実装したりしないでください。スキル入口が利用できない場合は具体的な不足を報告してください。この応答は読み取り先だけを示し、フォローやマージの許可を意味しません。',
     prClickPublish: 'ユーザーが PR カードの「PR を作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、この PR をレビュー可能な状態で作成してください。作成後はイベントの settings に従って改名とフォローを処理し、card_id を付けて pr_card でカードを更新してください。',
     prClickPublishDraft: 'ユーザーが PR カードの「下書きで作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、下書き PR を作成してください。作成後はイベントの settings に従って改名を処理し、card_id を付けて pr_card でカードを更新してください。',
     prClickFollow: 'ユーザーが PR カードの「マージまで自動フォロー」を押しました。pr スキルの第 4 節に従い {url} のフォローを開始し、担当タスクとスケジュールを確認したうえで card_id と following=true を付けて pr_card を呼んでください。既存の失敗も引き継ぎ、第 4 節の初回確認に従って担当タスクで対応・報告するか、具体的な障害を説明してください。GitHub の新しいイベントを待つだけにしないでください。',
@@ -687,6 +699,8 @@ var MESSAGES = {
     prBadPr: 'pr은 GitHub PR URL이나 번호여야 합니다',
     prBadCardId: 'card_id가 올바르지 않습니다',
     prCardNotFound: 'card_id에 해당하는 카드가 없어 새로 만들었습니다',
+    prCardExpired: '이 PR 카드의 저장 상태가 만료되었습니다. 에이전트에게 카드 새로 고침을 요청하거나 GitHub에서 직접 작업하세요',
+    prCardReadFailed: '지금 이 PR 카드의 상태를 읽을 수 없습니다. 잠시 후 다시 시도하세요',
     prMovedBelow: '최신 상태는 아래에 있습니다',
     prFetchFailed: 'PR 정보를 읽지 못했습니다({detail}). 알고 있는 정보로 카드를 표시합니다',
     prNextAsk: '카드를 표시했습니다. 사용자가 클릭하거나 대화에서 분명히 요청할 때까지 기다리고, 텍스트로 다시 묻지 마세요. 클릭은 이 플러그인이 보낸 메시지로 도착합니다. PR을 만든 뒤 card_id와 pr로 pr_card를 다시 호출하고, renamed / following에는 이미 완료한 작업만 넣으세요.',
@@ -696,6 +710,8 @@ var MESSAGES = {
     prClaimExpired: '확보 후 {minutes}분 안에 팔로우가 시작되지 않아 팔로우하지 않는 상태로 되돌렸습니다',
     prTodoRename: '"{title}"을 "#번호 짧은 주제"로 요약하고 cindy_helper의 set_current_session_title로 현재 작업 이름을 변경하세요. 번호와 핵심 의미를 유지하고 PR·팔로우 등의 절차 접두사와 중복 설명은 빼며 전체 PR 제목을 그대로 복사하지 마세요',
     prTodoFollow: 'pr 스킬로 {url} 백그라운드 팔로우 시작',
+    prFollowWorkflowRead: 'entry와 checker는 플러그인 패키지 내 상대 경로입니다. 이 대화의 사용 가능한 Skills에서 같은 namespace의 cindy-github 플러그인 pr 스킬을 찾고, 표시된 실제 파일 경로에서 SKILL.md를 읽으세요. checker는 해당 스킬 디렉터리의 scripts/pr-heartbeat-gate.mjs입니다.',
+    prFollowWorkflowFallback: 'ghost_manual이 매뉴얼 미선언만 보고해도 위 진입점에서 번들 스킬과 팔로우 검사기를 읽으세요. 작업 대상 저장소를 검색하거나 대체 팔로우 스크립트를 새로 작성·복사·인라인 구현하지 마세요. 스킬 진입점을 사용할 수 없으면 구체적인 부족 사항을 보고하세요. 이 응답은 읽기 위치만 제공하며 팔로우나 병합을 허가하지 않습니다.',
     prClickPublish: '사용자가 PR 카드에서 "PR 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 이 PR을 리뷰 가능한 상태로 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경과 팔로우를 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
     prClickPublishDraft: '사용자가 PR 카드에서 "초안으로 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 초안 PR을 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경을 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
     prClickFollow: '사용자가 PR 카드에서 "병합까지 자동 팔로우"를 눌렀습니다. pr 스킬의 4절에 따라 {url} 팔로우를 시작하고 담당 작업과 일정을 확인한 뒤 card_id와 following=true로 pr_card를 호출하세요. 기존 실패도 인계받아 4절의 첫 확인에 따라 담당 작업에서 처리·보고하거나 구체적인 장애물을 설명하세요. GitHub의 새 이벤트를 기다리기만 하지 마세요.',
@@ -2566,8 +2582,15 @@ async function callTool(args, callId) {
  * ──────────────────────────────────────────────────────────────────── */
 
 var PR_CARD_DIR = 'pr-cards';
-/** 私有目录最多保留多少张卡片的状态;超出删最旧的(被删的旧卡片点击后不再响应)。 */
+/**
+ * 私有目录保留策略:
+ * - 超出 PR_CARD_KEEP 时先清理失效/过期别名与较早的已结束(merged / closed)卡片(同时保留最近 PR_CARD_ENDED_MIN 张便于改设置);
+ * - 仍开放(含草稿)与待确认(ask)的卡片不会被已结束卡片挤掉,仅在总数超出 PR_CARD_MAX(低于宿主 2000 文件配额)时按 ask → open 兜底淘汰;
+ * - 活跃跟进或进行中操作对应的卡片及其当前锚点别名永不淘汰。
+ */
 var PR_CARD_KEEP = 200;
+var PR_CARD_ENDED_MIN = 50;
+var PR_CARD_MAX = 1000;
 var PR_CARD_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 var PR_REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 var PR_FILES_KEPT = 50;
@@ -2595,19 +2618,90 @@ function prCardPath(id) {
   return PR_CARD_DIR + '/' + id + '.json';
 }
 
-async function readPrCard(id, viaAlias) {
-  var r = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: prCardPath(id) });
-  if (!r || !r.ok) return null;
+async function deletePrCardFile(path) {
+  try {
+    var r = await cindy.send({ type: 'fs-request', root: 'data', op: 'delete', path: path });
+    return Boolean(r && r.ok && r.existed !== false);
+  } catch (e) {
+    return false;
+  }
+}
+
+async function repairPrCardAlias(anchorId, cardId) {
+  try {
+    await cindy.send({
+      type: 'fs-request', root: 'data', op: 'write',
+      path: prCardPath(anchorId), content: JSON.stringify({ id: anchorId, alias: cardId }),
+    });
+  } catch (e) {}
+}
+
+async function findPrCardByAnchor(anchorId) {
+  var listing;
+  try {
+    listing = await cindy.send({ type: 'fs-request', root: 'data', op: 'list', path: PR_CARD_DIR });
+  } catch (e) {
+    return { card: null, status: 'error' };
+  }
+  if (listing && !listing.ok && listing.errorCode === 'NOT_FOUND') return { card: null, status: 'missing' };
+  if (!listing || !listing.ok || !Array.isArray(listing.entries)) return { card: null, status: 'error' };
+  var readFailed = false;
+  for (var i = 0; i < listing.entries.length; i++) {
+    var path = listing.entries[i].path;
+    var match = /^pr-cards\/([A-Za-z0-9_-]{1,64})\.json$/.exec(path);
+    if (!match) continue;
+    var saved;
+    try {
+      saved = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: path });
+    } catch (e) {
+      readFailed = true;
+      continue;
+    }
+    if (!saved || !saved.ok) {
+      if (!saved || saved.errorCode !== 'NOT_FOUND') readFailed = true;
+      continue;
+    }
+    var record;
+    try { record = JSON.parse(saved.content); } catch (e) { continue; }
+    if (!record || record.alias || record.id !== match[1]) continue;
+    if (record.anchor === anchorId) {
+      return { card: record, status: 'ok', missingAlias: true };
+    }
+  }
+  return { card: null, status: readFailed || listing.truncated ? 'error' : 'missing' };
+}
+
+async function lookupPrCard(id, viaAlias) {
+  var r;
+  try {
+    r = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: prCardPath(id) });
+  } catch (e) {
+    return { card: null, status: 'error' };
+  }
+  if (!r || !r.ok) {
+    if (r && r.errorCode === 'NOT_FOUND') {
+      return viaAlias ? { card: null, status: 'missing' } : findPrCardByAnchor(id);
+    }
+    return { card: null, status: 'error' };
+  }
   var card;
   try {
     card = JSON.parse(r.content);
   } catch (e) {
-    return null;
+    return { card: null, status: 'error' };
   }
-  if (!card || card.id !== id) return null;
+  if (!card || card.id !== id) return { card: null, status: 'error' };
   // 挪过位置的卡片:新位置的点击带的是别名,只跟一层。
-  if (card.alias) return !viaAlias && PR_CARD_ID_RE.test(card.alias) ? readPrCard(card.alias, true) : null;
-  return card;
+  if (card.alias) {
+    return !viaAlias && PR_CARD_ID_RE.test(card.alias)
+      ? lookupPrCard(card.alias, true)
+      : { card: null, status: 'error' };
+  }
+  return { card: card, status: 'ok' };
+}
+
+async function readPrCard(id, viaAlias) {
+  return (await lookupPrCard(id, viaAlias)).card;
 }
 
 /** 卡片现在显示在哪次调用上:挪过位置的是 anchor,否则是 card_id 本身。 */
@@ -2652,8 +2746,12 @@ function isBoundStopError(card) {
   return !!card.scheduleId && !!card.scheduleError && card.scheduleErrorSource === 'stop';
 }
 
+function isBoundStopRetryableError(card) {
+  return !!card.scheduleId && !!card.scheduleError && (card.scheduleErrorSource === 'stop' || card.scheduleErrorSource === 'read');
+}
+
 function boundHookUnverified(card) {
-  return !!card.scheduleId && !!card.scheduleError && !isBoundStopError(card);
+  return !!card.scheduleId && !!card.scheduleError && !isBoundStopRetryableError(card);
 }
 
 function boundFollowUnverified(card) {
@@ -2662,6 +2760,10 @@ function boundFollowUnverified(card) {
 
 function prFollowActive(card) {
   return unverifiedLegacyFollow(card) || card.following === true || !!card.scheduleId || card.pending === 'follow' || card.pending === 'stop';
+}
+
+function prCardProtected(card) {
+  return prFollowActive(card) || card.stage === 'publishing' || !!card.pending || !!card.scheduleAction || card.readyUncertain === true;
 }
 
 async function findPrCardOwner(repo, number, head, explicitId, sessionId, localOnly) {
@@ -2704,9 +2806,16 @@ async function prOtherTask(owner, callId, sessionId, localCard, toLatest, stateO
   }
   // The read-only card moves like any other card; its local card_id stays.
   var movedFrom = updating && toLatest && prAnchor(local) !== callId ? await movePrCard(local, callId) : null;
-  if (!(await savePrCard(local))) return fail(t('prSaveFailed'));
-  if (movedFrom) await sendPrMovedStub(local, movedFrom, callId);
+  if (!(await savePrCard(local))) {
+    if (movedFrom) await deletePrCardFile(prCardPath(callId));
+    return fail(t('prSaveFailed'));
+  }
+  if (movedFrom) {
+    if (movedFrom !== local.id) await deletePrCardFile(prCardPath(movedFrom));
+    await sendPrMovedStub(local, movedFrom, callId);
+  }
   var shown = await sendPrCard(local, await readPrSettings(), updating && !movedFrom ? callId : null);
+  if (!updating || movedFrom === local.id) await prunePrCards(local.id);
   // A claim or stop report still needs the answer when no card can be shown (IM).
   if (!shown && !stateOp) return fail(t('prCardNotDelivered'));
   var other = {
@@ -2717,21 +2826,91 @@ async function prOtherTask(owner, callId, sessionId, localCard, toLatest, stateO
   return { ok: true, result: other };
 }
 
-async function prunePrCards() {
+async function prunePrCards(keepId) {
   var r = await cindy.send({ type: 'fs-request', root: 'data', op: 'list', path: PR_CARD_DIR });
   if (!r || !r.ok || !Array.isArray(r.entries) || r.entries.length <= PR_CARD_KEEP) return;
-  var stale = r.entries
-    .slice()
-    .sort(function (a, b) { return a.mtime - b.mtime; })
-    .slice(0, r.entries.length - PR_CARD_KEEP);
-  for (var i = 0; i < stale.length; i++) {
-    var saved = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: stale[i].path });
-    if (!saved || !saved.ok) continue;
+  var cards = Object.create(null);
+  var cardList = [];
+  var aliases = [];
+  var unreadIds = Object.create(null);
+  for (var i = 0; i < r.entries.length; i++) {
+    var entry = r.entries[i];
+    var match = /^pr-cards\/([A-Za-z0-9_-]{1,64})\.json$/.exec(entry.path);
+    if (!match) continue;
+    var entryId = match[1];
+    var mtime = typeof entry.mtime === 'number' ? entry.mtime : 0;
+    var saved = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: entry.path });
+    if (!saved || !saved.ok) {
+      if (!saved || saved.errorCode !== 'NOT_FOUND') unreadIds[entryId] = true;
+      continue;
+    }
     var record;
-    try { record = JSON.parse(saved.content); } catch (e) { continue; }
-    // Active ownership must not disappear merely because other cards were created.
-    if (prFollowActive(record)) continue;
-    await cindy.send({ type: 'fs-request', root: 'data', op: 'delete', path: stale[i].path });
+    try { record = JSON.parse(saved.content); } catch (e) { unreadIds[entryId] = true; continue; }
+    if (!record || record.id !== entryId) { unreadIds[entryId] = true; continue; }
+    if (record.alias) {
+      aliases.push({ id: entryId, path: entry.path, mtime: mtime, targetId: String(record.alias) });
+    } else {
+      var unit = { id: entryId, path: entry.path, mtime: mtime, record: record, liveAlias: null };
+      cards[entryId] = unit;
+      cardList.push(unit);
+    }
+  }
+  var deadAliases = [];
+  for (var j = 0; j < aliases.length; j++) {
+    var alias = aliases[j];
+    var owner = cards[alias.targetId];
+    if (owner) {
+      if (owner.record.anchor === alias.id) owner.liveAlias = alias;
+      else deadAliases.push(alias);
+    } else if (!r.truncated && !unreadIds[alias.targetId]) {
+      deadAliases.push(alias);
+    }
+  }
+  var remaining = r.entries.length;
+  async function deleteEntry(path) {
+    if (!(await deletePrCardFile(path))) return false;
+    remaining--;
+    return true;
+  }
+  async function evictUnit(unit) {
+    if (!(await deleteEntry(unit.path))) return;
+    if (unit.liveAlias) await deleteEntry(unit.liveAlias.path);
+  }
+  deadAliases.sort(function (a, b) { return a.mtime - b.mtime; });
+  for (var d = 0; d < deadAliases.length; d++) {
+    await deleteEntry(deadAliases[d].path);
+  }
+  if (remaining <= PR_CARD_KEEP) return;
+  var finished = [];
+  var asks = [];
+  var openIdle = [];
+  for (var k = 0; k < cardList.length; k++) {
+    var item = cardList[k];
+    // Never prune the card just created/moved by this call, active ownership, in-flight publish/ready/schedule operations, or unconfirmed ready writes (plus their live anchor aliases).
+    if (item.id === keepId || prCardProtected(item.record)) continue;
+    item.effectiveMtime = item.liveAlias ? Math.max(item.mtime, item.liveAlias.mtime) : item.mtime;
+    if (item.record.stage === 'merged' || item.record.stage === 'closed') finished.push(item);
+    else if (item.record.stage === 'ask') asks.push(item);
+    else openIdle.push(item);
+  }
+  var byMtime = function (a, b) { return a.effectiveMtime - b.effectiveMtime; };
+  finished.sort(byMtime);
+  while (remaining > PR_CARD_KEEP && finished.length > PR_CARD_ENDED_MIN) {
+    await evictUnit(finished.shift());
+  }
+  if (remaining <= PR_CARD_MAX) return;
+  while (remaining > PR_CARD_MAX && finished.length) {
+    await evictUnit(finished.shift());
+  }
+  if (remaining <= PR_CARD_MAX) return;
+  asks.sort(byMtime);
+  while (remaining > PR_CARD_MAX && asks.length) {
+    await evictUnit(asks.shift());
+  }
+  if (remaining <= PR_CARD_MAX) return;
+  openIdle.sort(byMtime);
+  while (remaining > PR_CARD_MAX && openIdle.length) {
+    await evictUnit(openIdle.shift());
   }
 }
 
@@ -3873,9 +4052,10 @@ async function syncCardSchedule(card, settings, start) {
       card.scheduleStatus = null;
       card.followedEver = true;
     } else {
-      var stopEnv;
-      try { stopEnv = await cardFollowSkillEnv(); } catch (_) {}
       errorSource = 'read';
+      // Read the approved skill dir BEFORE the final schedule_get so edits to
+      // ownership or hook while waiting for the dir lookup are observed before delete.
+      var stopEnv = await cardFollowSkillEnv();
       var owned = await prSchedule('schedule_get', { id: card.scheduleId });
       if (owned) {
         if (!ownedFollowSchedule(owned, card) || owned.id !== card.scheduleId) {
@@ -3909,17 +4089,24 @@ async function syncCardSchedule(card, settings, start) {
       card.following = false;
       card.scheduleStatus = 'unverified';
     }
-    // A confirmed absence releases the reservation. An unreadable scheduler
-    // keeps it until a refresh reconciles the operation.
-    try {
-      var remaining = await schedulesForPr(card);
-      if (start && !remaining.some(function (s) { return s.targetSessionId === card.sessionId; })) {
-        card.pending = card.scheduleAction = null;
-      }
-      if (!start && remaining.some(function (s) { return s.id === card.scheduleId; })) {
-        card.pending = card.scheduleAction = null;
-      }
-    } catch (_) {}
+    // Before schedule_delete runs (read/verify failure), no write went out: clear
+    // the in-flight Stop state even if schedulesForPr also fails transiently, so
+    // the card does not stay stuck on "stopping" and Stop remains retryable.
+    if (!start && (errorSource === 'read' || errorSource === 'verify')) {
+      card.pending = card.scheduleAction = null;
+    } else {
+      // A confirmed absence releases the reservation. An unreadable scheduler
+      // keeps it until a refresh reconciles the operation.
+      try {
+        var remaining = await schedulesForPr(card);
+        if (start && !remaining.some(function (s) { return s.targetSessionId === card.sessionId; })) {
+          card.pending = card.scheduleAction = null;
+        }
+        if (!start && remaining.some(function (s) { return s.id === card.scheduleId; })) {
+          card.pending = card.scheduleAction = null;
+        }
+      } catch (_) {}
+    }
   }
   await savePrCardRetry(card);
 }
@@ -4046,6 +4233,18 @@ function armPrClaimTimer(id, delay) {
       if (current && current.id === id && prClaimWaiting(current)) await settlePrClaim(current);
     }).catch(function () {});
   }, delay);
+}
+
+// Manual discovery and bundled Skills are separate host surfaces. Keep the recovery
+// route in tool receipts and click handoffs, where an agent without the Skill can see it.
+function prFollowWorkflow() {
+  return {
+    skill: 'pr',
+    entry: 'skills/pr/SKILL.md',
+    checker: 'skills/pr/scripts/pr-heartbeat-gate.mjs',
+    read: t('prFollowWorkflowRead'),
+    on_manual_failure: t('prFollowWorkflowFallback'),
+  };
 }
 
 async function prCardTool(args, callId, fromLegacyStop) {
@@ -4301,10 +4500,16 @@ async function prCardTool(args, callId, fromLegacyStop) {
   if (card.legacyHookRepair && !notes.includes(t('prLegacyHookRepair'))) notes.push(t('prLegacyHookRepair'));
   var movedFrom = updating && a.to_latest === true && prAnchor(card) !== callId ? await movePrCard(card, callId) : null;
   // 状态没存上时按钮点了找不到记录:不显示卡片,让 Agent 稍后重试。
-  if (!(await savePrCard(card))) return fail(t('prSaveFailed'));
-  if (movedFrom) await sendPrMovedStub(card, movedFrom, callId);
+  if (!(await savePrCard(card))) {
+    if (movedFrom) await deletePrCardFile(prCardPath(callId));
+    return fail(t('prSaveFailed'));
+  }
+  if (movedFrom) {
+    if (movedFrom !== card.id) await deletePrCardFile(prCardPath(movedFrom));
+    await sendPrMovedStub(card, movedFrom, callId);
+  }
   var delivered = await sendPrCard(card, settings, updating && !movedFrom ? callId : null);
-  if (!updating) await prunePrCards();
+  if (!updating || movedFrom === card.id) await prunePrCards(card.id);
   // A follow claim or a start/stop report is a state operation: its answer matters even where no card can be shown (IM).
   var stateOp = a.claim_follow === true || typeof a.following === 'boolean';
   // The state is saved but the card did not reach the conversation: do not report a card the user cannot see.
@@ -4374,6 +4579,9 @@ async function handOffPr(card, action, settings, msg, taskUrl) {
   else if (action === 'pr:open-task') text = t('prClickOpenTask', { url: taskUrl });
   else text = t('prClickStop', { url: url });
   var event = { card_id: card.id, action: action.slice(3), repo: card.repo };
+  if (action === 'pr:publish' || action === 'pr:draft' || action === 'pr:follow') {
+    event.follow_workflow = prFollowWorkflow();
+  }
   if (action === 'pr:open-task') event.task_url = taskUrl;
   if (card.pr) {
     event.pr_number = card.pr.number;
@@ -4503,12 +4711,29 @@ async function markPrReadyInner(card, settings, msg, progress) {
   await sendPrCard(card, settings, null);
 }
 
+async function notifyPrCardUnavailable(msg, status) {
+  var text = status === 'error' ? t('prCardReadFailed') : t('prCardExpired');
+  var payload = {
+    type: 'notify',
+    text: text.slice(0, 200),
+    tone: status === 'error' ? 'error' : 'warning',
+  };
+  if (typeof msg.mobilePageId === 'string' && msg.mobilePageId) payload.mobilePageId = msg.mobilePageId;
+  try { await cindy.send(payload); } catch (e) {}
+}
+
 async function prCardAction(msg) {
   var id = String(msg.callId || '');
   if (!PR_CARD_ID_RE.test(id)) return;
-  var card = await readPrCard(id);
-  if (!card) return;
+  var lookup = await lookupPrCard(id);
+  var card = lookup.card;
+  if (!card) {
+    await notifyPrCardUnavailable(msg, lookup.status);
+    return;
+  }
   if (card.sessionId && card.sessionId !== msg.sessionId) return;
+  // 旧版淘汰可能误删过活跃卡的锚点别名:校验归属后再补回,避免跨会话点击写盘。
+  if (lookup.missingAlias) await repairPrCardAlias(id, card.id);
   var action = String(msg.actionId || '');
   var settings = await readPrSettings();
   var active = await findPrCardOwner(card.repo, card.pr && card.pr.number, card.head, card.id, card.sessionId);
@@ -4663,10 +4888,13 @@ async function prCardAction(msg) {
       return;
     }
     // 没存上就不显示新状态(按钮会和记录对不上):重画已保存的那一版并提示。
-    var saved = await readPrCard(id);
-    if (!saved) return;
-    saved.note = t('prSaveFailed');
-    await sendPrCard(saved, settings, null);
+    var savedLookup = await lookupPrCard(id);
+    if (!savedLookup.card) {
+      await notifyPrCardUnavailable(msg, savedLookup.status);
+      return;
+    }
+    savedLookup.card.note = t('prSaveFailed');
+    await sendPrCard(savedLookup.card, settings, null);
     return;
   }
   // 原地更新被点的卡片:交给 Agent 的动作报 working 直到它用 pr_card 回写结果,其余点击报 done 立即结束。
@@ -5073,6 +5301,7 @@ cindy.onHostMessage(async function (msg) {
       r = fail(t('unknownTool', { tool: msg.tool }));
     }
     if (r.ok) {
+      if (msg.tool === 'pr_card' || msg.tool === 'pr_follow_settings') r.result.follow_workflow = prFollowWorkflow();
       cindy.send({ type: 'tool-result', callId: msg.callId, ok: true, result: r.result });
     } else {
       cindy.send({ type: 'tool-result', callId: msg.callId, ok: false, message: r.message });

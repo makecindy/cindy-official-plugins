@@ -37,7 +37,14 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { completeInitializeResult, isObject, isSessionOpen, normalizeMcpToolCall } = require('./agy-mcp.js');
+const {
+  adaptAgyNativeToolUpdate,
+  clientSupportsElicitationForm,
+  completeInitializeResult,
+  isObject,
+  isSessionOpen,
+  normalizeMcpToolCall,
+} = require('./agy-mcp.js');
 const { accountErrorRelay, classifyAccountErrorResponse } = require('./agy-account-errors.js');
 
 const REMOTE_WORKSPACE_ARG = '--cindy-remote-workspace';
@@ -56,6 +63,8 @@ const LAUNCH_DIR_PREFIX = 'cindy-agy-remote-';
 /** A launch directory this old belongs to a task that ended without cleaning up (a crash, a hard kill). */
 const STALE_LAUNCH_DIR_MS = 24 * 60 * 60 * 1000;
 
+/** Non-local agy tools explicitly allow-listed in `agentDefinition` (never touch host files or shell). */
+const REMOTE_SAFE_NATIVE_TOOLS = new Set(['search_web', 'ask_question', 'update_steps']);
 /** ACP tool kinds that mean "touched this computer" when the call is not an MCP call. */
 const LOCAL_KINDS = new Set(['read', 'edit', 'delete', 'move', 'execute']);
 /** agy's own file and command tools, by the name it reports. */
@@ -142,6 +151,8 @@ function agentDefinition(serverNames) {
     'description: Works on a project that is on another computer, through the tools Cindy provides.',
     'tools:',
     '  - search_web',
+    '  - ask_question',
+    '  - update_steps',
     'mcpServers:',
     ...serverNames.map((name) => `  - name: ${name}`),
     '---',
@@ -186,13 +197,24 @@ function remoteToolIdentity({ server, tool }) {
 }
 
 /** Keep the remote restriction on native file and command tools after normalizing MCP calls. */
-function inspectToolCall(toolCall, seen, serverNames = []) {
+function inspectToolCall(toolCall, seen, serverNames = [], seenSafeTools = null) {
   if (!isObject(toolCall)) return { type: 'other' };
   const mcpCall = normalizeMcpToolCall(toolCall, seen, serverNames, {
     allowLegacyEnvelope: true, toolIdentity: remoteToolIdentity,
   });
   if (mcpCall) return { type: 'mcp', toolCall: mcpCall };
+  const id = typeof toolCall.toolCallId === 'string' ? toolCall.toolCallId : null;
   const name = typeof toolCall.name === 'string' ? toolCall.name : '';
+  if (REMOTE_SAFE_NATIVE_TOOLS.has(name)) {
+    if (id && seenSafeTools) {
+      if (seenSafeTools.size >= 2_000 && !seenSafeTools.has(id)) {
+        seenSafeTools.delete(seenSafeTools.values().next().value);
+      }
+      seenSafeTools.add(id);
+    }
+    return { type: 'other' };
+  }
+  if (!name && id && seenSafeTools && seenSafeTools.has(id)) return { type: 'other' };
   const kind = typeof toolCall.kind === 'string' ? toolCall.kind : '';
   if (LOCAL_TOOL_NAMES.has(name) || LOCAL_KINDS.has(kind)) return { type: 'local', tool: name || kind };
   return { type: 'other' };
@@ -253,6 +275,8 @@ function startRemoteWorkspace(agyPath, host) {
   let stdinEnded = false;
   const queued = [];
   const seenCalls = new Map();
+  const seenSteps = new Map();
+  const seenSafeTools = new Set();
   let serverNames = [];
 
   const running = (child) => Boolean(child) && child.exitCode === null && child.signalCode === null;
@@ -470,7 +494,7 @@ function startRemoteWorkspace(agyPath, host) {
       toClientLine(line, agent.stdout);
       return;
     }
-    const verdict = inspectToolCall(isPermission ? params.toolCall : update, seenCalls, serverNames);
+    const verdict = inspectToolCall(isPermission ? params.toolCall : update, seenCalls, serverNames, seenSafeTools);
     if (verdict.type === 'local') {
       if (isPermission) {
         const options = Array.isArray(params.options) ? params.options : [];
@@ -483,16 +507,27 @@ function startRemoteWorkspace(agyPath, host) {
       );
       return;
     }
-    const outgoing = verdict.type === 'mcp'
-      ? { ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }
-      : message;
+    let outgoing = message;
+    let adapted = null;
+    if (verdict.type === 'mcp') {
+      outgoing = { ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } };
+    } else if (isToolUpdate) {
+      adapted = adaptAgyNativeToolUpdate(update, {
+        elicitationForm: clientSupportsElicitationForm(initRequest?.params),
+        seenSteps,
+      });
+      if (adapted?.action === 'drop') return;
+      if (adapted?.action === 'replace') {
+        outgoing = { ...message, params: { ...params, update: adapted.update } };
+      }
+    }
     if (isToolUpdate) {
       const action = errorRelay.notification(outgoing);
       if (action?.flush) {
         for (const item of action.flush) toClient(item, agent.stdout);
       }
     }
-    if (verdict.type === 'mcp') {
+    if (verdict.type === 'mcp' || adapted?.action === 'replace') {
       toClient(outgoing, agent.stdout);
       return;
     }
