@@ -4,7 +4,7 @@
   "name": "Antigravity",
   "description": "Run Cindy tasks with the Google Antigravity CLI (agy) installed on this computer.",
   "version": "0.6.0",
-  "releaseNotes": "Antigravity accounts are now managed in Settings → Model Providers: add several Google accounts, see each one’s usage and let Cindy share tasks between them, with automatic switching when one runs out or needs a new sign-in. Also includes account-bound Google verification on desktop and mobile. The plugin settings page keeps the CLI setup and points there.",
+  "releaseNotes": "Antigravity accounts are now managed in Settings → Model Providers: add several Google accounts, see each one’s usage and let Cindy share tasks between them, with automatic switching when one runs out or needs a new sign-in. Also includes account-bound Google verification and native ask_question / update_steps ACP card adaptation. The plugin settings page keeps the CLI setup and points there.",
   "minCindyVersion": "0.1.148",
   "icon": "icon.png",
   "locales": {
