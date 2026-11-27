@@ -143,13 +143,7 @@ function normalizeMcpToolCall(toolCall, seen, serverNames, { allowLegacyEnvelope
       seen.set(id, known);
     }
   }
-  const knownMatch = Boolean(known) && (
-    allowLegacyEnvelope
-    || name === known.sourceName
-    || name === known.toolName
-    || name === known.title
-  );
-  if (!knownMatch) return null;
+  if (!known || (!allowLegacyEnvelope && name !== known.sourceName && name !== known.toolName)) return null;
 
   const next = { ...toolCall };
   if ('title' in next) next.title = known.title;
