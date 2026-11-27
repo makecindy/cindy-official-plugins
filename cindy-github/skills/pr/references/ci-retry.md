@@ -65,6 +65,7 @@ const replaceRefsArgs = ['--no-replace-objects', 'for-each-ref', '--format=%(ref
 const shallowStateArgs = ['--no-replace-objects', 'rev-parse', '--is-shallow-repository'];
 const shallowPathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'shallow'];
 const refFormatArgs = ['--no-replace-objects', 'rev-parse', '--show-ref-format'];
+const commitMessagePathArgs = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'COMMIT_EDITMSG'];
 const lockPathArgs = ['index', 'HEAD', exactRef, 'packed-refs']
   .map(name => ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', name]);
 const originalObjectArgs = ['--no-replace-objects', 'cat-file', 'commit', originalRemoteSha];
@@ -177,6 +178,42 @@ amend, leave local work unpushed. If an earlier amend may have copied notes,
 read back HEAD and every suspected notes ref from its original configuration and
 environment without repeating the amend. Unknown destinations/effects remain
 unknown; do not restore/delete refs, replay notes, reset user work or refund quota.
+
+COMMIT_EDITMSG must be absent or a private regular file. Even --no-edit amend
+writes this helper; resolve `commitMessagePathArgs` in the actual Git environment,
+including linked worktrees, before any budget status/reservation, amend and push.
+Do not construct `.git/COMMIT_EDITMSG` or assume `.git` is a directory. Confirm the
+absolute path belongs to this verified repository's Git metadata. Inspect the
+existing parent chain with lstat: every component must be a real directory with
+known, stable lossless device/inode identity. Any symlink/junction, missing parent,
+non-directory or unreadable/unknown component stops; ENOENT at the leaf alone is
+not proof of safe absence.
+
+Use lstat without following the leaf. An existing file must be regular, have
+known `nlink === 1n`, and nonzero inode plus lossless BigInt device/inode IDs;
+signed high-bit representations are valid. Any symlink (including dangling),
+multiple hard links, directory, special file, missing/unreadable identity or
+unknown result stops before quota or amend. Keep these observations only in the
+current Agent verification, not a new cache or receipt. Re-read the same Git path,
+parents, type, link count and identity at every boundary: a changed path/parent,
+file replacement or absence becoming presence before amend stops without refund.
+Both signed and unsigned paths share this prerequisite.
+
+After amend, an existing private file must retain its pinned identity; a formerly
+absent target must now be a private regular file, whose identity is pinned for
+the final pre-push recheck. Unexpected, changed or unknown state leaves the local
+commit unpushed. Never remove, replace or relink this file to qualify, change Git
+environment/configuration, or run a probe amend. These checks are not an atomic
+binding of Git to the inspected file; they rely on the required exclusive
+checkout and do not prevent a later concurrent swap. No lock owner or executor
+is added. [Git commit's file contract](https://git-scm.com/docs/git-commit#FILES)
+describes the overwrite.
+
+If an earlier amend may have followed an alias, a failure or unchanged HEAD does
+not prove that outside files were untouched. Read back HEAD and account for every
+suspected aliased output read-only within existing authorization. Unknown effects
+remain unknown; do not restore outside bytes, replay, reset user work or refund
+quota. The receipt I/O owner is not used to inspect or repair Git helper files.
 
 Any occupied or unreadable Git lock path stops before budget status/reservation,
 amend and push. First require `refFormatArgs` to succeed with exactly `files`;

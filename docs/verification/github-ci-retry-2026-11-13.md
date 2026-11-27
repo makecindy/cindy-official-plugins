@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.69, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.70, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1669,3 +1669,32 @@ main.js/settings/node receipt/budget/notes guide/regression/locales are byte-ide
 Forge69 exact-content passes: **35 files, 281498 archive bytes, 797350 uncompressed bytes**; generated package deleted and absence verified. Additional unchanged-main account-errors/bridge tests initially returned **50 pass /1 fail /4 skip (12.10s)**. The failed parent suite alone was rechecked once: **37 pass /0 fail /1 skip (11.47s)**. The initial child failure detail was not retained in the bounded first output, and its root cause was not established; do not call it a confirmed infrastructure flake or claim the initial batch was all green. All files for this optional check exactly match current main; no unrelated implementation change or further rerun. This does not authorize CI repush.
 
 Intermediate69 mandatory four suites plus plugin: **666 passed /42 skipped /0 failed (301.65s)**. These results cover main1b89f186 and the preference-entry documentation fix, not the later fab1b273 entry-receipt change.
+
+
+## Bundled workflow receipt integration — source1.5.70, not installed
+
+Before this round single push, main moved tofab1b273bab6c19c527fda2bda9c3aab877a99bb (GitHub1.5.48). Keep local signed69/2f3b808f and normally mergefab1 on the same branch. The inherited pr_card/pr_follow_settings result and publish/draft/follow handoff add follow_workflow reading locations for the bundled Skill/checker; this is discovery data, not follow/merge authorization. The existing event.settings assignment remains once for non-navigation actions, carrying ci_retry_repush and the established queue/live-read behavior; new receipt fields coexist with it.
+
+Conflicts in main.js/test expectations preserve both the receipt and CI settings. Four-language tool descriptions retain strict CI and legacy-repair conditions plus the bundled reading fallback; no replacement scripts. Root equalszh. pr_card lengths EN1004/zh863/JA734/KO807 and pr_follow_settings EN989/zh443/JA587/KO682 stay below1024. Two initial overlong English drafts were rejected by the local length precheck before final test execution, then compacted without dropping boundaries. Existing focused publication/model/IM/queue-read/reference contracts pass15/15 (.61s). No assertion was weakened. Recovery guide/receipt owner/gate/argv and settings implementation are unchanged from69; main.js receipt output/locales are changed and lack real Cindy integration evidence.
+
+The newly inherited verification/pr-follow-entry-2026-11-13.md is upstream content; its environment statements are not this task runtime evidence. Source hook/schedule, author, scopes and credentials remain; source70 is not installed. The settings-entry correction remains paired in user guides and historical evidence. Optional Antigravity results above remain a separate, unconfirmed initial failure plus a passing narrowed recheck, not a claimed all-green full batch or recovery justification.
+
+Pre-file-guard candidate70 mandatory four suites plus plugin: **666 passed /42 skipped /0 failed (334.63s)**; Forge35/283295/803271 was deleted. A later COMMIT_EDITMSG review finding is not covered by those candidate results; final corrected70 is recorded separately.
+
+
+## Amend helper-file boundary checkpoint — final source1.5.70 candidate
+
+Invariant: COMMIT_EDITMSG is either confirmed absent under stable real Git metadata parents or a private regular file with known single-link, stable lossless identity. The existing Agent verification owns these transient observations; no receipt fields, storage, lock, executor or retry are added. Resolve the path through Git in the actual environment, including linked worktrees. lstat the leaf/parents without following aliases; symlink/junction, hard-link count other than1, missing parent, replacement or unknown facts stop before budget/amend/push. Signed/unsigned paths share it. Never remove or repair the file to qualify.
+
+| Event/state | Required outcome |
+| --- | --- |
+| Linked, nonregular, unreadable or unknown before budget | Stop without reservation or amend |
+| Parent/path/ID/link count changes; absent target appears before amend | Stop, no refund after reservation |
+| Successful amend creates an expected private file, or retains pinned private identity | Pin/recheck at push alongside all existing guards |
+| Unexpected helper state or failed/unknown amend | Leave local work unpushed; inspect HEAD and suspected outputs read-only, no restore/replay/reset/refund |
+
+This does not atomically bind Git to a prior lstat or prevent another process swapping a path after final checks; exclusive-checkout prerequisites remain. Receipt I/O is not reused on Git helper files. Native Windows/Node22/Git2.54 isolated fixtures reproduce overwrite through symlinks and hardlinks in both ordinary and linked worktrees (all4 ran, none skipped), with amend success/HEAD movement/outside fixture changes. Read-only inspection before the counterexample leaves HEAD/fixture bytes unchanged and performs no quota/push; path/regular/absent/replacement controls also run. Corrected case family red against unchanged pre-guard guide0pass/6fail, then6pass0fail4.50s. This is actual local Git counterexample plus Agent-guide contract, not mechanical refusal or real Cindy/GitHub/remote recovery evidence. No real user files, credentials, attempts or retired fixtures. [Git commit FILES](https://git-scm.com/docs/git-commit#FILES) is the supporting file contract.
+
+The pre-file-guard70 full-suite/package numbers above are intermediate only; final corrected candidate needs its own checks/package. Current notes AND helper-file refusal, installed integration and all earlier acceptance gaps remain unverified live. The separate settings documentation finding remains fixed.
+
+Final corrected70 mandatory four suites plus plugin: **672 passed /42 skipped /0 failed (307.62s)**. Forge exact-content: **35 files /284192 archive bytes /806050 uncompressed bytes**, generated package removed and absence verified. These results include the helper-file exclusion and native regressions; they cover fab1b273, not subsequently moved main5d67a305. Source70 remains uninstalled.

@@ -40,6 +40,12 @@ exclusive branch with write permission, no WIP, no rewrite ban and no unknown or
 other people's commits. Required real fixes take priority and are batched into a
 normal push when possible.
 
+The Agent also resolves Git's actual `COMMIT_EDITMSG` helper path. It must be
+absent under verified real parents or a private regular file with a known single
+link and stable identity. Symlinks, multiple hard links, replacement or unknown
+state stop before budget/amend/push; the file is never removed or repaired to
+qualify. These observations are not an atomic binding of Git to that file.
+
 CI-only recovery also stops if there is any retained approval, a merge-queue
 entry, enabled auto-merge or unknown/incomplete information about those states.
 The Agent reads the complete reviews and live queue/auto-merge state before

@@ -223,6 +223,74 @@ test('notes rewrite eligibility excludes auxiliary-ref writes before quota or am
   });
 });
 
+test('commit message file aliases are excluded before any budget or amend', async t => {
+  for (const linked of [false, true]) for (const alias of ['hardlink', 'symlink']) await t.test(`${linked ? 'linked' : 'ordinary'} worktree / ${alias}`, t => {
+    const fx = fixture(t), work = path.join(fx.root, 'work'); fs.mkdirSync(work);
+    const global = path.join(fx.root, 'global'); fs.writeFileSync(global, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1', GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' };
+    for (const k of Object.keys(env)) if (/^GIT_(?:DIR$|WORK_TREE$|COMMON_DIR$|INDEX_FILE$|NOTES_|CONFIG_(?:COUNT|KEY_|VALUE_|PARAMETERS))/.test(k)) delete env[k];
+    let active = work;
+    const invoke = (args, actualEnv = env) => spawnSync('git', args, { cwd: active, env: actualEnv, encoding: 'utf8', shell: false });
+    const git = args => { const r = invoke(args); assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };
+    git(['init', '-b', 'main']);
+    for (const [k, v] of [['user.name', 'Ada Example'], ['user.email', 'ada@example.test'], ['commit.gpgsign', 'false'], ['core.hooksPath', path.join(fx.root, 'no-hooks')]]) git(['config', k, v]);
+    fs.writeFileSync(path.join(work, 'code.txt'), 'fixture code\n'); git(['add', '.']); git(['commit', '-s', '-m', 'original fixture message']);
+    const original = git(['rev-parse', 'HEAD']);
+    if (linked) { const next = path.join(fx.root, 'linked'); git(['worktree', 'add', '-b', 'feature', next]); active = next; assert.ok(fs.statSync(path.join(active, '.git')).isFile()); }
+    const expected = ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'COMMIT_EDITMSG'];
+    const target = git(expected), external = path.join(fx.root, 'external-fixture.txt'), bytes = 'fixture-owned original bytes\n';
+    fs.writeFileSync(external, bytes);
+    // Fixture construction only. Recovery must never unlink or repair a target
+    // to make it eligible. No actual user file, quota or remote is touched.
+    if (fs.existsSync(target)) fs.unlinkSync(target);
+    try { if (alias === 'hardlink') fs.linkSync(external, target); else fs.symlinkSync(external, target, 'file'); }
+    catch (error) { if (alias === 'symlink' && error.code === 'EPERM') { t.skip('native file symlink creation unavailable'); return; } throw error; }
+    const st = fs.lstatSync(target, { bigint: true });
+    if (alias === 'symlink') assert.equal(st.isSymbolicLink(), true);
+    else { assert.equal(st.isFile(), true); assert.equal(st.nlink, 2n); }
+    // The read-only evidence gathering itself leaves all fixture state intact.
+    assert.equal(git(['rev-parse', 'HEAD']), original); assert.equal(fs.readFileSync(external, 'utf8'), bytes);
+    assert.equal(fs.existsSync(fx.retryDir), false);
+    const plan = guideArguments({ verifiedBranch: linked ? 'feature' : 'main', verifiedRemote: 'origin', originalRemoteSha: original, newSha: original,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    // Native old-risk counterexample, not a production recovery attempt or a
+    // claim that an Agent mechanically refused. There is no budget/push here.
+    const amended = invoke(plan.amendArgs, { ...env, GIT_COMMITTER_DATE: '2026-01-02T00:00:00Z' });
+    assert.equal(amended.status, 0, amended.stderr);
+    assert.notEqual(git(['rev-parse', 'HEAD']), original);
+    assert.notEqual(fs.readFileSync(external, 'utf8'), bytes, 'amend follows the alias and overwrites the outside fixture');
+    const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    assert.ok(guide.includes('COMMIT_EDITMSG must be absent or a private regular file'));
+    assert.ok(guide.includes('nlink === 1n'));
+    assert.ok(guide.includes('before any budget status/reservation, amend and push'));
+    assert.ok(guide.includes('Never remove, replace or relink this file to qualify'));
+  });
+  await t.test('Git-resolved path and stable regular/absent observations', t => {
+    const fx = fixture(t), work = path.join(fx.root, 'work'); fs.mkdirSync(work);
+    const env = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(fx.root, 'empty-config') }; fs.writeFileSync(env.GIT_CONFIG_GLOBAL, '');
+    const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
+    const source = guide.match(/```js\n(\/\/ Argument lists for the existing task execution tool\.[\s\S]*?)\n```/)[1];
+    const args = runInNewContext(source + '\n(typeof commitMessagePathArgs === "undefined" ? undefined : commitMessagePathArgs)', {
+      verifiedBranch: 'feature', verifiedRemote: 'origin', originalRemoteSha: oldHead, newSha: newHead,
+      gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir });
+    assert.ok(args, 'document one effective Git path read shared by all recovery paths');
+    assert.deepEqual(Array.from(args), ['--no-replace-objects', 'rev-parse', '--path-format=absolute', '--git-path', 'COMMIT_EDITMSG']);
+    execFileSync('git', ['init', '-b', 'main'], { cwd: work, env, stdio: 'pipe' });
+    const target = execFileSync('git', args, { cwd: work, env, encoding: 'utf8' }).trim();
+    assert.throws(() => fs.lstatSync(target), { code: 'ENOENT' }); assert.ok(fs.lstatSync(path.dirname(target)).isDirectory());
+    fs.writeFileSync(target, 'private fixture'); const pinned = fs.lstatSync(target, { bigint: true });
+    assert.equal(pinned.isFile(), true); assert.equal(pinned.nlink, 1n); assert.equal(typeof pinned.dev, 'bigint'); assert.notEqual(pinned.ino, 0n);
+    fs.renameSync(target, target + '.old'); fs.writeFileSync(target, 'replacement fixture');
+    const replacement = fs.lstatSync(target, { bigint: true });
+    assert.notEqual(replacement.ino, pinned.ino, 'same path is not stable identity');
+    assert.equal(fs.readFileSync(target + '.old', 'utf8'), 'private fixture');
+    assert.equal(fs.existsSync(fx.retryDir), false);
+    const flat = guide.replace(/\s+/g, ' ');
+    assert.ok(flat.includes('absence becoming presence before amend stops'));
+    assert.ok(flat.includes('These checks are not an atomic binding of Git'));
+  });
+});
+
 test('recovery guide passes dynamic refs, remotes and paths as literal argument data', () => {
   const branches = ['feature/plain', 'topic$(id)', 'topic;whoami', "topic'quoted", 'topic"quoted', 'topic`whoami`', 'topic&whoami', 'topic/日本語'];
   for (const verifiedBranch of branches) {
