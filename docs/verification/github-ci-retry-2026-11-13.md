@@ -1603,3 +1603,14 @@ Four conflict files required integration: version/release notes and version asse
 Focused production-entry regressions for unknown/reference/manual-stop/legacy-hook/Node gating pass11/11 (0.66s). Final combined mandatory validation is recorded below separately. Neither source62 nor63 is installed by this task. Inherited cache/reconcile/Node-evidence/manual-stop/repair UI and existing recovery/unknown/header/read-order/disable/signed-head/causal acceptance remain unverified in actual Cindy. The task's checked-in source hook and scheduler are intentionally preserved, with no launcher migration. No live preferences, credentials, permissions, hook configuration, real quota, retired fixtures or blocked cleanup were touched.
 
 Final combined63 mandatory four suites plus plugin: **626 passed / 42 skipped / 0 failed (244.57 s)**. The 42 skips retain the same 17 unavailable native receipt success cases and25 POSIX CLI cases; the new card/Node-entry regressions ran. Forge63 exact-content: **30 files, 265716 archive bytes, 757696 uncompressed bytes**; generated62/63 packages both removed and absence verified. No live installation or new runtime acceptance.
+
+
+## Local continuation for post-push main movement — source1.5.64, not installed
+
+After63 was pushed and its actual PR/ref/DCO audited, main advanced again to cab58a08add02162e51cd06d08c248b656c9fbc3 (1.5.41), causing a new conflict. Public PR/notice were corrected: published63 was tested against c335, not cab. This64 continuation is prepared in the same checkout for the next fix round; it is not claimed as the published PR head here.
+
+The merge retains main's scenario-based Skill references and publish-time followDeclined choice. Root Skill keeps the bounded CI exception and argument boundary, while the live-per-round read, setup preference scope and denied-rerun cap rules are retained in background-round/follow-up-setup/fix-round references respectively. No hook/schedule migration, new task, worker, real preference or permission change. The gate, CI core/guide/receipt I/O are byte-identical to published63. Newly bundled reference files are source files, not disposable validation copies.
+
+Forge64 exact-content: **35 files, 272077 archive bytes, 764540 uncompressed bytes**; generated package removed and absence verified. This preparation does not supply actual Cindy publication-opt-out/Skill-routing, cache/UI/recovery or power-loss acceptance. Existing cleanup restrictions remain.
+
+Local64 continuation mandatory four suites plus plugin: **630 passed / 42 skipped / 0 failed (255.85 s)**. Skip scope remains17 unavailable native receipt positive cases and25 POSIX CLI cases. This is validated local source awaiting the next round delivery, not current public PR acceptance.
