@@ -548,7 +548,8 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
   // the text in the agent definition (the agent's system prompt). Gap: no test covered the field. The
   // smallest inputs: one instruction on a new and on a resumed session, and one `@[label](path)` that
   // agy would expand into a file of the computer giving the quota (the text may come from a friend).
-  for (const method of ['session/new', 'session/resume']) {
+  // Only the official plugin implements it; the legacy agy-acp runs this file too.
+  if (official) for (const method of ['session/new', 'session/resume']) {
     test(`remote-workspace mode puts the client’s system prompt into the agent definition (${method})`, async (t) => {
       const { launchFile, bridge, send, reply, server } = remoteSession(t);
       bridge.child.stdin.write(INITIALIZE);
@@ -575,7 +576,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
   // Why: ACP requires an engine that cannot apply the instructions to fail the request instead of
   // starting a session without them. Smallest inputs: the one mode not offered, an empty content list,
   // a non-text block and a text longer than any Cindy keeps (8,000 characters).
-  test('remote-workspace mode refuses instructions it cannot apply and starts no session for them', async (t) => {
+  if (official) test('remote-workspace mode refuses instructions it cannot apply and starts no session for them', async (t) => {
     const { launchFile, bridge, send, reply, server } = remoteSession(t);
     bridge.child.stdin.write(INITIALIZE);
     await reply(0, 'initialize answer');
