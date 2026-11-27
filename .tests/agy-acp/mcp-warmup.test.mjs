@@ -284,9 +284,10 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
   test('closing while warm-up is still in flight deletes the opened session before close() resolves', async (t) => {
     const { entry, log, sessions } = await bridgeServer(t, { delayMs: 120 });
     const warmup = warmMcpServers([entry]);
-    // Wait until initialize succeeded (session created) while notifications/initialized or tools/list is still in flight.
+    // Wait until notifications/initialized reaches the server, proving warmServer already received and
+    // confirmed initialize's 200 JSON-RPC result and is now in flight on notifications/initialized / tools/list.
     const deadline = Date.now() + 4_000;
-    while (sessions.size === 0 && Date.now() < deadline) {
+    while (!log.some((item) => item.rpc === 'notifications/initialized') && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 15));
     }
     assert.equal(sessions.size, 1, 'initialize opened a session before close()');
