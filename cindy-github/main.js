@@ -3704,8 +3704,8 @@ function stampPrClaim(card) {
 }
 
 /**
- * Settle an expired, unconfirmed claim. Returns 'following' when a schedule this task owns turned out to be
- * running, 'released' when the scheduler confirmed there is none, 'stamped' for a record saved before claims were
+ * Settle an expired, unconfirmed claim. Returns 'following' when a running schedule of this task was found and
+ * reconciled (it may still need a repair or stay unverified), 'released' when the scheduler confirmed there is none, 'stamped' for a record saved before claims were
  * timed, or null when nothing changed: not yet expired, the scheduler cannot be queried here or failed (an
  * unconfirmed schedule may still exist), or a schedule exists that is not running.
  */
@@ -3719,11 +3719,11 @@ async function expirePrClaim(card, now) {
     try { rows = await schedulesForPr(card); } catch (_) { return null; }
     var mine = rows.filter(function (row) { return row.targetSessionId === card.sessionId; });
     if (mine.some(function (row) { return ownedFollowSchedule(row, card) && row.status === 'active'; })) {
-      card.following = true;
-      card.followedEver = true;
+      // Adopt it through the same verification as any unreported follow-up: ownership, the exact hook, and the
+      // repair hint for an old launch command. An unconfirmed hook keeps the reservation as unverified.
       card.pending = null;
       delete card.claimedAt;
-      card.note = null;
+      await reconcileLegacyFollow(card, null);
       return 'following';
     }
     // A paused or unrecognised schedule for this task is not ours to judge: keep the reservation.

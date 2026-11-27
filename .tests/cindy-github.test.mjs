@@ -3145,16 +3145,33 @@ test('an expired claim whose schedule is running becomes following instead of be
   rows.set('agent-made', {
     id: 'agent-made', prompt: 'Follow ' + url, targetSessionId: 's1', recurring: true, status: 'active',
     prTrigger: { url, change: 'any' },
-    preRunHook: { command: 'node "/skills/pr/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 },
+    preRunHook: { command: 'node "/approved skills/agent-skills/skills/_root__cindy-github--pr/scripts/pr-node.cjs" pr-heartbeat-gate.mjs ' + url, timeoutMs: 180000 },
   });
   ageClaim(runtime, claimed.callId);
   const refreshed = await runtime.tool({ card_id: claimed.callId });
-  assert.equal(refreshed.reply.result.note, undefined);
+  assert.equal(refreshed.reply.result.follow_state, 'active');
   const saved = JSON.parse(runtime.files.get(`pr-cards/${claimed.callId}.json`));
   assert.equal(saved.following, true);
   assert.equal(saved.pending, null);
-  assert.ok(actionsOf(runtime.lastCard(claimed.callId).html).includes('pr:stop'));
+  assert.equal(saved.scheduleId, 'agent-made');
+  // Adopted like any task-made schedule: it is stopped from Automation settings, so user edits are never deleted.
+  assert.equal(refreshed.reply.result.note, fill(zhCopy.prManualStop, { id: 'agent-made' }));
   assert.equal(calls.includes('schedule_create'), false);
+});
+
+test('an expired claim adopting a schedule with the old launch command reports the repair', async () => {
+  const { hostApi, rows } = followScheduler();
+  const url = 'https://github.com/octo/repo/pull/42';
+  const runtime = createPrRuntime({ github: prGraphql(), hostApi });
+  const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  rows.set('old', { id: 'old', prompt: 'Follow ' + url, targetSessionId: 's1', recurring: true, status: 'active', preRunHook: oldFollowHook(url) });
+  ageClaim(runtime, claimed.callId);
+  const refreshed = (await runtime.tool({ card_id: claimed.callId })).reply.result;
+  assert.equal(refreshed.follow_state, 'unverified');
+  assert.equal(refreshed.legacy_hook_repair.schedule_id, 'old');
+  assert.match(refreshed.legacy_hook_repair.command, /pr-node\.cjs" pr-heartbeat-gate\.mjs https:\/\/github\.com\/octo\/repo\/pull\/42$/);
+  assert.match(runtime.lastCard(claimed.callId).html, new RegExp(zhCopy.prFollowNeedsRepair));
+  assert.deepEqual(rows.get('old').preRunHook, oldFollowHook(url));
 });
 
 test('an expired claim is kept while the scheduler cannot be read or a paused schedule exists', async () => {
@@ -3238,13 +3255,18 @@ test('an expired claim is kept when the scheduler cannot be queried, and listing
   const second = await listOnly.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
   rows.set('agent-made', {
     id: 'agent-made', prompt: 'Follow ' + url, targetSessionId: 's1', recurring: true, status: 'active',
-    preRunHook: { command: 'node "/skills/pr/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 },
+    preRunHook: { command: 'node "/approved skills/agent-skills/skills/_root__cindy-github--pr/scripts/pr-node.cjs" pr-heartbeat-gate.mjs ' + url, timeoutMs: 180000 },
   });
   ageClaim(listOnly, second.callId);
-  await listOnly.tool({ card_id: second.callId });
+  const adopted = await listOnly.tool({ card_id: second.callId });
+  // The schedule is found without the node worker; confirming its exact hook needs the worker, so the
+  // follow-up is kept as unverified (still reserved), never released.
+  assert.equal(adopted.reply.result.follow_state, 'unverified');
   const saved = JSON.parse(listOnly.files.get(`pr-cards/${second.callId}.json`));
-  assert.equal(saved.following, true);
   assert.equal(saved.pending, null);
+  assert.equal(saved.scheduleStatus, 'unverified');
+  const blocked = await listOnly.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(blocked.reply.result.disposition, 'existing_task');
 });
 
 test('every saved follow claim is timed, including the hand-off after marking a draft ready', async () => {
