@@ -4191,3 +4191,16 @@ test('every saved follow claim is timed, including the hand-off after marking a 
   await runtime.tool({ card_id: cardId, following: true });
   assert.equal(savedCard(runtime, cardId).claimedAt, undefined);
 });
+
+test('pr Skill allows simulator/sanitized screenshots directly while gating real data and waiting for answers', () => {
+  const skill = readFileSync(new URL('../cindy-github/skills/pr/SKILL.md', import.meta.url), 'utf8');
+  const publish = readFileSync(new URL('../cindy-github/skills/pr/references/publish.md', import.meta.url), 'utf8');
+  assert.doesNotMatch(skill, /or attaches screenshots\./);
+  assert.doesNotMatch(publish, /useful, approved visuals above/);
+  assert.match(skill, /simulator\/emulator, mock, fixture, or redacted\/sanitized data[\s\S]{0,120}need no separate confirmation/);
+  assert.match(skill, /real or unredacted user, account, machine, or private\/sensitive data/);
+  assert.match(skill, /wait for the user's answer before pushing, opening or updating the PR, or posting the reply/);
+  assert.match(publish, /simulator\/emulator, mock, fixture, or redacted\/sanitized data[\s\S]{0,160}may be attached directly without asking first/);
+  assert.match(publish, /real or unredacted user, account, machine, or private\/sensitive data/);
+  assert.match(publish, /never push, open\/update the PR, or post while waiting for the answer/);
+});
