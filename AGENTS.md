@@ -53,16 +53,20 @@ Every AI reviewer (including **Codex** and **Greptile**) MUST follow these rules
 
 - **L1 Routine maintenance (Fast-Lane)**: bugfixes, perf, small enhancements,
   copy/locales/icons, tests, and traceable dependency maintenance on existing
-  plugins — especially by a maintainer or plugin owner listed in
-  `.github/plugin-owners.json` without widening boundaries. **Required CI green
-  + Greptile `APPROVED` + no unresolved Codex P0/P1 → merge directly.** No
-  manual re-review and no device-verification wait.
-- **L2 Boundary changes**: new plugin submission, widening `provisioning.json`
-  to `all`, new/widened permissions, credentials, autonomous hosts, or
-  subprocesses, or changed third-party OAuth scopes / newly added dependency on
-  an unready host OAuth grant (even without editing `ghost.json`). **Required
-  CI green + no unresolved confirmed P0/P1 + maintainer boundary confirmation**
-  (maintainer `Approve` satisfies the approval gate when Greptile does not
+  plugins without widening boundaries.
+  - **Maintainers & listed plugin owners** (`.github/plugin-owners.json`):
+    **Required CI green + Greptile `APPROVED` + no unresolved Codex P0/P1 →
+    auto-merge directly.** No manual re-review and no device-verification wait.
+  - **Unlisted external contributors**: automated review runs as usual, then a
+    maintainer or plugin owner gives a quick human check before merging (no
+    unattended auto-merge).
+- **L2 Boundary changes**: new plugin submission (touches `provisioning.json`),
+  widening `provisioning.json` to `all`, new/widened permissions, credentials,
+  autonomous hosts, or subprocesses, or changed third-party OAuth scopes / newly
+  added dependency on an unready host OAuth grant (even without editing
+  `ghost.json`). **Required CI green + no unresolved confirmed P0/P1 +
+  maintainer boundary confirmation & `Approve`** (`provisioning.json` is in
+  Greptile `excludePaths`, so new plugins and audience changes never
   auto-approve; wait for platform approval when an OAuth/host grant is not
   ready).
 - **L3 Repository governance & publish trust**: `.github/workflows/**`,

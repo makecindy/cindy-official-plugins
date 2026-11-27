@@ -22,8 +22,8 @@
 
 | 级别 | 变更范围 | 放行规则 |
 | --- | --- | --- |
-| **L1 常规迭代（快车道）** | 已有插件的 bugfix、性能优化、小功能增强、UI/文案/多语言/图标、测试、可追溯的依赖维护；尤其是由 `.github/plugin-owners.json` 中的维护者或插件 Owner 更新自己的插件且未扩大边界 | **必需 CI 全绿 + Greptile `APPROVED` + Codex 无未解决 P0/P1 → 直接可合**，不做额外人工复审，不卡实机验收 |
-| **L2 边界变更** | 新增官方插件、`provisioning.json` 扩大到 `all`、新增/扩大权限/凭证/自主域名/子进程边界、变更第三方 OAuth scope 或依赖未就绪的宿主授权 | **必需 CI 全绿 + 无未解决的已确认 P0/P1 + 维护者确认边界**（若 Greptile 未自动批准，则由维护者 Approve 满足审批门禁；不重做代码挑刺）。涉及未获平台批准或宿主未发布的 OAuth 授权时标「等平台批准」暂缓合并 |
+| **L1 常规迭代（快车道）** | 已有插件的 bugfix、性能优化、小功能增强、UI/文案/多语言/图标、测试、可追溯的依赖维护，且未扩大边界 | **维护者或 `.github/plugin-owners.json` 登记的插件 Owner**：必需 CI 全绿 + Greptile `APPROVED` + Codex 无未解决 P0/P1 → **直接自动可合**，不做额外人工复审、不卡实机验收。<br>**未登记的外部贡献者**：同样走双机器人审查，合并前由维护者或插件 Owner 过目确认（不无人值守自动合并） |
+| **L2 边界变更** | 新增官方插件（必改 `provisioning.json`）、`provisioning.json` 扩大到 `all`、新增/扩大权限/凭证/自主域名/子进程边界、变更第三方 OAuth scope 或依赖未就绪的宿主授权 | **必需 CI 全绿 + 无未解决的已确认 P0/P1 + 维护者确认边界并 Approve**（`provisioning.json` 已列入 Greptile `excludePaths`，新插件与受众变更不会自动批准；不重做代码挑刺）。涉及未获平台批准或宿主未发布的 OAuth 授权时标「等平台批准」暂缓合并 |
 | **L3 仓库基座** | `.github/workflows/**`、`.greptile/**`、`AGENTS.md`、`.github/plugin-owners.json`、削弱 `.tests/` 门禁、重命名或删除已发布插件 | **必需 CI 全绿 + 无未解决的已确认 P0/P1 + 维护者明确 Approve**（Greptile 对 L3 路径不自动 approve，由维护者 Approve 直接满足审批门禁） |
 
 > **合并授权纪律**：reviewer 身份本身不授予 merge/close 权限；已获维护者授权的合并程序在满足对应级别条件后可直接合并，不绕过 GitHub ruleset。
