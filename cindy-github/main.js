@@ -2920,7 +2920,7 @@ function newPrCard(id, repo) {
   return {
     id: id, repo: repo, head: '', base: '', commits: null, files: null, filesTotal: null,
     stage: 'ask', publishingDraft: false, queued: false, pr: null,
-    renamed: false, following: false, followedEver: false, pending: null,
+    renamed: false, following: false, followedEver: false, followDeclined: false, pending: null,
     settingsOpen: false, note: null, settingsApplied: false,
   };
 }
@@ -3739,6 +3739,7 @@ async function syncCardSchedule(card, settings, start) {
       card.scheduleStatus = null;
     }
     card.following = start;
+    card.followDeclined = !start;
     card.pending = card.scheduleAction = null;
     card.scheduleError = null;
     card.legacyHookRepair = repair;
@@ -3897,6 +3898,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
     if (!a.following && unverifiedLegacyFollow(card)) card.scheduleError = null;
     if (!a.following || !unverifiedLegacyFollow(card)) card.following = a.following;
     card.scheduleAction = null;
+    card.followDeclined = !a.following;
     if (!a.following) { card.scheduleId = card.scheduleStatus = null; card.manualStop = false; delete card.manualStopOpen; delete card.pendingStopNotice; }
     if (a.following) card.followedEver = true;
     if (card.pending === 'follow' || card.pending === 'stop') card.pending = null;
@@ -3937,7 +3939,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
     card.settingsApplied = true;
     card.publishedHere = true;
     if (settings.autoRename && !card.renamed) todo.push(t('prTodoRename', { title: prTaskTitle(card) }));
-    if (!legacyFollow && settings.autoFollow && a.following !== false && card.pending !== 'stop' && !card.following && !card.scheduleId && !card.pr.draft) {
+    if (!legacyFollow && settings.autoFollow && a.following !== false && !card.followDeclined && card.pending !== 'stop' && !card.following && !card.scheduleId && !card.pr.draft) {
       card.pending = 'follow';
       nativeStart = hasCardScheduler();
       if (!nativeStart) todo.push(t('prTodoFollow', { url: card.pr.url }));
@@ -4127,9 +4129,9 @@ async function markPrReadyInner(card, settings, msg, progress) {
     card.note = uncertain
       ? t('prReadyUnknown')
       : t('prReadyFailed', { detail: String(err || fresh.err || '').slice(0, 160) });
-  } else if (settings.autoFollow && card.stage === 'open' && card.publishedHere && hasCardScheduler()) {
+  } else if (settings.autoFollow && !card.followDeclined && card.stage === 'open' && card.publishedHere && hasCardScheduler()) {
     await syncCardSchedule(card, settings, true);
-  } else if (settings.autoFollow && card.stage === 'open') {
+  } else if (settings.autoFollow && !card.followDeclined && card.stage === 'open') {
     // Record "following is starting" before handing it to the agent, as the first step does for "ready":
     // if that cannot be saved, nothing is sent, so a later click can never send it a second time.
     card.pending = 'follow';
