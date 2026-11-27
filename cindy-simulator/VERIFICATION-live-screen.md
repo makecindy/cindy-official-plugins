@@ -62,3 +62,75 @@ it had the earlier latency, which the end-to-end runs above isolated and fixed.
 - iPhone Duo posture on the phone; Apple TV remote and Vision Pro spatial input
   (not offered on the phone).
 - The packaged 0.3.29 `.cindy` installed in a released Cindy build.
+
+# Viewing on another computer — 2026-11-11
+
+Plugin `cindy-simulator` 0.3.43 source. Viewer: Cindy desktop dev build from
+`makecindy/cindy` branch `dash/desktop-live-screen` in an isolated profile, with
+this source installed from a local `.cindy` package. Provider: a released Cindy on
+the same Mac Studio (macOS 27, Xcode 27.1) running one iOS 27.3 simulator
+(`Cindy iPhone Air`) bound to the task. Both sides were on one machine and one
+network; only that test device was started or turned.
+
+## Checked in the task sidebar
+
+- Without the plugin on the viewer, Cindy shows the notice and the entry that lead
+  to this plugin's page; nothing of the device is drawn.
+- With it, the task page opens by itself with `device=<computer>` and shows the
+  controller (device chip, zoom, More, Home, screenshot, rotate, help) around the
+  remote device at 1260×2736.
+- Click opens an App; a held drag scrolls a list; the wheel sends two touches 80
+  points either side with the touch indicators shown; Home returns to the Home
+  Screen; rotate turns Safari to landscape and the page lays out 2736×1260.
+- Screenshot to Desktop writes `<device name> <date time>.png` on the viewer.
+- A stream that ends (the page hidden, the address renewed) reconnects on its own.
+
+## Remote mark and device management (same day)
+
+- The controller's top bar shows "远程 · Dash的Mac Studio" next to the device name
+  (the name comes from Cindy with the page address); the task page's states carry
+  the same mark.
+- The provider's installed plugin predates the management channel, so the viewer's
+  request went unanswered (`SYNC_RESULT_UNKNOWN` after 30 s, asked once): the page
+  stayed view only with the running device, as designed for an older plugin there.
+- Choosing, creating, opening, shutting down and switching devices on the other
+  computer were **not exercised between two real computers**: that needs this
+  version on the provider too. They are covered by `.tests/baguette/remote-task.test.cjs`,
+  which joins the two logic pages (viewer and provider) through a stand-in for
+  Cindy's request channel, and by the controller case in `control-page.test.cjs`.
+
+## Device body (same day)
+
+- With the body made by this plugin's provider-side code from this Mac's Xcode
+  artwork (iPhone Air: 10 pieces upright, 3 turned) and handed to the viewer's
+  worker piece by piece, the sidebar shows the iPhone Air body with its side
+  buttons and Dynamic Island mask; a tap still lands on the right App; after
+  rotate the body turns and the page lays out 990×492.
+- The pieces were handed over by a script standing in for the other computer,
+  because the provider's installed plugin predates this. The fetch itself
+  (asked once, in order, `none` when there is no artwork) is covered by
+  `.tests/baguette/remote-task.test.cjs` and `remote-chrome.test.cjs`.
+
+## One tab for both computers (same day)
+
+- With no device running for the task, the tab lists this computer's devices under
+  "这台电脑" with "在这台电脑新建…"; the other computer's group was absent with the
+  note about updating its plugin, because the provider's installed plugin predates
+  the management channel.
+- Binding or booting one of this computer's devices from the remote task's tab was
+  **not exercised**: the isolated viewer and the provider run on the same Mac and
+  share one simulator device set, so it would have operated the provider's devices.
+  It is covered by `.tests/baguette/remote-task.test.cjs` (both groups, use and
+  create on either side, the remembered choice, list-only reads of the other side).
+
+## Not checked
+
+- Real two-finger trackpad contacts, Option pinch and pan, typing and paste were not
+  exercised by hand: script-driven key events do not reach the device page. They use
+  the same gesture modules as the local page (`.tests/baguette/remote-viewer.test.cjs`
+  asserts the modules and the trackpad declaration are loaded).
+- A viewer on Windows or Linux, Android, iPad, Apple TV and Vision Pro devices, two
+  computers on different networks, dark mode and a detached sidebar window.
+- The picture is re-encoded on the way; sharpness and latency were judged by eye only.
+- With providers before the still-picture fix in the same Cindy branch, the first
+  picture appears only once the device's screen changes.
