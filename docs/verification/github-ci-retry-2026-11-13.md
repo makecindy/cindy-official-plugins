@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.68, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.69, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -63,8 +63,10 @@ excluded. Image metadata is not retained.
 | ![1.5.14 settings light](github-ci-retry/desktop-settings-light-1.5.14.png) | ![1.5.14 card light](github-ci-retry/desktop-card-light-1.5.14.png) |
 | ![1.5.14 settings dark](github-ci-retry/desktop-settings-dark-1.5.14.png) | ![1.5.14 card dark](github-ci-retry/desktop-card-dark-1.5.14.png) |
 
-In 1.5.17 the account-settings preference control, KV reads and dedicated
-readiness/write messaging were removed. These old settings-page observations
+In 1.5.17 the account-settings CI authorization control, KV reads for that
+control and dedicated readiness/write messaging were removed. Later main adds
+the separate auto-follow preference there; it does not restore CI authorization.
+These old settings-page observations
 are historical, not a current entry point or an outstanding cold-start test.
 The card's persistence and explicit target action paths are unchanged; their
 evidence remains applicable. Changed recovery rules need their own evidence.
@@ -1654,3 +1656,16 @@ Conflicts were manifest/version notes, four-language preference descriptions and
 All newly generated packages and this round's automatic large GitHub response were deleted with absence read-back. No candidate copy, blocked cleanup retry or live runtime fixture was created. Actual67 Git-tree publish contract passed1/1 (11.57s); final68 post-commit receipt is recorded in the PR delivery report.
 
 The task's exact source hook, schedule/target/model/timeout/cadence and author remain. Source68 was not installed; current root version was not read, local45 is historical last tested only. GitHub main45/46 labels here refer to their specific main commits, not the older feature-local45 build. No real preference, token, permission, hook configuration or quota changed. Current notes/config refusal, card routing/model prefs/error recovery, cache/probe/diagnostic/launcher/UI/read-order/disable/shared-consumer/signed-head/causal runtime gaps remain; tests and API reads do not waive them. Prior blocked cleanup residuals and #12846 follower remain untouched. Original acceptance was externally resolved, not newly accepted here.
+
+
+## Preference-entry documentation and current base — 2026-11-27 (source1.5.69, not installed)
+
+Same-family invariant: account settings may read/save auto-follow through the existing main-page queue, but never provide or write CI-repush authorization. Both user guides now name CI authorization specifically, retain queue/read-back requirements and identify ignored messages as retired CI messages. Historical1.5.17 observations are qualified to the then-removed CI control and its reads, not current auto-follow settings. Existing production-entry preference/authorization/screenshot-policy tests pass6/6 (.29s); no implementation-mirroring documentation test was added.
+
+The same branch merges main1b89f18645b52eb7c48e63fd2e42efc4c173b43b, including728b5e48/GitHub1.5.47 screenshot guidance and unchanged upstream antigravity verification-entry changes. Actual conflicts were manifest/version assertion and source Skill privacy paragraph: retain main simulator/sanitized-vs-real/private screenshot distinction plus this feature bounded CI exception and argument boundary. No screenshot was generated/uploaded and no permission to publish private data was inferred. Existing task source hook/schedule are preserved.
+
+main.js/settings/node receipt/budget/notes guide/regression/locales are byte-identical to delivered68; no code recovery change or new machinery. Inherited antigravity paths exactly match main and are not authored here. Final candidate validation/package follow below. Real Cindy notes refusal and all prior current-runtime prerequisites remain unmet; source69 is not installed, local namespace unavailable does not authorize root substitution or rewriting. No preferences/credentials/permissions/quota changes, retired fixture reuse, blocked cleanup retry or candidate copy.
+
+Forge69 exact-content passes: **35 files, 281498 archive bytes, 797350 uncompressed bytes**; generated package deleted and absence verified. Additional unchanged-main account-errors/bridge tests initially returned **50 pass /1 fail /4 skip (12.10s)**. The failed parent suite alone was rechecked once: **37 pass /0 fail /1 skip (11.47s)**. The initial child failure detail was not retained in the bounded first output, and its root cause was not established; do not call it a confirmed infrastructure flake or claim the initial batch was all green. All files for this optional check exactly match current main; no unrelated implementation change or further rerun. This does not authorize CI repush.
+
+Intermediate69 mandatory four suites plus plugin: **666 passed /42 skipped /0 failed (301.65s)**. These results cover main1b89f186 and the preference-entry documentation fix, not the later fab1b273 entry-receipt change.

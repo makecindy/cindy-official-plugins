@@ -21,9 +21,11 @@ push. Old prompts or card results cannot act as lasting rewrite authorization.
 Missing, disabled or unreadable preferences forbid CI-only rewrites; ordinary
 authorized fixes can continue. Card actions share the existing main-page queue
 and set their displayed target value rather than inverting a newer global value.
-The plugin account-settings page has no PR preference controls, reads or writes.
-Its retired preference messages are ignored; no preference handshake or second
-writer remains. Unknown writes require read-back, not blind replay.
+The plugin account-settings page has no CI-repush authorization control. It does
+offer the separate auto-follow preference: the page reads `/kv` and saves through
+the main page's existing queue, preserving CI authorization. Retired CI-preference
+messages remain ignored; there is no account-page CI authorization writer.
+Unknown writes require read-back, not blind replay.
 Unreadable or malformed storage is displayed as unknown, with no toggle/model
 choices, rather than as Off. A read-only Refresh action can recover the current
 state. Every preference action reads back current settings, including a save
