@@ -3537,28 +3537,49 @@ async function schedulesForPr(card) {
   return rows.filter(function (row) { return mentionsPr(row, url); });
 }
 
-async function cardFollowSkillDir() {
+async function cardFollowSkillEnv() {
   var response = await cindy.node.request({ method: 'followSkillDir' });
-  var dir = response && response.ok && response.result;
+  var raw = response && response.ok && response.result;
+  var dir = typeof raw === 'string' ? raw : raw && typeof raw.dir === 'string' ? raw.dir : null;
+  var platform = raw && typeof raw === 'object' && typeof raw.platform === 'string' ? raw.platform : null;
   // Double quoting is portable for these paths. Reject shell interpolation and
   // Windows command expansion even in host-generated directory names.
   if (typeof dir !== 'string' || /["$`%!\r\n]/.test(dir)) throw new Error('PR Skill unavailable');
-  return dir;
+  return { dir: dir, platform: platform };
 }
 
 function cardFollowCommand(dir, url) {
   return 'node "' + dir + '/scripts/pr-node.cjs" pr-heartbeat-gate.mjs ' + url;
 }
 
+// Cindy's scheduler stabilizes skill-snapshot paths with POSIX single quotes on
+// macOS/Linux (shellQuotePath), while card-created and Windows hooks use double quotes.
+function posixSingleQuoted(filePath) {
+  return "'" + filePath.replace(/'/g, "'\\''") + "'";
+}
+
 // Only exact generated commands from this approved Skill confer native
 // schedule ownership. URL owner/repo case is immaterial, not shell syntax.
-function exactFollowHook(row, card, dir) {
+function exactFollowHook(row, card, skillEnv) {
   var url = followUrl(card);
   var command = row.preRunHook.command;
   var match = typeof command === 'string' && /^(.*) (https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+)$/.exec(command);
+  var dir = typeof skillEnv === 'string' ? skillEnv : skillEnv && skillEnv.dir;
+  var platform = skillEnv && typeof skillEnv === 'object' && typeof skillEnv.platform === 'string' ? skillEnv.platform : null;
   if (!dir || !match || match[2].toLowerCase() !== url) return null;
-  var legacy = match[1] === 'node "' + dir + '/scripts/pr-heartbeat-gate.mjs"';
-  if (!legacy && match[1] !== 'node "' + dir + '/scripts/pr-node.cjs" pr-heartbeat-gate.mjs') return null;
+  // Windows schedules run under cmd.exe where POSIX single quotes are not path quotes.
+  // Fail closed when the scheduler host platform is Windows or unknown.
+  var isWin32 = platform === 'win32';
+  var allowPosixSingle = platform === 'darwin' || platform === 'linux';
+  function matchesQuoted(scriptName, suffix) {
+    var posixPath = dir + '/scripts/' + scriptName;
+    if (match[1] === 'node "' + posixPath + '"' + suffix) return true;
+    if (isWin32 && match[1] === 'node "' + dir + '\\scripts\\' + scriptName + '"' + suffix) return true;
+    if (allowPosixSingle && match[1] === 'node ' + posixSingleQuoted(posixPath) + suffix) return true;
+    return false;
+  }
+  var legacy = matchesQuoted('pr-heartbeat-gate.mjs', '');
+  if (!legacy && !matchesQuoted('pr-node.cjs', ' pr-heartbeat-gate.mjs')) return null;
   // The public scheduler API has no caller-supplied compare-and-update guard:
   // report a replacement for the old command, never write it automatically.
   return { repair: legacy ? { schedule_id: row.id, command: cardFollowCommand(dir, url) } : null };
@@ -3605,10 +3626,11 @@ async function resolveLegacyHookRepair(hook, row) {
 }
 
 async function legacyFollowRepair(row, card) {
-  if (typeof row.preRunHook.command !== 'string' || row.preRunHook.command.indexOf('/scripts/pr-heartbeat-gate.mjs" ') < 0) return null;
-  var dir;
-  try { dir = await cardFollowSkillDir(); } catch (_) { return null; }
-  return resolveLegacyHookRepair(exactFollowHook(row, card, dir), row);
+  if (typeof row.preRunHook.command !== 'string' ||
+    !/[\\/]scripts[\\/]pr-heartbeat-gate\.mjs["'] /.test(row.preRunHook.command)) return null;
+  var env;
+  try { env = await cardFollowSkillEnv(); } catch (_) { return null; }
+  return resolveLegacyHookRepair(exactFollowHook(row, card, env), row);
 }
 
 // Reconcile all ID-less legacy follow fields in one place, using only the
@@ -3626,12 +3648,12 @@ async function reconcileLegacyFollow(card, readError, fromStop) {
       } else {
         // An unavailable approved directory is not evidence of a custom
         // command. Keep the reservation for the next ordinary refresh.
-        var dir = await cardFollowSkillDir();
+        var env = await cardFollowSkillEnv();
         var saved = await prSchedule('schedule_get', { id: candidate.id });
         if (saved) {
           if (saved.id !== candidate.id || !ownedFollowSchedule(saved, card)) error = t('prOwnershipUnknown');
           else {
-            hook = exactFollowHook(saved, card, dir);
+            hook = exactFollowHook(saved, card, env);
             if (!hook) error = t('prScheduleHookUnknown');
             else row = saved;
           }
@@ -3664,7 +3686,7 @@ async function reconcileLegacyFollow(card, readError, fromStop) {
 }
 
 async function createCardSchedule(card, settings) {
-  var dir = await cardFollowSkillDir();
+  var dir = (await cardFollowSkillEnv()).dir;
   var url = followUrl(card);
   var model = prSettingsForAgent(settings, true).follow_model;
   var input = {
@@ -3722,10 +3744,10 @@ async function syncCardSchedule(card, settings, start) {
         card.pending = card.scheduleAction = null;
         throw new Error(t('prOwnershipUnknown'));
       }
-      var dir = await cardFollowSkillDir();
+      var env = await cardFollowSkillEnv();
       var saved = await prSchedule('schedule_get', { id: row.id });
       if (!ownedFollowSchedule(saved, card) || saved.status !== 'active' || saved.id !== row.id) throw new Error('schedule_get');
-      var hook = exactFollowHook(saved, card, dir);
+      var hook = exactFollowHook(saved, card, env);
       if (!hook) {
         card.pending = card.scheduleAction = null;
         throw new Error(t('prScheduleHookUnknown'));
@@ -3737,12 +3759,12 @@ async function syncCardSchedule(card, settings, start) {
       card.scheduleStatus = null;
       card.followedEver = true;
     } else {
-      var stopDir;
-      try { stopDir = await cardFollowSkillDir(); } catch (_) {}
+      var stopEnv;
+      try { stopEnv = await cardFollowSkillEnv(); } catch (_) {}
       var owned = await prSchedule('schedule_get', { id: card.scheduleId });
       if (owned) {
         if (!ownedFollowSchedule(owned, card) || owned.id !== card.scheduleId) throw new Error(t('prOwnershipUnknown'));
-        if (!exactFollowHook(owned, card, stopDir)) throw new Error(t('prScheduleHookUnknown'));
+        if (!exactFollowHook(owned, card, stopEnv)) throw new Error(t('prScheduleHookUnknown'));
         await prSchedule('schedule_delete', { id: owned.id });
         if (await prSchedule('schedule_get', { id: owned.id })) throw new Error('schedule_delete');
       }
