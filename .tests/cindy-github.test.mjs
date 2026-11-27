@@ -1795,6 +1795,7 @@ function followScheduler(options = {}) {
         if (options.failList) throw new Error('cannot list schedules');
         data = [...rows.values()];
       } else if (tool === 'schedule_delete') {
+        if (options.failDelete) throw new Error('cannot delete schedule');
         data = { deleted: args.id };
         rows.delete(args.id);
       } else throw new Error('unexpected ' + tool);
@@ -2393,31 +2394,147 @@ test('a card stuck in schedule verification error recovers on ordinary refresh a
   }
 });
 
-test('a bound card whose Stop failed on a custom hook clears scheduleError once repaired or deleted', async () => {
+test('a bound card whose Stop failed on a custom hook reports unverified consistently until repaired or deleted', async () => {
   const url = 'https://github.com/octo/repo/pull/42';
-  for (const outcome of ['repaired', 'deleted']) {
+  for (const outcome of ['repaired', 'repaired-legacy', 'deleted']) {
     const { hostApi, calls, rows } = followScheduler();
     const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
     const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
     const validHook = { ...rows.get('sch-1').preRunHook };
-    rows.get('sch-1').preRunHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 };
+    const customHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 };
+    rows.get('sch-1').preRunHook = customHook;
 
     await rt.click(opened.callId, 'pr:stop');
     assert.equal(calls.includes('schedule_delete'), false, outcome);
-    assert.match(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleError, /无法确认这条调度仍使用插件生成的前置检查/, outcome);
+    assert.deepEqual(rows.get('sch-1').preRunHook, customHook, outcome);
+    let card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(card.following, false, outcome);
+    assert.equal(card.scheduleStatus, 'unverified', outcome);
+    assert.equal(card.scheduleErrorSource, 'verify', outcome);
+    assert.match(card.scheduleError, /无法确认这条调度仍使用插件生成的前置检查/, outcome);
+    assert.match(rt.lastCard(opened.callId).html, /跟进待核实/, outcome);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-live-label=/, outcome);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, outcome);
 
-    // Refresh while still custom preserves the error.
-    await rt.tool({ card_id: opened.callId, following: true });
-    assert.match(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).scheduleError, /无法确认这条调度仍使用插件生成的前置检查/, outcome);
+    // Ordinary refresh and following: true while still custom keep the unverified state and error,
+    // never render 跟进中, and still refuse to delete the custom hook.
+    for (const refreshArgs of [{}, { following: true }]) {
+      const stillCustom = await rt.tool({ card_id: opened.callId, ...refreshArgs });
+      card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      assert.equal(stillCustom.reply.result.follow_state, 'unverified', outcome);
+      assert.match(stillCustom.reply.result.note, /无法确认这条调度仍使用插件生成的前置检查/, outcome);
+      assert.equal(card.following, false, outcome);
+      assert.equal(card.scheduleStatus, 'unverified', outcome);
+      assert.match(card.scheduleError, /无法确认这条调度仍使用插件生成的前置检查/, outcome);
+      assert.match(rt.lastCard(opened.callId).html, /跟进待核实/, outcome);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-live-label=/, outcome);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, outcome);
+    }
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(calls.includes('schedule_delete'), false, outcome);
+    assert.deepEqual(rows.get('sch-1').preRunHook, customHook, outcome);
 
     if (outcome === 'repaired') rows.get('sch-1').preRunHook = validHook;
+    else if (outcome === 'repaired-legacy') rows.get('sch-1').preRunHook = oldFollowHook(url);
     else rows.delete('sch-1');
 
     const refreshed = await rt.tool({ card_id: opened.callId });
-    const card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
     assert.equal(card.scheduleError, null, outcome);
-    assert.equal(card.note, null, outcome);
-    assert.equal(refreshed.reply.result.follow_state, outcome === 'repaired' ? 'active' : 'stopped', outcome);
+    assert.equal(card.scheduleErrorSource, null, outcome);
+    if (outcome === 'repaired') {
+      assert.equal(card.note, null);
+      assert.equal(card.following, true);
+      assert.equal(refreshed.reply.result.follow_state, 'active');
+      assert.match(rt.lastCard(opened.callId).html, /data-ghost-live-label=/);
+      assert.match(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/);
+    } else if (outcome === 'repaired-legacy') {
+      assert.equal(refreshed.reply.result.follow_state, 'unverified');
+      assert.equal(refreshed.reply.result.legacy_hook_repair.schedule_id, 'sch-1');
+    } else {
+      assert.equal(card.note, null);
+      assert.equal(card.scheduleId, null);
+      assert.equal(refreshed.reply.result.follow_state, 'stopped');
+    }
+  }
+});
+
+test('a bound card whose schedule_delete is rejected keeps the stop error across refresh until deleted or retried', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  for (const outcome of ['retry-stop', 'deleted-externally', 'mutated-to-custom']) {
+    const fault = { failDelete: true };
+    const { hostApi, calls, rows } = followScheduler(fault);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_state, 'active');
+
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(rows.has('sch-1'), true, outcome);
+    let card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(card.scheduleId, 'sch-1', outcome);
+    assert.equal(card.following, false, outcome);
+    assert.equal(card.scheduleStatus, 'unverified', outcome);
+    assert.equal(card.scheduleErrorSource, 'stop', outcome);
+    assert.match(card.scheduleError, /cannot delete schedule/, outcome);
+    assert.match(rt.lastCard(opened.callId).html, /cannot delete schedule/, outcome);
+    assert.match(rt.lastCard(opened.callId).html, /跟进待核实/, outcome);
+    assert.match(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, outcome);
+    assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-live-label=/, outcome);
+
+    // Ordinary refresh (and following: true) while the schedule still exists must preserve the stop error
+    // instead of clearing it merely because the hook is valid.
+    for (const refreshArgs of [{}, { following: true }]) {
+      const refreshed = await rt.tool({ card_id: opened.callId, ...refreshArgs });
+      card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      assert.equal(refreshed.reply.result.follow_state, 'unverified', outcome);
+      assert.match(refreshed.reply.result.note, /cannot delete schedule/, outcome);
+      assert.equal(card.scheduleErrorSource, 'stop', outcome);
+      assert.match(card.scheduleError, /cannot delete schedule/, outcome);
+      assert.equal(card.following, false, outcome);
+      assert.equal(card.scheduleStatus, 'unverified', outcome);
+      assert.equal(rows.has('sch-1'), true, outcome);
+      assert.match(rt.lastCard(opened.callId).html, /跟进待核实/, outcome);
+      assert.match(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, outcome);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /data-ghost-live-label=/, outcome);
+    }
+
+    if (outcome === 'retry-stop') {
+      fault.failDelete = false;
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(rows.size, 0);
+      card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      assert.equal(card.scheduleId, null);
+      assert.equal(card.scheduleError, null);
+      assert.equal(card.scheduleErrorSource, null);
+      assert.equal(card.note, null);
+      const afterStop = await rt.tool({ card_id: opened.callId });
+      assert.equal(afterStop.reply.result.follow_state, 'stopped');
+      assert.equal(afterStop.reply.result.note, undefined);
+    } else if (outcome === 'deleted-externally') {
+      rows.delete('sch-1');
+      const afterDelete = await rt.tool({ card_id: opened.callId });
+      card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      assert.equal(afterDelete.reply.result.follow_state, 'stopped');
+      assert.equal(afterDelete.reply.result.note, undefined);
+      assert.equal(card.scheduleId, null);
+      assert.equal(card.scheduleError, null);
+      assert.equal(card.scheduleErrorSource, null);
+      assert.equal(card.note, null);
+    } else {
+      const customHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 };
+      rows.get('sch-1').preRunHook = customHook;
+      const mutated = await rt.tool({ card_id: opened.callId });
+      card = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      assert.equal(mutated.reply.result.follow_state, 'unverified');
+      assert.equal(card.scheduleErrorSource, 'verify');
+      assert.match(card.scheduleError, /无法确认这条调度仍使用插件生成的前置检查/);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/);
+      fault.failDelete = false;
+      const deletesBefore = calls.filter(c => c === 'schedule_delete').length;
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(calls.filter(c => c === 'schedule_delete').length, deletesBefore);
+      assert.deepEqual(rows.get('sch-1').preRunHook, customHook);
+    }
   }
 });
 
