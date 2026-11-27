@@ -1,5 +1,5 @@
 name: New plugin proposal / 新插件提案
-description: Optional design notes for a new official plugin / 新官方插件的可选设计说明
+description: Optional design discussion for a new official plugin / 新官方插件的可选设计讨论
 labels: [new-plugin]
 body:
   - type: input
@@ -13,42 +13,33 @@ body:
   - type: textarea
     id: scenario
     attributes:
-      label: Scenario & scope / 场景与边界
-      description: What will users ask Cindy to do with it? What is explicitly out of scope? / 用户会让 Cindy 用它做什么？哪些明确不做？
+      label: Scenario & scope / 场景与用途
+      description: What will users ask Cindy to do with it? / 用户会让 Cindy 用它做什么？
     validations:
       required: true
 
   - type: textarea
     id: overlap
     attributes:
-      label: Overlap check / 与现有插件的查重
-      description: "Which existing plugins are closest, and why is yours different? Same-provider families coexist fine; duplicate generic capabilities (e.g. a second web search) do not. / 与 README 表哪些最相近？差异化或互补理由。"
+      label: Overlap check (optional) / 与现有插件的差异（可选）
+      description: If a similar plugin exists, briefly explain how yours differs / 如有相近插件，简述差异
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: capabilities
     attributes:
-      label: Required capabilities / 所需能力声明
-      description: "Network hosts; credential type (/secrets, OAuth, node.secretBindings); whether Node Runtime is needed and why. Minimal only — security review starting point. / 网络域名、凭证类型、是否需 Node Runtime。"
+      label: Required capabilities & side effects (optional) / 所需能力与外部副作用（可选）
+      description: Network hosts, credentials, Node runtime, or irreversible actions (send/post/delete) / 网络域名、凭证、Node Runtime 或外发/删除等副作用
     validations:
-      required: true
-
-  - type: textarea
-    id: side-effects
-    attributes:
-      label: Irreversible side effects / 不可逆副作用
-      description: Which tools send, post, delete, or otherwise change external state? / 哪些工具会发送、发帖、删除或以其他方式改变外部状态？
-    validations:
-      required: true
+      required: false
 
   - type: markdown
     attributes:
       value: |
-        This issue is optional. Admission and audience are judged against the
-        repository standard; a plugin that fits needs no prior approval from
-        the maintainers. See
+        This issue is **optional** — you can submit a PR directly without prior approval.
+        Admission and audience follow
         [Submit your plugin](https://github.com/makecindy/cindy-official-plugins#submit-your-plugin).
 
-        本 issue 可选。准入与受众按仓库标准判定；符合标准不需要维护者事先批准。见
+        本 issue **可选**——符合标准可直接提交 PR，无需事先批准。准入与受众标准见
         [提交你的插件](https://github.com/makecindy/cindy-official-plugins/blob/main/README.zh-CN.md#提交你的插件)。
