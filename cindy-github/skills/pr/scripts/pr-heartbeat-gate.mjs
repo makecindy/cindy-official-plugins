@@ -91,6 +91,13 @@ const EXIT_PASS = 0;
 const EXIT_BLOCK = 1;
 const EXIT_SKIP = 2;
 
+const MIN_NODE_MAJOR = 18;
+function supportedNodeMajor(version = process.versions.node) {
+  if (!/^\d+\.\d+\.\d+(?:[-+].*)?$/.test(String(version || ''))) return null;
+  const major = Number(String(version).split('.')[0]);
+  return major >= MIN_NODE_MAJOR ? major : null;
+}
+
 /**
  * pr-snapshot.mjs 的默认位置:与本 gate 同目录的版本控制脚本(随 pr 技能一起
  * 演进,无需再维护仓外硬编码路径);需要时用 --snapshot 或 PR_SNAPSHOT_SCRIPT
@@ -1386,12 +1393,20 @@ function promotePending(state, now) {
 }
 
 /** 跑快照。永不 throw:把退出码与输出原样交回,由调用方翻译成协议语义。 */
-function runSnapshot(snapshotPath, repo, number) {
+function runSnapshot(snapshotPath, repo, number, { stateDir = null, env = process.env } = {}) {
   return new Promise((resolve) => {
+    // Preserve the legacy CLI argument contract (`<number> --repo <owner/repo>`) for
+    // older/custom `--snapshot` and `PR_SNAPSHOT_SCRIPT` scripts; pass cache location
+    // via `CINDY_PR_STATE_DIR`, and explicitly strip it in diagnostic read-only runs.
+    const childEnv = { ...env };
+    for (const key of Object.keys(childEnv)) {
+      if (key.toUpperCase() === 'CINDY_PR_STATE_DIR') delete childEnv[key];
+    }
+    if (stateDir) childEnv.CINDY_PR_STATE_DIR = stateDir;
     execFile(
       process.execPath,
       [snapshotPath, String(number), '--repo', repo],
-      { encoding: 'utf8', maxBuffer: SNAPSHOT_MAX_BUFFER },
+      { encoding: 'utf8', maxBuffer: SNAPSHOT_MAX_BUFFER, env: childEnv },
       (err, stdout, stderr) => {
         resolve({
           code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
@@ -1545,7 +1560,8 @@ export function snapshotFailurePlan(run, previous, now, threshold = DEFAULT_MAX_
 }
 
 async function gateMain(argv, ctx) {
-  const { env, out, err } = ctx;
+  const { env, out, err, nodeMajor } = ctx;
+  const emitPrecheckOk = () => out(`CINDY_PRECHECK_OK\nCINDY_PR_NODE=${nodeMajor}\n`);
   const args = parseArgs(argv, env);
   if (args.help) {
     usage(err);
@@ -1730,7 +1746,11 @@ async function gateMain(argv, ctx) {
     emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
     return EXIT_SKIP;
   }
-  // 宿主看到这个 PR 的状态变了而提前触发的一轮:不看节奏,也不做探测(宿主已经知道有变化)。
+  const isReconcileWatch = hookTrigger?.kind === 'watch' && hookTrigger?.reason === 'reconcile';
+  const targetedWait = Boolean(previous?.wait && (previous.wait.checks.length > 0 || previous.wait.threads.length > 0));
+  // 宿主看到这个 PR 的状态变了而提前触发的一轮:不看节奏;明确状态变化直接完整读取,
+  // 但 overflow/重连补查 (reason='reconcile') 先走轻量 --probe 验证是否真有评论或状态变化,
+  // 避免未变化的 PR 在补查扫表时反复拉全量快照。
   const triggered = args.triggered || (hookTrigger?.kind === 'watch') || newFollow || diagnostic;
   // Neither an idle tick nor an unchanged summary proves that a failed snapshot recovered.
   const recovering = previous?.consecutiveSnapshotFailures > 0;
@@ -1746,21 +1766,23 @@ async function gateMain(argv, ctx) {
         reason: 'not-due',
         detail: `pace=${pace.pace}; next look at ${isoAt(pace.nextAt)}`,
       }, out);
-      if (!args.json && !recovering) out('CINDY_PRECHECK_OK\n');
+      if (!args.json && !recovering) emitPrecheckOk();
       return EXIT_SKIP;
     }
   }
   // 先问一句「有没有变」:一个很小的查询,与上次完整读取时一致就不做三四个接口的完整读取。
   // Counts alone cannot reveal a named check's rerun or a thread being resolved/replied to.
   // While explicitly waiting on those items, inspect them each tick rather than waiting 30 minutes.
-  const targetedWait = previous?.wait && (previous.wait.checks.length > 0 || previous.wait.threads.length > 0);
-  const probeRun = triggered || targetedWait || recovering ? null : await ctx.runProbe(args.snapshot, args.repo, args.number);
+  const skipProbe = args.triggered || newFollow || diagnostic
+    || (hookTrigger?.kind === 'watch' && !isReconcileWatch)
+    || targetedWait || recovering;
+  const probeRun = skipProbe ? null : await ctx.runProbe(args.snapshot, args.repo, args.number);
   const probe = parseProbe(probeRun);
-  if (!triggered && probeAllowsSkip(previous, probe, now, args.maxSilenceMs)) {
+  if (!skipProbe && probeAllowsSkip(previous, probe, now, args.maxSilenceMs)) {
     const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'unchanged', detail: 'probe matches the last full read', checkedAt: now };
     persist(file, { ...previous, lastProbeAt: now, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
     emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
-    if (!args.json) out('CINDY_PRECHECK_OK\n');
+    if (!args.json) emitPrecheckOk();
     return EXIT_SKIP;
   }
   // An explicit GitHub rate limit on the probe must enter the existing backoff path immediately
@@ -1770,7 +1792,10 @@ async function gateMain(argv, ctx) {
   );
   const run = probeRateLimited
     ? { code: probeRun.code, stdout: '', stderr: String(probeRun.stderr ?? '') }
-    : await ctx.runSnapshot(args.snapshot, args.repo, args.number);
+    : await ctx.runSnapshot(args.snapshot, args.repo, args.number, {
+        stateDir: diagnostic ? null : args.stateDir,
+        env,
+      });
 
   let snap = null;
   if (run.code === 0) {
@@ -2007,7 +2032,7 @@ async function gateMain(argv, ctx) {
   }, out);
   // Optional host marker: healthy SKIP is recovery, backoff SKIP is not.
   if (!args.json && checkSucceeded) {
-    out('CINDY_PRECHECK_OK\n');
+    emitPrecheckOk();
   }
   return decision.exitCode;
 }
@@ -2079,7 +2104,13 @@ export async function runGate(argv, {
   readTrigger = readHookTrigger,
   out = (text) => process.stdout.write(text),
   err = (text) => process.stderr.write(text),
+  nodeVersion = process.versions.node,
 } = {}) {
+  const nodeMajor = supportedNodeMajor(nodeVersion);
+  if (!nodeMajor) {
+    err(`[pr-heartbeat-gate] Node.js ${MIN_NODE_MAJOR}+ is required (running ${nodeVersion || 'unknown'}). Switch to pr-node.cjs in Automation settings.\n`);
+    return EXIT_BLOCK;
+  }
   let record, traceFile, args, code;
   const at = now();
   try {
@@ -2096,7 +2127,7 @@ export async function runGate(argv, {
         ...(args.waitFile ? {waitPlan:{...scrub(JSON.parse(fs.readFileSync(args.waitFile,'utf8')),HUMAN_APPROVAL_LANGUAGE),reason:'recorded wait'}} : {}) };
     }
     } catch { record = null; }
-    const ctx = { env, now: () => at, out, err,
+    const ctx = { env, now: () => at, out, err, nodeMajor,
       runSnapshot: async (...a) => {
         const value = await snapshotRunner(...a);
         if (record) {
@@ -2117,9 +2148,17 @@ export async function runGate(argv, {
         let trigger = null;
         if (event?.kind === 'watch') {
           // Keep replay deterministic without retaining arbitrary event details.
-          trigger = { kind: 'watch' };
+          trigger = {
+            kind: 'watch',
+            ...(event.reason === 'reconcile' ? { reason: 'reconcile' } : {}),
+          };
           if (event.source === 'pr-status' && typeof event.detail === 'string' && event.detail.toLowerCase() === url.toLowerCase()) {
-            trigger = { kind: 'watch', source: 'pr-status', detail: url };
+            trigger = {
+              kind: 'watch',
+              source: 'pr-status',
+              detail: url,
+              ...(event.reason === 'reconcile' ? { reason: 'reconcile' } : {}),
+            };
           }
         }
         if (typeof event?.firstScheduleId === 'string' && event.firstScheduleId) {

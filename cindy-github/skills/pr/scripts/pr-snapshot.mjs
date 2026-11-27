@@ -5,8 +5,11 @@
 // script centralizes the API shape and uses execFile-based gh wrappers so shell
 // quoting cannot corrupt long GraphQL queries.
 
-import { ensureBinary, ghGraphQL, ghJson } from './lib/gh.mjs';
+import { ensureBinary, ghGraphQL, ghJson, ghJsonConditional } from './lib/gh.mjs';
 import { execFile } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { resolvePullRequestTarget } from './lib/repo-target.mjs';
 import { applyRequiredChecks, requiredChecksOf } from './lib/required-checks.mjs';
 import { classifyMergeQueue } from './lib/merge-queue.mjs';
@@ -26,15 +29,16 @@ const VERDICT_EXIT_CODES = {
 };
 
 function usage() {
-  process.stderr.write(`Usage: node scripts/pr-snapshot.mjs <pr-number-or-url> [--repo owner/name] [--strict-exit]\n`);
+  process.stderr.write(`Usage: node scripts/pr-snapshot.mjs <pr-number-or-url> [--repo owner/name] [--state-dir <dir>] [--strict-exit]\n`);
 }
 
-function parseArgs(argv) {
+function parseArgs(argv, env = process.env) {
   let repo = null;
   let prArg = null;
   let strictExit = false;
   let probe = false;
   let expectHead = null;
+  let stateDir = env.CINDY_PR_STATE_DIR?.trim() || null;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '-h' || arg === '--help') {
@@ -45,6 +49,12 @@ function parseArgs(argv) {
       const value = argv[++i];
       if (!value || value.startsWith('--')) throw new Error(`${arg} needs a commit SHA`);
       expectHead = value;
+      continue;
+    }
+    if (arg === '--state-dir') {
+      const value = argv[++i];
+      if (!value || !value.trim() || value.startsWith('--')) throw new Error(`${arg} needs a directory path`);
+      stateDir = value.trim();
       continue;
     }
     if (arg === '--repo') {
@@ -68,10 +78,196 @@ function parseArgs(argv) {
   if (probe && expectHead) throw new Error('--expect-head cannot be used with --probe');
   return {
     expectHead,
+    stateDir,
     ...resolvePullRequestTarget(prArg, { explicitRepo: repo }),
     strictExit,
     probe,
   };
+}
+
+const MAX_RULES_CACHE_ENTRIES = 20;
+const PR_REST_CACHE_SCHEMA = 2;
+const RULES_CACHE_SCHEMA = 2;
+
+function safeCacheSlug(repo) {
+  return String(repo).replace(/[^a-zA-Z0-9._-]+/g, '__');
+}
+
+function prRestCachePath(stateDir, repo, number) {
+  return path.join(stateDir, `${safeCacheSlug(repo)}-${number}.rest-cache.json`);
+}
+
+function repoRulesCachePath(stateDir, repo) {
+  return path.join(stateDir, `${safeCacheSlug(repo)}.rules-cache.json`);
+}
+
+function readJsonCache(filePath) {
+  if (!filePath) return null;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeJsonCacheAtomic(filePath, payload) {
+  if (!filePath) return;
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+    const tmp = `${filePath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(payload), { mode: 0o600 });
+    fs.renameSync(tmp, filePath);
+  } catch {
+    // ETag cache writes are best-effort optimizations and never fail a snapshot.
+  }
+}
+
+function isValidPullCacheData(data) {
+  return Boolean(data && typeof data === 'object' && !Array.isArray(data) && typeof data.state === 'string' && data.head && typeof data.head === 'object');
+}
+
+/**
+ * Persist only the minimal fields that pr-snapshot.mjs actually consumes from
+ * REST `repos/{owner}/{repo}/pulls/{number}` — never bodies, reviewers, or
+ * nested repository payloads.
+ */
+function pickPullCacheData(data) {
+  if (!isValidPullCacheData(data)) return null;
+  return {
+    ...(typeof data.html_url === 'string' ? { html_url: data.html_url } : {}),
+    ...(typeof data.title === 'string' ? { title: data.title } : {}),
+    state: data.state,
+    merged: Boolean(data.merged),
+    mergeable: typeof data.mergeable === 'boolean' ? data.mergeable : null,
+    mergeable_state: typeof data.mergeable_state === 'string' ? data.mergeable_state : null,
+    head: { sha: typeof data.head.sha === 'string' ? data.head.sha : null },
+    additions: Number.isFinite(data.additions) ? data.additions : null,
+    deletions: Number.isFinite(data.deletions) ? data.deletions : null,
+    changed_files: Number.isFinite(data.changed_files) ? data.changed_files : null,
+  };
+}
+
+/**
+ * Persist only the required-status-check entries consumed by requiredChecksOf,
+ * discarding unrelated branch rules and ruleset metadata.
+ */
+function pickBranchRulesCacheData(rules) {
+  if (!Array.isArray(rules) || rules.length >= 100) return null;
+  const projected = [];
+  for (const rule of rules) {
+    if (!rule || typeof rule !== 'object') continue;
+    if (rule.type !== 'required_status_checks') continue;
+    const checks = rule.parameters?.required_status_checks;
+    if (!Array.isArray(checks)) return null;
+    const projectedChecks = [];
+    for (const check of checks) {
+      if (!check || typeof check !== 'object' || typeof check.context !== 'string' || !check.context) {
+        return null;
+      }
+      projectedChecks.push({
+        context: check.context,
+        ...(Number.isInteger(check.integration_id) && check.integration_id > 0
+          ? { integration_id: check.integration_id }
+          : {}),
+      });
+    }
+    projected.push({
+      type: 'required_status_checks',
+      parameters: { required_status_checks: projectedChecks },
+    });
+  }
+  return projected;
+}
+
+async function fetchPrView(repo, number, stateDir) {
+  const apiPath = `repos/${repo}/pulls/${number}`;
+  const cachePath = stateDir ? prRestCachePath(stateDir, repo, number) : null;
+  const cached = cachePath ? readJsonCache(cachePath) : null;
+  const cachedData = cached?.schema === PR_REST_CACHE_SCHEMA && typeof cached.etag === 'string'
+    ? pickPullCacheData(cached.data)
+    : null;
+  const validCached = cachedData ? { etag: cached.etag, data: cachedData } : null;
+  const res = await ghJsonConditional(apiPath, {
+    etag: validCached?.etag ?? null,
+    includeHeaders: true,
+  });
+  if (res.notModified && validCached) {
+    if (cachePath && res.etag && res.etag !== validCached.etag) {
+      writeJsonCacheAtomic(cachePath, {
+        schema: PR_REST_CACHE_SCHEMA,
+        etag: res.etag,
+        data: validCached.data,
+        updatedAt: Date.now(),
+      });
+    }
+    return { ...validCached.data, head: { ...validCached.data.head } };
+  }
+  const data = res.notModified
+    ? await ghJson(apiPath, { includeHeaders: true })
+    : res.data;
+  const picked = pickPullCacheData(data);
+  if (cachePath && res.etag && picked) {
+    writeJsonCacheAtomic(cachePath, {
+      schema: PR_REST_CACHE_SCHEMA,
+      etag: res.etag,
+      data: picked,
+      updatedAt: Date.now(),
+    });
+  }
+  return picked ?? data;
+}
+
+function upsertBranchRulesCache(cachePath, cacheKey, entry) {
+  if (!cachePath) return;
+  const freshStore = readJsonCache(cachePath);
+  const prevEntries = freshStore?.schema === RULES_CACHE_SCHEMA && freshStore.entries && typeof freshStore.entries === 'object'
+    ? { ...freshStore.entries }
+    : {};
+  prevEntries[cacheKey] = entry;
+  const sortedEntries = Object.entries(prevEntries)
+    .sort((a, b) => (Number(b[1]?.updatedAt) || 0) - (Number(a[1]?.updatedAt) || 0))
+    .slice(0, MAX_RULES_CACHE_ENTRIES);
+  writeJsonCacheAtomic(cachePath, { schema: RULES_CACHE_SCHEMA, entries: Object.fromEntries(sortedEntries) });
+}
+
+async function fetchBranchRules(repo, baseRefName, viewer, stateDir) {
+  const apiPath = `repos/${repo}/rules/branches/${encodeURIComponent(baseRefName)}?per_page=100`;
+  const cachePath = stateDir ? repoRulesCachePath(stateDir, repo) : null;
+  const cacheKey = `${viewer ?? ''}:${baseRefName}`;
+  const store = cachePath ? readJsonCache(cachePath) : null;
+  const rawEntry = store?.schema === RULES_CACHE_SCHEMA && store.entries && typeof store.entries === 'object'
+    ? store.entries[cacheKey]
+    : null;
+  const cachedRules = rawEntry && typeof rawEntry.etag === 'string'
+    ? pickBranchRulesCacheData(rawEntry.rules)
+    : null;
+  const validEntry = cachedRules ? { etag: rawEntry.etag, rules: cachedRules } : null;
+  const res = await ghJsonConditional(apiPath, {
+    etag: validEntry?.etag ?? null,
+    includeHeaders: true,
+    fatalExit: false,
+    retries: 1,
+  });
+  if (res.notModified && validEntry) {
+    if (cachePath) {
+      upsertBranchRulesCache(cachePath, cacheKey, {
+        etag: res.etag || validEntry.etag,
+        rules: validEntry.rules,
+        updatedAt: Date.now(),
+      });
+    }
+    return validEntry.rules;
+  }
+  const rules = res.notModified
+    ? await ghJson(apiPath, { includeHeaders: true, fatalExit: false, retries: 1 })
+    : res.data;
+  // A full page may be truncated. Unknown is not an empty inventory; never cache incomplete rules.
+  if (!Array.isArray(rules) || rules.length >= 100) throw new Error('Incomplete branch rules');
+  const picked = pickBranchRulesCacheData(rules);
+  if (cachePath && res.etag && picked) {
+    upsertBranchRulesCache(cachePath, cacheKey, { etag: res.etag, rules: picked, updatedAt: Date.now() });
+  }
+  return picked ?? rules;
 }
 
 function lastCommit(prView) {
@@ -512,9 +708,7 @@ async function main() {
   await ensureBinary();
   if (args.probe) return probe(args);
 
-  const prView = await ghJson(
-    `repos/${args.repo}/pulls/${args.number}`, { includeHeaders: true }
-  );
+  const prView = await fetchPrView(args.repo, args.number, args.stateDir);
   const ghView = prView;
 
   let rawCheckRollup = [];
@@ -601,9 +795,7 @@ async function main() {
   if (!terminal) {
     try {
       if (!pr.baseRefName) throw new Error('Missing PR base branch');
-      const rules = await ghJson(`repos/${args.repo}/rules/branches/${encodeURIComponent(pr.baseRefName)}?per_page=100`, { includeHeaders: true, fatalExit: false, retries: 1 });
-      // A full page may be truncated. Unknown is not an empty inventory.
-      if (!Array.isArray(rules) || rules.length >= 100) throw new Error('Incomplete branch rules');
+      const rules = await fetchBranchRules(args.repo, pr.baseRefName, gql.data?.viewer?.login ?? null, args.stateDir);
       requiredChecks = requiredChecksOf(pr.baseRef, rules);
       checkRollup = applyRequiredChecks(checkRollup, requiredChecks);
     } catch (error) {
