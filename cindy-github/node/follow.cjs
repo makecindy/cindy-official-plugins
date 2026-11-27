@@ -19,6 +19,7 @@ function followSkillDir(installation) {
   if (relative.length !== 3 || relative[0] === '..' || relative[1] !== 'skills' || relative[2] !== 'pr')
     throw new Error('Approved PR Skill unavailable');
   fs.accessSync(path.join(dir, 'scripts', 'pr-heartbeat-gate.mjs'), fs.constants.R_OK);
+  fs.accessSync(path.join(dir, 'scripts', 'pr-node.cjs'), fs.constants.R_OK);
   return dir;
 }
 
@@ -31,7 +32,7 @@ if (require.main === module || globalThis.__CINDY_NODE__) {
     const reply = { jsonrpc: '2.0', id: req.id };
     try {
       if (req.method !== 'followSkillDir') throw new Error('Unsupported method');
-      reply.result = followSkillDir(path.resolve(__dirname, '..'));
+      reply.result = { dir: followSkillDir(path.resolve(__dirname, '..')), platform: process.platform };
     } catch (error) {
       reply.error = { code: -32000, message: error.message };
     }

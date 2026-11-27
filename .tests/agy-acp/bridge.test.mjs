@@ -112,6 +112,29 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
         send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ask-r1',
           name: 'ask_question', kind: 'execute', title: 'Run ask_question', status: 'in_progress' } } });
         send({ id: message.id, result: { stopReason: 'end_turn' } });
+      } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'cards_and_mcp') {
+        // Mix Antigravity native ask_question/update_steps with external MCP tools sharing the exact same names.
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'steps-native',
+          name: 'update_steps', kind: 'edit', title: 'Run update_steps', status: 'in_progress',
+          rawInput: { steps: [{ title: 'Native plan', status: 'in_progress' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ask-native',
+          name: 'ask_question', kind: 'execute', title: 'Run ask_question', status: 'in_progress' } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ext-ask',
+          name: 'ask_question', kind: 'other', title: 'Run ask_question', status: 'in_progress',
+          rawInput: { ServerName: 'partner', ToolName: 'ask_question', Arguments: { prompt: 'External prompt' } } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ext-steps',
+          name: 'update_steps', kind: 'other', title: 'Run update_steps', status: 'in_progress',
+          rawInput: { ServerName: 'partner', ToolName: 'update_steps', Arguments: { steps: [{ title: 'External step', status: 'in_progress' }] } } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'ext-steps',
+          name: 'update_steps', kind: 'other', title: 'Run update_steps', status: 'completed',
+          rawInput: { steps: [{ title: 'External step', status: 'done' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ext-direct',
+          name: 'mcp_partner_update_steps', kind: 'other', title: 'Run mcp_partner_update_steps', status: 'in_progress',
+          rawInput: { steps: [{ title: 'Direct MCP step', status: 'in_progress' }], toolSummary: 'update steps' } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'ext-direct',
+          name: 'update_steps', kind: 'other', title: 'Run update_steps', status: 'completed',
+          rawInput: { steps: [{ title: 'Direct MCP step', status: 'done' }] } } } });
+        send({ id: message.id, result: { stopReason: 'end_turn' } });
       } else if (message.method === 'session/prompt') {
         promptId = message.id;
         send({ id: 'perm-1', method: 'session/request_permission', params: { sessionId: 'sess-1',
@@ -568,6 +591,105 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.equal(legacyUpdates.at(-1).name, 'ask_question');
     legacy.bridge.child.stdin.end();
     assert.equal((await legacy.bridge.closed).code, 0);
+  });
+
+  test('remote-workspace mode checks MCP ownership before native card adaptation while keeping local-tool blocking active', async (t) => {
+    const relay = remoteSession(t, { FAKE_AGY_SCRIPT: 'cards_and_mcp' });
+    relay.send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { elicitation: { form: {} } } },
+    });
+    await relay.reply(0, 'initialize answer');
+    relay.send({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'session/new',
+      params: { cwd: '/shadow/p', mcpServers: [relay.server('cindy_exec'), relay.server('partner')] },
+    });
+    await relay.reply(1, 'session/new answer');
+    relay.send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'native and mcp' }] } });
+    assert.deepEqual((await relay.reply(2, 'prompt answer')).result, { stopReason: 'end_turn' });
+    const updates = relay.messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates, [
+      {
+        sessionUpdate: 'plan',
+        entries: [{ content: 'Native plan', priority: 'medium', status: 'in_progress' }],
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ask-native',
+        name: 'AskUserQuestion',
+        kind: 'execute',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ext-ask',
+        name: 'mcp__partner__ask_question',
+        kind: 'other',
+        title: 'mcp__partner__ask_question',
+        status: 'in_progress',
+        rawInput: { prompt: 'External prompt' },
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ext-steps',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'in_progress',
+        rawInput: { steps: [{ title: 'External step', status: 'in_progress' }] },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'ext-steps',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'completed',
+        rawInput: { steps: [{ title: 'External step', status: 'done' }] },
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ext-direct',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'in_progress',
+        rawInput: { steps: [{ title: 'Direct MCP step', status: 'in_progress' }] },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'ext-direct',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'completed',
+        rawInput: { steps: [{ title: 'Direct MCP step', status: 'done' }] },
+      },
+    ]);
+    relay.bridge.child.stdin.end();
+    assert.equal((await relay.bridge.closed).code, 0);
+
+    // Local file/command tools still terminate the remote task even when elicitation.form is negotiated.
+    const blocked = remoteSession(t, { FAKE_AGY_SCRIPT: 'native' });
+    blocked.send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { elicitation: { form: {} } } },
+    });
+    await blocked.reply(0, 'blocked initialize answer');
+    blocked.send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [blocked.server('cindy_exec')] } });
+    await blocked.reply(1, 'blocked session/new answer');
+    blocked.send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'write a note' }] } });
+    const closed = await Promise.race([blocked.bridge.closed, new Promise((resolve) => setTimeout(() => resolve(null), 8_000))]);
+    assert.ok(closed, 'the entry ended the task');
+    assert.equal(closed.code, 78);
+    assert.match(blocked.bridge.stderr.text(), /its own tool "write_to_file"/);
   });
 
   test('remote-workspace mode stops the task when Antigravity uses a tool of its own', async (t) => {

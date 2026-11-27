@@ -470,25 +470,6 @@ function startRemoteWorkspace(agyPath, host) {
       toClientLine(line, agent.stdout);
       return;
     }
-    if (isToolUpdate) {
-      const id = typeof update.toolCallId === 'string' ? update.toolCallId : null;
-      const name = typeof update.name === 'string' ? update.name : '';
-      if (id && REMOTE_SAFE_NATIVE_TOOLS.has(name)) {
-        if (seenSafeTools.size >= 2_000 && !seenSafeTools.has(id)) {
-          seenSafeTools.delete(seenSafeTools.values().next().value);
-        }
-        seenSafeTools.add(id);
-      }
-      const adapted = adaptAgyNativeToolUpdate(update, {
-        elicitationForm: clientSupportsElicitationForm(initRequest?.params),
-        seenSteps,
-      });
-      if (adapted?.action === 'drop') return;
-      if (adapted?.action === 'replace') {
-        toClient({ ...message, params: { ...params, update: adapted.update } }, agent.stdout);
-        return;
-      }
-    }
     const verdict = inspectToolCall(isPermission ? params.toolCall : update, seenCalls, serverNames, seenSafeTools);
     if (verdict.type === 'local') {
       if (isPermission) {
@@ -505,6 +486,17 @@ function startRemoteWorkspace(agyPath, host) {
     if (verdict.type === 'mcp') {
       toClient({ ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }, agent.stdout);
       return;
+    }
+    if (isToolUpdate) {
+      const adapted = adaptAgyNativeToolUpdate(update, {
+        elicitationForm: clientSupportsElicitationForm(initRequest?.params),
+        seenSteps,
+      });
+      if (adapted?.action === 'drop') return;
+      if (adapted?.action === 'replace') {
+        toClient({ ...message, params: { ...params, update: adapted.update } }, agent.stdout);
+        return;
+      }
     }
     toClientLine(line, agent.stdout);
   };

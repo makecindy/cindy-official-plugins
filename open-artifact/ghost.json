@@ -1,0 +1,343 @@
+{
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.146",
+  "id": "open-artifact",
+  "name": "Open Artifact",
+  "author": "GaoWeiLiuXD",
+  "version": "1.0.6",
+  "icon": "assets/icon.png",
+  "description": "Create, edit, and comment on Open Artifact work in the task sidebar.",
+  "whenToUse": "Create or edit a deck, design, whiteboard, spreadsheet, dashboard, document, or animation as a live artifact.",
+  "kind": "chip",
+  "entry": "main.js",
+  "launch": "resident",
+  "sessionContext": true,
+  "confirm": true,
+  "preview": {
+    "hosts": [
+      "127.0.0.1"
+    ]
+  },
+  "agent": {
+    "tasks": true,
+    "targets": true
+  },
+  "showTaskPreferences": false,
+  "skill": {
+    "items": [
+      {
+        "name": "artifacts",
+        "description": "Make an Open Artifact (a slide deck, a design canvas, a whiteboard, a data dashboard, a doc, a short animated motion piece, …) as a folder of files that opens as a live local page where the person views, edits, comments and exports, with their comments coming back to you. Use when the person types `/artifacts <type> <what to make>`, or asks for something they will look at closely, keep, change, comment on or present - a presentation, pitch or talk deck; app screens, a mockup, a landing page, a poster, flyer or graphic, or \"a few options\" to look at; a brainstorm or retro board, a flowchart or an architecture sketch; a dashboard, metrics page, KPI tracker or recurring report from their data; a document, report, proposal, plan, spec, memo, notes or other writing to keep, share or comment on; a short animated video, an explainer, a promo, motion graphics or a GIF - or asks to keep or share a diagram you drew. Not for answers read once, code, or a file in a format they named.",
+        "dir": "skills/artifacts"
+      }
+    ]
+  },
+  "tools": [
+    {
+      "name": "artifact",
+      "description": "Create, inspect, update, or open a local Open Artifact. Start with quickstart to select a type and read its instructions. Use its open-artifact:// link for subsequent edits. Open shows the editable page in the Cindy task sidebar. See the bundled /artifacts skill for file-editing, sharing and export guidance.",
+      "exposure": "startup",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "quickstart",
+              "list",
+              "publish",
+              "read",
+              "open",
+              "call",
+              "adopt",
+              "delete",
+              "share"
+            ],
+            "description": "What to do: quickstart, list, publish, read, open, call, adopt, delete or share. Omitted: publish."
+          },
+          "intent": {
+            "type": "string",
+            "description": "quickstart: what is being made (design, design-system, slides, whiteboard, document, data, sheets, motion, other), or a few words about it."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "types",
+              "mine",
+              "all"
+            ],
+            "description": "list: types (the installed types), mine (this session's and this workspace's artifacts; the default) or all (every artifact)."
+          },
+          "type": {
+            "type": "string",
+            "description": "list: only artifacts of this type (an id, or open-artifact://type/<id>). quickstart: the type already chosen (an id), to get its create call and steps without matching."
+          },
+          "query": {
+            "type": "string",
+            "description": "list: only artifacts whose title contains this text."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "list: how many to return (default 50, at most 200)."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "list: the next_cursor of the previous page."
+          },
+          "type_url": {
+            "type": "string",
+            "description": "publish without url: the type to create from (open-artifact://type/<id>, from quickstart). read without url: the type to describe."
+          },
+          "title": {
+            "type": "string",
+            "description": "publish without url: the new artifact's name. quickstart: the name it will have, to find similar ones."
+          },
+          "folder": {
+            "type": "string",
+            "description": "publish without url, or adopt: where the artifact's folder goes (absolute, or relative to the workspace). Default <workspace>/artifacts/<slug>."
+          },
+          "url": {
+            "type": "string",
+            "description": "An artifact: open-artifact://artifact/<id>, as publish returned it."
+          },
+          "files": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "publish with url: files to write under the artifact root, as {\"rel/path\": \"text\"} or {\"rel/path\": {\"content\": \"...\", \"encoding\": \"base64\"}}; null deletes."
+          },
+          "if_match": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "publish with url: {\"rel/path\": sha256 | null | \"*\"}. Write only while the file still has the sha256 you read, does not exist (null), or anyway (\"*\"). One mismatch writes nothing and returns the current versions."
+          },
+          "check": {
+            "type": "boolean",
+            "description": "publish with url: run the type's check action after writing; its result comes back as check."
+          },
+          "open": {
+            "type": "string",
+            "enum": [
+              "after_first_write",
+              "now",
+              "never"
+            ],
+            "description": "publish without url: after_first_write (the default) opens the page in your app once your first write lands; now opens it at once; never leaves it closed. Where your app cannot show pages by itself the result says so: open view_url in your app's built-in browser, if you have one."
+          },
+          "related": {
+            "type": "boolean",
+            "description": "quickstart: list existing artifacts the recommended type can build on, such as design systems (default true)."
+          },
+          "path": {
+            "type": "string",
+            "description": "read: one file or folder under the root (omitted: the record and the file list)."
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "read: several files under the root at once."
+          },
+          "name": {
+            "type": "string",
+            "description": "call: the action's name (check, upload, ...; read with url lists them)."
+          },
+          "args": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "call: the action's arguments. upload: {file: absolute path, name?, group?}."
+          },
+          "panel": {
+            "type": "string",
+            "enum": [
+              "share",
+              "export"
+            ],
+            "description": "open: also open the page's Share panel (share), for the person to share it on the network, or its Export tab (export), for them to download a file."
+          },
+          "cloud": {
+            "type": "string",
+            "description": "share: publish the artifact to this cloud remote (its name, as `open-artifact remote list` shows it). It works only on a remote the person set up and let agents publish to (agentMayPublish); otherwise the person publishes it, from the Share panel or with `open-artifact publish <id> --remote <name>`."
+          }
+        }
+      }
+    },
+    {
+      "name": "artifact_data",
+      "description": "Read and write the document store of an artifact whose type keeps one (its instructions say so). get, list and query read documents with their sha256; set, update, delete, str_replace and batch write them. update merges fields, and {\"__delete__\": true} removes one; str_replace changes one passage of a long text field. Replacing or deleting an existing document needs if_match: the sha256 you read, or \"*\". Your writes show live on open pages.",
+      "exposure": "startup",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "get",
+              "list",
+              "query",
+              "set",
+              "update",
+              "delete",
+              "str_replace",
+              "batch"
+            ],
+            "description": "What to do: get, list, query, set, update, delete, str_replace or batch."
+          },
+          "url": {
+            "type": "string",
+            "description": "The artifact (open-artifact://artifact/<id>)."
+          },
+          "collection": {
+            "type": "string",
+            "description": "The collection: alone for list / query (query needs it), with doc_id for one document."
+          },
+          "doc_id": {
+            "type": "string",
+            "description": "With collection: the document to get / set / update / delete / str_replace."
+          },
+          "path": {
+            "type": "string",
+            "description": "collection/doc_id, instead of the two."
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "set / update: the document's fields."
+          },
+          "file_path": {
+            "type": "string",
+            "description": "set / update: a JSON file holding the fields, instead of data."
+          },
+          "if_match": {
+            "description": "set / update / delete / str_replace: the sha256 get returned (write only if unchanged), null (only if it does not exist) or \"*\" (replace whatever is there)."
+          },
+          "field": {
+            "type": "string",
+            "description": "str_replace: the text field, as a dot path (body, notes.text)."
+          },
+          "old": {
+            "type": "string",
+            "description": "str_replace: the passage to replace; it must occur exactly once."
+          },
+          "new": {
+            "type": "string",
+            "description": "str_replace: the passage that replaces it."
+          },
+          "where": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "query: [{field, op, value}], all must hold. op: ==, !=, <, <=, >, >=, in, not-in (up to 30 values), array-contains."
+          },
+          "order_by": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "query: {field, dir: \"asc\" | \"desc\"}."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "list / query: how many documents (default 100, at most 1000)."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "list / query: the next_cursor of the previous page."
+          },
+          "out_file": {
+            "type": "string",
+            "description": "get / list / query: write the result to this JSON file (absolute, or relative to the workspace) and return only its path and counts."
+          },
+          "writes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "batch: [{op: set|update|delete|str_replace, path | collection+doc_id, data | file_path, if_match?, field?, old?, new?}], at most 500."
+          }
+        },
+        "required": [
+          "action",
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "artifact_comments",
+      "description": "Comments the person leaves on their artifact's page, kept in the artifact's own folder on this computer (no outside service). read lists the threads; reply answers one (thread_id is after \";thread=\" in the message), with resolve: true when it is done; resolve and reopen change a thread's state. A thread sent to you is the person asking for your answer in it, so replying there is what they asked for. Answer only threads sent to you, in one or two lines. wait blocks until the next message for this session: use it only when nothing else can wake you.",
+      "exposure": "startup",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "read",
+              "reply",
+              "resolve",
+              "reopen",
+              "wait"
+            ],
+            "description": "What to do: read, reply, resolve, reopen or wait."
+          },
+          "url": {
+            "type": "string",
+            "description": "The artifact (open-artifact://artifact/<id>). wait: optional."
+          },
+          "thread_id": {
+            "type": "string",
+            "description": "reply / resolve / reopen: the thread (after \";thread=\" in the message)."
+          },
+          "text": {
+            "type": "string",
+            "description": "reply: the answer."
+          },
+          "resolve": {
+            "type": "boolean",
+            "description": "reply: resolve the thread too."
+          },
+          "all": {
+            "type": "boolean",
+            "description": "read: resolved threads too."
+          },
+          "since": {
+            "type": "string",
+            "description": "read: only threads with a message at or after this time (ISO 8601)."
+          },
+          "acknowledge_duplicate": {
+            "type": "boolean",
+            "description": "reply: send the same text as your last reply in this thread again, on purpose."
+          },
+          "timeout_ms": {
+            "type": "number",
+            "description": "wait: how long (default 600000)."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    }
+  ],
+  "node": {
+    "entry": "node/worker.cjs",
+    "entries": [
+      "node/daemon.cjs"
+    ],
+    "protocol": "json-rpc-stdio",
+    "lifecycle": "resident",
+    "childSpawn": true
+  },
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "readme": {
+    "en": "README.md",
+    "zh-CN": "README.zh-CN.md"
+  },
+  "releaseNotes": "随包使用 Open Artifact 0.16.1。重连时暂存的留言会在原任务的下一次工具调用中取回。"
+}

@@ -58,7 +58,7 @@ function supportsSteering(agentVersion) {
  * as soon as a new one takes over. Keep Cindy's original request open until
  * the newest prompt finishes and relay all of the session's streamed updates.
  */
-function attachSteering(input, output, child, stop) {
+function attachSteering(input, output, child, stop, errorRelay) {
   const turns = new Map();
   const requests = new Map();
   const openingSessions = new Map();
@@ -95,9 +95,18 @@ function attachSteering(input, output, child, stop) {
     const message = parse(line);
     if (!message) return line;
     if (message.method) {
-      if (!isAntigravity) return line;
-      const normalized = normalizeToolMessage(message);
+      const normalized = isAntigravity ? normalizeToolMessage(message) : undefined;
       if (normalized === null) return null;
+      const outgoing = normalized || message;
+      if (errorRelay) {
+        const action = errorRelay.notification(outgoing);
+        if (action) {
+          if (action.flush) {
+            for (const item of action.flush) toClient.push(encode(item));
+          }
+          if (action.hold) return null;
+        }
+      }
       return normalized ? encode(normalized) : line;
     }
     if (message.id === undefined) return line;
@@ -120,18 +129,24 @@ function attachSteering(input, output, child, stop) {
     }
 
     const turn = requests.get(message.id);
-    if (!turn) return line;
+    if (!turn) {
+      const classified = errorRelay ? errorRelay.response(message) : message;
+      return classified !== message ? encode(classified) : line;
+    }
     requests.delete(message.id);
     if (message.id === turn.latestId) turn.result = message;
     if (--turn.pending !== 0) return null;
     turns.delete(turn.sessionId);
-    return encode({ ...turn.result, id: turn.originalId });
+    const finalMessage = { ...turn.result, id: turn.originalId };
+    const classified = errorRelay ? errorRelay.response(finalMessage) : finalMessage;
+    return encode(classified);
   });
 
   const toAgent = lineTransform((line) => {
     const message = parse(line);
     if (!message?.method || message.id === undefined) return line;
     const params = message.params;
+    if (errorRelay) errorRelay.request(message);
     if (message.method === 'initialize') {
       initializeId = message.id;
       elicitationForm = clientSupportsElicitationForm(params);
