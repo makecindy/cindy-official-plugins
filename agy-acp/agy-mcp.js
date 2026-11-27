@@ -18,6 +18,83 @@ function isSessionOpen(method) {
   return method === 'session/new' || method === 'session/load' || method === 'session/resume';
 }
 
+function clientSupportsElicitationForm(params) {
+  if (!isObject(params)) return false;
+  const caps = isObject(params.clientCapabilities)
+    ? params.clientCapabilities
+    : isObject(params.client_capabilities) ? params.client_capabilities : null;
+  return Boolean(caps && isObject(caps.elicitation) && isObject(caps.elicitation.form));
+}
+
+function mapAgyStepStatus(status) {
+  switch (typeof status === 'string' ? status.toLowerCase() : '') {
+    case 'done':
+    case 'completed':
+    case 'skipped':
+    case 'cancelled':
+    case 'canceled':
+    case 'failed':
+      return 'completed';
+    case 'in_progress':
+    case 'inprogress':
+    case 'running':
+      return 'in_progress';
+    default:
+      return 'pending';
+  }
+}
+
+/**
+ * Adapts Antigravity's native UI-only tool updates into standard ACP / Cindy conventions when
+ * the host negotiated `clientCapabilities.elicitation.form` (Cindy host support for native
+ * question & plan cards; older hosts receive the raw `update_steps` / `ask_question` tool rows
+ * unchanged so existing progress rows do not regress):
+ *  - `update_steps` → standard ACP `plan` notification (deduplicated per toolCallId so
+ *    the follow-up `completed` update neither duplicates nor renders a raw tool card;
+ *    `status: "failed"` updates are always preserved).
+ *  - `ask_question` → `AskUserQuestion`, so Cindy's native question card replaces the raw
+ *    tool row cleanly.
+ */
+function adaptAgyNativeToolUpdate(toolCall, { elicitationForm = false, seenSteps } = {}) {
+  if (!isObject(toolCall) || !elicitationForm) return null;
+  const id = typeof toolCall.toolCallId === 'string' ? toolCall.toolCallId : null;
+  const name = typeof toolCall.name === 'string' ? toolCall.name : '';
+  const status = typeof toolCall.status === 'string' ? toolCall.status.toLowerCase() : '';
+
+  if (name === 'update_steps' || (id && seenSteps && seenSteps.has(id))) {
+    if (status === 'failed' || status === 'error') {
+      if (id && seenSteps) seenSteps.delete(id);
+      return null;
+    }
+    const rawSteps = Array.isArray(toolCall.rawInput?.steps)
+      ? toolCall.rawInput.steps
+      : Array.isArray(toolCall.args?.steps) ? toolCall.args.steps : null;
+    if (!rawSteps) return seenSteps && id && seenSteps.has(id) ? { action: 'drop' } : null;
+    const entries = rawSteps.flatMap((step) => {
+      if (!isObject(step) || typeof step.title !== 'string' || !step.title.trim()) return [];
+      return [{ content: step.title.trim(), priority: 'medium', status: mapAgyStepStatus(step.status) }];
+    });
+    const digest = JSON.stringify(entries);
+    if (id && seenSteps) {
+      if (seenSteps.get(id) === digest) return { action: 'drop' };
+      if (seenSteps.size >= MAX_TRACKED_CALLS && !seenSteps.has(id)) {
+        seenSteps.delete(seenSteps.keys().next().value);
+      }
+      seenSteps.set(id, digest);
+    }
+    return { action: 'replace', update: { sessionUpdate: 'plan', entries } };
+  }
+
+  if (name === 'ask_question') {
+    return {
+      action: 'replace',
+      update: { ...toolCall, name: 'AskUserQuestion', title: 'AskUserQuestion' },
+    };
+  }
+
+  return null;
+}
+
 function mcpArguments(input) {
   const value = input.Arguments;
   if (isObject(value)) return value;
@@ -82,4 +159,11 @@ function normalizeMcpToolCall(toolCall, seen, serverNames, { allowLegacyEnvelope
   return next;
 }
 
-module.exports = { completeInitializeResult, isObject, isSessionOpen, normalizeMcpToolCall };
+module.exports = {
+  adaptAgyNativeToolUpdate,
+  clientSupportsElicitationForm,
+  completeInitializeResult,
+  isObject,
+  isSessionOpen,
+  normalizeMcpToolCall,
+};

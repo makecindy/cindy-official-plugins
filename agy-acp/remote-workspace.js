@@ -11,8 +11,8 @@
  *
  * How (checked against agy 1.5.13):
  *  - agy's permission rules do not stop its own tools over ACP, so they are not used. The agent
- *    definition's `tools` allow-list does: with only `search_web` allowed, the file and command
- *    tools do not exist in the session.
+ *    definition's `tools` allow-list does: with only `search_web`, `ask_question`, and
+ *    `update_steps` allowed, the file and command tools do not exist in the session.
  *  - A restricted agent can use an MCP server only when the server is named in its definition
  *    AND passed in `session/new`. The definition names the servers; their addresses and the task
  *    token stay in the `session/new` request and never reach a file.
@@ -21,6 +21,9 @@
  *    `--agent` after the definition has been written.
  *  - agy does not declare HTTP MCP support although it has it; the `initialize` answer is
  *    completed so Cindy hands its tools over.
+ *  - agy gives the session's MCP servers five seconds to connect, and a server late for that is
+ *    not declared to the model. Every handshake request here crosses the device link, so the
+ *    handshakes are done before `session/new` reaches agy (mcp-warmup.js).
  *  - agy reports an MCP call in its own way: through a generic caller (`MCP Tool Bash`, arguments
  *    nested) in a new session, as a tool named `mcp_<server>_<tool>` in a resumed one. Both are
  *    passed to Cindy as the tool they are, so Cindy shows and checks its own Bash, Read, Write….
@@ -37,8 +40,16 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { completeInitializeResult, isObject, isSessionOpen, normalizeMcpToolCall } = require('./agy-mcp.js');
+const {
+  adaptAgyNativeToolUpdate,
+  clientSupportsElicitationForm,
+  completeInitializeResult,
+  isObject,
+  isSessionOpen,
+  normalizeMcpToolCall,
+} = require('./agy-mcp.js');
 const { createSteeringRelay } = require('./agy-steering.js');
+const { warmMcpServers } = require('./mcp-warmup.js');
 
 const REMOTE_WORKSPACE_ARG = '--cindy-remote-workspace';
 const GUEST_WORKSPACE_ARG = '--cindy-guest-workspace';
@@ -56,6 +67,8 @@ const LAUNCH_DIR_PREFIX = 'cindy-agy-remote-';
 /** A launch directory this old belongs to a task that ended without cleaning up (a crash, a hard kill). */
 const STALE_LAUNCH_DIR_MS = 24 * 60 * 60 * 1000;
 
+/** Non-local agy tools explicitly allow-listed in `agentDefinition` (never touch host files or shell). */
+const REMOTE_SAFE_NATIVE_TOOLS = new Set(['search_web', 'ask_question', 'update_steps']);
 /** ACP tool kinds that mean "touched this computer" when the call is not an MCP call. */
 const LOCAL_KINDS = new Set(['read', 'edit', 'delete', 'move', 'execute']);
 /** agy's own file and command tools, by the name it reports. */
@@ -142,6 +155,8 @@ function agentDefinition(serverNames) {
     'description: Works on a project that is on another computer, through the tools Cindy provides.',
     'tools:',
     '  - search_web',
+    '  - ask_question',
+    '  - update_steps',
     'mcpServers:',
     ...serverNames.map((name) => `  - name: ${name}`),
     '---',
@@ -186,13 +201,24 @@ function remoteToolIdentity({ server, tool }) {
 }
 
 /** Keep the remote restriction on native file and command tools after normalizing MCP calls. */
-function inspectToolCall(toolCall, seen, serverNames = []) {
+function inspectToolCall(toolCall, seen, serverNames = [], seenSafeTools = null) {
   if (!isObject(toolCall)) return { type: 'other' };
   const mcpCall = normalizeMcpToolCall(toolCall, seen, serverNames, {
     allowLegacyEnvelope: true, toolIdentity: remoteToolIdentity,
   });
   if (mcpCall) return { type: 'mcp', toolCall: mcpCall };
+  const id = typeof toolCall.toolCallId === 'string' ? toolCall.toolCallId : null;
   const name = typeof toolCall.name === 'string' ? toolCall.name : '';
+  if (REMOTE_SAFE_NATIVE_TOOLS.has(name)) {
+    if (id && seenSafeTools) {
+      if (seenSafeTools.size >= 2_000 && !seenSafeTools.has(id)) {
+        seenSafeTools.delete(seenSafeTools.values().next().value);
+      }
+      seenSafeTools.add(id);
+    }
+    return { type: 'other' };
+  }
+  if (!name && id && seenSafeTools && seenSafeTools.has(id)) return { type: 'other' };
   const kind = typeof toolCall.kind === 'string' ? toolCall.kind : '';
   if (LOCAL_TOOL_NAMES.has(name) || LOCAL_KINDS.has(kind)) return { type: 'local', tool: name || kind };
   return { type: 'other' };
@@ -240,13 +266,14 @@ function startRemoteWorkspace(agyPath, host) {
     return;
   }
 
-  /** `handshake` → `ready` → `opening` (child init) → `opening-session` (session open) → `session` (or terminal `failed`). */
+  /** `handshake` → `ready` → `opening` (child init) → `warming` (MCP handshakes) → `opening-session` (session open) → `session` (or terminal `failed`). */
   let phase = 'handshake';
   let initRequest = null;
   let probe = null;
   let agent = null;
   let agentExited = false;
   let sessionRequest = null;
+  let warmup = null;
   let finished = false;
   let stopCode = null;
   let forceTimer = null;
@@ -254,6 +281,8 @@ function startRemoteWorkspace(agyPath, host) {
   let stdinEnded = false;
   const queued = [];
   const seenCalls = new Map();
+  const seenSteps = new Map();
+  const seenSafeTools = new Set();
   let serverNames = [];
   const steering = createSteeringRelay();
 
@@ -309,6 +338,7 @@ function startRemoteWorkspace(agyPath, host) {
   const finish = (code) => {
     if (finished) return;
     finished = true;
+    warmup?.close();
     clearTimeout(forceTimer);
     clearTimeout(agentCloseTimer);
     const done = () => process.exit(code);
@@ -423,8 +453,12 @@ function startRemoteWorkspace(agyPath, host) {
     }
     try {
       writeAgentDefinition(dir, servers.map((server) => server.name));
+      // Warms while agy starts; session open waits for it (see onAgentLine).
+      warmup = warmMcpServers(servers, { log: (text) => process.stderr.write(`[agy-acp] ${text}\n`) });
       agent = launch([...acpArgs, '--agent', AGENT_NAME]);
     } catch (error) {
+      warmup?.close();
+      warmup = null;
       refuse(request.id, -32603, `Antigravity could not be started for a task on another computer (${describe(error)}).`);
       return;
     }
@@ -467,6 +501,10 @@ function startRemoteWorkspace(agyPath, host) {
     sessionRequest = null;
     serverNames = [];
     seenCalls.clear();
+    seenSteps.clear();
+    seenSafeTools.clear();
+    warmup?.close();
+    warmup = null;
     clearTimeout(forceTimer);
     forceTimer = null;
     clearTimeout(agentCloseTimer);
@@ -494,8 +532,13 @@ function startRemoteWorkspace(agyPath, host) {
         failOpen(message.error);
         return;
       }
-      toAgent(sessionRequest);
-      phase = 'opening-session';
+      phase = 'warming';
+      const sendSessionOpen = (mcpServers) => {
+        if (finished || stopCode !== null || stdinEnded || agentExited || phase !== 'warming') return;
+        toAgent({ ...sessionRequest, params: { ...sessionRequest.params, mcpServers } });
+        phase = 'opening-session';
+      };
+      warmup.ready.then(sendSessionOpen, () => sendSessionOpen(sessionRequest.params.mcpServers));
       return;
     }
     if (phase === 'opening-session' && message.id === sessionRequest.id && message.method === undefined) {
@@ -527,7 +570,9 @@ function startRemoteWorkspace(agyPath, host) {
       toClientLine(line, agent.stdout);
       return;
     }
-    const verdict = inspectToolCall(isPermission ? params.toolCall : update, seenCalls, serverNames);
+    // Always verify tool ownership (MCP vs native vs local) BEFORE adapting native UI cards
+    // so an external MCP tool named `ask_question` or `update_steps` keeps its MCP origin.
+    const verdict = inspectToolCall(isPermission ? params.toolCall : update, seenCalls, serverNames, seenSafeTools);
     if (verdict.type === 'local') {
       if (isPermission) {
         const options = Array.isArray(params.options) ? params.options : [];
@@ -543,6 +588,17 @@ function startRemoteWorkspace(agyPath, host) {
     if (verdict.type === 'mcp') {
       toClient({ ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }, agent.stdout);
       return;
+    }
+    if (isToolUpdate) {
+      const adapted = adaptAgyNativeToolUpdate(update, {
+        elicitationForm: clientSupportsElicitationForm(initRequest?.params),
+        seenSteps,
+      });
+      if (adapted?.action === 'drop') return;
+      if (adapted?.action === 'replace') {
+        toClient({ ...message, params: { ...params, update: adapted.update } }, agent.stdout);
+        return;
+      }
     }
     toClientLine(line, agent.stdout);
   };
@@ -560,7 +616,7 @@ function startRemoteWorkspace(agyPath, host) {
       forwardClientLine(line, message);
       return;
     }
-    if (phase === 'opening' || phase === 'opening-session') {
+    if (phase === 'opening' || phase === 'warming' || phase === 'opening-session') {
       if (message && message.method === undefined && message.id !== undefined) {
         toAgentLine(line);
         return;
@@ -616,6 +672,7 @@ function startRemoteWorkspace(agyPath, host) {
   });
   // Last line of defence for any exit path: never leave agy running, never leave the directory.
   process.on('exit', () => {
+    warmup?.close();
     for (const child of [probe, agent]) if (running(child)) killTree(child, 'SIGKILL');
     removeLaunchDir(dir);
   });

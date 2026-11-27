@@ -8,10 +8,11 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -95,6 +96,51 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
         // An agy that ignored the agent's tool list: one of its own tools runs, and the turn stays open.
         send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'call-n',
           name: 'write_to_file', kind: 'edit', title: 'note.txt', status: 'in_progress' } } });
+      } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'cards') {
+        // Native UI tools (even if tagged with edit/execute kinds) are adapted when elicitation.form is negotiated,
+        // preserved unchanged on older hosts, and failure updates are never dropped.
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'steps-r1',
+          name: 'update_steps', kind: 'edit', title: 'Run update_steps', status: 'in_progress',
+          rawInput: { steps: [{ title: 'Inspect', status: 'done' }, { title: 'Optional', status: 'skipped' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'steps-r1',
+          kind: 'edit', status: 'completed',
+          rawInput: { steps: [{ title: 'Inspect', status: 'done' }, { title: 'Optional', status: 'skipped' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'steps-r2',
+          name: 'update_steps', kind: 'edit', title: 'Run update_steps', status: 'in_progress',
+          rawInput: { steps: [{ title: 'Verify', status: 'in_progress' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'steps-r2',
+          kind: 'edit', status: 'failed', rawOutput: 'validation failed' } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ask-r1',
+          name: 'ask_question', kind: 'execute', title: 'Run ask_question', status: 'in_progress' } } });
+        send({ id: message.id, result: { stopReason: 'end_turn' } });
+      } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'mcp-shadow') {
+        const text = message.params && Array.isArray(message.params.prompt) && message.params.prompt[0] ? message.params.prompt[0].text : '';
+        if (text === 'escape') {
+          send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'local-escape',
+            name: 'write_to_file', kind: 'edit', title: 'escape.txt', status: 'in_progress' } } });
+        } else {
+          // Mix native UI tools with same-named external MCP tools in one turn.
+          send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'nat-steps',
+            name: 'update_steps', kind: 'edit', title: 'Run update_steps', status: 'in_progress',
+            rawInput: { steps: [{ title: 'Native plan', status: 'in_progress' }] } } } });
+          send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'nat-steps',
+            kind: 'edit', status: 'completed',
+            rawInput: { steps: [{ title: 'Native plan', status: 'in_progress' }] } } } });
+          send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'nat-ask',
+            name: 'ask_question', kind: 'execute', title: 'Run ask_question', status: 'in_progress' } } });
+          send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ext-ask',
+            name: 'call_mcp_tool', kind: 'execute', title: 'MCP Tool ask_question', status: 'in_progress',
+            rawInput: { ServerName: 'custom_ext', ToolName: 'ask_question', Arguments: { question: 'Choose' } },
+            args: { ServerName: 'custom_ext', ToolName: 'ask_question', Arguments: { question: 'Choose' } } } } });
+          send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'ext-ask',
+            name: 'ask_question', kind: 'execute', title: 'MCP Tool ask_question', status: 'completed' } } });
+          send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ext-steps',
+            name: 'mcp_custom_ext_update_steps', kind: 'other', title: 'Run mcp_custom_ext_update_steps', status: 'in_progress',
+            rawInput: { steps: [{ title: 'External step', status: 'done' }], toolSummary: 'Update external steps' } } } });
+          send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'ext-steps',
+            name: 'update_steps', kind: 'other', title: 'Run mcp_custom_ext_update_steps', status: 'completed' } } });
+          send({ id: message.id, result: { stopReason: 'end_turn' } });
+        }
       } else if (message.method === 'session/prompt') {
         promptId = message.id;
         send({ id: 'perm-1', method: 'session/request_permission', params: { sessionId: 'sess-1',
@@ -420,8 +466,8 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.deepEqual(launch.args.slice(-2), ['--agent', 'cindy-remote']);
     assert.deepEqual(launch.files, ['.agents'], 'agy runs in a directory holding only the agent definition');
     assert.ok(!samePath(launch.cwd, os.tmpdir()), 'not the shared temp folder');
-    // One harmless tool of agy's own; the servers by name only. Their address and the task token stay in session/new.
-    assert.match(launch.definition, /^tools:\n  - search_web\nmcpServers:\n  - name: cindy_exec\n  - name: cindy\n---$/m);
+    // Harmless native UI/search tools of agy's own; the servers by name only. Their address and the task token stay in session/new.
+    assert.match(launch.definition, /^tools:\n  - search_web\n  - ask_question\n  - update_steps\nmcpServers:\n  - name: cindy_exec\n  - name: cindy\n---$/m);
     assert.doesNotMatch(launch.definition, /task-secret|127\.0\.0\.1/);
     assert.deepEqual(launch.session, { cwd: '/shadow/p', mcpServers: [server('cindy_exec'), server('cindy')] });
 
@@ -472,6 +518,55 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.equal((await bridge.closed).code, 0);
   });
 
+  // Why: agy leaves out MCP servers that are not connected within five seconds, and here every handshake
+  // crosses the device link. session/new must reach agy only after the warm-up, naming the local relay
+  // for a server that was warmed (mcp-warmup.test.mjs covers the relay itself).
+  test('remote-workspace mode hands agy its MCP servers only after their handshake is done', async (t) => {
+    const authHeader = `Bearer ${randomUUID()}`;
+    const sessions = new Set();
+    const mcp = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => setTimeout(() => {
+        if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
+        const message = body ? JSON.parse(body) : {};
+        const sid = req.headers['mcp-session-id'];
+        if (req.method === 'GET') return res.writeHead(405).end();
+        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+        if (!sid) {
+          const id = `s${sessions.size}`;
+          sessions.add(id);
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
+          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }));
+        }
+        if (message.id === undefined) return res.writeHead(202).end();
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [] } }));
+      }, 300));
+    });
+    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
+    t.after(() => mcp.close());
+    const { launchFile, bridge, send, reply } = remoteSession(t);
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    const exec = {
+      type: 'http',
+      name: 'cindy_exec',
+      url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
+      headers: [{ name: 'Authorization', value: authHeader }],
+    };
+    const unheated = { type: 'http', name: 'cindy', url: 'http://example.test/mcp/cindy', headers: [] };
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec, unheated] } });
+    await reply(1, 'session/new answer');
+    const { session } = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
+    assert.equal(sessions.size, 1, 'the server was warmed before agy got session/new');
+    assert.match(session.mcpServers[0].url, /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{32}\/0$/);
+    assert.deepEqual(session.mcpServers[0].headers, exec.headers);
+    assert.deepEqual(session.mcpServers[1], unheated, 'a server that could not be warmed keeps its own address');
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
   test('remote-workspace mode does not start a session without Cindy’s file and command tools', async (t) => {
     const { launchFile, bridge, send, reply, server } = remoteSession(t);
     bridge.child.stdin.write(INITIALIZE);
@@ -483,6 +578,159 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.ok(!fs.existsSync(launchFile), 'the session process was never started');
     bridge.child.stdin.end();
     assert.equal((await bridge.closed).code, 0);
+  });
+
+  test('remote-workspace mode adapts native update_steps and ask_question updates through the relay and preserves compatibility without elicitation.form', async (t) => {
+    const withForm = remoteSession(t, { FAKE_AGY_SCRIPT: 'cards' });
+    withForm.send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { elicitation: { form: {} } } },
+    });
+    await withForm.reply(0, 'initialize answer');
+    withForm.send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ type: 'http', name: 'cindy_exec', url: 'http://example.test/mcp/cindy_exec', headers: [] }] } });
+    await withForm.reply(1, 'session/new answer');
+    withForm.send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'plan and ask' }] } });
+    assert.deepEqual((await withForm.reply(2, 'prompt answer')).result, { stopReason: 'end_turn' });
+    const updates = withForm.messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates, [
+      {
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Inspect', priority: 'medium', status: 'completed' },
+          { content: 'Optional', priority: 'medium', status: 'completed' },
+        ],
+      },
+      {
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Verify', priority: 'medium', status: 'in_progress' },
+        ],
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'steps-r2',
+        kind: 'edit',
+        status: 'failed',
+        rawOutput: 'validation failed',
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ask-r1',
+        name: 'AskUserQuestion',
+        kind: 'execute',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+    ]);
+    withForm.bridge.child.stdin.end();
+    assert.equal((await withForm.bridge.closed).code, 0);
+
+    // Older Cindy hosts (without elicitation.form) keep the raw update_steps and ask_question tool rows unchanged.
+    const legacy = remoteSession(t, { FAKE_AGY_SCRIPT: 'cards' });
+    legacy.send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false } } },
+    });
+    await legacy.reply(0, 'legacy initialize answer');
+    legacy.send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ type: 'http', name: 'cindy_exec', url: 'http://example.test/mcp/cindy_exec', headers: [] }] } });
+    await legacy.reply(1, 'legacy session/new answer');
+    legacy.send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'plan and ask' }] } });
+    assert.deepEqual((await legacy.reply(2, 'legacy prompt answer')).result, { stopReason: 'end_turn' });
+    const legacyUpdates = legacy.messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.equal(legacyUpdates.some((u) => u.sessionUpdate === 'plan'), false);
+    assert.equal(legacyUpdates[0].name, 'update_steps');
+    assert.equal(legacyUpdates.at(-1).name, 'ask_question');
+    legacy.bridge.child.stdin.end();
+    assert.equal((await legacy.bridge.closed).code, 0);
+  });
+
+  // Why: remote-workspace must verify tool ownership (MCP vs native vs local) BEFORE adapting native UI cards
+  // so external MCP tools named ask_question or update_steps keep their MCP identity while local tools still abort.
+  test('remote-workspace mode preserves MCP origin for same-named ask_question/update_steps tools while adapting native cards and blocking local tools', async (t) => {
+    const { bridge, messages, send, reply } = remoteSession(t, { FAKE_AGY_SCRIPT: 'mcp-shadow' });
+    send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { elicitation: { form: {} } } },
+    });
+    await reply(0, 'initialize answer');
+    send({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'session/new',
+      params: {
+        cwd: '/shadow/p',
+        mcpServers: [
+          { type: 'http', name: 'cindy_exec', url: 'http://example.test/mcp/cindy_exec', headers: [] },
+          { type: 'http', name: 'custom_ext', url: 'http://example.test/mcp/custom_ext', headers: [] },
+        ],
+      },
+    });
+    await reply(1, 'session/new answer');
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'mix native and mcp' }] } });
+    assert.deepEqual((await reply(2, 'prompt answer')).result, { stopReason: 'end_turn' });
+
+    const updates = messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates, [
+      {
+        sessionUpdate: 'plan',
+        entries: [{ content: 'Native plan', priority: 'medium', status: 'in_progress' }],
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'nat-ask',
+        name: 'AskUserQuestion',
+        kind: 'execute',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ext-ask',
+        name: 'mcp__custom_ext__ask_question',
+        kind: 'other',
+        title: 'mcp__custom_ext__ask_question',
+        status: 'in_progress',
+        rawInput: { question: 'Choose' },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'ext-ask',
+        name: 'mcp__custom_ext__ask_question',
+        kind: 'other',
+        title: 'mcp__custom_ext__ask_question',
+        status: 'completed',
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ext-steps',
+        name: 'mcp__custom_ext__update_steps',
+        kind: 'other',
+        title: 'mcp__custom_ext__update_steps',
+        status: 'in_progress',
+        rawInput: { steps: [{ title: 'External step', status: 'done' }] },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'ext-steps',
+        name: 'mcp__custom_ext__update_steps',
+        kind: 'other',
+        title: 'mcp__custom_ext__update_steps',
+        status: 'completed',
+      },
+    ]);
+
+    // Native local file tools still trigger abandon (exit 78) in the same session.
+    send({ jsonrpc: '2.0', id: 3, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'escape' }] } });
+    const closed = await Promise.race([bridge.closed, new Promise((resolve) => setTimeout(() => resolve(null), 8_000))]);
+    assert.ok(closed, 'the entry ended the task');
+    assert.equal(closed.code, 78);
+    assert.match(bridge.stderr.text(), /its own tool "write_to_file"/);
   });
 
   test('remote-workspace mode stops the task when Antigravity uses a tool of its own', async (t) => {
@@ -2494,6 +2742,116 @@ process.stdout.write('', () => process.exit(0));
    * How much the pipes take before stdout keeps a queue varies with the load, so the burst grows until the
    * relay is still running when Cindy reads. The first such burst leaves only a little queued.
    */
+  test('adapts update_steps into ACP plans, drops duplicates, and renames ask_question only when elicitation.form is negotiated', async (t) => {
+    const withForm = await localRelay(t);
+    withForm.request(1, 'initialize', { clientCapabilities: { elicitation: { form: {} } } });
+    withForm.response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+    withForm.request(2, 'session/new', { cwd: '/repo', mcpServers: [] });
+    withForm.response(2, { sessionId: 'one' });
+
+    withForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'steps-l1',
+          name: 'update_steps',
+          kind: 'other',
+          title: 'Run update_steps',
+          status: 'in_progress',
+          rawInput: { steps: [{ title: 'Check', status: 'in_progress' }, { title: 'Skip', status: 'skipped' }] },
+        },
+      },
+    });
+    withForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'steps-l1',
+          kind: 'other',
+          status: 'completed',
+          rawInput: { steps: [{ title: 'Check', status: 'in_progress' }, { title: 'Skip', status: 'skipped' }] },
+        },
+      },
+    });
+    withForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'ask-l1',
+          name: 'ask_question',
+          kind: 'other',
+          title: 'Run ask_question',
+          status: 'in_progress',
+        },
+      },
+    });
+
+    const updatesWithForm = withForm.client.filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updatesWithForm, [
+      {
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Check', priority: 'medium', status: 'in_progress' },
+          { content: 'Skip', priority: 'medium', status: 'completed' },
+        ],
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ask-l1',
+        name: 'AskUserQuestion',
+        kind: 'other',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+    ]);
+
+    const withoutForm = await localRelay(t);
+    withoutForm.request(1, 'initialize', { clientCapabilities: { fs: { readTextFile: false } } });
+    withoutForm.response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+    withoutForm.request(2, 'session/new', { cwd: '/repo', mcpServers: [] });
+    withoutForm.response(2, { sessionId: 'one' });
+    withoutForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'steps-l2',
+          name: 'update_steps',
+          kind: 'other',
+          title: 'Run update_steps',
+          status: 'in_progress',
+          rawInput: { steps: [{ title: 'Keep legacy row', status: 'in_progress' }] },
+        },
+      },
+    });
+    withoutForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'ask-l2',
+          name: 'ask_question',
+          kind: 'other',
+          title: 'Run ask_question',
+          status: 'in_progress',
+        },
+      },
+    });
+    const updatesWithoutForm = withoutForm.client.filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.equal(updatesWithoutForm.length, 2);
+    assert.equal(updatesWithoutForm[0].sessionUpdate, 'tool_call');
+    assert.equal(updatesWithoutForm[0].name, 'update_steps');
+    assert.equal(updatesWithoutForm[1].name, 'ask_question');
+  });
+
   test('exits right after Cindy has read the last notification, not after the flush timeout', { timeout: 40_000 }, async (t) => {
     const flushTimeoutMs = 2_000;
     let bridge = null;
@@ -2626,6 +2984,15 @@ process.stdin.on('data', (chunk) => {
           send({ id: steer1Id, result: { stopReason: 'end_turn', usage: { outputTokens: 11 } } });
           return;
         }
+        if (${JSON.stringify(mode)} === 'combined') {
+          send({ method: 'session/update', params: { sessionId: 'sess-r', update: { sessionUpdate: 'tool_call', toolCallId: 'c-steps',
+            name: 'update_steps', kind: 'edit', title: 'Run update_steps', status: 'in_progress',
+            rawInput: { steps: [{ title: 'Steered step', status: 'done' }] } } } });
+          send({ method: 'session/update', params: { sessionId: 'sess-r', update: { sessionUpdate: 'tool_call', toolCallId: 'c-ask',
+            name: 'ask_question', kind: 'execute', title: 'Run ask_question', status: 'in_progress' } } });
+          send({ id: steer1Id, result: { stopReason: 'end_turn', usage: { outputTokens: 13 } } });
+          return;
+        }
         send({
           id: 'perm-steer',
           method: 'session/request_permission',
@@ -2748,7 +3115,9 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
     send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-steer' }] } });
 
     const openErr = await reply(1, 'failed session/new answer');
-    assert.deepEqual(openErr.error, { code: -32000, message: 'restricted init failed' });
+    assert.equal(openErr.error.code, -32000);
+    assert.equal(openErr.error.message, 'restricted init failed');
+    if (official) assert.deepEqual(openErr.error.data, { _meta: { cindy: { kind: 'auth-required' } } });
     const queuedPromptErr = await reply(2, 'settled queued prompt');
     assert.equal(queuedPromptErr.error.code, -32600);
     const queuedSteerErr = await reply(3, 'settled queued steering');
@@ -2851,6 +3220,71 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
     assert.equal(closed.code, 78);
     assert.match(bridge.stderr.text(), /its own tool "write_to_file"/);
   });
+
+  test('combines MCP warm-up, same-turn steering, and native card adaptation in one remote-workspace session', async (t) => {
+    const authHeader = `Bearer ${randomUUID()}`;
+    const warmedSessions = new Set();
+    const mcp = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => setTimeout(() => {
+        if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
+        const message = body ? JSON.parse(body) : {};
+        const sid = req.headers['mcp-session-id'];
+        if (req.method === 'GET') return res.writeHead(405).end();
+        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+        if (!sid) {
+          const id = `warm-${warmedSessions.size}`;
+          warmedSessions.add(id);
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
+          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }));
+        }
+        if (message.id === undefined) return res.writeHead(202).end();
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [{ name: 'Bash', inputSchema: { type: 'object' } }] } }));
+      }, 60));
+    });
+    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
+    t.after(() => mcp.close());
+
+    const { bridge, messages, send, reply, serverMessages } = remoteSteerHarness(t, { mode: 'combined' });
+    send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { elicitation: { form: {} } } },
+    });
+    const init = await reply(0, 'initialize answer');
+    assert.deepEqual(init.result.agentCapabilities.mcpCapabilities, { http: true });
+    assert.deepEqual(init.result._meta, { retained: true, steering: { supported: true } });
+
+    const exec = {
+      type: 'http',
+      name: 'cindy_exec',
+      url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
+      headers: [{ name: 'Authorization', value: authHeader }],
+    };
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec] } });
+    await reply(1, 'session/new answer');
+    const openMsg = serverMessages().find((m) => m.method === 'session/new');
+    assert.equal(warmedSessions.size, 1, 'MCP warm-up completed before session/new reached agy');
+    assert.match(openMsg.params.mcpServers[0].url, /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{32}\/0$/);
+
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'start' }] } });
+    await waitFor(() => messages().some((m) => m.method === 'session/update'), 8_000, 'first turn update');
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'steer with cards' }] } });
+    assert.deepEqual((await reply(3, 'steer ack')).result, { outcome: 'injected' });
+    assert.deepEqual((await reply(2, 'merged prompt reply')).result, { stopReason: 'end_turn', usage: { outputTokens: 13 } });
+
+    const updates = messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates.slice(1), [
+      { sessionUpdate: 'plan', entries: [{ content: 'Steered step', priority: 'medium', status: 'completed' }] },
+      { sessionUpdate: 'tool_call', toolCallId: 'c-ask', name: 'AskUserQuestion', kind: 'execute', title: 'AskUserQuestion', status: 'in_progress' },
+    ]);
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
 });
 
 test('a disconnected input rejects pending and subsequent ACP calls', async () => {
@@ -2903,4 +3337,109 @@ test('installation verifies the archive and staged CLI before activating it', {
   fs.rmdirSync(target);
   assert.deepEqual(install(digest), { state: 'installed', version: '1.5.14' });
   assert.deepEqual(fs.readFileSync(target), fs.readFileSync(cli));
+});
+
+test('adapts Antigravity update_steps into ACP plan updates and normalizes ask_question when form elicitation is negotiated', async () => {
+  const mcp = await import(pathToFileURL(path.join(root, 'agy-mcp.js')));
+  assert.equal(mcp.clientSupportsElicitationForm({ clientCapabilities: { elicitation: { form: {} } } }), true);
+  assert.equal(mcp.clientSupportsElicitationForm({ clientCapabilities: { fs: { readTextFile: false } } }), false);
+
+  const seenSteps = new Map();
+  const firstSteps = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'steps-1',
+    name: 'update_steps',
+    title: 'Run update_steps',
+    status: 'in_progress',
+    rawInput: {
+      steps: [
+        { title: 'Inspect codebase', status: 'done' },
+        { title: 'Apply fix', status: 'in_progress' },
+        { title: 'Skip optional', status: 'skipped' },
+      ],
+    },
+  }, { elicitationForm: true, seenSteps });
+  assert.deepEqual(firstSteps, {
+    action: 'replace',
+    update: {
+      sessionUpdate: 'plan',
+      entries: [
+        { content: 'Inspect codebase', priority: 'medium', status: 'completed' },
+        { content: 'Apply fix', priority: 'medium', status: 'in_progress' },
+        { content: 'Skip optional', priority: 'medium', status: 'completed' },
+      ],
+    },
+  });
+
+  // Duplicate completed update for the same toolCallId is dropped instead of rendering a raw tool card.
+  const duplicateSteps = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'steps-1',
+    name: 'update_steps',
+    status: 'completed',
+    rawInput: {
+      steps: [
+        { title: 'Inspect codebase', status: 'done' },
+        { title: 'Apply fix', status: 'in_progress' },
+        { title: 'Skip optional', status: 'skipped' },
+      ],
+    },
+  }, { elicitationForm: true, seenSteps });
+  assert.deepEqual(duplicateSteps, { action: 'drop' });
+
+  // Failed tool_call_update is preserved even when rawInput is omitted or repeats the same steps.
+  const failedOmitted = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'steps-1',
+    status: 'failed',
+    rawOutput: 'error',
+  }, { elicitationForm: true, seenSteps });
+  assert.equal(failedOmitted, null);
+
+  mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'steps-2',
+    name: 'update_steps',
+    status: 'in_progress',
+    rawInput: { steps: [{ title: 'Step A', status: 'in_progress' }] },
+  }, { elicitationForm: true, seenSteps });
+  const failedRepeated = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'steps-2',
+    name: 'update_steps',
+    status: 'failed',
+    rawInput: { steps: [{ title: 'Step A', status: 'in_progress' }] },
+  }, { elicitationForm: true, seenSteps });
+  assert.equal(failedRepeated, null);
+
+  // Older hosts (elicitationForm: false) keep raw update_steps unchanged so existing progress rows do not disappear.
+  const legacySteps = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'steps-legacy',
+    name: 'update_steps',
+    status: 'in_progress',
+    rawInput: { steps: [{ title: 'Legacy step', status: 'in_progress' }] },
+  }, { elicitationForm: false, seenSteps });
+  assert.equal(legacySteps, null);
+
+  // ask_question is normalized to AskUserQuestion only when the client negotiated form elicitation.
+  const askWithForm = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'ask-1',
+    name: 'ask_question',
+    title: 'Run ask_question',
+    status: 'in_progress',
+  }, { elicitationForm: true, seenSteps });
+  assert.equal(askWithForm?.action, 'replace');
+  assert.equal(askWithForm?.update.name, 'AskUserQuestion');
+  assert.equal(askWithForm?.update.title, 'AskUserQuestion');
+
+  const askWithoutForm = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'ask-2',
+    name: 'ask_question',
+    title: 'Run ask_question',
+    status: 'in_progress',
+  }, { elicitationForm: false, seenSteps });
+  assert.equal(askWithoutForm, null);
 });

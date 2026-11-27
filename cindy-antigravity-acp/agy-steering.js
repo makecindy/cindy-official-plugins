@@ -2,7 +2,14 @@
 
 const { Transform } = require('node:stream');
 const { StringDecoder } = require('node:string_decoder');
-const { completeInitializeResult, isObject, isSessionOpen, normalizeMcpToolCall } = require('./agy-mcp.js');
+const {
+  adaptAgyNativeToolUpdate,
+  clientSupportsElicitationForm,
+  completeInitializeResult,
+  isObject,
+  isSessionOpen,
+  normalizeMcpToolCall,
+} = require('./agy-mcp.js');
 
 function lineTransform(handle) {
   const decoder = new StringDecoder('utf8');
@@ -134,6 +141,7 @@ function attachSteering(input, output, child, stop, errorRelay) {
   const mcpSessions = new Map();
   let initializeId;
   let isAntigravity = false;
+  let elicitationForm = false;
 
   function normalizeToolMessage(message) {
     const { method, params } = message;
@@ -141,21 +149,28 @@ function attachSteering(input, output, child, stop, errorRelay) {
     let key;
     if (method === 'session/request_permission' && message.id !== undefined) key = 'toolCall';
     if (method === 'session/update' && (updateKind === 'tool_call' || updateKind === 'tool_call_update')) key = 'update';
-    if (!key || typeof params?.sessionId !== 'string') return null;
+    if (!key || typeof params?.sessionId !== 'string') return undefined;
     const { sessionId } = params;
     // agy can replay updates while it loads a known session, before its open response.
     const opening = [...openingSessions.values()].find((session) => session.sessionId === sessionId);
     const session = opening ?? mcpSessions.get(sessionId);
-    if (!session) return null;
+    if (!session) return undefined;
     const toolCall = normalizeMcpToolCall(params[key], session.seen, session.serverNames);
-    return toolCall ? { ...message, params: { ...params, [key]: toolCall } } : null;
+    if (toolCall) return { ...message, params: { ...params, [key]: toolCall } };
+    if (key === 'update') {
+      const adapted = adaptAgyNativeToolUpdate(params.update, { elicitationForm, seenSteps: session.seenSteps });
+      if (adapted?.action === 'drop') return null;
+      if (adapted?.action === 'replace') return { ...message, params: { ...params, update: adapted.update } };
+    }
+    return undefined;
   }
 
   const toClient = lineTransform((line) => {
     const message = parse(line);
     if (!message) return line;
     if (message.method) {
-      const normalized = isAntigravity && normalizeToolMessage(message);
+      const normalized = isAntigravity ? normalizeToolMessage(message) : undefined;
+      if (normalized === null) return null;
       const outgoing = normalized || message;
       if (errorRelay) {
         const action = errorRelay.notification(outgoing);
@@ -203,11 +218,14 @@ function attachSteering(input, output, child, stop, errorRelay) {
     if (!message?.method || message.id === undefined) return line;
     const params = message.params;
     if (errorRelay) errorRelay.request(message);
-    if (message.method === 'initialize') initializeId = message.id;
+    if (message.method === 'initialize') {
+      initializeId = message.id;
+      elicitationForm = clientSupportsElicitationForm(params);
+    }
     if (isAntigravity && isSessionOpen(message.method)) {
       const servers = Array.isArray(params?.mcpServers) ? params.mcpServers : [];
       const serverNames = servers.map((server) => server?.name).filter((name) => typeof name === 'string' && name);
-      openingSessions.set(message.id, { sessionId: params?.sessionId, serverNames, seen: new Map() });
+      openingSessions.set(message.id, { sessionId: params?.sessionId, serverNames, seen: new Map(), seenSteps: new Map() });
     }
     const handled = steering.handleClientMessage(message);
     if (!handled) return line;
