@@ -184,7 +184,8 @@ test('prints the post-publish pr_card handoff reminder in text output while keep
   assert.ok(groupIdx > 0 && optOutIdx > groupIdx && callIdx > optOutIdx,
     'ownership check and following: false guard must appear before the first pr_card(published: true) instruction');
   assert.match(textOut, /following: false/);
-  assert.match(textOut, /pr_follow_settings/);
+  assert.match(textOut, /show the Cindy task card for X and IM/);
+  assert.match(textOut, /pr_follow_settings.*only if the card call returned no preferences/);
   assert.match(textOut, /pr_card.*published: true/);
   const jsonOut = execFileSync('node', [script, work, '--json'], { encoding: 'utf8' });
   assert.equal(JSON.parse(jsonOut).branch, 'fix');

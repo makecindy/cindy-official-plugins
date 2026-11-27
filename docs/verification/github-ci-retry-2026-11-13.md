@@ -2,7 +2,7 @@
 
 # GitHub CI recovery evidence — 2026-11-13
 
-Current publication policy: **1.5.66, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
+Current publication policy: **1.5.67, not installed**; all active hooks and unsupported directory durability stop recovery. Local 1.5.45 trial evidence below is version-limited; see the final section.
 
 Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
@@ -1645,3 +1645,16 @@ Only version/notes and version-assertion/settings-test adapter conflicts require
 The strict receipt owner/gate, caps and Git argv are byte-identical to65; only its shared Agent notes exclusion is new versus public63. Both signed and unsigned paths use that same exclusion, not a separate executor. Prior source64/65 results are intermediate evidence only; final combined checks/package follow below. All blocked cleanup residuals, retired resources and #12846 follower remain untouched.
 
 Intermediate combined66 mandatory four suites plus plugin: **657 passed / 42 skipped / 0 failed (290.13 s)**. Forge66: **35 files, 278975 archive bytes, 787744 uncompressed bytes**, exact content and deletion/absence verified. A later main3a3e9270 source-card handoff change is not covered by this intermediate validation.
+
+
+## Final source-card handoff baseline — source1.5.67, not installed
+
+Before the one round push, main advanced to3a3e92701457706521f09b0a6ab08cf955960723 (GitHub1.5.45). Local66/b1f24278 remains signed and unpushed while this same checkout incorporates3a. Inherited behavior displays the source Cindy PR card on every channel while a dedicated task owns any authorized follow-up. The runtime only adds main's published=false settingsApplied guard; scenario/preflight instructions preserve source-card presentation and fall back to preference-only reads only when the card lacks settings. This does not authorize a new worker for this task or migrate its source hook.
+
+Conflicts are version/notes/version assertion plus the four-language pr_follow_settings descriptions. Final descriptions retain main's channel/card routing and the entire strict CI preference/default-off/cap/live-read/directory-sync/hook conditions. All are within1024 characters (EN932,zh378,JA511,KO596), root matcheszh. Five focused manifest/publication/dispatcher contracts pass (.37s). Source67 notes exclusion/receipt owner/gate/argv and recovery regression content are byte-identical to65/66. Settings/worker code still matches main; no scopes, credential grants, real preferences or installations changed. main1.5.45 here identifies3a, not the older tested feature-local1.5.45 commit.
+
+Final67 checks/package are recorded below. Source66 657/42/0 is reused only as intermediate evidence. No source-card routing/model preference/notes refusal or other current runtime gap has new Cindy acceptance; native fixtures and test hosts remain distinct from real integration. Existing blocked cleanup and retired-resource prohibitions remain.
+
+Forge67 exact-content: **35 files, 279437 archive bytes, 789515 uncompressed bytes**; generated65/66/67 packages all deleted and absence verified. The task-created large GitHub read response was also removed after summarizing; no new candidate copy, blocked cleanup retry or runtime fixture. Actual post-commit release-contract receipt is recorded in the PR delivery report.
+
+Final combined67 mandatory four suites plus plugin: **658 passed / 42 skipped / 0 failed (531.56 s)**. The longer run was allowed to complete once; read-only process inspection confirmed active isolated Git fixture subprocesses, with no interruption or duplicate suite. Skip scope remains17 unavailable native full-directory-sync positive paths and25 POSIX-only CLI cases, not new Cindy/Linux evidence.

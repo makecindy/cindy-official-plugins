@@ -4054,6 +4054,9 @@ async function prCardTool(args, callId, fromLegacyStop) {
     card = newPrCard(callId, repo);
     if (ref && a.published !== true) card.settingsApplied = true;
   }
+  // A dispatcher may already have an ask card. Show the PR there while the
+  // dedicated task handles publication preferences and owns the schedule.
+  if (ref && a.published === false) card.settingsApplied = true;
   card.sessionId = sessionId;
   if (ref) card.repo = ref.repo;
   else if (repo) card.repo = repo;
