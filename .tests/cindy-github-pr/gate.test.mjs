@@ -1818,7 +1818,7 @@ test('只提交 APPROVED 的自动合并 bot 不写入仓库评审名单,也不�
   assert.match(r.json().detail, /events=\[checks-failed,remarks\]/);
 });
 
-test('升级路径:旧提交有自有 App 检查佐证的真实评审保留,核实无检查佐证的自动合并 bot 清掉', async (t) => {
+test('升级路径:旧版单 PR 状态在完整快照上清掉纯自动合并 bot 并保留真实评审,不完整快照保守延后', async (t) => {
   const fx = createFixture(t);
   const autoMergeReview = {
     id: 'R-auto',
@@ -1830,35 +1830,17 @@ test('升级路径:旧提交有自有 App 检查佐证的真实评审保留,核�
     url: 'https://gh/R-auto',
     commitOid: 'aaa1111',
   };
-  const oldGreptileApproved = {
-    id: 'R-grep-ok',
-    author: 'greptile-apps',
-    authorIsBot: true,
-    state: 'APPROVED',
-    body: 'LGTM',
-    submittedAt: iso(T0 - 20 * 24 * 60 * MIN),
-    url: 'https://gh/R-grep-ok',
-    commitOid: 'aaa1111',
-  };
-  const first = snap({
-    reviews: [autoMergeReview, oldGreptileApproved],
-    reviewCommitChecks: {
-      aaa1111: [
-        { appSlug: 'greptile-apps', appId: 99 },
-        { appSlug: 'github-actions', appId: 15368 },
-      ],
-    },
-  });
+  const realGreptileReview = botReview('R-grep', 'greptile-apps', 'aaa1111', iso(T0 - 20 * 24 * 60 * MIN));
+  const first = snap({ reviews: [autoMergeReview, realGreptileReview] });
   fx.setSnapshot(first);
   await fx.run();
   assert.equal((await fx.run(['--ack'])).code, 0);
 
-  // 模拟旧版 v1.5.35 留下的单 PR 状态(无 reviewerBotsVersion)且仓库 14 天缓存已过期。
+  // 模拟旧版留下的单 PR 状态(无 reviewerBotsVersion)且仓库 14 天缓存已过期。
   fx.writeRepoState({ reviewerBots: {} });
   fx.writeState({ reviewerBots: ['cindy-auto-merge-bot', 'greptile-apps'], reviewerBotsVersion: undefined });
 
-  // 新 head 尚无任何检查注册,但旧提交 aaa1111 上有 Greptile 自有 App 检查、无 auto-merge 检查:
-  // 保留 greptile-apps 继续收齐,清掉 cindy-auto-merge-bot 并迁至 v2。
+  // 完整快照上:保留有评审证据的 greptile-apps 继续收齐,清掉 cindy-auto-merge-bot 并迁至 v2。
   fx.advance(2);
   const red = { latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], reviewerChecks: [], verdict: 'NEEDS_WORK' };
   fx.setSnapshot(snap({ ...first, ...red }));
@@ -1870,12 +1852,9 @@ test('升级路径:旧提交有自有 App 检查佐证的真实评审保留,核�
   assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
   assert.equal(fx.readState().reviewerBotsVersion, 2);
 
-  // 仅剩旧版自动合并 bot(无真实评审 bot),历史提交核实无自有 App 检查且仓库缓存已过期:升级后直接放行。
+  // 仅剩旧版自动合并 bot(无真实评审 bot)且仓库缓存已过期:升级后立刻放行,不再卡 20 分钟。
   const autoOnly = createFixture(t);
-  const onlyAutoSnap = snap({
-    reviews: [autoMergeReview],
-    reviewCommitChecks: { aaa1111: [{ appSlug: 'github-actions', appId: 15368 }] },
-  });
+  const onlyAutoSnap = snap({ reviews: [autoMergeReview] });
   autoOnly.setSnapshot(onlyAutoSnap);
   await autoOnly.run();
   assert.equal((await autoOnly.run(['--ack'])).code, 0);
@@ -1889,22 +1868,21 @@ test('升级路径:旧提交有自有 App 检查佐证的真实评审保留,核�
   assert.deepEqual(autoOnly.readState().reviewerBots, []);
   assert.equal(autoOnly.readState().reviewerBotsVersion, 2);
 
-  // 若旧提交检查未能查到(无 reviewCommitChecks),保守保留旧名单且暂不标记 v2,避免漏等真实评审。
-  const unverified = createFixture(t);
-  const unverifiedSnap = snap({ reviews: [oldGreptileApproved], reviewerChecks: [] });
-  unverified.setSnapshot(unverifiedSnap);
-  await unverified.run();
-  assert.equal((await unverified.run(['--ack'])).code, 0);
-  unverified.writeRepoState({ reviewerBots: {} });
-  unverified.writeState({ reviewerBots: ['greptile-apps'], reviewerBotsVersion: undefined });
-  unverified.advance(2);
-  unverified.setSnapshot(snap({ ...unverifiedSnap, ...red }));
-  r = await unverified.run(['--json']);
+  // 快照不完整(如 reviewThreads.truncated)时保守保留旧名单且暂不升至 v2,继续收齐等待。
+  const incomplete = createFixture(t);
+  incomplete.setSnapshot(onlyAutoSnap);
+  await incomplete.run();
+  assert.equal((await incomplete.run(['--ack'])).code, 0);
+  incomplete.writeRepoState({ reviewerBots: {} });
+  incomplete.writeState({ reviewerBots: ['greptile-apps'], reviewerBotsVersion: undefined });
+  incomplete.advance(2);
+  incomplete.setSnapshot(snap({ ...onlyAutoSnap, ...red, reviewThreads: { totalCount: 1, fetchedCount: 0, unresolvedCount: 0, activeUnresolvedCount: 0, outdatedUnresolvedCount: 0, truncated: true, nodes: [] } }));
+  r = await incomplete.run(['--json']);
   assert.equal(r.code, 2, r.stdout);
   assert.equal(r.json().reason, 'settling');
   assert.match(r.json().detail, /held until greptile-apps answer/);
-  assert.deepEqual(unverified.readState().reviewerBots, ['greptile-apps']);
-  assert.equal(unverified.readState().reviewerBotsVersion, 1);
+  assert.deepEqual(incomplete.readState().reviewerBots, ['greptile-apps']);
+  assert.equal(incomplete.readState().reviewerBotsVersion, 1);
 });
 
 test('按阶段节奏:只等人审时 30 分钟才看一次,不到时间不调用 GitHub;宿主触发立刻看', async (t) => {
@@ -2916,6 +2894,41 @@ test('replay refuses to call a trace complete when a recorded round is missing',
   assert.equal((await replay(lines)).complete, true);
   const holed = await replay([lines[0], lines[1], lines[3]]);
   assert.equal(holed.complete, false); assert.equal(holed.gaps, 1);
+});
+
+test('gate requires Node 18+ before skipping and appends CINDY_PR_NODE after CINDY_PRECHECK_OK', async (t) => {
+  const fx = createFixture(t);
+  fx.setSnapshot(snap());
+  const first = await fx.run();
+  assert.equal(first.code, 0, first.stderr);
+  assert.match(first.stdout, /CINDY_PRECHECK_OK\nCINDY_PR_NODE=\d+\n$/);
+  await fx.run(['--ack']);
+
+  // Pacing not-due tick still fails closed on Node < 18 instead of emitting CINDY_PRECHECK_OK
+  let oldOut = '';
+  let oldErr = '';
+  const blocked = await runGate([PR_URL, '--state-dir', path.join(fx.root, 'state'), '--snapshot', path.join(fx.root, 'fake-pr-snapshot.mjs'), '--pacing'], {
+    now: () => fx.now(),
+    readTrigger: async () => null,
+    out: (s) => { oldOut += s; },
+    err: (s) => { oldErr += s; },
+    nodeVersion: '16.20.2',
+  });
+  assert.equal(blocked, 1);
+  assert.match(oldErr, /Node\.js 18\+ is required \(running 16\.20\.2\)/);
+  assert.equal(oldOut, '');
+
+  // Healthy not-due skip on Node 18+ emits both CINDY_PRECHECK_OK and CINDY_PR_NODE
+  let okOut = '';
+  const skipped = await runGate([PR_URL, '--state-dir', path.join(fx.root, 'state'), '--snapshot', path.join(fx.root, 'fake-pr-snapshot.mjs'), '--pacing'], {
+    now: () => fx.now(),
+    readTrigger: async () => null,
+    out: (s) => { okOut += s; },
+    err: () => {},
+    nodeVersion: '22.14.0',
+  });
+  assert.equal(skipped, 2);
+  assert.match(okOut, /CINDY_PRECHECK_OK\nCINDY_PR_NODE=22\n$/);
 });
 
 test('reconcile watch trigger bypasses pacing but runs lightweight probe first; real status watch still reads in full', async (t) => {

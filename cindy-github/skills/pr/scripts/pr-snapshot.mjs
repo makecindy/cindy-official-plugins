@@ -13,7 +13,6 @@ import path from 'node:path';
 import { resolvePullRequestTarget } from './lib/repo-target.mjs';
 import { applyRequiredChecks, requiredChecksOf } from './lib/required-checks.mjs';
 import { classifyMergeQueue } from './lib/merge-queue.mjs';
-import { uncorroboratedApprovalCommits } from './lib/follow-pacing.mjs';
 
 const PASS_CONCLUSIONS = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL']);
 const FAIL_CONCLUSIONS = new Set(['FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED', 'STALE', 'STARTUP_FAILURE']);
@@ -704,96 +703,6 @@ async function probe(args) {
   process.stdout.write(JSON.stringify(probeFingerprint(pr)) + '\n');
 }
 
-const COMMIT_CHECK_BATCH_SIZE = 10;
-const MAX_COMMIT_CHECK_PAGES = 5;
-
-const COMMIT_CHECK_PAGE_QUERY = `
-query($owner: String!, $name: String!, $oid: GitObjectID!, $after: String!) {
-  repository(owner: $owner, name: $name) {
-    object(oid: $oid) {
-      ... on Commit {
-        oid
-        statusCheckRollup {
-          contexts(first: 100, after: $after) {
-            pageInfo { hasNextPage endCursor }
-            nodes {
-              __typename
-              ... on CheckRun { checkSuite { app { databaseId slug } } }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-`;
-
-function collectCheckRunApps(nodes, seen) {
-  for (const n of nodes ?? []) {
-    if (n?.__typename !== 'CheckRun') continue;
-    const appSlug = n.checkSuite?.app?.slug ?? null;
-    const appId = n.checkSuite?.app?.databaseId ?? null;
-    if (appSlug && Number.isInteger(appId) && appId > 0 && !seen.has(appSlug)) {
-      seen.set(appSlug, { appSlug, appId });
-    }
-  }
-}
-
-async function fetchReviewCommitChecks(owner, name, oids) {
-  if (!oids.length) return {};
-  const out = {};
-  for (let offset = 0; offset < oids.length; offset += COMMIT_CHECK_BATCH_SIZE) {
-    const batch = oids.slice(offset, offset + COMMIT_CHECK_BATCH_SIZE);
-    const varDefs = batch.map((_, i) => `$oid${i}: GitObjectID!`).join(', ');
-    const fields = batch
-      .map((_, i) => `    c${i}: object(oid: $oid${i}) { ... on Commit { oid statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage endCursor } nodes { __typename ... on CheckRun { checkSuite { app { databaseId slug } } } } } } } }`)
-      .join('\n');
-    const query = `query($owner: String!, $name: String!, ${varDefs}) {\n  repository(owner: $owner, name: $name) {\n${fields}\n  }\n}`;
-    const vars = { owner, name };
-    batch.forEach((oid, i) => { vars[`oid${i}`] = oid; });
-    let repo;
-    try {
-      const res = await ghGraphQL(query, vars, { includeHeaders: true, fatalExit: false, retries: 1 });
-      repo = res?.data?.repository ?? {};
-    } catch {
-      // Preserve results already fetched by earlier batches; failed batch commits stay unverified.
-      continue;
-    }
-    for (let i = 0; i < batch.length; i++) {
-      const oid = batch[i];
-      const commit = repo[`c${i}`];
-      if (!commit || commit.oid !== oid) continue;
-      let contexts = commit.statusCheckRollup?.contexts;
-      const seen = new Map();
-      collectCheckRunApps(contexts?.nodes, seen);
-      let complete = !contexts?.pageInfo?.hasNextPage;
-      let pages = 1;
-      while (!complete && contexts?.pageInfo?.endCursor && pages < MAX_COMMIT_CHECK_PAGES) {
-        pages += 1;
-        try {
-          const pageRes = await ghGraphQL(
-            COMMIT_CHECK_PAGE_QUERY,
-            { owner, name, oid, after: contexts.pageInfo.endCursor },
-            { includeHeaders: true, fatalExit: false, retries: 1 },
-          );
-          const nextCommit = pageRes?.data?.repository?.object;
-          if (!nextCommit || nextCommit.oid !== oid) break;
-          contexts = nextCommit.statusCheckRollup?.contexts;
-          collectCheckRunApps(contexts?.nodes, seen);
-          complete = !contexts?.pageInfo?.hasNextPage;
-        } catch {
-          // Keep Apps already proved on earlier pages while leaving this commit unverified (`complete: false`).
-          break;
-        }
-      }
-      if (complete || seen.size > 0) {
-        out[oid] = { complete, apps: [...seen.values()] };
-      }
-    }
-  }
-  return out;
-}
-
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   await ensureBinary();
@@ -938,14 +847,6 @@ async function main() {
   }
   const strictExitCode = VERDICT_EXIT_CODES[gate.verdict] ?? 50;
 
-  const latestCommitOid = pr.headRefOid || latestCommit?.oid || ghView.head?.sha || null;
-  const reviews = (pr.reviews?.nodes || []).map(normalizeReview);
-  const reactions = (pr.reactions?.nodes || []).map((r) => ({ content: r.content ?? null, at: r.createdAt ?? null, author: r.user?.login ?? null }));
-  const approvalCommits = uncorroboratedApprovalCommits({ latestCommitOid, reviews, reviewThreads, reactions, reviewerChecks });
-  const reviewCommitChecks = approvalCommits.length
-    ? await fetchReviewCommitChecks(args.owner, args.name, approvalCommits)
-    : {};
-
   const out = {
     fetchedAt: new Date().toISOString(),
     repo: args.repo,
@@ -971,7 +872,7 @@ async function main() {
     // Match the lightweight probe's live base ref. REST pull.base.sha can remain
     // at the PR's old base after the branch advances, hiding baseline fixes.
     baseCommitOid: pr.baseRef?.target?.oid ?? null,
-    latestCommitOid,
+    latestCommitOid: pr.headRefOid || latestCommit?.oid || ghView.head?.sha || null,
     // diff 规模(REST /pulls 自带):供 gate 的「范围膨胀」机判用。刻意不进 gate 指纹
     // (指纹按字段显式挑选),base 移动等噪声不会因此制造无谓唤起。
     additions: Number.isFinite(ghView.additions) ? ghView.additions : null,
@@ -990,7 +891,6 @@ async function main() {
     checks: checkRollup,
     requiredChecks,
     reviewerChecks,
-    reviewCommitChecks,
     mergeQueue,
     checksSummary: {
       total: checksSummary.total,
@@ -1006,10 +906,10 @@ async function main() {
       actionRequiredRuns: checksSummary.actionRequiredRuns,
     },
     reviewThreads,
-    reviews,
+    reviews: (pr.reviews?.nodes || []).map(normalizeReview),
     comments: (pr.comments?.nodes || []).map(normalizeTopComment),
     // Reactions on the PR itself: a bot reviewer's 👍 can be its whole answer to a push.
-    reactions,
+    reactions: (pr.reactions?.nodes || []).map((r) => ({ content: r.content ?? null, at: r.createdAt ?? null, author: r.user?.login ?? null })),
     // Older top-level comments beyond the 100 read (a PR with more than that; the gate watches new ones only).
     commentsOmitted: Math.max(0, (pr.comments?.totalCount ?? 0) - (pr.comments?.nodes?.length ?? 0)),
     // Emit the GraphQL probe baseline only when it agrees with the check rollup evaluated in this

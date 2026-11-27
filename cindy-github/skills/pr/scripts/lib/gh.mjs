@@ -161,7 +161,7 @@ export async function ghJsonConditional(
 }
 
 // `gh api graphql -f query=...` returning parsed JSON.
-export async function ghGraphQL(query, variables = {}, { retries = 1, includeHeaders = false, fatalExit = true } = {}) {
+export async function ghGraphQL(query, variables = {}, { retries = 1, includeHeaders = false } = {}) {
   const args = ['api', 'graphql', ...(includeHeaders ? ['--include'] : []), '-f', `query=${query}`];
   for (const [k, v] of Object.entries(variables)) {
     // Strings go through -f (raw): -F would turn a repo named `2048`, `true` or `null` into a
@@ -180,8 +180,7 @@ export async function ghGraphQL(query, variables = {}, { retries = 1, includeHea
       if (looksFatal(errStr)) {
         if (includeHeaders) reportRateLimit(e);
         process.stderr.write(`[gh] fatal on graphql: ${errStr.slice(0, 500)}\n`);
-        if (fatalExit) process.exit(1);
-        throw e;
+        process.exit(1);
       }
       if (attempt < retries) {
         await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS));

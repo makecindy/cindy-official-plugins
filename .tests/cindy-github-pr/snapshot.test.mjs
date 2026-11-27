@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url';
 import nodeTest from 'node:test';
 
 import { runGate, decide, isHumanOnlyReviewPending, watchFromSnapshot, evaluateWatch, snapshotFailurePlan } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
-import { expectedBots, resolvePrReviewerBots, settleState } from '../../cindy-github/skills/pr/scripts/lib/follow-pacing.mjs';
 import { splitHttpResponse, rateLimitRetryAt } from '../../cindy-github/skills/pr/scripts/lib/gh.mjs';
 import {
   parseGitHubRemote,
@@ -53,21 +52,6 @@ if [ "$1" = api ] && [ "$2" = graphql ]; then
     *viewer*) ;;
     *checkRunCountsByState*) cat "$d/resp-probe.json"; exit 0 ;;
   esac
-  case "$q" in *'$after'*)
-    n=$(cat "$d/page-count" 2>/dev/null || echo 0)
-    n=$((n + 1))
-    printf '%s' "$n" > "$d/page-count"
-    if [ -f "$d/resp-commit-page-$n.err" ]; then cat "$d/resp-commit-page-$n.err" >&2; exit 1; fi
-    cat "$d/resp-commit-page-$n.json"; exit 0 ;;
-  esac
-  case "$q" in *GitObjectID*)
-    n=$(cat "$d/batch-count" 2>/dev/null || echo 0)
-    n=$((n + 1))
-    printf '%s' "$n" > "$d/batch-count"
-    if [ -f "$d/resp-commit-batch-$n.err" ]; then cat "$d/resp-commit-batch-$n.err" >&2; exit 1; fi
-    if [ -f "$d/resp-commit-batch-$n.json" ]; then cat "$d/resp-commit-batch-$n.json"; exit 0; fi
-    cat "$d/resp-commit-checks.json"; exit 0 ;;
-  esac
   for f in mergeQueueEntry beforeCommit ADDED_TO_MERGE_QUEUE_EVENT headRefOid baseRef; do
     case "$q" in *"$f"*) ;; *) echo "Missing query field: $f" >&2; exit 1 ;; esac
   done
@@ -95,18 +79,6 @@ exit 1
     write('resp-prview.json', { headRefOid: data.checkHead, statusCheckRollup: data.rollup ?? [{ __typename: 'CheckRun', name: 'PR check', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
     write('resp-graphql.json', { data: { viewer: { login: 'me' }, repository: { pullRequest: data.pr } } });
     write('resp-probe.json', { data: { repository: { pullRequest: data.pr } } });
-    write('resp-commit-checks.json', { data: { repository: data.commitChecks ?? {} } });
-    for (const f of fs.readdirSync(root)) {
-      if (/^(batch-count|page-count|resp-commit-batch-|resp-commit-page-)/.test(f)) fs.unlinkSync(path.join(root, f));
-    }
-    (data.commitBatches ?? []).forEach((batch, i) => {
-      if (batch?.error) fs.writeFileSync(path.join(root, `resp-commit-batch-${i + 1}.err`), batch.error);
-      else write(`resp-commit-batch-${i + 1}.json`, { data: { repository: batch } });
-    });
-    (data.commitPages ?? []).forEach((page, i) => {
-      if (page?.error) fs.writeFileSync(path.join(root, `resp-commit-page-${i + 1}.err`), page.error);
-      else write(`resp-commit-page-${i + 1}.json`, { data: { repository: { object: page } } });
-    });
     write('resp-compare.json', { status: data.comparison });
     write('resp-rest.json', { base: { sha: data.restBase ?? 'old-base' }, head: { sha: data.restHead }, mergeable: true, state: 'open', html_url: 'https://github.com/acme/game/pull/54' });
     return JSON.parse(execFileSync(process.execPath, [script, 'https://github.com/acme/game/pull/54', ...(data.args ?? [])], {
@@ -616,181 +588,6 @@ process.exit(2);
   assert.match(branches, /feat\/demo/);
   const calls = fs.readFileSync(logFile, 'utf8').trim().split('\n').map(line => JSON.parse(line));
   assert.deepEqual(calls, [['--version'], ['api', 'repos/acme/game/pulls/54']]);
-});
-
-test('snapshot looks up historical commit check apps for older uncorroborated bot approvals', t => {
-  const run = fixture(t);
-  const oldSha = 'aaaa1111bbbb2222cccc3333dddd4444eeee5555';
-  const oldAt = '2026-10-01T00:00:00Z';
-  const snap = run({
-    timelineItems: { nodes: [] },
-    reviews: {
-      nodes: [
-        { id: 'R1', author: { login: 'greptile-apps', __typename: 'Bot' }, state: 'APPROVED', body: 'LGTM', submittedAt: oldAt, url: 'https://gh/R1', commit: { oid: oldSha } },
-        { id: 'R2', author: { login: 'cindy-auto-merge-bot', __typename: 'Bot' }, state: 'APPROVED', body: 'auto', submittedAt: oldAt, url: 'https://gh/R2', commit: { oid: oldSha } },
-      ],
-    },
-  }, 'ahead', {
-    commitChecks: {
-      c0: {
-        oid: oldSha,
-        statusCheckRollup: {
-          contexts: {
-            pageInfo: { hasNextPage: false },
-            nodes: [
-              { __typename: 'CheckRun', checkSuite: { app: { databaseId: 99, slug: 'greptile-apps' } } },
-              { __typename: 'CheckRun', checkSuite: { app: { databaseId: 15368, slug: 'github-actions' } } },
-            ],
-          },
-        },
-      },
-    },
-  });
-  assert.deepEqual(snap.reviewCommitChecks, {
-    [oldSha]: {
-      complete: true,
-      apps: [
-        { appSlug: 'greptile-apps', appId: 99 },
-        { appSlug: 'github-actions', appId: 15368 },
-      ],
-    },
-  });
-  const legacy = { reviewerBots: ['cindy-auto-merge-bot', 'greptile-apps'] };
-  const resolved = resolvePrReviewerBots(legacy, snap);
-  assert.deepEqual(resolved, { bots: ['greptile-apps'], version: 2 });
-  const expected = expectedBots({ snap, previous: legacy, repoBots: {} });
-  assert.deepEqual(expected, ['greptile-apps']);
-  assert.equal(settleState({ snap, headSeenAt: Date.now() - 60_000, expected, now: Date.now() }).open, true);
-});
-
-test('snapshot batches 11 historical approval commits so early reviewer apps stay and pure approvers exit', t => {
-  const run = fixture(t);
-  const oldAt = '2026-10-01T00:00:00Z';
-  const oids = Array.from({ length: 11 }, (_, i) => `10000000000000000000000000000000000000${String(i).padStart(2, '0')}`);
-  const commitObj = (oid, apps) => ({
-    oid,
-    statusCheckRollup: {
-      contexts: {
-        pageInfo: { hasNextPage: false, endCursor: null },
-        nodes: apps.map(([appId, slug]) => ({ __typename: 'CheckRun', checkSuite: { app: { databaseId: appId, slug } } })),
-      },
-    },
-  });
-
-  // 1) Pure approval bot on all 11 old commits -> 2 batches (10 + 1) verify all 11, drop bot, migrate to v2.
-  const batch1Pure = Object.fromEntries(oids.slice(0, 10).map((oid, i) => [`c${i}`, commitObj(oid, [[15368, 'github-actions']])]));
-  const batch2Pure = { c0: commitObj(oids[10], [[15368, 'github-actions']]) };
-  const pureSnap = run({
-    timelineItems: { nodes: [] },
-    reviews: {
-      nodes: oids.map((oid, i) => ({
-        id: `RA-${i}`, author: { login: 'cindy-auto-merge-bot', __typename: 'Bot' }, state: 'APPROVED',
-        body: 'auto', submittedAt: oldAt, url: `https://gh/RA-${i}`, commit: { oid },
-      })),
-    },
-  }, 'ahead', { commitBatches: [batch1Pure, batch2Pure] });
-  assert.equal(Object.keys(pureSnap.reviewCommitChecks).length, 11);
-  const pureResolved = resolvePrReviewerBots({ reviewerBots: ['cindy-auto-merge-bot'] }, pureSnap);
-  assert.deepEqual(pureResolved, { bots: [], version: 2 });
-  assert.equal(settleState({ snap: pureSnap, headSeenAt: Date.now() - 60_000, expected: pureResolved.bots, now: Date.now() }).open, false);
-
-  // 2) Early commit #0 carries Greptile App check; all 11 carry auto-merge approvals -> Greptile stays, auto-merge exits.
-  const batch1Mixed = {
-    ...batch1Pure,
-    c0: commitObj(oids[0], [[99, 'greptile-apps'], [15368, 'github-actions']]),
-  };
-  const mixedReviews = [
-    { id: 'RG-0', author: { login: 'greptile-apps', __typename: 'Bot' }, state: 'APPROVED', body: 'LGTM', submittedAt: oldAt, url: 'https://gh/RG-0', commit: { oid: oids[0] } },
-    ...oids.map((oid, i) => ({
-      id: `RA-${i}`, author: { login: 'cindy-auto-merge-bot', __typename: 'Bot' }, state: 'APPROVED',
-      body: 'auto', submittedAt: oldAt, url: `https://gh/RA-${i}`, commit: { oid },
-    })),
-  ];
-  const mixedSnap = run({ timelineItems: { nodes: [] }, reviews: { nodes: mixedReviews } }, 'ahead', { commitBatches: [batch1Mixed, batch2Pure] });
-  const mixedResolved = resolvePrReviewerBots({ reviewerBots: ['cindy-auto-merge-bot', 'greptile-apps'] }, mixedSnap);
-  assert.deepEqual(mixedResolved, { bots: ['greptile-apps'], version: 2 });
-  assert.equal(settleState({ snap: mixedSnap, headSeenAt: Date.now() - 60_000, expected: mixedResolved.bots, now: Date.now() }).open, true);
-
-  // 3) Mid-flight failure on batch 2 preserves batch 1 evidence (Greptile corroborated) while leaving commit #10 unverified (v1).
-  const partialBatchSnap = run({ timelineItems: { nodes: [] }, reviews: { nodes: mixedReviews } }, 'ahead', {
-    commitBatches: [batch1Mixed, { error: 'gh: HTTP 403 rate limit' }],
-  });
-  assert.equal(Object.keys(partialBatchSnap.reviewCommitChecks).length, 10);
-  const partialResolved = resolvePrReviewerBots({ reviewerBots: ['cindy-auto-merge-bot', 'greptile-apps'] }, partialBatchSnap);
-  assert.deepEqual(partialResolved, { bots: ['cindy-auto-merge-bot', 'greptile-apps'], version: 1 });
-});
-
-test('snapshot paginates >100 historical commit checks and preserves proved apps on mid-page failure', t => {
-  const run = fixture(t);
-  const oldSha = 'bbbb1111cccc2222dddd3333eeee4444ffff5555';
-  const oldAt = '2026-10-01T00:00:00Z';
-  const reviews = {
-    nodes: [
-      { id: 'R1', author: { login: 'greptile-apps', __typename: 'Bot' }, state: 'APPROVED', body: 'LGTM', submittedAt: oldAt, url: 'https://gh/R1', commit: { oid: oldSha } },
-      { id: 'R2', author: { login: 'cindy-auto-merge-bot', __typename: 'Bot' }, state: 'APPROVED', body: 'auto', submittedAt: oldAt, url: 'https://gh/R2', commit: { oid: oldSha } },
-    ],
-  };
-
-  // 1) Two-page commit checks: Greptile appears on page 2, pagination completes -> Greptile kept, auto-merge dropped, v2.
-  const pagedSnap = run({ timelineItems: { nodes: [] }, reviews }, 'ahead', {
-    commitBatches: [{
-      c0: {
-        oid: oldSha,
-        statusCheckRollup: {
-          contexts: {
-            pageInfo: { hasNextPage: true, endCursor: 'cursor-1' },
-            nodes: [{ __typename: 'CheckRun', checkSuite: { app: { databaseId: 15368, slug: 'github-actions' } } }],
-          },
-        },
-      },
-    }],
-    commitPages: [{
-      oid: oldSha,
-      statusCheckRollup: {
-        contexts: {
-          pageInfo: { hasNextPage: false, endCursor: null },
-          nodes: [{ __typename: 'CheckRun', checkSuite: { app: { databaseId: 99, slug: 'greptile-apps' } } }],
-        },
-      },
-    }],
-  });
-  assert.deepEqual(pagedSnap.reviewCommitChecks[oldSha], {
-    complete: true,
-    apps: [
-      { appSlug: 'github-actions', appId: 15368 },
-      { appSlug: 'greptile-apps', appId: 99 },
-    ],
-  });
-  assert.deepEqual(
-    resolvePrReviewerBots({ reviewerBots: ['cindy-auto-merge-bot', 'greptile-apps'] }, pagedSnap),
-    { bots: ['greptile-apps'], version: 2 },
-  );
-
-  // 2) Page 1 proves Greptile, page 2 fails midway -> Greptile still corroborated (`apps` kept), commit stays `complete: false` so uncorroborated bots stay at v1.
-  const pageFailSnap = run({ timelineItems: { nodes: [] }, reviews }, 'ahead', {
-    commitBatches: [{
-      c0: {
-        oid: oldSha,
-        statusCheckRollup: {
-          contexts: {
-            pageInfo: { hasNextPage: true, endCursor: 'cursor-1' },
-            nodes: [{ __typename: 'CheckRun', checkSuite: { app: { databaseId: 99, slug: 'greptile-apps' } } }],
-          },
-        },
-      },
-    }],
-    commitPages: [{ error: 'gh: HTTP 403 forbidden' }],
-  });
-  assert.deepEqual(pageFailSnap.reviewCommitChecks[oldSha], {
-    complete: false,
-    apps: [{ appSlug: 'greptile-apps', appId: 99 }],
-  });
-  assert.deepEqual(
-    resolvePrReviewerBots({ reviewerBots: ['cindy-auto-merge-bot', 'greptile-apps'] }, pageFailSnap),
-    { bots: ['cindy-auto-merge-bot', 'greptile-apps'], version: 1 },
-  );
-  // Even for a brand-new PR (no legacy list), page 1's proved Greptile App still registers immediately.
-  assert.deepEqual(resolvePrReviewerBots(null, pageFailSnap), { bots: ['greptile-apps'], version: 2 });
 });
 
 nodeTest('ghJsonConditional handles HTTP 200 ETag and HTTP 304 Not Modified without retries or exit', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim / symlink' : false }, (t) => {
