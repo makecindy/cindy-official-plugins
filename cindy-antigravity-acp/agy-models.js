@@ -20,6 +20,7 @@ const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { accountModelSessionFileOf } = require('./agy-account-dir.js');
 const { isSignInRequired, openAgy, tierFromMeta } = require('./agy-client.js');
 const { configFilePath } = require('./resolve-agy.js');
 
@@ -123,6 +124,9 @@ function probeFolder() {
 }
 
 function sessionFilePath(options) {
+  if (options && typeof options.accountDir === 'string' && options.accountDir) {
+    return accountModelSessionFileOf(options.accountDir, options);
+  }
   const config = configFilePath(options);
   return config ? path.join(path.dirname(config), SESSION_FILE_NAME) : null;
 }

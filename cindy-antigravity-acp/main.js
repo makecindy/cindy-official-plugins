@@ -15,17 +15,11 @@
  *   main -> { type: 'custom-path-ack', reqId }
  *   main -> { type: 'custom-path-result', reqId, ok, snapshot?, error?, detail? }
  *   main -> { type: 'locale-changed' }
- *   page -> { type: 'account-request', reqId, op: 'status' | 'login' | 'cancel' | 'logout', generation? }  (resent until acknowledged)
- *     generation is the snapshot.generation the page showed when the user asked (it is clock-seeded, so it survives a main.js restart);
- *     a login or logout asked for another one is answered with error 'stale'.
- *   main -> { type: 'account-ack', reqId }
- *   main -> { type: 'account-result', reqId, op, account, error?, detail? }
- *   main -> { type: 'account-changed', account }   (any change, e.g. a sign-in started from another view)
- *   account = { signedIn: true | false | null, tier?, canSignIn, canSignOut, busy: 'login' | 'logout' | null }
  *
- * Sign-in stays with agy (Google account in agy's own store, see agy-account.js); the plugin never
- * sees credentials or the email, only whether agy is signed in and its subscription tier name.
- * While agy is not signed in the engine is published as unavailable with a sign-in hint.
+ * Accounts are managed in Cindy's Model Providers: the engine publishes agy's Google sign-in as its
+ * account method and Cindy signs accounts in through the worker (see worker.js). Neither this page
+ * nor the settings page signs in or out; the settings page only points to Model Providers, and
+ * snapshot.signInRequired tells it that no signed-in account could list the models.
  */
 (function () {
   'use strict';
@@ -43,16 +37,10 @@
   var EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
   /** Cindy permission modes agy's own modes stand for; Full access is always Cindy's. */
   var MODES = ['default', 'acceptEdits', 'auto', 'plan'];
-  var SIGN_IN_MESSAGES = {
-    'zh-CN': 'Antigravity 还没有登录。请打开 Antigravity 插件设置，点「用 Google 登录」。',
-    en: 'Antigravity is not signed in. Open the Antigravity plugin settings and select Sign in with Google.',
+  var ACCOUNT_METHOD_LABELS = {
+    'zh-CN': 'Google 账号',
+    en: 'Google account',
   };
-  var ACCOUNT_TIMEOUT_MS = 60000;
-  // Sign-in waits for the user in the browser. The worker reports progress every 10 s, so Cindy keeps
-  // the request alive up to 5.5 minutes; agy-account.js itself gives up after 5.
-  var LOGIN_SILENCE_MS = 30000;
-  var LOGIN_MAX_TOTAL_MS = 330000;
-  var ACCOUNT_ERRORS = ['busy', 'not-installed', 'unsupported', 'cancelled', 'timeout', 'failed'];
 
   var locale = 'en';
   var lastResult = null;
@@ -66,47 +54,6 @@
   var customPathPending = 0;
   var seenRequests = [];
   var channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel(CHANNEL_NAME) : null;
-  // Coalesce settings checks. Drop a read
-  // from the previous account if sign-in or credentials change mid-request.
-  let usage = null;
-  let usageWanted = false;
-  let usageCheck = 0;
-  let usageGeneration = 0;
-  let usagePending = null;
-  function announceUsage(checking = false) {
-    if (channel) channel.postMessage({ type: 'harness-usage', usage, checking });
-  }
-  function clearUsage() {
-    usageGeneration++;
-    usageCheck = 0;
-    usagePending = null;
-    usage = null;
-    announceUsage();
-  }
-  function refreshUsage() {
-    if (!usageAvailable()) {
-      usageWanted = true;
-      return Promise.resolve();
-    }
-    usageWanted = false;
-    if (usagePending) return usagePending;
-    if (Date.now() - usageCheck < 60000) return Promise.resolve();
-    usageCheck = Date.now();
-    const generation = usageGeneration;
-    usagePending = (async () => {
-      let next = null;
-      try {
-        const response = await cindy.node.request({ method: 'usage', params: {}, timeoutMs: 26000 });
-        if (response?.ok && (response.result?.windows?.length || response.result?.balances?.length)) next = response.result;
-      } catch { /* Absence of billing data does not affect the engine. */ }
-      if (generation !== usageGeneration || !usageAvailable()) return;
-      usage = next;
-      announceUsage();
-
-    })().finally(() => { if (generation === usageGeneration) usagePending = null; });
-    return usagePending;
-  }
-  function usageAvailable() { return !!(lastResult && lastResult.available && !signInRequired); }
 
   /**
    * agy's model list and working modes (published with the engine status, shown by Cindy like a
@@ -116,23 +63,11 @@
   var models = null;
   var modes = null;
   var defaultMode = null;
+  /** No signed-in account could list the models; the settings page then points to Model Providers. */
   var signInRequired = false;
   var modelSessionId = null;
   var modelsListedAt = 0;
   var modelsInflight = null;
-
-  /**
-   * agy's sign-in as last seen (by a listing, a status check, a sign-in or a sign-out); kept in
-   * memory only. signedIn is null until checked. accountOp is the sign-in or sign-out running.
-   */
-  var account = { signedIn: null, tier: null, canSignIn: true, canSignOut: true };
-  var accountOp = null;
-  var accountOpToken = null;
-  var accountCheck = null;
-  /** When agy's sign-in state was last learned, and when the user last signed in or out here. */
-  var accountSeenAt = 0;
-  var accountActionAt = 0;
-  var ACCOUNT_FRESH_MS = 10000;
 
   function sanitizeModels(raw) {
     if (!Array.isArray(raw)) return [];
@@ -221,21 +156,26 @@
 
   /** Only metadata leaves the plugin: never the executable path or a command. */
   function harnessEntry(result) {
-    var entry = { id: HARNESS_ID, available: result.available === true && !signInRequired };
+    var entry = { id: HARNESS_ID, available: result.available === true };
     if (entry.available) {
       entry.reportsUsage = true;
-      // The worker reports the single local agy login. Older hosts ignore this field.
-      entry.accounts = { methods: [] };
+      // Cindy may manage the original agy login and add more isolated Google accounts in the pool.
+      // Keeping the engine available even while the default login is signed out lets users sign in
+      // or add accounts directly in Cindy's Model Providers view and keeps other accounts usable.
+      entry.accounts = {
+        methods: [{
+          id: 'oauth-personal',
+          label: ACCOUNT_METHOD_LABELS[locale] || ACCOUNT_METHOD_LABELS.en,
+          kind: 'browser',
+        }],
+      };
     }
     if (entry.available && supportsRemoteWorkspace(result.version)) {
       entry.remoteWorkspace = true;
       entry.guestWorkspace = true;
     }
 
-    if (result.available === true && signInRequired) {
-      entry.reason = 'not-signed-in';
-      entry.message = SIGN_IN_MESSAGES[locale] || SIGN_IN_MESSAGES.en;
-    } else if (!entry.available) {
+    if (!entry.available) {
       entry.reason = result.reason === 'not-runnable' ? 'not-runnable' : 'not-installed';
       var messages = result.messages || {};
       var message = shortString(messages[locale], 200) || shortString(messages.en, 200) || shortString(result.message, 200);
@@ -295,44 +235,11 @@
     return result;
   }
 
-  function accountView() {
-    return {
-      signedIn: account.signedIn,
-      tier: account.tier || undefined,
-      canSignIn: account.canSignIn,
-      canSignOut: account.canSignOut,
-      busy: accountOp,
-    };
-  }
-
-  function announceAccount() {
-    if (channel) channel.postMessage({ type: 'account-changed', account: accountView() });
-  }
-
-  /** Records agy's sign-in state; the engine status Cindy shows follows it (sign-in hint or ready). */
-  function applySignedIn(signedIn, tier) {
-    var gen = pathGeneration;
-    account.signedIn = signedIn;
-    accountSeenAt = Date.now();
-    var name = tier && typeof tier === 'object' ? shortString(tier.name, 200) : undefined;
-    if (!signedIn) account.tier = null;
-    else if (name) account.tier = name;
-    var changed = signInRequired !== !signedIn;
-    signInRequired = !signedIn;
-    if (!signedIn) clearUsage();
-    else if (changed) void refreshUsage();
-    if (!changed || !lastResult || !lastResult.available) return Promise.resolve();
-    return publish(lastResult).then(function (published) {
-      if (gen === pathGeneration) lastPublish = published;
-    });
-  }
-
   function snapshot() {
     return {
       ok: lastError === null && lastResult !== null,
       result: lastResult,
       signInRequired: signInRequired,
-      account: accountView(),
       publish: lastPublish,
       error: lastError,
       checkedAt: lastCheckedAt,
@@ -361,8 +268,6 @@
         }
         lastError = null;
         lastResult = sanitizeResult(response.result);
-        if (!lastResult.available) clearUsage();
-        else if (usageWanted) void refreshUsage();
         return publish(lastResult).then(function (published) {
           if (gen !== pathGeneration) return snapshot();
           lastPublish = published;
@@ -411,36 +316,26 @@
           if (detail) out.detail = detail;
           return out;
         }
-        // Invalidate every in-flight detect / model-list / account action from the previous executable.
-        var hadLogin = accountOp === 'login';
+        // Invalidate every in-flight detect / model-list from the previous executable. The worker itself
+        // cancels a sign-in Cindy started for it.
         pathGeneration += 1;
         inflight = null;
         modelsInflight = null;
-        accountCheck = null;
-        accountOp = null;
-        accountOpToken = null;
         models = null;
         modes = null;
         defaultMode = null;
         modelsListedAt = 0;
         modelSessionId = null;
         signInRequired = false;
-        account = { signedIn: null, tier: null, canSignIn: true, canSignOut: true };
-        accountSeenAt = 0;
-        accountActionAt = Date.now();
         lastCheckedAt = Date.now();
         lastError = null;
         lastResult = sanitizeResult(response.result.detection);
-        clearUsage();
         saveState();
-        if (hadLogin) void nodeCall('cancelLogin', { timeoutMs: 10000 });
         if (!cliState.active) {
           cliState = {};
           cliProgress = null;
           announceCliState();
         }
-        announceAccount();
-        if (lastResult.available) void refreshUsage();
         var gen = pathGeneration;
         return publish(lastResult).then(function (published) {
           if (gen === pathGeneration) lastPublish = published;
@@ -474,7 +369,6 @@
     if (modelsInflight) return modelsInflight;
     if (mode === 'if-missing' && models && models.length) return Promise.resolve();
     if (mode === 'if-stale' && models && Date.now() - modelsListedAt < MODELS_MIN_INTERVAL_MS) return Promise.resolve();
-    var startedAt = Date.now();
     var gen = pathGeneration;
     var run = Promise.resolve()
       .then(function () {
@@ -487,31 +381,26 @@
       .then(function (response) {
         if (gen !== pathGeneration) return undefined;
         var result = response && response.ok === true ? response.result : null;
-        // A sign-in or sign-out made while this listing ran is newer than what the listing saw.
-        var fresh = accountActionAt < startedAt;
         if (result && result.supported === false && result.reason === 'not-signed-in') {
-          return fresh ? applySignedIn(false).then(announceAccount) : undefined;
+          // No signed-in account to list with: the settings page points to Cindy's Model Providers.
+          signInRequired = true;
+          return undefined;
         }
         if (!result || result.supported !== true || !Array.isArray(result.models)) return undefined;
         var next = sanitizeModels(result.models);
         var nextModes = sanitizeModes(result.modes);
         var nextDefault = nextModes.indexOf(result.defaultMode) !== -1 ? result.defaultMode : null;
-        var changed = (fresh && signInRequired)
-          || JSON.stringify(next) !== JSON.stringify(models || [])
+        var changed = JSON.stringify(next) !== JSON.stringify(models || [])
           || JSON.stringify(nextModes) !== JSON.stringify(modes || [])
           || nextDefault !== defaultMode;
-        if (fresh) {
-          signInRequired = false;
-          account.signedIn = true;
-          accountSeenAt = Date.now();
-          if (result.tier && shortString(result.tier.name, 200)) account.tier = shortString(result.tier.name, 200);
-          announceAccount();
-        }
+        signInRequired = false;
         models = next;
         modes = nextModes;
         defaultMode = nextDefault;
         modelsListedAt = Date.now();
-        if (typeof result.sessionId === 'string') modelSessionId = result.sessionId.slice(0, 128);
+        if (!result.defaultSignedOut && typeof result.sessionId === 'string') {
+          modelSessionId = result.sessionId.slice(0, 128);
+        }
         saveState();
         if (!changed || !lastResult) return undefined;
         return publish(lastResult).then(function (published) {
@@ -532,111 +421,6 @@
         return response && response.ok === true && response.result && typeof response.result === 'object' ? response.result : null;
       }, function () { return null; });
   }
-
-  function failure(result) {
-    var outcome = { error: result && ACCOUNT_ERRORS.indexOf(result.error) !== -1 ? result.error : 'failed' };
-    var detail = result && shortString(result.detail, 300);
-    if (detail) outcome.detail = detail;
-    return outcome;
-  }
-
-  /** Asks agy whether it is signed in (settings page opened or "Check again"); never while signing in / out. */
-  function checkAccount() {
-    if (accountOp) return Promise.resolve({});
-    if (accountCheck) return accountCheck;
-    if (!lastResult || !lastResult.available) return Promise.resolve({});
-    var startedAt = Date.now();
-    var gen = pathGeneration;
-    // After a model listing (it resumes the same agy session): a listing that just finished already
-    // told us whether agy is signed in.
-    var run = Promise.resolve(modelsInflight)
-      .then(function () {
-        if (gen !== pathGeneration) return { stale: true };
-        if (account.signedIn !== null && Date.now() - accountSeenAt < ACCOUNT_FRESH_MS) return { fresh: true };
-        return nodeCall('account', { params: modelSessionId ? { sessionId: modelSessionId } : {}, timeoutMs: ACCOUNT_TIMEOUT_MS });
-      })
-      .then(function (result) {
-        if (gen !== pathGeneration || (result && (result.fresh || result.stale))) return {};
-        if (!result || result.supported !== true || typeof result.signedIn !== 'boolean') return failure(null);
-        if (accountActionAt >= startedAt) return {};
-        account.canSignIn = result.canSignIn !== false;
-        account.canSignOut = result.canSignOut !== false;
-        return applySignedIn(result.signedIn, result.tier).then(function () { return {}; });
-      })
-      .then(function (outcome) {
-        if (accountCheck === run) accountCheck = null;
-        if (gen === pathGeneration) announceAccount();
-        return outcome;
-      });
-    accountCheck = run;
-    return run;
-  }
-
-  /** agy's Google sign-in (agy opens the browser); then the models are read again. */
-  function runLogin() {
-    // A path save is swapping the executable this request would reach: refuse until it has answered.
-    if (accountOp || customPathPending > 0) return Promise.resolve({ error: 'busy' });
-    var gen = pathGeneration;
-    var token = {};
-    accountOp = 'login';
-    accountOpToken = token;
-    announceAccount();
-    return nodeCall('login', { timeoutMs: LOGIN_SILENCE_MS, maxTotalMs: LOGIN_MAX_TOTAL_MS })
-      .then(function (result) {
-        if (gen !== pathGeneration) return { error: 'cancelled', stale: true };
-        if (!result || result.ok !== true) return failure(result);
-        accountActionAt = Date.now();
-        return applySignedIn(true, result.tier).then(function () {
-          if (gen !== pathGeneration) return { error: 'cancelled', stale: true };
-          // Read the models again for the signed-in account, after any listing still running.
-          Promise.resolve(modelsInflight).then(function () {
-            if (gen === pathGeneration) return refreshModels('force');
-          });
-          return {};
-        });
-      })
-      .then(function (outcome) {
-        if (accountOpToken === token) {
-          accountOp = null;
-          accountOpToken = null;
-        }
-        if (gen === pathGeneration) announceAccount();
-        return outcome && outcome.stale ? { error: 'cancelled' } : outcome;
-      });
-  }
-
-  function runCancel() {
-    if (accountOp !== 'login') return Promise.resolve({});
-    return nodeCall('cancelLogin', { timeoutMs: 10000 }).then(function () { return {}; });
-  }
-
-  /** Signs agy out; the settings page sends this only after the user confirmed. */
-  function runLogout() {
-    // The account on screen belongs to the executable being replaced; never sign out the new one by mistake.
-    if (accountOp || customPathPending > 0) return Promise.resolve({ error: 'busy' });
-    var gen = pathGeneration;
-    var token = {};
-    accountOp = 'logout';
-    accountOpToken = token;
-    announceAccount();
-    return nodeCall('logout', { timeoutMs: ACCOUNT_TIMEOUT_MS })
-      .then(function (result) {
-        if (gen !== pathGeneration) return { error: 'cancelled', stale: true };
-        if (!result || result.ok !== true) return failure(result);
-        accountActionAt = Date.now();
-        return applySignedIn(false).then(function () { return {}; });
-      })
-      .then(function (outcome) {
-        if (accountOpToken === token) {
-          accountOp = null;
-          accountOpToken = null;
-        }
-        if (gen === pathGeneration) announceAccount();
-        return outcome && outcome.stale ? { error: 'cancelled' } : outcome;
-      });
-  }
-
-  var ACCOUNT_OPS = { status: checkAccount, login: runLogin, cancel: runCancel, logout: runLogout };
 
   function remember(reqId) {
     if (seenRequests.indexOf(reqId) !== -1) return false;
@@ -788,11 +572,6 @@
       var data = event && event.data;
       if (handleCliMaintenance(data)) return;
       if (!data || typeof data !== 'object') return;
-      if (data.type === 'harness-usage-request') {
-        announceUsage(usageAvailable() && !usage && (!usageCheck || !!usagePending));
-        void refreshUsage();
-        return;
-      }
       if (typeof data.reqId !== 'string' || data.reqId.length > 64) return;
       if (data.type === 'detect-request') {
         channel.postMessage({ type: 'detect-ack', reqId: data.reqId });
@@ -830,23 +609,19 @@
         });
         return;
       }
-      if (data.type === 'account-request' && Object.prototype.hasOwnProperty.call(ACCOUNT_OPS, data.op)) {
-        channel.postMessage({ type: 'account-ack', reqId: data.reqId });
-        if (!remember(data.reqId)) return;
-        // The page asked about the account of an executable that has since been replaced: never act on the new one.
-        var stale = (data.op === 'login' || data.op === 'logout') && typeof data.generation === 'number' && data.generation !== pathGeneration;
-        (stale ? Promise.resolve({ error: 'stale' }) : ACCOUNT_OPS[data.op]()).then(function (outcome) {
-          var message = { type: 'account-result', reqId: data.reqId, op: data.op, account: accountView() };
-          if (outcome && outcome.error) message.error = outcome.error;
-          if (outcome && outcome.detail) message.detail = outcome.detail;
-          channel.postMessage(message);
-        });
-      }
     };
   }
 
   cindy.onHostMessage(function (message) {
     if (handleCliProgress(message)) return;
+    if (message && message.type === 'event' && message.name === 'node-notification' && message.method === 'account-ready') {
+      // An account just signed in. A listing still running may have started before that sign-in and
+      // answer "not signed in", so list again once it has ended instead of joining it.
+      stateLoaded.then(function () { return modelsInflight; }).then(function () {
+        if (lastResult && lastResult.available && (signInRequired || !models || !models.length)) return refreshModels('force');
+      });
+      return;
+    }
     // Cindy opened a model picker (its provider-style refresh, with its own cooldown).
     if (message && message.type === 'harnesses-refresh-requested') {
       stateLoaded.then(detect).then(function () { return refreshModels('if-stale'); });
@@ -857,8 +632,8 @@
     if (channel) channel.postMessage({ type: 'locale-changed' });
     if (next === locale) return;
     locale = next;
-    // The stored install / sign-in hint should follow Cindy's language; no new detection needed.
-    if (lastResult && (!lastResult.available || signInRequired)) {
+    // Republish so the install hint or account method label follows Cindy's language; no new detection needed.
+    if (lastResult) {
       publish(lastResult).then(function (published) { lastPublish = published; });
     }
   });

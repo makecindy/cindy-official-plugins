@@ -13,6 +13,7 @@
  */
 
 const { isObject, isSessionOpen } = require('./agy-mcp.js');
+const { hasIsolatedStoreFile, isIsolationUnverified } = require('./agy-account-dir.js');
 
 const QUOTA_REASONS = new Set([
   'QUOTA_EXHAUSTED',
@@ -159,11 +160,20 @@ function classifyAccountErrorResponse(message, now = Date.now()) {
   return attachCindyMeta(message, info);
 }
 
+/** The diagnostics line an entry writes before it stops a session the relay refused for `violation`. */
+function isolationViolationLine(violation) {
+  return violation === 'unverified'
+    ? '[agy-acp] This Antigravity account has not passed the isolated sign-in check since its last sign-in; stopping so another account is never used in its place.\n'
+    : '[agy-acp] Antigravity opened a session without isolated sign-in files; stopping to prevent default-login fallback.\n';
+}
+
 /**
  * Tracks session open / prompt request IDs and agy's warning chunks so both
  * explicit JSON-RPC errors and terminal `⚠ <error>` message chunks carry `_meta.cindy`.
  */
-function accountErrorRelay(nowFn = Date.now) {
+function accountErrorRelay(nowFn = Date.now, options) {
+  const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : null;
+  const onIsolationViolation = options && typeof options.onIsolationViolation === 'function' ? options.onIsolationViolation : null;
   const pending = new Map();
 
   function activePrompt(sessionId) {
@@ -175,7 +185,8 @@ function accountErrorRelay(nowFn = Date.now) {
   return {
     request(message) {
       if (!isObject(message) || message.id === undefined) return;
-      if (isSessionOpen(message.method) || message.method === 'session/prompt') {
+      const sessionOpen = isSessionOpen(message.method);
+      if (sessionOpen || message.method === 'session/prompt') {
         if (pending.size >= MAX_TRACKED_REQUESTS) {
           const oldest = pending.keys().next().value;
           pending.delete(oldest);
@@ -186,7 +197,7 @@ function accountErrorRelay(nowFn = Date.now) {
         // Notifications only identify the session. Overlapping prompts cannot attribute a text warning.
         const previous = sessionId && activePrompt(sessionId);
         if (previous) previous.canInferWarning = false;
-        pending.set(message.id, { sessionId, canInferWarning: !previous, warning: null });
+        pending.set(message.id, { sessionId, sessionOpen, canInferWarning: !previous, warning: null });
       }
     },
 
@@ -236,6 +247,27 @@ function accountErrorRelay(nowFn = Date.now) {
       const held = tracked.canInferWarning ? tracked.warning : null;
       if (!held && tracked.warning) flush?.(tracked.warning.rawMessage);
 
+      if (tracked.sessionOpen && accountDir && message.error === undefined && isObject(message.result)) {
+        // Unproven isolation first: such a directory can hold agy's files and still not be the account agy used.
+        const violation = isIsolationUnverified(accountDir) ? 'unverified'
+          : !hasIsolatedStoreFile(accountDir) ? 'missing-store'
+            : null;
+        if (violation) {
+          if (onIsolationViolation) onIsolationViolation(violation);
+          return {
+            jsonrpc: '2.0',
+            id: message.id,
+            error: {
+              code: -32000,
+              message: violation === 'unverified'
+                ? 'This Antigravity account has not passed the isolated sign-in check; sign in to it again before using it.'
+                : 'Antigravity ignored isolated account storage; refusing to run on the default login.',
+              data: { _meta: { cindy: { kind: 'auth-required' } } },
+            },
+          };
+        }
+      }
+
       if (isObject(message.error)) {
         const classified = classifyAccountErrorResponse(message, nowFn());
         if (classified !== message || !held) return classified;
@@ -269,4 +301,4 @@ function accountErrorRelay(nowFn = Date.now) {
   };
 }
 
-module.exports = { accountErrorRelay, classifyAccountErrorResponse };
+module.exports = { accountErrorRelay, classifyAccountErrorResponse, isolationViolationLine };
