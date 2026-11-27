@@ -1,16 +1,16 @@
 'use strict';
 
 /**
- * Antigravity sign-in for the settings page, over ACP (the protocol Cindy uses for tasks).
+ * Antigravity sign-in for Cindy's engine accounts, over ACP (the protocol Cindy uses for tasks).
  *
  * Sign-in stays with agy: `authenticate` with agy's Google method makes agy open the browser and
- * keep the token in its own store; `logout` makes agy forget it. The plugin never sees a credential
- * or the account email; it only learns whether agy is signed in and the subscription tier name agy
- * reports (`_meta.antigravity.tier`).
+ * keep the token in its own store. Over ACP the plugin only learns whether agy is signed in and the
+ * subscription tier name agy reports (`_meta.antigravity.tier`); agy 1.5.18 reports no account
+ * identity there, so the identity of an account Cindy added comes from agy's token file in that
+ * account's directory (agy-account-dir.js), never from the original login.
  *
- * Verified with agy 1.5.12 (2026-11-19): `authenticate` returns once the browser sign-in finishes;
- * `logout` ignores its params and signs out immediately, so it is only sent after the user
- * confirmed in the settings page. agy in a terminal shares the same sign-in.
+ * Verified with agy 1.5.12 (2026-11-19): `authenticate` returns once the browser sign-in finishes.
+ * agy in a terminal shares the original sign-in. The plugin never signs agy out.
  */
 
 const { killTree } = require('./resolve-agy.js');
@@ -54,22 +54,17 @@ function canSignIn(init) {
     && init.authMethods.some((method) => method && method.id === GOOGLE_METHOD);
 }
 
-function canSignOut(init) {
-  const auth = init.agentCapabilities && init.agentCapabilities.auth;
-  return Boolean(auth && typeof auth === 'object' && auth.logout);
-}
-
 /**
  * Whether agy is signed in, and its tier. Resumes the plugin's model-list session when there is one
  * (that also returns the tier); otherwise lists sessions, which opens nothing.
- * @returns {Promise<{ supported: true, signedIn: boolean, tier?: { name: string }, canSignIn: boolean, canSignOut: boolean }
+ * @returns {Promise<{ supported: true, signedIn: boolean, tier?: { name: string } }
  *   | { supported: false, reason: 'not-installed' }>}
  */
 async function status(params, options) {
   const agy = await openAgy(options);
   if (!agy) return { supported: false, reason: 'not-installed' };
   const { call, init } = agy;
-  const base = { supported: true, canSignIn: canSignIn(init), canSignOut: canSignOut(init) };
+  const base = { supported: true };
   const sessionCaps = (init.agentCapabilities && init.agentCapabilities.sessionCapabilities) || {};
   const sessionId = params && typeof params.sessionId === 'string' && params.sessionId ? params.sessionId : null;
   try {
@@ -198,23 +193,4 @@ function cancelLogin(options) {
   return { ok: true, cancelled: true };
 }
 
-/**
- * Signs agy out (Cindy's Antigravity tasks and agy in a terminal then need a new sign-in).
- * @returns {Promise<{ ok: true } | { ok: false, error: 'busy' | 'not-installed' | 'unsupported' | 'failed', detail?: string }>}
- */
-async function logout(options) {
-  if (activeLogin) return { ok: false, error: 'busy' };
-  const agy = await openAgy(options);
-  if (!agy) return { ok: false, error: 'not-installed' };
-  try {
-    if (!canSignOut(agy.init)) return { ok: false, error: 'unsupported' };
-    await agy.call('logout', {});
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, error: 'failed', detail: detailOf(error) };
-  } finally {
-    agy.close();
-  }
-}
-
-module.exports = { GOOGLE_METHOD, accountStatus, cancelLogin, login, logout, status };
+module.exports = { GOOGLE_METHOD, accountStatus, cancelLogin, login, status };

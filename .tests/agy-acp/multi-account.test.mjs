@@ -622,4 +622,79 @@ describe('multi-account worker, ACP entry, remote workspace, and main.js', () =>
     hostListeners[0]({ type: 'host-context-changed', ok: true, context: { locale: 'en', uiLocale: 'en' } });
     await waitFor(() => puts.at(-1).accounts.methods[0].label === 'Google account', 3_000, 'locale updated method label');
   });
+
+  // Why: account-ready used to join a listing already in flight. When that listing had started before the
+  // sign-in and answered "not signed in", the new account's models were never read.
+  test('main.js lists the models again when an account signs in while an older listing is still running', async () => {
+    class Channel {
+      static all = [];
+      constructor(name) { this.name = name; this.onmessage = null; Channel.all.push(this); }
+      postMessage(data) {
+        const copy = JSON.parse(JSON.stringify(data));
+        for (const other of Channel.all) {
+          if (other !== this && other.name === this.name && other.onmessage) setTimeout(() => other.onmessage({ data: copy }), 0);
+        }
+      }
+    }
+    const puts = [];
+    const nodeCalls = [];
+    const hostListeners = [];
+    let finishFirstListing = null;
+    const context = vm.createContext({
+      BroadcastChannel: Channel,
+      setTimeout,
+      clearTimeout,
+      cindy: {
+        request: async () => ({ ok: true, context: { locale: 'en', uiLocale: 'en' } }),
+        node: {
+          request: async (request) => {
+            nodeCalls.push(request.method);
+            if (request.method === 'detect') return { ok: true, result: { available: true, version: '1.5.18' } };
+            if (request.method === 'listModels' && !finishFirstListing) {
+              // The start-up listing began before any account was signed in and answers late.
+              return new Promise((resolve) => {
+                finishFirstListing = () => resolve({ ok: true, result: { supported: false, reason: 'not-signed-in' } });
+              });
+            }
+            if (request.method === 'listModels') {
+              return { ok: true, result: { supported: true, defaultSignedOut: true, models: [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon' }] } };
+            }
+            return { ok: false };
+          },
+        },
+        onHostMessage: (listener) => { hostListeners.push(listener); return () => {}; },
+      },
+      fetch: async (url, init) => {
+        if (url === '/kv' && !init) return { ok: true, json: async () => ({}) };
+        if (url === '/harnesses') puts.push(JSON.parse(init.body).harnesses[0]);
+        return { ok: true, status: 200 };
+      },
+    });
+    vm.runInContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context, { filename: 'main.js' });
+    await waitFor(() => finishFirstListing, 3_000, 'start-up listing in flight');
+
+    // The account signs in while that listing is still running; only then does the listing answer.
+    hostListeners[0]({ type: 'event', name: 'node-notification', method: 'account-ready', params: {} });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(nodeCalls.filter((method) => method === 'listModels').length, 1, 'no second listing joins the one in flight');
+    finishFirstListing();
+    await waitFor(() => puts.some((entry) => entry.models && entry.models.length === 1), 3_000, 'models listed again after the stale answer');
+    assert.equal(nodeCalls.filter((method) => method === 'listModels').length, 2);
+    assert.deepEqual(puts.at(-1).models, [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon' }]);
+
+    // The settings page learns from the next check that an account is signed in, and is offered no account action.
+    const page = new Channel('cindy-antigravity-acp');
+    const received = [];
+    page.onmessage = (event) => received.push(event.data);
+    page.postMessage({ type: 'detect-request', reqId: 'r1' });
+    page.postMessage({ type: 'account-request', reqId: 'a1', op: 'logout' });
+    page.postMessage({ type: 'harness-usage-request' });
+    await waitFor(() => received.some((message) => message.type === 'detect-result'), 3_000, 'detect result');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const snapshot = received.find((message) => message.type === 'detect-result').snapshot;
+    assert.equal(snapshot.signInRequired, false);
+    assert.equal(snapshot.account, undefined);
+    assert.deepEqual(received.filter((message) => /^account-|^harness-usage/.test(message.type)), []);
+    assert.ok(!nodeCalls.some((method) => ['login', 'logout', 'cancelLogin', 'account', 'usage'].includes(method)));
+  });
 });

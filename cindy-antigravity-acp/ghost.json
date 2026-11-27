@@ -4,8 +4,8 @@
   "name": "Antigravity",
   "description": "Run Cindy tasks with the Google Antigravity CLI (agy) installed on this computer.",
   "version": "0.6.0",
-  "releaseNotes": "Supports adding and pooling multiple Google accounts for Antigravity in Cindy with isolated per-account storage, usage tracking, and automatic quota/auth failover.",
-  "minCindyVersion": "0.1.143",
+  "releaseNotes": "Antigravity accounts are now managed in Settings → Model Providers: add several Google accounts, see each one’s usage and let Cindy share tasks between them, with automatic switching when one runs out or needs a new sign-in. The plugin settings page keeps the CLI setup and points there.",
+  "minCindyVersion": "0.1.148",
   "icon": "icon.png",
   "locales": {
     "en": "locales/en.json",

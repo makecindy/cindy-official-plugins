@@ -17,8 +17,6 @@
  *      | { supported: false, reason: 'not-installed' | 'not-signed-in' } | { supported: true, error, detail? }
  *     Asks agy over ACP in the plugin's one dedicated session (see agy-models.js); `tier` is the
  *     subscription tier name agy reports.
- *   account({ sessionId? }) -> { supported: true, signedIn, tier?, canSignIn, canSignOut }
- *      | { supported: false, reason } | { supported: true, error, detail? }
  *   accountStatus({ harnessId, accountDir? }) -> { state: 'signed-in', identity?, plan?, fingerprint? } | { state: 'signed-out' } | null
  *     Cindy's engine accounts (the engine publishes `accounts: { methods: [{ id: 'oauth-personal', kind: 'browser' }] }`):
  *     reads either the original agy login (no `accountDir`) or an isolated account directory Cindy created
@@ -33,18 +31,12 @@
  *     the next listing (plugins upgraded from 0.4.x kept it only in main.js). Kept only when the worker
  *     remembers none; starts no agy.
  *   usage({ harnessId?, accountDir? }) -> { updatedAt, windows } | null   (agy's native /usage, see agy-usage.js)
- *   login() -> { ok: true, tier? } | { ok: false, error, detail? }
- *     agy's Google sign-in: agy opens the browser; answers when the sign-in finished, was cancelled
- *     or after 5 minutes. Sends a `progress` notification every 10 s meanwhile (keeps Cindy's
- *     request alive).
- *   cancelLogin() -> { ok: true, cancelled }
  *   cliMaintenance({ action, version?, op? }) -> { state, version } | { error }
  *     Checks, installs or updates agy (see cli-installer.cjs). While installing it sends `progress`
  *     keep-alives and `cli-progress` { op, events } notifications for the settings page.
- *   logout() -> { ok: true } | { ok: false, error, detail? }
- *     Signs agy out; the settings page only asks after the user confirmed.
- *   login() and logout() answer { ok: false, error: 'busy' } while a custom path is being saved: the account
- *   they would act on is the one of the executable being replaced.
+ *   accountLogin answers { ok: false, error: 'busy' } while a custom path is being saved: the account it
+ *   would act on is the one of the executable being replaced. There is no sign-out: removing an account
+ *   in Cindy only stops Cindy using it.
  *   OAuth tokens stay in agy's own storage; the worker only reads non-secret display metadata
  *   (email / tier) for Cindy's account picker and never returns credentials.
  */
@@ -215,13 +207,6 @@ const handlers = {
     customPathQueue = run.catch(() => {});
     return run.finally(() => { customPathPending -= 1; });
   },
-  async account(params) {
-    return account.status(params).catch((error) => ({
-      supported: true,
-      error: 'status-failed',
-      detail: String((error && error.message) || error).slice(0, 300),
-    }));
-  },
   accountStatus(params) {
     const target = targetAccountOf(params, false);
     if (!target) return null;
@@ -281,18 +266,6 @@ const handlers = {
     const accountDir = params && params.accountDir !== undefined ? params.accountDir : null;
     account.cancelLogin({ accountDir });
     return { ok: true };
-  },
-  login() {
-    return runAccountLogin(undefined);
-  },
-  async cancelLogin() {
-    return account.cancelLogin();
-  },
-  async logout() {
-    if (customPathPending > 0) return { ok: false, error: 'busy' };
-    usageReads.delete('');
-    rememberedPlans.delete('');
-    return account.logout().finally(() => { accountStatusReads.delete(''); });
   },
   async listModels(params) {
     const revision = modelSourceRevision;
