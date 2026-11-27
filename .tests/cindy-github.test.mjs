@@ -100,7 +100,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.37');
+  assert.equal(manifest.version, '1.5.38');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -1660,13 +1660,27 @@ test('a rejected handoff releases the reservation but an unknown handoff retains
 });
 
 test('a stop report cannot reapply deferred post-publication auto-follow settings', async () => {
-  const runtime = createPrRuntime({ github: prGraphql(), kv: { prCard: { autoFollow: true } } });
+  const options = { github: prGraphql(), kv: { prCard: { autoFollow: true } }, kvFails: true };
+  const runtime = createPrRuntime(options);
   const ask = await runtime.tool({ repo: 'octo/repo', head: 'feature' });
-  const stopped = await runtime.tool({ card_id: ask.callId, pr: 42, following: false, claim_follow: true });
+  await runtime.tool({ card_id: ask.callId, pr: 42 });
+  await runtime.tool({ card_id: ask.callId, following: true });
+  options.kvFails = false;
+  const stopped = await runtime.tool({ card_id: ask.callId, following: false, claim_follow: true });
   assert.equal(stopped.reply.result.follow_claimed, false);
   assert.equal(stopped.reply.result.todo, undefined);
   const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
   assert.equal(other.reply.result.follow_claimed, true);
+});
+
+test('publishing from an ask card still applies auto-follow even when following: false is passed', async () => {
+  const runtime = createPrRuntime({ github: prGraphql(), kv: { prCard: { autoFollow: true } } });
+  const ask = await runtime.tool({ repo: 'octo/repo', head: 'feature' });
+  const opened = await runtime.tool({ card_id: ask.callId, pr: 42, following: false });
+  assert.equal(opened.reply.result.todo.length, 1);
+  assert.match(opened.reply.result.todo[0], /https:\/\/github\.com\/octo\/repo\/pull\/42/);
+  const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(other.reply.result.disposition, 'existing_task');
 });
 
 test('a task with its own legacy duplicate follow record can still stop it while another task is active', async () => {
@@ -2349,15 +2363,99 @@ test('viewing an existing red PR does not start following; explicitly clicking h
   assert.equal(other.reply.result.disposition, 'existing_task');
 });
 
-test('publication without an ask card is distinct from viewing a PR or declining follow-up', async () => {
+test('publication applies auto-follow even if following: false is passed, while viewing stays read-only', async () => {
   for (const [args, enabled, expected] of [
-    [{}, true, 0], [{ published: true }, false, 0], [{ published: true, following: false }, true, 0],
+    [{}, true, 0],
+    [{ published: true }, false, 0],
+    [{ published: true, following: false }, true, 1],
     [{ published: true }, true, 1],
   ]) {
     const { hostApi, rows } = followScheduler();
     const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: enabled } } });
-    await rt.tool({ repo: 'octo/repo', pr: 42, ...args });
-    assert.equal(rows.size, expected);
+    const res = await rt.tool({ repo: 'octo/repo', pr: 42, ...args });
+    assert.equal(rows.size, expected, JSON.stringify({ args, enabled }));
+    if (expected === 1) assert.equal(res.reply.result.follow_state, 'active');
+  }
+
+  // Ask-card publication + autoRename + following: false still starts native follow-up and keeps it protected.
+  {
+    const { hostApi, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoRename: true, autoFollow: true } } });
+    const ask = await rt.tool({ repo: 'octo/repo', head: 'topic' });
+    const opened = await rt.tool({ card_id: ask.callId, pr: 42, following: false });
+    assert.equal(opened.reply.result.follow_state, 'active');
+    assert.equal(opened.reply.result.todo.length, 1);
+    assert.equal(rows.size, 1);
+    const falseStop = await rt.tool({ card_id: ask.callId, renamed: true, following: false });
+    assert.equal(falseStop.reply.ok, false);
+    const renamed = await rt.tool({ card_id: ask.callId, renamed: true });
+    assert.equal(renamed.reply.ok, true);
+    assert.equal(renamed.reply.result.follow_state, 'active');
+    assert.equal(rows.size, 1);
+  }
+
+  // Settings unreadable during initial publish with following: false still auto-follows once readable.
+  {
+    const { hostApi, rows } = followScheduler();
+    const opts = { github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } }, kvFails: true };
+    const rt = createPrRuntime(opts);
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, following: false });
+    assert.equal(rows.size, 0);
+    assert.match(opened.reply.result.note, /设置暂时读不到/);
+    opts.kvFails = false;
+    const recovered = await rt.tool({ card_id: opened.callId });
+    assert.equal(recovered.reply.result.follow_state, 'active');
+    assert.equal(rows.size, 1);
+  }
+});
+
+test('a draft published here starts auto-follow when refreshed as ready, while a viewed draft stays manual', async () => {
+  // Native host: draft published here -> refreshed as ready -> auto-follow starts; viewed draft stays manual.
+  for (const published of [true, false]) {
+    const { hostApi, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql({ draft: true }), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, ...(published ? { published: true } : {}) });
+    assert.equal(opened.reply.result.stage, 'draft');
+    assert.equal(rows.size, 0);
+
+    rt.setGithub(prGraphql({ draft: false }));
+    const ready = await rt.tool({ card_id: opened.callId, following: false });
+    assert.equal(ready.reply.result.stage, 'open');
+    assert.equal(rows.size, published ? 1 : 0, `published=${published}`);
+    if (published) {
+      assert.equal(ready.reply.result.follow_state, 'active');
+      // After user stops follow-up, refreshing the non-draft card does not restart it.
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(rows.size, 0);
+      const afterStop = await rt.tool({ card_id: opened.callId });
+      assert.equal(afterStop.reply.result.follow_state, 'stopped');
+      assert.equal(rows.size, 0);
+    }
+  }
+
+  // Legacy host: draft published here turning ready while settings unreadable or card refused retries cleanly.
+  {
+    const opts = { github: prGraphql({ draft: true }), kv: { prCard: { autoFollow: true } } };
+    const rt = createPrRuntime(opts);
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.todo, undefined);
+
+    rt.setGithub(prGraphql({ draft: false }));
+    opts.kvFails = true;
+    const unreadable = await rt.tool({ card_id: opened.callId });
+    assert.equal(unreadable.reply.result.todo, undefined);
+    assert.match(unreadable.reply.result.note, /设置暂时读不到/);
+
+    opts.kvFails = false;
+    opts.refuseCards = true;
+    const refused = await rt.tool({ card_id: opened.callId });
+    assert.equal(refused.reply.ok, false);
+
+    opts.refuseCards = false;
+    const retried = await rt.tool({ card_id: opened.callId });
+    assert.equal(retried.reply.ok, true);
+    assert.equal(retried.reply.result.todo.length, 1);
+    assert.match(retried.reply.result.todo[0], /https:\/\/github\.com\/octo\/repo\/pull\/42/);
   }
 });
 

@@ -3731,6 +3731,7 @@ async function prCardTool(args, callId) {
   // intent was the whole saved follow record. Both permit read-only discovery.
   var legacyFollow = updating && !card.scheduleId && !card.scheduleAction &&
     (card.pending === 'stop' || (!card.pending && (card.following === true || unverifiedLegacyFollow(card))));
+  var wasDraft = Boolean(card.pr && card.pr.draft);
   var number = ref ? ref.number : card.pr ? card.pr.number : null;
   if (number) {
     var status;
@@ -3784,6 +3785,7 @@ async function prCardTool(args, callId) {
       }
     } catch (err) { return fail(t('prScheduleFailed', { detail: String(err.message || err) })); }
   }
+  var wasPendingStop = card.pending === 'stop';
   if (typeof a.following === 'boolean') {
     if (!a.following && unverifiedLegacyFollow(card)) card.scheduleError = null;
     if (!a.following || !unverifiedLegacyFollow(card)) card.following = a.following;
@@ -3820,15 +3822,35 @@ async function prCardTool(args, callId) {
   var todo = [];
   var nativeStart = false;
   var settingsAppliedBefore = card.settingsApplied;
-  if (card.stage === 'open' && !card.settingsApplied && settings.unreadable) {
+  var readyFollowPendingBefore = Boolean(card.readyFollowPending);
+  var readyAfterPublish = updating && Boolean(status && !status.err) && wasDraft &&
+    Boolean(card.pr && !card.pr.draft) && card.publishedHere === true;
+  if (card.stage !== 'open' || (card.pr && card.pr.draft) || wasPendingStop) {
+    card.readyFollowPending = false;
+  } else if (readyAfterPublish && settings.unreadable) {
+    card.readyFollowPending = true;
+  }
+  var needPublishSettings = card.stage === 'open' && !card.settingsApplied;
+  var needReadyFollow = card.stage === 'open' && !needPublishSettings &&
+    (readyAfterPublish || card.readyFollowPending === true) && card.publishedHere === true;
+  if ((needPublishSettings || needReadyFollow) && settings.unreadable) {
     // Unreadable settings are not "all off": keep the one-time to-do list for the next call.
     notes.push(t('prSettingsLater'));
   }
-  if (card.stage === 'open' && !card.settingsApplied && !settings.unreadable) {
+  if (needPublishSettings && !settings.unreadable) {
     card.settingsApplied = true;
     card.publishedHere = true;
     if (settings.autoRename && !card.renamed) todo.push(t('prTodoRename', { title: prTaskTitle(card) }));
-    if (!legacyFollow && settings.autoFollow && a.following !== false && card.pending !== 'stop' && !card.following && !card.scheduleId && !card.pr.draft) {
+    if (!legacyFollow && settings.autoFollow && !wasPendingStop && card.pending !== 'stop' &&
+        !card.following && !card.followedEver && !card.scheduleId && !card.pr.draft) {
+      card.pending = 'follow';
+      nativeStart = hasCardScheduler();
+      if (!nativeStart) todo.push(t('prTodoFollow', { url: card.pr.url }));
+    }
+  } else if (needReadyFollow && !settings.unreadable) {
+    card.readyFollowPending = false;
+    if (!legacyFollow && settings.autoFollow && !wasPendingStop && card.pending !== 'stop' &&
+        !card.following && !card.scheduleId && !card.pr.draft) {
       card.pending = 'follow';
       nativeStart = hasCardScheduler();
       if (!nativeStart) todo.push(t('prTodoFollow', { url: card.pr.url }));
@@ -3863,7 +3885,10 @@ async function prCardTool(args, callId) {
     // No permission to follow was handed out either, so a reservation added by this call must not keep other tasks out.
     var released = card.pending !== pendingBefore;
     if (released) card.pending = pendingBefore;
-    if (card.settingsApplied !== settingsAppliedBefore || released) {
+    var nextReadyPending = needReadyFollow ? true : readyFollowPendingBefore;
+    var readyRestored = Boolean(card.readyFollowPending) !== nextReadyPending;
+    if (readyRestored) card.readyFollowPending = nextReadyPending;
+    if (card.settingsApplied !== settingsAppliedBefore || released || readyRestored) {
       card.settingsApplied = settingsAppliedBefore;
       await savePrCardRetry(card);
     }
