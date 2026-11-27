@@ -275,6 +275,7 @@ function startRemoteWorkspace(agyPath, host) {
   let agentExited = false;
   let sessionRequest = null;
   let warmup = null;
+  let warmupCleanup = null;
   let finished = false;
   let stopCode = null;
   let forceTimer = null;
@@ -337,15 +338,27 @@ function startRemoteWorkspace(agyPath, host) {
     toAgentLine(line);
   };
 
+  const closeWarmup = () => {
+    if (!warmup) return;
+    const current = warmup;
+    warmup = null;
+    warmupCleanup = current.close();
+  };
+
   const finish = (code) => {
     if (finished) return;
     finished = true;
-    warmup?.close();
+    closeWarmup();
     clearTimeout(forceTimer);
     clearTimeout(agentCloseTimer);
     const done = () => process.exit(code);
+    const pending = [];
     if (process.stdout.writableLength > 0) {
-      process.stdout.once('drain', done);
+      pending.push(new Promise((resolve) => process.stdout.once('drain', resolve)));
+    }
+    if (warmupCleanup) pending.push(warmupCleanup);
+    if (pending.length) {
+      Promise.all(pending).then(done, done);
       setTimeout(done, timings.flush);
     } else {
       done();
@@ -461,8 +474,7 @@ function startRemoteWorkspace(agyPath, host) {
       warmup = warmMcpServers(servers, { log: (text) => process.stderr.write(`[agy-acp] ${text}\n`) });
       agent = launch([...acpArgs, '--agent', AGENT_NAME]);
     } catch (error) {
-      warmup?.close();
-      warmup = null;
+      closeWarmup();
       refuse(request.id, -32603, `Antigravity could not be started for a task on another computer (${describe(error)}).`);
       return;
     }
@@ -507,8 +519,7 @@ function startRemoteWorkspace(agyPath, host) {
     seenCalls.clear();
     seenSteps.clear();
     seenSafeTools.clear();
-    warmup?.close();
-    warmup = null;
+    closeWarmup();
     clearTimeout(forceTimer);
     forceTimer = null;
     clearTimeout(agentCloseTimer);
@@ -711,7 +722,7 @@ function startRemoteWorkspace(agyPath, host) {
   });
   // Last line of defence for any exit path: never leave agy running, never leave the directory.
   process.on('exit', () => {
-    warmup?.close();
+    closeWarmup();
     for (const child of [probe, agent]) if (running(child)) killTree(child, 'SIGKILL');
     removeLaunchDir(dir);
   });

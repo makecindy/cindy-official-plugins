@@ -212,6 +212,44 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     assert.equal(log.length, beforeAuth + 2);
   });
 
+  test('close ends unhanded warmed sessions exactly once and leaves handed-off sessions untouched', async (t) => {
+    // 1. Unhanded session (e.g., restricted agy failed initialize or session open): close() sends DELETE once.
+    const unhanded = await bridgeServer(t);
+    const w1 = warmMcpServers([unhanded.entry]);
+    await w1.ready;
+    const unhandedSid = [...unhanded.sessions.keys()][0];
+    assert.ok(unhandedSid, 'warm-up created an upstream session');
+    await w1.close();
+    await w1.close();
+    const unhandedDeletes = unhanded.log.filter((item) => item.method === 'DELETE' && item.sid === unhandedSid);
+    assert.equal(unhandedDeletes.length, 1, 'unhanded warmed session was deleted exactly once');
+    assert.equal(unhanded.sessions.size, 0, 'no unhanded session remains on upstream');
+
+    // 2. Handed-off session (agy consumed warmed initialize): close() never sends DELETE for it.
+    const handed = await bridgeServer(t);
+    const w2 = warmMcpServers([handed.entry]);
+    const [given] = await w2.ready;
+    const init = await agyRequest(given.url, { message: INITIALIZE });
+    assert.equal(init.status, 200);
+    await w2.close();
+    await w2.close();
+    const handedDeletes = handed.log.filter((item) => item.method === 'DELETE');
+    assert.equal(handedDeletes.length, 0, 'handed-off session is owned by agy and untouched by close()');
+    assert.ok(handed.sessions.has(init.sid), 'handed-off session stays active on upstream');
+
+    // 3. Mismatched initialize already closed the warmed session: subsequent close() does not DELETE a second time.
+    const mismatched = await bridgeServer(t);
+    const w3 = warmMcpServers([mismatched.entry]);
+    const [given3] = await w3.ready;
+    const mismatchedSid = [...mismatched.sessions.keys()][0];
+    const other = { ...INITIALIZE, params: { ...INITIALIZE.params, capabilities: { roots: { listChanged: true } } } };
+    await agyRequest(given3.url, { message: other });
+    await w3.close();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const mismatchedDeletes = mismatched.log.filter((item) => item.method === 'DELETE' && item.sid === mismatchedSid);
+    assert.equal(mismatchedDeletes.length, 1, 'mismatched warmed session was deleted only once across mismatch + close()');
+  });
+
   // Only the client's capabilities differ: the server may answer such a client differently.
   test('a handshake that differs from the warm-up goes to the server, and the warmed session is closed', async (t) => {
     const { entry, log, sessions } = await bridgeServer(t);

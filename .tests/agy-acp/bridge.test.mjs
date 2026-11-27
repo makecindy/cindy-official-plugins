@@ -2947,6 +2947,166 @@ process.stdout.write('', () => process.exit(0));
     assert.equal(updatesWithoutForm[1].name, 'ask_question');
   });
 
+  // Why: in local mode with elicitation.form negotiated, follow-up updates for an already-identified
+  // external MCP tool named ask_question or update_steps may carry only the bare tool name; they must
+  // retain their MCP origin instead of turning into native question or plan cards.
+  test('local relay preserves MCP origin on bare-name follow-up updates for external ask_question and update_steps tools', async (t) => {
+    const relay = await localRelay(t);
+    relay.request(1, 'initialize', { clientCapabilities: { elicitation: { form: {} } } });
+    relay.response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.18' } });
+    relay.request(2, 'session/new', {
+      cwd: '/repo',
+      mcpServers: [{ type: 'http', name: 'custom_ext', url: 'http://example.test/mcp/custom_ext', headers: [] }],
+    });
+    relay.response(2, { sessionId: 'one' });
+
+    // External MCP ask_question via call_mcp_tool followed by bare-name tool_call_update.
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'ext-ask-local',
+          name: 'call_mcp_tool',
+          kind: 'execute',
+          title: 'MCP Tool ask_question',
+          status: 'in_progress',
+          rawInput: { ServerName: 'custom_ext', ToolName: 'ask_question', Arguments: { question: 'Pick' } },
+          args: { ServerName: 'custom_ext', ToolName: 'ask_question', Arguments: { question: 'Pick' } },
+        },
+      },
+    });
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'ext-ask-local',
+          name: 'ask_question',
+          kind: 'execute',
+          title: 'MCP Tool ask_question',
+          status: 'completed',
+        },
+      },
+    });
+
+    // External MCP update_steps via direct form followed by bare-name completed tool_call_update.
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'ext-steps-local',
+          name: 'mcp_custom_ext_update_steps',
+          kind: 'other',
+          title: 'Run mcp_custom_ext_update_steps',
+          status: 'in_progress',
+          rawInput: { steps: [{ title: 'External step', status: 'in_progress' }], toolSummary: 'External steps' },
+        },
+      },
+    });
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'ext-steps-local',
+          name: 'update_steps',
+          kind: 'other',
+          title: 'Run update_steps',
+          status: 'completed',
+          rawInput: { steps: [{ title: 'External step', status: 'done' }] },
+        },
+      },
+    });
+
+    // Genuine native tools in the same session still adapt normally.
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'nat-steps-local',
+          name: 'update_steps',
+          kind: 'other',
+          title: 'Run update_steps',
+          status: 'in_progress',
+          rawInput: { steps: [{ title: 'Native plan', status: 'in_progress' }] },
+        },
+      },
+    });
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'nat-ask-local',
+          name: 'ask_question',
+          kind: 'other',
+          title: 'Run ask_question',
+          status: 'in_progress',
+        },
+      },
+    });
+
+    const updates = relay.client.filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates, [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ext-ask-local',
+        name: 'mcp__custom_ext__ask_question',
+        kind: 'other',
+        title: 'mcp__custom_ext__ask_question',
+        status: 'in_progress',
+        rawInput: { question: 'Pick' },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'ext-ask-local',
+        name: 'mcp__custom_ext__ask_question',
+        kind: 'other',
+        title: 'mcp__custom_ext__ask_question',
+        status: 'completed',
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ext-steps-local',
+        name: 'mcp__custom_ext__update_steps',
+        kind: 'other',
+        title: 'mcp__custom_ext__update_steps',
+        status: 'in_progress',
+        rawInput: { steps: [{ title: 'External step', status: 'in_progress' }] },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'ext-steps-local',
+        name: 'mcp__custom_ext__update_steps',
+        kind: 'other',
+        title: 'mcp__custom_ext__update_steps',
+        status: 'completed',
+        rawInput: { steps: [{ title: 'External step', status: 'done' }] },
+      },
+      {
+        sessionUpdate: 'plan',
+        entries: [{ content: 'Native plan', priority: 'medium', status: 'in_progress' }],
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'nat-ask-local',
+        name: 'AskUserQuestion',
+        kind: 'other',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+    ]);
+  });
+
   test('exits right after Cindy has read the last notification, not after the flush timeout', { timeout: 40_000 }, async (t) => {
     const flushTimeoutMs = 2_000;
     let bridge = null;
@@ -3379,6 +3539,61 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
 
     bridge.child.stdin.end();
     assert.equal((await bridge.closed).code, 0);
+  });
+
+  // Why: if MCP warm-up succeeded before session/resume was rejected (agy never consumed the warmed session),
+  // failOpen must delete that unhanded upstream session once and closing the bridge must not delete it again.
+  test('deletes unhanded warmed MCP sessions once when remote session open fails', async (t) => {
+    const authHeader = `Bearer ${randomUUID()}`;
+    const activeSessions = new Set();
+    const deletedSessions = [];
+    const mcp = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
+        const sid = req.headers['mcp-session-id'];
+        if (req.method === 'GET') return res.writeHead(405).end();
+        if (req.method === 'DELETE') {
+          deletedSessions.push(sid);
+          activeSessions.delete(sid);
+          return res.writeHead(200).end();
+        }
+        const message = body ? JSON.parse(body) : {};
+        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+        if (!sid) {
+          const id = `warm-fail-${activeSessions.size}`;
+          activeSessions.add(id);
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
+          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }));
+        }
+        if (message.id === undefined) return res.writeHead(202).end();
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [{ name: 'Bash', inputSchema: { type: 'object' } }] } }));
+      });
+    });
+    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
+    t.after(() => mcp.close());
+
+    const { bridge, send, reply } = remoteSteerHarness(t, { mode: 'fail-session-open' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    const exec = {
+      type: 'http',
+      name: 'cindy_exec',
+      url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
+      headers: [{ name: 'Authorization', value: authHeader }],
+    };
+    send({ jsonrpc: '2.0', id: 1, method: 'session/resume', params: { sessionId: 'sess-known', cwd: '/shadow/p', mcpServers: [exec] } });
+    const openErr = await reply(1, 'rejected session/resume answer');
+    assert.equal(openErr.error.code, -32004);
+    await waitFor(() => deletedSessions.length === 1, 4_000, 'unhanded warmed MCP session deleted on failOpen');
+    assert.equal(activeSessions.size, 0, 'warmed upstream session was closed');
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(deletedSessions.length, 1, 'closing the bridge did not send a duplicate DELETE');
   });
 });
 

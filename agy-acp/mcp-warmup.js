@@ -232,7 +232,7 @@ async function warmServer(server, signal) {
 
 /** Ends a warmed MCP session nobody will use. */
 function closeWarmSession(server, warm) {
-  exchange(server.url, { method: 'DELETE', headers: { ...serverHeaders(server), 'mcp-session-id': warm.sessionId } }).catch(() => {});
+  return exchange(server.url, { method: 'DELETE', headers: { ...serverHeaders(server), 'mcp-session-id': warm.sessionId } }).catch(() => {});
 }
 
 function readBody(req) {
@@ -292,15 +292,23 @@ function forward(req, res, server, body) {
 function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => {} } = {}) {
   const token = crypto.randomBytes(24).toString('base64url');
   const abort = new AbortController();
-  /** Per server: the kept answers not given yet, and whether agy left the warmed session. */
+  /** Per server: kept answers, whether warm-up still owns the upstream session, and whether agy left it. */
   const states = servers.map((server) => ({
     server,
     auth: serverHeaders(server),
     warm: null,
+    owned: false,
     live: false,
     pending: { discover: true, initialize: true, initialized: true, stream: true, tools: true },
   }));
   let closed = false;
+
+  /** Ends a warmed upstream session that warm-up still owns (never handed to agy), at most once. */
+  const releaseOwned = (state) => {
+    if (!state.owned || !state.warm) return null;
+    state.owned = false;
+    return closeWarmSession(state.server, state.warm);
+  };
 
   const relay = http.createServer((req, res) => {
     void (async () => {
@@ -344,11 +352,12 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
       // agy opened an MCP session of its own (another agy version): the warmed one is not used, and
       // from here on the server sees agy's requests only.
       if (method === 'initialize') {
-        if (pending.initialize) closeWarmSession(state.server, warm);
+        releaseOwned(state);
         state.live = true;
       }
       return null;
     }
+    if (key === 'initialize') state.owned = false;
     pending[key] = false;
     const kept = warm[key];
     return { kept, body: key === 'stream' ? kept.body : withId(kept, message.id) };
@@ -377,9 +386,12 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
       }, deadlineMs);
       Promise.all(states.map((state) => warmServer(state.server, abort.signal).then((warm) => {
         if (!warm) return;
-        // A late warm-up after the deadline is not used: the server was already given at its own address.
+        // A late warm-up after the deadline or close is not used: the server was already given at its own address.
         if (abort.signal.aborted || closed) closeWarmSession(state.server, warm);
-        else state.warm = warm;
+        else {
+          state.warm = warm;
+          state.owned = true;
+        }
       }, () => {}))).then(finish);
     });
   });
@@ -389,6 +401,8 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
       closed = true;
       abort.abort();
       if (relay.listening) relay.close();
+      const releases = states.map(releaseOwned).filter(Boolean);
+      return releases.length ? Promise.all(releases).then(() => {}) : Promise.resolve();
     },
   };
 }
