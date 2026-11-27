@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { createContext, Script } from 'node:vm';
@@ -100,7 +102,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.43');
+  assert.equal(manifest.version, '1.5.44');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -2006,7 +2008,8 @@ function followScheduler(options = {}) {
     node: { async request({ method }) {
       assert.equal(method, 'followSkillDir');
       if (options.failDir) throw new Error('skill directory temporarily unavailable');
-      return { ok: true, result: '/approved skills/agent-skills/skills/_root__cindy-github--pr' };
+      const dir = options.skillDir ?? '/approved skills/agent-skills/skills/_root__cindy-github--pr';
+      return { ok: true, result: options.platform === undefined ? dir : { dir, platform: options.platform } };
     } },
   };
   return { hostApi, calls, rows, runs };
@@ -2275,6 +2278,135 @@ test('same-name project script, custom shell command and terminal PR remain unto
   assert.equal(result.reply.result.stage, 'merged');
   assert.equal(result.reply.result.legacy_hook_repair, undefined);
   assert.equal(calls.includes('schedule_update'), false);
+});
+
+test('stabilized hook quoting follows the scheduler host platform (POSIX single quotes on macOS/Linux, double quotes only on Windows)', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  const posixSingle = (p) => `'${p.replace(/'/g, `'\\''`)}'`;
+  const runFreshAdoption = async ({ skillDir, platform, command }) => {
+    const { hostApi, calls, rows } = followScheduler({ skillDir, platform });
+    const existing = {
+      id: 'existing-hook', targetSessionId: 's1', status: 'active', recurring: true,
+      prompt: 'Follow ' + url, preRunHook: { command, timeoutMs: 180000 },
+    };
+    rows.set(existing.id, existing);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    return { opened, rt, calls, rows, existing };
+  };
+
+  // 1. macOS and Linux accept POSIX single-quoted stabilized hooks (legacy + launcher) and reject invalid/Windows-backslash forms.
+  for (const platform of ['darwin', 'linux']) {
+    for (const skillDir of [
+      '/approved skills/agent-skills/skills/_root__cindy-github--pr',
+      "/Users/O'Brien/Library/Application Support/Cindy/agent-skills/skills/_root__cindy-github--pr",
+    ]) {
+      const legacyCommand = `node ${posixSingle(`${skillDir}/scripts/pr-heartbeat-gate.mjs`)} ${url}`;
+      const legacyRun = await runFreshAdoption({ skillDir, platform, command: legacyCommand });
+      assert.equal(legacyRun.opened.reply.result.follow_state, 'unverified');
+      assert.equal(legacyRun.opened.reply.result.legacy_hook_repair.schedule_id, legacyRun.existing.id);
+      assert.equal(
+        legacyRun.opened.reply.result.legacy_hook_repair.command,
+        `node "${skillDir}/scripts/pr-node.cjs" pr-heartbeat-gate.mjs ${url}`,
+      );
+      assert.equal(legacyRun.calls.includes('schedule_update'), false);
+
+      // Refreshing an already-bound owning card exercises legacyFollowRepair.
+      const refreshedLegacy = await legacyRun.rt.tool({ card_id: legacyRun.opened.callId });
+      assert.equal(refreshedLegacy.reply.result.follow_state, 'unverified');
+      assert.equal(refreshedLegacy.reply.result.legacy_hook_repair.schedule_id, legacyRun.existing.id);
+
+      // Modern pr-node.cjs launcher stabilized with POSIX single quotes verifies active via exactFollowHook on fresh adoption.
+      const launcherCommand = `node ${posixSingle(`${skillDir}/scripts/pr-node.cjs`)} pr-heartbeat-gate.mjs ${url}`;
+      const launcherRun = await runFreshAdoption({ skillDir, platform, command: launcherCommand });
+      assert.equal(launcherRun.opened.reply.result.follow_state, 'active');
+      assert.equal(launcherRun.opened.reply.result.legacy_hook_repair, undefined);
+      assert.equal(launcherRun.calls.includes('schedule_update'), false);
+
+      for (const bad of [
+        `node '${skillDir}/scripts/pr-heartbeat-gate.mjs" ${url}`,
+        `node "${skillDir}/scripts/pr-node.cjs' pr-heartbeat-gate.mjs ${url}`,
+        `node "${skillDir}\\scripts\\pr-node.cjs" pr-heartbeat-gate.mjs ${url}`,
+        `node '/project/scripts/pr-heartbeat-gate.mjs' ${url}`,
+        `node '/project/scripts/pr-node.cjs' pr-heartbeat-gate.mjs ${url}`,
+      ]) {
+        const rejectedRun = await runFreshAdoption({ skillDir, platform, command: bad });
+        assert.equal(rejectedRun.opened.reply.result.follow_state, 'failed', `expected rejection on ${platform} for: ${bad}`);
+        assert.equal(rejectedRun.opened.reply.result.legacy_hook_repair, undefined);
+        assert.equal(rejectedRun.calls.includes('schedule_create'), false);
+      }
+    }
+  }
+
+  // 2. Windows accepts double-quoted hooks (both '/' from cardFollowCommand and '\\' from Windows stabilization)
+  //    and rejects POSIX single-quoted hooks from first adoption, ID-less legacy reconciliation, and bound refresh.
+  const winSkillDir = String.raw`C:\Users\Alice Smith\AppData\Roaming\Cindy\owners\o1\ghost-install-state\agent-skills\skills\_root__cindy-github--pr`;
+  for (const okLauncher of [
+    `node "${winSkillDir}/scripts/pr-node.cjs" pr-heartbeat-gate.mjs ${url}`,
+    `node "${winSkillDir}\\scripts\\pr-node.cjs" pr-heartbeat-gate.mjs ${url}`,
+  ]) {
+    const winLauncher = await runFreshAdoption({ skillDir: winSkillDir, platform: 'win32', command: okLauncher });
+    assert.equal(winLauncher.opened.reply.result.follow_state, 'active', `expected active on win32 for: ${okLauncher}`);
+    assert.equal(winLauncher.opened.reply.result.legacy_hook_repair, undefined);
+    assert.equal(winLauncher.calls.includes('schedule_create'), false);
+    assert.match(winLauncher.rt.lastCard(winLauncher.opened.callId).html, /data-ghost-live-label="跟进中"/);
+  }
+
+  for (const okLegacy of [
+    `node "${winSkillDir}/scripts/pr-heartbeat-gate.mjs" ${url}`,
+    `node "${winSkillDir}\\scripts\\pr-heartbeat-gate.mjs" ${url}`,
+  ]) {
+    const winLegacy = await runFreshAdoption({ skillDir: winSkillDir, platform: 'win32', command: okLegacy });
+    assert.equal(winLegacy.opened.reply.result.follow_state, 'unverified', `expected unverified on win32 for: ${okLegacy}`);
+    assert.equal(winLegacy.opened.reply.result.legacy_hook_repair.schedule_id, winLegacy.existing.id);
+    assert.equal(
+      winLegacy.opened.reply.result.legacy_hook_repair.command,
+      `node "${winSkillDir}/scripts/pr-node.cjs" pr-heartbeat-gate.mjs ${url}`,
+    );
+    const refreshed = await winLegacy.rt.tool({ card_id: winLegacy.opened.callId });
+    assert.equal(refreshed.reply.result.follow_state, 'unverified');
+    assert.equal(refreshed.reply.result.legacy_hook_repair.schedule_id, winLegacy.existing.id);
+  }
+
+  for (const rejectedWin of [
+    `node ${posixSingle(`${winSkillDir}/scripts/pr-node.cjs`)} pr-heartbeat-gate.mjs ${url}`,
+    `node ${posixSingle(`${winSkillDir}\\scripts\\pr-node.cjs`)} pr-heartbeat-gate.mjs ${url}`,
+    `node ${posixSingle(`${winSkillDir}/scripts/pr-heartbeat-gate.mjs`)} ${url}`,
+    `node ${posixSingle(`${winSkillDir}\\scripts\\pr-heartbeat-gate.mjs`)} ${url}`,
+  ]) {
+    // First-adoption entry point must reject POSIX single-quoted commands on Windows instead of showing "跟进中".
+    const winRejected = await runFreshAdoption({ skillDir: winSkillDir, platform: 'win32', command: rejectedWin });
+    assert.equal(winRejected.opened.reply.result.follow_state, 'failed', `expected win32 rejection for: ${rejectedWin}`);
+    assert.equal(winRejected.opened.reply.result.legacy_hook_repair, undefined);
+    assert.equal(winRejected.calls.includes('schedule_create'), false);
+    assert.doesNotMatch(winRejected.rt.lastCard(winRejected.opened.callId).html, /data-ghost-live-label="跟进中"/);
+
+    // ID-less legacy reconciliation must also reject POSIX single-quoted commands on Windows.
+    const { hostApi, rows } = followScheduler({ skillDir: winSkillDir, platform: 'win32' });
+    const rt = createPrRuntime({ github: prGraphql(), hostApi });
+    const preNative = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+    rows.set('win-single-legacy', {
+      id: 'win-single-legacy', targetSessionId: 's1', status: 'active', recurring: true,
+      prompt: 'Follow ' + url, preRunHook: { command: rejectedWin, timeoutMs: 180000 },
+    });
+    const reconciled = await rt.tool({ card_id: preNative.callId });
+    assert.equal(reconciled.reply.result.follow_state, 'failed', `expected win32 reconcile rejection for: ${rejectedWin}`);
+    assert.equal(reconciled.reply.result.legacy_hook_repair, undefined);
+    assert.doesNotMatch(rt.lastCard(preNative.callId).html, /data-ghost-live-label="跟进中"/);
+  }
+
+  // 3. Missing/unknown host platform fails closed: double quotes still work, POSIX single quotes are rejected.
+  const posixDir = '/approved skills/agent-skills/skills/_root__cindy-github--pr';
+  const unknownDouble = await runFreshAdoption({
+    skillDir: posixDir,
+    command: `node "${posixDir}/scripts/pr-node.cjs" pr-heartbeat-gate.mjs ${url}`,
+  });
+  assert.equal(unknownDouble.opened.reply.result.follow_state, 'active');
+  const unknownSingle = await runFreshAdoption({
+    skillDir: posixDir,
+    command: `node ${posixSingle(`${posixDir}/scripts/pr-node.cjs`)} pr-heartbeat-gate.mjs ${url}`,
+  });
+  assert.equal(unknownSingle.opened.reply.result.follow_state, 'failed');
 });
 
 test('refresh of a pre-native following card discovers its sole active legacy hook and reports a manual repair', async () => {
@@ -3314,6 +3446,40 @@ test('the Cindy Node bootstrap starts the PR follow worker when loading it via r
   assert.deepEqual(JSON.parse(result.stdout), {
     id: 1, jsonrpc: '2.0', error: { code: -32000, message: 'Unsupported method' },
   });
+});
+
+test('followSkillDir RPC reports both the approved skill directory and scheduler host platform', () => {
+  const entry = fileURLToPath(new URL('../cindy-github/node/follow.cjs', import.meta.url));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'cindy-github-follow-rpc-')));
+  try {
+    const install = join(root, 'cindy-brain', '_ns', '_root', 'cindy-github');
+    const workerEntry = join(install, 'node', 'follow.cjs');
+    const snapshotScripts = join(root, 'ghost-install-state', 'skill-snapshots', '_ns', '_root', 'cindy-github', 'rev-1', 'skills', 'pr', 'scripts');
+    const projectionParent = join(root, 'ghost-install-state', 'agent-skills', 'skills');
+    const projectionDir = join(projectionParent, '_root__cindy-github--pr');
+    mkdirSync(join(install, 'node'), { recursive: true });
+    mkdirSync(snapshotScripts, { recursive: true });
+    mkdirSync(projectionParent, { recursive: true });
+    copyFileSync(entry, workerEntry);
+    writeFileSync(join(snapshotScripts, 'pr-heartbeat-gate.mjs'), '');
+    writeFileSync(join(snapshotScripts, 'pr-node.cjs'), '');
+    symlinkSync(join(snapshotScripts, '..'), projectionDir, 'junction');
+
+    const result = spawnSync(process.execPath, [workerEntry], {
+      input: JSON.stringify({ id: 2, method: 'followSkillDir', jsonrpc: '2.0' }) + '\n',
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      id: 2,
+      jsonrpc: '2.0',
+      result: { dir: projectionDir, platform: process.platform },
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 function verifiedNodeRun(scheduleId, {
