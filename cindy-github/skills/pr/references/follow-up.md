@@ -2,13 +2,13 @@
 
 Read this when debugging a follow-up, or before changing the schedule or the check. Day-to-day rounds only need SKILL.md.
 
-The schedule fires every 5 minutes (older schedules: every 10, switched by their next round). Each time, `scripts/pr-heartbeat-gate.mjs` runs first as the schedule's pre-run check:
+The schedule fires every 5 minutes (older schedules may retain their saved interval). Each time, the bundled `scripts/pr-node.cjs` launcher selects Node.js 18 or newer from PATH and executes `scripts/pr-heartbeat-gate.mjs` as the schedule's pre-run check:
 
 - **exit 0:** wake the agent in the bound task; the check's output, including the list of what happened, is attached to the prompt.
 - **exit 2:** skip this run. No model call, no tokens, nothing in the task.
 - **anything else:** the run is recorded as failed and the user is notified.
 
-Each check saves its decision, reason, detail and list as `lastResult`. The agent reads it with the read-only `--last-result --json`, which also returns the current `wait` and the acknowledged/released `waitContext`.
+Each real scheduled check saves its decision, reason, detail and list as `lastResult`. The host’s “Test run” and hook self-test are read-only previews: they never consume an existing wait, pending event, retry budget or trace history. The agent reads it with the read-only `--last-result --json`, which also returns the current `wait` and the acknowledged/released `waitContext`.
 
 ## Pace: most firings end at once
 
@@ -17,10 +17,10 @@ Before any GitHub call the check asks whether a look is due, from what its last 
 | Stage | Looks |
 |---|---|
 | Fast: an unacknowledged update, a due model wait or defer or no-checks deadline, an open settle window | every firing |
-| Explicit model wait | every 5 minutes to detect new work; this does not call the model |
+| Explicit technical wait (`checks`, `baseline`, `retry`) | every 5 minutes to detect new work; this does not call the model |
 | Active: checks running, a failure, a conflict or merge-queue problem, a new commit or an agent round in the last hour | every firing of the 5-minute schedule |
 | Idle | about every 10 minutes |
-| Waiting: only a human approval or the merge is left (`READY`, `BLOCKED_HUMAN`) | about every 30 minutes |
+| Waiting: only a human approval or the merge is left (`READY`, `BLOCKED_HUMAN`, or an explicit `human` wait after recent activity cools down) | about every 30 minutes |
 | Quiet: a draft, or nothing changed for 6 hours | about every hour |
 
 **Cindy fires it early.** When the title-bar PR status (refreshed about every 90 seconds while someone looks at Cindy) shows a change for this PR, Cindy runs the schedule at once and tells the check through the hook's stdin (`trigger: { kind: 'watch', … }`). Such a run skips both the pace and the probe and reads the PR in full. For ordinary checks, `--triggered` simulates a change and `--no-pacing` disables stage pacing.
@@ -45,13 +45,14 @@ While a round settles the watch does not advance, so the held items and anything
 
 ## Cost: a small question first
 
-Every check first runs `pr-snapshot.mjs --probe`: one small GraphQL query for the PR's state, head, mergeability, check counts by state, the newest comment and review, and the base branch's commit (used only while a check is failing). When it matches the last full read, the check stops there (`unchanged`). It reads the PR in full (three or four API calls) only when the probe differs or when one of these holds: an update was released but not yet acknowledged, checks were still running or mergeability was unknown at the last full read, the PR is merged or closed, 30 minutes have passed since the last full read (the probe cannot see edits inside review threads), a new commit's check deadline or a defer is due, or the silence guard is due. A failed probe also falls back to a full read. While an explicit wait names checks or threads, each due poll reads in full instead of probing: equal counts can hide a rerun or an inline resolution. Such changes must not wait for the 30-minute fallback. Waits without named targets still use the small probe. Host triggers accelerate observation, never bypass the wait filter.
+Every check first runs `pr-snapshot.mjs --probe`: one small GraphQL query for the PR's state, head, mergeability, check counts by state, the newest comment and review, and the base branch's commit (used only while a check is failing). When it matches the last full read, the check stops there (`unchanged`). It reads the PR in full (three or four API calls) only when the probe differs or when one of these holds: an update was released but not yet acknowledged, checks were still running or mergeability was unknown at the last full read, the PR is merged or closed, 30 minutes have passed since the last full read (the probe cannot see edits inside review threads), a new commit's check deadline or a defer/wait is due, or the silence guard is due (when not suppressed by an active wait, defer, or human-only wait). A failed probe also falls back to a full read, except an explicit GitHub rate limit, which enters rate-limit backoff immediately without issuing a full snapshot. While an explicit wait names checks or threads, each due poll reads in full instead of probing: equal counts can hide a rerun or an inline resolution. Such changes must not wait for the 30-minute fallback. Waits without named targets still use the small probe. Host triggers accelerate observation, never bypass the wait filter.
 
 ## When the agent is woken
 
-The check keeps a `watch`: what the agent has already been told about. It wakes the agent only for news against it, in the spirit of T3 Code's pull request watch:
+The check keeps a `watch`: what the agent has already been told about. On the first hook of a newly created schedule, a prior follower's watch and waits for this PR are discarded, so previously observed failures are not lost when following is explicitly restarted. Retrying the same first hook and reusing a running schedule do not reset its watch. It wakes the agent only for news against it, in the spirit of T3 Code's pull request watch:
 
 - **Checks failed:** a check failed (including cancelled, timed out or needing action) that had not failed on this commit before. Reported once per commit and name; a re-run that replaced a failed attempt no longer counts, because the snapshot keeps only the latest run of each check.
+- **Checks finished with failures:** when a failure was observed while other checks were running, their final completion on that same commit is one more event (`checks-finished`) if failures remain. An unchanged fully finished failing batch does not wake again; a new head starts a new batch. This event uses the same acknowledgement and retry handling as other events.
 - **Checks passed:** all required checks passed (all checks when the repository marks none as required). Non-required checks still running at that moment get one more update when they all finish; later changes to them do not wake.
 - **Comments:** new comments, reviews with a body or a verdict, and review-thread comments from anyone except the account the agent uses. Edits count as new. Empty "commented" reviews are skipped; their thread comments carry the content.
 - **Base moved while failing:** a check is failing and the base branch got a new commit (`base-moved`), for example a fix for a baseline failure. Both the probe and full snapshot read the live GraphQL `baseRef.target.oid`; the REST pull base SHA can lag behind the branch. When the updated base contains the fix, merge it into the PR, verify and push, then confirm CI on the new head. While nothing fails the base is not watched, so ordinary base progress never wakes. During an explicit wait, base movement is absorbed only when every currently failing check is the exact named attempt already handled; a baseline wait brings its review forward to at most one hour after the first absorbed base commit (later commits join that look), so a fix on the base is picked up within the hour even late in the backoff. Any other failure retains the ordinary base watch.
@@ -97,7 +98,7 @@ Read `--last-result --json`, then create a JSON file from its `waitContext` (sub
 }
 ```
 
-Apply with `node "<skill-dir>/scripts/pr-heartbeat-gate.mjs" <PR_URL> --wait <plan.json>`.
+Apply with `node "<skill-dir>/scripts/pr-node.cjs" pr-heartbeat-gate.mjs <PR_URL> --wait <plan.json>`.
 Check the `wait-set` receipt; `--last-result --json` reads it back without changing anything.
 The JSON file is consumed once, not kept as a dependency. The reason is the agent's conclusion,
 never an instruction copied from a PR comment. This changes only wake-up decisions, not GitHub
@@ -132,7 +133,7 @@ only choose human waiting when every failing check and unresolved thread is acco
 The `wait-set` receipt of such a wait carries `notice` when the user is owed a message: `entered`
 the first time on this head, then `reminder` on every model renewal, including a same-day renewal.
 Each actual round states progress and the blocker; if the user must decide, ask that specific
-question again with a recommendation. No-change polls still skip without a message or model call.
+question again with a recommendation under the continuing-follow decision rule in SKILL.md section 5; end the round without blocking on a reply. No-change polls still skip without a message or model call.
 An absent receipt notice does not override a pending user decision known to the agent. A wait recorded before this rule existed is reviewed a day after it was set
 and reported once.
 
@@ -165,11 +166,12 @@ Safety and resumption:
 - Missing/truncated data is never evidence of continued waiting. It requests investigation without
   advancing past potentially unseen events. Existing network failures and rate-limit backoff still apply.
 
-Latency: with Cindy running and GitHub available, an explicit wait is inspected on each five-minute
-poll; a host status trigger can inspect sooner. Model start still depends on the task being available.
-Only post-push bot/check feedback retains the existing maximum 20-minute batching window. This is not
-a real-time delivery guarantee. Without an explicit wait, existing stage pacing and the 30-minute
-full-read fallback remain unchanged.
+Latency: with Cindy running and GitHub available, an explicit technical wait (`checks`, `baseline`,
+`retry`) is inspected on each five-minute poll, while a `human` wait cools down to the 30-minute
+`waiting` pace after recent activity passes; a host status trigger can inspect sooner. Model start
+still depends on the task being available. Only post-push bot/check feedback retains the existing
+maximum 20-minute batching window. This is not a real-time delivery guarantee. Without an explicit
+wait, existing stage pacing and the 30-minute full-read fallback remain unchanged.
 
 ## Reliability rules
 
@@ -231,7 +233,7 @@ omitted. Raw comment text is never retained. Identifiers, timings, check identit
 pre-observation state remain private diagnostic data. CINDY_PR_TRACE=0 disables recording.
 Recording failures never change the gate decision. Oversized/failed samples are explicit replay gaps.
 
-Run `node <skill-dir>/scripts/pr-follow-replay.mjs <trace.jsonl> [candidate-scripts-directory]`.
+Run `node "<skill-dir>/scripts/pr-node.cjs" pr-follow-replay.mjs <trace.jsonl> [candidate-scripts-directory]`.
 The trace must be chronological and for one PR; concatenate .1 before the current file when needed.
 Replay seeds once, then carries state through observations and recorded ack/wait/resume actions.
 It never changes production state or calls a model. It reports wake counts and decision differences,
