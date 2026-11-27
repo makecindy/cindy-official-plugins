@@ -4065,6 +4065,49 @@ test('cards without a trusted creation baseline stay manualStop fail-closed, whi
     assert.equal(calls.includes('schedule_delete'), true);
   }
 
+  // Edits made in Automation AFTER schedule_create succeeds but BEFORE the initial schedule_get
+  // read-back must NOT be recorded as scheduleDefaults: the card locks to manualStop=true immediately
+  // and Stop issues zero schedule_delete calls while preserving the edited schedule.
+  for (const earlyEdit of ['model', 'timezone', 'fastMode-true-to-ultrafast', 'prompt', 'notify', 'preRunPlugin']) {
+    let mutated = false;
+    const { hostApi, rows, calls } = followScheduler({
+      beforeGet(liveRows, id) {
+        if (mutated) return;
+        const row = liveRows.get(id);
+        if (!row) return;
+        mutated = true;
+        if (earlyEdit === 'model') { row.model = 'claude-opus-4-6'; row.providerId = 'anthropic'; row.modelAgentKind = 'claude-code'; }
+        else if (earlyEdit === 'timezone') row.timezone = row.timezone === 'UTC' ? 'America/New_York' : 'UTC';
+        else if (earlyEdit === 'fastMode-true-to-ultrafast') row.fastMode = 'ultrafast';
+        else if (earlyEdit === 'prompt') row.prompt = 'Edited before first read-back for https://github.com/octo/repo/pull/42';
+        else if (earlyEdit === 'notify') row.notify = { desktop: true, feishu: true };
+        else row.preRunPlugin = { pluginId: 'other-plugin', onFailure: 'block' };
+      },
+    });
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: {
+      autoFollow: true,
+      ...(earlyEdit === 'fastMode-true-to-ultrafast'
+        ? { followModel: { route: { agentKind: 'cc', providerId: 'chosen', model: 'sonnet', effort: 'high', fastMode: true, agentDeviceId: 'remote' } } }
+        : {}),
+    } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_state, 'active', earlyEdit);
+    const key = `pr-cards/${opened.callId}.json`;
+    const createdCard = JSON.parse(rt.files.get(key));
+    assert.equal(createdCard.manualStop, true, earlyEdit);
+    assert.equal(createdCard.scheduleDefaults, undefined, earlyEdit);
+    const openHtml = rt.lastCard(opened.callId).html;
+    assert.doesNotMatch(openHtml, /<button data-ghost-action="pr:stop"/, earlyEdit);
+    assert.match(openHtml, /<button data-ghost-action="pr:manual-stop" aria-label="手动停止"/, earlyEdit);
+
+    const beforeStop = structuredClone(rows.get('sch-1'));
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(calls.filter(c => c === 'schedule_delete').length, 0, earlyEdit);
+    assert.equal(rows.size, 1, earlyEdit);
+    assert.deepEqual(structuredClone(rows.get('sch-1')), beforeStop, earlyEdit);
+    assert.match(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止（ID：sch-1）/, earlyEdit);
+  }
+
   // Legacy host without card scheduler stays fail-closed on cards without a trusted creation baseline.
   {
     const { hostApi } = followScheduler();

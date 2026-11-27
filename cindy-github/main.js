@@ -3798,6 +3798,7 @@ async function reconcileLegacyFollow(card, readError, fromStop, hadClaim, clearO
   if (hadClaim !== false || row) card.followedEver = true;
   card.scheduleId = row ? row.id : null;
   card.manualStop = !!row;
+  delete card.scheduleDefaults;
   if (!row) delete card.manualStopOpen;
   card.following = !!row && row.status === 'active';
   card.scheduleStatus = unverified ? 'unverified' : row && !card.following ? row.status : null;
@@ -3890,11 +3891,25 @@ function isCardCreatedSchedule(row, card, skillEnv, expectedConfig) {
     !row.useWorktree &&
     !row.persistentSession &&
     !row.workingDir &&
+    !row.agentDeviceId &&
+    !row.preRunPlugin &&
     !row.webhookTrigger &&
     !row.expireAt &&
     (row.jobType === undefined || row.jobType === 'prompt') &&
     (row.executionMode === undefined || row.executionMode === 'agent') &&
     (row.kind === undefined || row.kind === 'cron');
+}
+
+function applyCardStopProvenance(card, row, env, baseline) {
+  if (baseline && isCardCreatedSchedule(row, card, env, baseline)) {
+    card.manualStop = false;
+    delete card.manualStopOpen;
+    card.scheduleDefaults = baseline;
+    return true;
+  }
+  card.manualStop = true;
+  delete card.scheduleDefaults;
+  return false;
 }
 
 // Single-owner bound schedule read reconciliation used by pr_card refresh,
@@ -3948,12 +3963,7 @@ async function reconcileBoundSchedule(card, row, options) {
     if (!card.scheduleDefaults) {
       card.manualStop = true;
     } else if (checkEnv && (!needsHookCheck || verifiedHook)) {
-      if (!isCardCreatedSchedule(row, card, checkEnv, card.scheduleDefaults)) {
-        card.manualStop = true;
-        delete card.scheduleDefaults;
-      } else {
-        delete card.manualStopOpen;
-      }
+      applyCardStopProvenance(card, row, checkEnv, card.scheduleDefaults);
     }
   }
 }
@@ -3980,7 +3990,9 @@ async function createCardSchedule(card, settings) {
     input.fastMode = model.fast_mode;
     if (model.effort) input.effort = model.effort;
   }
-  return prSchedule('schedule_create', input);
+  var defaults = scheduleConfigSnapshot(input);
+  var created = await prSchedule('schedule_create', input);
+  return { created: created, defaults: defaults };
 }
 
 // Save the intent first. After a lost receipt or a restart, look up the schedule
@@ -4014,11 +4026,14 @@ async function syncCardSchedule(card, settings, mode) {
     if (action === 'start') {
       var rows = await schedulesForPr(card);
       var createdId = null;
+      var createdDefaults = null;
       if (rows.length === 0) {
         var creationError;
         try {
-          var created = await createCardSchedule(card, settings);
+          var createdResult = await createCardSchedule(card, settings);
+          var created = createdResult && createdResult.created;
           createdId = created && typeof created.id === 'string' ? created.id : null;
+          createdDefaults = createdId && createdResult.defaults ? createdResult.defaults : null;
         } catch (err) { creationError = err; }
         rows = await schedulesForPr(card);
         if (!rows.length) {
@@ -4047,13 +4062,7 @@ async function syncCardSchedule(card, settings, mode) {
       }
       repair = await resolveLegacyHookRepair(hook, saved);
       card.scheduleId = row.id;
-      card.manualStop = createdId !== saved.id;
-      if (card.manualStop) {
-        delete card.scheduleDefaults;
-      } else {
-        delete card.manualStopOpen;
-        card.scheduleDefaults = scheduleConfigSnapshot(saved);
-      }
+      applyCardStopProvenance(card, saved, env, createdId === saved.id ? createdDefaults : null);
       card.scheduleStatus = null;
       card.followedEver = true;
       card.following = true;
@@ -4136,14 +4145,7 @@ async function syncCardSchedule(card, settings, mode) {
             throw new Error(t('prScheduleHookUnknown'));
           }
           repair = await resolveLegacyHookRepair(finalHook, finalSchedule);
-          if (card.manualStop !== true) {
-            if (!card.scheduleDefaults || !isCardCreatedSchedule(finalSchedule, card, resumeEnv, card.scheduleDefaults)) {
-              card.manualStop = true;
-              delete card.scheduleDefaults;
-            } else {
-              delete card.manualStopOpen;
-            }
-          }
+          if (card.manualStop !== true) applyCardStopProvenance(card, finalSchedule, resumeEnv, card.scheduleDefaults);
           card.following = true;
           card.followDeclined = false;
           card.scheduleStatus = null;
@@ -4167,9 +4169,7 @@ async function syncCardSchedule(card, settings, mode) {
         // Always re-verify the live schedule against the creation baseline before
         // deleting: cards without a trusted baseline or edited in Automation stay
         // protected with manual stop.
-        if (!card.scheduleDefaults || !isCardCreatedSchedule(owned, card, stopEnv, card.scheduleDefaults)) {
-          card.manualStop = true;
-          delete card.scheduleDefaults;
+        if (!applyCardStopProvenance(card, owned, stopEnv, card.scheduleDefaults)) {
           card.following = owned.status === 'active';
           card.scheduleStatus = card.following ? null : owned.status;
           card.pending = card.scheduleAction = null;
@@ -4178,7 +4178,6 @@ async function syncCardSchedule(card, settings, mode) {
           await savePrCardRetry(card);
           return;
         }
-        card.manualStop = false;
         errorSource = 'stop';
         await prSchedule('schedule_delete', { id: owned.id });
         if (await prSchedule('schedule_get', { id: owned.id })) throw new Error('schedule_delete');
@@ -4256,14 +4255,7 @@ async function syncCardSchedule(card, settings, mode) {
                 clearCardScheduleError(card);
                 clearLegacyScheduleNotice(card);
                 card.legacyHookRepair = await resolveLegacyHookRepair(afterHook, afterResume);
-                if (card.manualStop !== true) {
-                  if (!card.scheduleDefaults || !isCardCreatedSchedule(afterResume, card, afterEnv, card.scheduleDefaults)) {
-                    card.manualStop = true;
-                    delete card.scheduleDefaults;
-                  } else {
-                    delete card.manualStopOpen;
-                  }
-                }
+                if (card.manualStop !== true) applyCardStopProvenance(card, afterResume, afterEnv, card.scheduleDefaults);
                 card.note = null;
               }
             } else if (afterResume.status === 'paused') {
