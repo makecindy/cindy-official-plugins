@@ -209,56 +209,87 @@ test('approval-only and auto-merge bots are not recorded as expected reviewer bo
   assert.deepEqual(botsAnswered(activeReviewers, ['greptile-apps'], 'h2', T0), ['greptile-apps']);
 });
 
-test('legacy per-PR reviewerBots migrates cleanly to v2 on complete snapshots and defers on incomplete ones', () => {
+test('legacy per-PR reviewerBots retains unconfirmed older-head apps until current-head evidence settles, then migrates to v2', () => {
   const oldAt = new Date(T0 - 20 * 24 * 60 * MIN).toISOString();
-  const autoOnlySnap = {
+  const autoCurrentHeadSnap = {
     latestCommitOid: 'bbb2222',
-    reviews: [{ author: 'cindy-auto-merge-bot', authorIsBot: true, state: 'APPROVED', body: 'ok', commitOid: 'aaa1111', submittedAt: oldAt }],
+    reviews: [{ author: 'cindy-auto-merge-bot', authorIsBot: true, state: 'APPROVED', body: 'ok', commitOid: 'bbb2222', submittedAt: oldAt }],
     reviewerChecks: [],
   };
-  const repoBots = updateRepoBots({}, autoOnlySnap, T0);
+  const repoBots = updateRepoBots({}, autoCurrentHeadSnap, T0);
   assert.deepEqual(repoBots, {});
 
-  // Legacy state with only an approval-only bot: drops it on complete snapshot and upgrades to v2.
+  // 1) Current-head APPROVED without own reviewer App check drops immediately without waiting for settle.
   const legacyOnly = { reviewerBots: ['cindy-auto-merge-bot'] };
-  const expected = expectedBots({ snap: autoOnlySnap, previous: legacyOnly, repoBots });
-  assert.deepEqual(expected, []);
-  assert.equal(settleState({ snap: autoOnlySnap, headSeenAt: T0, expected, now: T0 + MIN }).open, false);
-  assert.deepEqual(resolvePrReviewerBots(legacyOnly, autoOnlySnap), { bots: [], version: REVIEWER_BOTS_VERSION });
+  const expectedCurrent = expectedBots({ snap: autoCurrentHeadSnap, previous: legacyOnly, repoBots, headSeenAt: T0, now: T0 + MIN });
+  assert.deepEqual(expectedCurrent, []);
+  assert.equal(settleState({ snap: autoCurrentHeadSnap, headSeenAt: T0, expected: expectedCurrent, now: T0 + MIN }).open, false);
+  assert.deepEqual(resolvePrReviewerBots(legacyOnly, autoCurrentHeadSnap, { headSeenAt: T0, now: T0 + MIN }), { bots: [], version: REVIEWER_BOTS_VERSION });
 
-  // Mixed legacy state: keeps bots corroborated on the snapshot (comments, reactions, or dedicated App checks), drops approval-only bot.
-  const mixedSnap = {
+  // 2) Older-head clean approval (e.g. Greptile approved aaa1111 with its App check; new head bbb2222 has no checks yet):
+  //    while current head is still settling, retain unconfirmed legacy apps at v1 so real reviewers are not dropped early.
+  const olderApprovalNewHead = {
     latestCommitOid: 'bbb2222',
     reviews: [
       { author: 'cindy-auto-merge-bot', authorIsBot: true, state: 'APPROVED', body: 'ok', commitOid: 'aaa1111', submittedAt: oldAt },
-      { author: 'greptile-apps', authorIsBot: true, state: 'APPROVED', body: 'LGTM', commitOid: 'bbb2222', submittedAt: oldAt },
-      { author: 'codex-bot', authorIsBot: true, state: 'COMMENTED', body: 'nit', commitOid: 'aaa1111', submittedAt: oldAt },
+      { author: 'greptile-apps', authorIsBot: true, state: 'APPROVED', body: 'LGTM', commitOid: 'aaa1111', submittedAt: oldAt },
     ],
+    reviewerChecks: [],
+  };
+  const legacyMixed = { reviewerBots: ['cindy-auto-merge-bot', 'greptile-apps'] };
+  const legacyGreptile = { reviewerBots: ['greptile-apps'] };
+  const earlyExpected = expectedBots({ snap: olderApprovalNewHead, previous: legacyGreptile, repoBots: {}, headSeenAt: T0, now: T0 + MIN });
+  assert.deepEqual(earlyExpected, ['greptile-apps']);
+  assert.equal(settleState({ snap: olderApprovalNewHead, headSeenAt: T0, expected: earlyExpected, now: T0 + MIN }).open, true);
+  assert.deepEqual(resolvePrReviewerBots(legacyGreptile, olderApprovalNewHead, { headSeenAt: T0, now: T0 + MIN }), { bots: ['greptile-apps'], version: 1 });
+  // Without timing proof, default is conservative (retain at v1).
+  assert.deepEqual(resolvePrReviewerBots(legacyGreptile, olderApprovalNewHead), { bots: ['greptile-apps'], version: 1 });
+
+  // 3) Once Greptile registers its dedicated App check on the new head, it is immediately corroborated;
+  //    if Greptile was the only legacy bot, migration to v2 completes right away without waiting 20 min.
+  const greptileRegistered = {
+    ...olderApprovalNewHead,
     reviewerChecks: [
-      { name: 'Greptile Review', appSlug: 'greptile-apps', appId: 99, headSha: 'bbb2222', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: oldAt, completedAt: oldAt },
-      { name: 'CI', appSlug: 'github-actions', appId: 15368, headSha: 'bbb2222', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: oldAt, completedAt: oldAt },
+      { name: 'Greptile Review', appSlug: 'greptile-apps', appId: 99, headSha: 'bbb2222', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: new Date(T0 + 2 * MIN).toISOString(), completedAt: new Date(T0 + 3 * MIN).toISOString() },
+      { name: 'CI', appSlug: 'github-actions', appId: 15368, headSha: 'bbb2222', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: new Date(T0 + 2 * MIN).toISOString(), completedAt: new Date(T0 + 3 * MIN).toISOString() },
     ],
   };
-  const legacyMixed = { reviewerBots: ['cindy-auto-merge-bot', 'greptile-apps', 'codex-bot'] };
-  const mixedExpected = expectedBots({ snap: mixedSnap, previous: legacyMixed, repoBots: {} });
-  assert.deepEqual(mixedExpected, ['codex-bot', 'greptile-apps']);
-  assert.equal(settleState({ snap: mixedSnap, headSeenAt: T0, expected: mixedExpected, now: T0 + MIN }).open, true);
-  assert.deepEqual(resolvePrReviewerBots(legacyMixed, mixedSnap), { bots: ['codex-bot', 'greptile-apps'], version: REVIEWER_BOTS_VERSION });
+  assert.deepEqual(resolvePrReviewerBots(legacyGreptile, greptileRegistered, { headSeenAt: T0, now: T0 + 3 * MIN }), { bots: ['greptile-apps'], version: REVIEWER_BOTS_VERSION });
+  // In a mixed list, cindy-auto-merge-bot is still unconfirmed until the settle window completes, then drops permanently at v2.
+  assert.deepEqual(resolvePrReviewerBots(legacyMixed, greptileRegistered, { headSeenAt: T0, now: T0 + 3 * MIN }), { bots: ['cindy-auto-merge-bot', 'greptile-apps'], version: 1 });
+  assert.deepEqual(resolvePrReviewerBots(legacyMixed, greptileRegistered, { headSeenAt: T0, now: T0 + 20 * MIN }), { bots: ['greptile-apps'], version: REVIEWER_BOTS_VERSION });
 
-  // Incomplete/truncated snapshot: preserves legacy list and leaves migration pending at v1.
+  // 4) Pure auto-merge bot on an older commit: once current head settles (or on an older settled head with no pending checks),
+  //    it is dropped permanently and migrated to v2.
+  const autoOnlyOlder = {
+    latestCommitOid: 'bbb2222',
+    createdAt: oldAt,
+    reviews: [{ author: 'cindy-auto-merge-bot', authorIsBot: true, state: 'APPROVED', body: 'ok', commitOid: 'aaa1111', submittedAt: oldAt }],
+    reviewerChecks: [],
+    checks: [{ name: 'build', outcome: 'passed', status: 'COMPLETED' }],
+  };
+  assert.deepEqual(resolvePrReviewerBots(legacyOnly, autoOnlyOlder, { headSeenAt: T0, now: T0 + 20 * MIN }), { bots: [], version: REVIEWER_BOTS_VERSION });
+  assert.deepEqual(resolvePrReviewerBots(legacyOnly, autoOnlyOlder, { headSeenAt: null, now: T0 }), { bots: [], version: REVIEWER_BOTS_VERSION });
+  // Pending checks without headSeenAt still defer migration.
+  assert.deepEqual(
+    resolvePrReviewerBots(legacyOnly, { ...autoOnlyOlder, checks: [{ name: 'build', outcome: 'pending', status: 'IN_PROGRESS' }] }, { headSeenAt: null, now: T0 }),
+    { bots: ['cindy-auto-merge-bot'], version: 1 },
+  );
+
+  // 5) Incomplete/truncated snapshot: preserves legacy list and leaves migration pending at v1 even after settle window.
   for (const incomplete of [
-    { ...autoOnlySnap, checksSummary: { unavailable: true } },
-    { ...autoOnlySnap, checksSummary: { truncated: true } },
-    { ...autoOnlySnap, reviewThreads: { truncated: true, nodes: [] } },
-    { ...autoOnlySnap, gate: { truncated: true } },
-    { ...autoOnlySnap, reviews: Array.from({ length: 50 }, (_, i) => ({ author: 'cindy-auto-merge-bot', authorIsBot: true, state: 'APPROVED', commitOid: `sha${i}`, submittedAt: oldAt })) },
+    { ...autoOnlyOlder, checksSummary: { unavailable: true } },
+    { ...autoOnlyOlder, checksSummary: { truncated: true } },
+    { ...autoOnlyOlder, reviewThreads: { truncated: true, nodes: [] } },
+    { ...autoOnlyOlder, gate: { truncated: true } },
+    { ...autoOnlyOlder, reviews: Array.from({ length: 50 }, (_, i) => ({ author: 'cindy-auto-merge-bot', authorIsBot: true, state: 'APPROVED', commitOid: `sha${i}`, submittedAt: oldAt })) },
   ]) {
-    assert.deepEqual(resolvePrReviewerBots(legacyOnly, incomplete), { bots: ['cindy-auto-merge-bot'], version: 1 });
+    assert.deepEqual(resolvePrReviewerBots(legacyOnly, incomplete, { headSeenAt: T0, now: T0 + 20 * MIN }), { bots: ['cindy-auto-merge-bot'], version: 1 });
   }
 
-  // Vetted v2 state: keeps previously verified reviewer bot even before checks register on a new head.
+  // 6) Vetted v2 state: keeps previously verified reviewer bot even before checks register on a new head.
   const v2Prev = { reviewerBots: ['greptile-apps'], reviewerBotsVersion: REVIEWER_BOTS_VERSION };
   const newHeadNoChecks = { latestCommitOid: 'ccc3333', reviews: [], reviewerChecks: [] };
-  assert.deepEqual(expectedBots({ snap: newHeadNoChecks, previous: v2Prev, repoBots: {} }), ['greptile-apps']);
-  assert.deepEqual(resolvePrReviewerBots(v2Prev, newHeadNoChecks), { bots: ['greptile-apps'], version: REVIEWER_BOTS_VERSION });
+  assert.deepEqual(expectedBots({ snap: newHeadNoChecks, previous: v2Prev, repoBots: {}, headSeenAt: T0, now: T0 + MIN }), ['greptile-apps']);
+  assert.deepEqual(resolvePrReviewerBots(v2Prev, newHeadNoChecks, { headSeenAt: T0, now: T0 + MIN }), { bots: ['greptile-apps'], version: REVIEWER_BOTS_VERSION });
 });

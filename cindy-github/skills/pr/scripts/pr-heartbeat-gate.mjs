@@ -1701,7 +1701,7 @@ async function gateMain(argv, ctx) {
     // owner's deliveries, acknowledgements, pacing or suppression markers.
     // New notification fields must not silently inherit an old owner's state.
     const facts = ['headOid', 'roundCount', 'reviewersSeen', 'deferredHeadOid',
-      'initialAdditions', 'headSeenAt', 'reviewerBots', 'lastKnownConflicting',
+      'initialAdditions', 'headSeenAt', 'reviewerBots', 'reviewerBotsVersion', 'lastKnownConflicting',
       'currentFingerprint', 'fingerprintFields', 'lastChangeAt', 'inventoryFailures',
       'consecutiveSnapshotFailures', 'lastSnapshotFailureAt', 'snapshotFailureFingerprint',
       'snapshotFailureSummary', 'snapshotFailureBackoffUntil', 'snapshotWatchRetryAt'];
@@ -1858,7 +1858,7 @@ async function gateMain(argv, ctx) {
   const repoFile = repoStateFilePath(args.stateDir, args.repo);
   const repoState = readState(repoFile) ?? {};
   const repoBots = updateRepoBots(repoState.reviewerBots, snap, now);
-  const waitFor = expectedBots({ snap, previous, repoBots, viewer: snap.viewer });
+  const waitFor = expectedBots({ snap, previous, repoBots, viewer: snap.viewer, headSeenAt, now });
   // 旧版状态没有 headSeenAt:这个提交不知道何时推送的,不压。
   const settle = settleState({ snap, headSeenAt, expected: waitFor, now });
   const decision = decide({
@@ -2011,7 +2011,7 @@ async function gateMain(argv, ctx) {
     // 节奏与收齐:新提交首次看到的时刻、本 PR 见过的 bot reviewer、收齐窗口截止、上次有变化的时刻
     ...(headSeenAt ? { headSeenAt } : {}),
     ...(() => {
-      const resolved = resolvePrReviewerBots(previous, snap);
+      const resolved = resolvePrReviewerBots(previous, snap, { headSeenAt, now });
       return { reviewerBots: resolved.bots, reviewerBotsVersion: resolved.version };
     })(),
     ...(settle.open && decision.reason === 'settling' ? { settleUntil: settle.until } : {}),

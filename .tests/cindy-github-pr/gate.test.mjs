@@ -1818,7 +1818,7 @@ test('只提交 APPROVED 的自动合并 bot 不写入仓库评审名单,也不�
   assert.match(r.json().detail, /events=\[checks-failed,remarks\]/);
 });
 
-test('升级路径:旧版单 PR 状态在完整快照上清掉纯自动合并 bot 并保留真实评审,不完整快照保守延后', async (t) => {
+test('升级路径:旧 head 有 App 佐证、新 head 暂无检查时暂留旧 App 等待证据到齐,收齐后保留真实评审并清掉自动审批 bot 迁至 v2', async (t) => {
   const fx = createFixture(t);
   const autoMergeReview = {
     id: 'R-auto',
@@ -1830,8 +1830,22 @@ test('升级路径:旧版单 PR 状态在完整快照上清掉纯自动合并 bo
     url: 'https://gh/R-auto',
     commitOid: 'aaa1111',
   };
-  const realGreptileReview = botReview('R-grep', 'greptile-apps', 'aaa1111', iso(T0 - 20 * 24 * 60 * MIN));
-  const first = snap({ reviews: [autoMergeReview, realGreptileReview] });
+  const oldGreptileApproved = {
+    id: 'R-grep-ok',
+    author: 'greptile-apps',
+    authorIsBot: true,
+    state: 'APPROVED',
+    body: 'LGTM',
+    submittedAt: iso(T0 - 20 * 24 * 60 * MIN),
+    url: 'https://gh/R-grep-ok',
+    commitOid: 'aaa1111',
+  };
+  const first = snap({
+    reviews: [autoMergeReview, oldGreptileApproved],
+    reviewerChecks: [
+      { name: 'Greptile Review', appSlug: 'greptile-apps', appId: 99, headSha: 'aaa1111', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: iso(T0 - 20 * 24 * 60 * MIN), completedAt: iso(T0 - 20 * 24 * 60 * MIN) },
+    ],
+  });
   fx.setSnapshot(first);
   await fx.run();
   assert.equal((await fx.run(['--ack'])).code, 0);
@@ -1840,43 +1854,107 @@ test('升级路径:旧版单 PR 状态在完整快照上清掉纯自动合并 bo
   fx.writeRepoState({ reviewerBots: {} });
   fx.writeState({ reviewerBots: ['cindy-auto-merge-bot', 'greptile-apps'], reviewerBotsVersion: undefined });
 
-  // 完整快照上:保留有评审证据的 greptile-apps 继续收齐,清掉 cindy-auto-merge-bot 并迁至 v2。
+  // 1) 新 head bbb2222 刚推送、Greptile 的 App 检查尚未注册:暂留未确认的旧 App(v1),不提前结束收齐等待。
   fx.advance(2);
   const red = { latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], reviewerChecks: [], verdict: 'NEEDS_WORK' };
   fx.setSnapshot(snap({ ...first, ...red }));
   let r = await fx.run(['--json']);
   assert.equal(r.code, 2, r.stdout);
   assert.equal(r.json().reason, 'settling');
-  assert.match(r.json().detail, /held until greptile-apps answer/);
-  assert.doesNotMatch(r.json().detail, /cindy-auto-merge-bot/);
+  assert.match(r.json().detail, /greptile-apps/);
+  assert.deepEqual(fx.readState().reviewerBots, ['cindy-auto-merge-bot', 'greptile-apps']);
+  assert.equal(fx.readState().reviewerBotsVersion, 1);
+
+  // 2) Greptile 在新 head 注册自有 App 检查并批准,等本轮收齐窗口结束:
+  //    Greptile 凭当前 head 证据保留,纯自动审批 bot 清掉,单 PR 状态迁至 v2 并放行。
+  fx.advance(20);
+  const greptileOnNewHead = {
+    ...first,
+    ...red,
+    reviews: [
+      ...first.reviews,
+      { id: 'R-grep-2', author: 'greptile-apps', authorIsBot: true, state: 'APPROVED', body: 'LGTM', submittedAt: iso(fx.now() - 15 * MIN), url: 'https://gh/R-grep-2', commitOid: 'bbb2222' },
+    ],
+    reviewerChecks: [
+      { name: 'Greptile Review', appSlug: 'greptile-apps', appId: 99, headSha: 'bbb2222', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: iso(fx.now() - 16 * MIN), completedAt: iso(fx.now() - 15 * MIN) },
+    ],
+  };
+  fx.setSnapshot(snap(greptileOnNewHead));
+  r = await fx.run(['--json']);
+  assert.equal(r.code, 0, r.stdout);
   assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
   assert.equal(fx.readState().reviewerBotsVersion, 2);
+  assert.equal((await fx.run(['--resume', 'pushed fix'])).code, 0);
 
-  // 仅剩旧版自动合并 bot(无真实评审 bot)且仓库缓存已过期:升级后立刻放行,不再卡 20 分钟。
-  const autoOnly = createFixture(t);
-  const onlyAutoSnap = snap({ reviews: [autoMergeReview] });
-  autoOnly.setSnapshot(onlyAutoSnap);
-  await autoOnly.run();
-  assert.equal((await autoOnly.run(['--ack'])).code, 0);
-  autoOnly.writeRepoState({ reviewerBots: {} });
-  autoOnly.writeState({ reviewerBots: ['cindy-auto-merge-bot'], reviewerBotsVersion: undefined });
-  autoOnly.advance(2);
-  autoOnly.setSnapshot(snap({ ...onlyAutoSnap, ...red }));
-  r = await autoOnly.run(['--json']);
+  // 3) 迁至 v2 后再推 ccc3333:即使 ccc3333 尚无检查,仍保留 Greptile、不再等待 cindy-auto-merge-bot。
+  fx.advance(5);
+  fx.setSnapshot(snap({ ...greptileOnNewHead, latestCommitOid: 'ccc3333', checks: [check('lint', 'failed', { required: true })], reviewerChecks: [] }));
+  r = await fx.run(['--json']);
+  assert.equal(r.code, 2, r.stdout);
+  assert.equal(r.json().reason, 'settling');
+  assert.match(r.json().detail, /held until greptile-apps answer/);
+  assert.doesNotMatch(r.json().detail, /cindy-auto-merge-bot/);
+
+  // 4) 仅剩旧版纯真实评审 Greptile(旧 head 有 App 佐证、新 head 暂无检查):
+  //    新 head 刚推时暂留等待;一旦 Greptile 在新 head 注册检查并答复,无需等满 20 分钟立刻迁至 v2 并放行。
+  const grepOnly = createFixture(t);
+  const grepFirst = snap({ reviews: [oldGreptileApproved], reviewerChecks: first.reviewerChecks });
+  grepOnly.setSnapshot(grepFirst);
+  await grepOnly.run();
+  assert.equal((await grepOnly.run(['--ack'])).code, 0);
+  grepOnly.writeRepoState({ reviewerBots: {} });
+  grepOnly.writeState({ reviewerBots: ['greptile-apps'], reviewerBotsVersion: undefined });
+  grepOnly.advance(2);
+  grepOnly.setSnapshot(snap({ ...grepFirst, ...red }));
+  r = await grepOnly.run(['--json']);
+  assert.equal(r.code, 2, r.stdout);
+  assert.equal(r.json().reason, 'settling');
+  assert.match(r.json().detail, /held until greptile-apps answer/);
+  assert.equal(grepOnly.readState().reviewerBotsVersion, 1);
+
+  grepOnly.advance(3);
+  grepOnly.setSnapshot(snap({
+    ...grepFirst,
+    ...red,
+    reviews: [
+      oldGreptileApproved,
+      { id: 'R-grep-b', author: 'greptile-apps', authorIsBot: true, state: 'APPROVED', body: 'LGTM', submittedAt: iso(grepOnly.now()), url: 'https://gh/R-grep-b', commitOid: 'bbb2222' },
+    ],
+    reviewerChecks: [
+      { name: 'Greptile Review', appSlug: 'greptile-apps', appId: 99, headSha: 'bbb2222', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: iso(grepOnly.now() - MIN), completedAt: iso(grepOnly.now()) },
+    ],
+  }));
+  r = await grepOnly.run(['--json']);
+  assert.equal(r.code, 0, r.stdout);
+  assert.deepEqual(grepOnly.readState().reviewerBots, ['greptile-apps']);
+  assert.equal(grepOnly.readState().reviewerBotsVersion, 2);
+
+  // 5) 仅剩旧版自动合并 bot 且其在当前 head 上提交了无 App 佐证的 APPROVED:无需等满 20 分钟直接清掉迁至 v2 并放行。
+  const autoCurrent = createFixture(t);
+  const autoCurrentReview = { ...autoMergeReview, commitOid: 'bbb2222' };
+  const autoCurrentSnap = snap({ reviews: [autoCurrentReview] });
+  autoCurrent.setSnapshot(autoCurrentSnap);
+  await autoCurrent.run();
+  assert.equal((await autoCurrent.run(['--ack'])).code, 0);
+  autoCurrent.writeRepoState({ reviewerBots: {} });
+  autoCurrent.writeState({ reviewerBots: ['cindy-auto-merge-bot'], reviewerBotsVersion: undefined });
+  autoCurrent.advance(2);
+  autoCurrent.setSnapshot(snap({ ...autoCurrentSnap, ...red }));
+  r = await autoCurrent.run(['--json']);
   assert.equal(r.code, 0, r.stdout);
   assert.match(r.json().detail, /events=\[checks-failed\]/);
-  assert.deepEqual(autoOnly.readState().reviewerBots, []);
-  assert.equal(autoOnly.readState().reviewerBotsVersion, 2);
+  assert.deepEqual(autoCurrent.readState().reviewerBots, []);
+  assert.equal(autoCurrent.readState().reviewerBotsVersion, 2);
 
-  // 快照不完整(如 reviewThreads.truncated)时保守保留旧名单且暂不升至 v2,继续收齐等待。
+  // 6) 快照不完整(如 reviewThreads.truncated)时即使已过收齐窗口也保守保留旧名单且暂不升至 v2。
   const incomplete = createFixture(t);
-  incomplete.setSnapshot(onlyAutoSnap);
+  incomplete.setSnapshot(autoCurrentSnap);
   await incomplete.run();
   assert.equal((await incomplete.run(['--ack'])).code, 0);
   incomplete.writeRepoState({ reviewerBots: {} });
   incomplete.writeState({ reviewerBots: ['greptile-apps'], reviewerBotsVersion: undefined });
   incomplete.advance(2);
-  incomplete.setSnapshot(snap({ ...onlyAutoSnap, ...red, reviewThreads: { totalCount: 1, fetchedCount: 0, unresolvedCount: 0, activeUnresolvedCount: 0, outdatedUnresolvedCount: 0, truncated: true, nodes: [] } }));
+  incomplete.setSnapshot(snap({ ...autoCurrentSnap, ...red, reviewThreads: { totalCount: 1, fetchedCount: 0, unresolvedCount: 0, activeUnresolvedCount: 0, outdatedUnresolvedCount: 0, truncated: true, nodes: [] } }));
   r = await incomplete.run(['--json']);
   assert.equal(r.code, 2, r.stdout);
   assert.equal(r.json().reason, 'settling');
