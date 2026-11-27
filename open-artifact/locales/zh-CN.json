@@ -1,0 +1,16 @@
+{
+  "name": "Open Artifact",
+  "description": "在任务侧栏创建、编辑和评论 Open Artifact 作品。",
+  "whenToUse": "需要创建或编辑演示文稿、设计稿、白板、表格、看板、文档或动画时。",
+  "tools": {
+    "artifact": {
+      "description": "创建、读取、更新或打开本机作品。用 quickstart 选择作品类型，在 Cindy 右侧栏打开编辑页面。"
+    },
+    "artifact_data": {
+      "description": "读取或修改作品的数据记录，支持查询、写入和批处理。"
+    },
+    "artifact_comments": {
+      "description": "读取、回复、解决或重新打开作品评论，也可等待新的评论。"
+    }
+  }
+}

@@ -754,6 +754,61 @@ test('successful device removal/erase and App launch still produce confirmed out
     assert.equal(calls.some(args=>args.includes('force-stop')),relaunch);
   }
 });
+test('Android ADB console preserves exact device identity across line endings',async t=>{
+  const root=await temp(t),runtime='android:android-36:google_apis:x86_64',adbPath=path.join(root,'adb');
+  const sdk={inspect:async()=>({ready:true,adb:adbPath,emulator:path.join(root,'emulator'),images:[{identifier:runtime,directory:path.join(root,'image'),abi:'x86_64',version:'36'}]})};
+  const calls=[],touches=[],logLine='1000.0 100 100 W Fixture: ready';
+  const endpoint=await emulator(t,(stream,headers,body)=>{
+    const method=headers[':path'].split('/').at(-1);
+    if(method==='getScreenshot')return send(stream,'Image',{format:{width:108,height:240,rotation:{rotation:0}},image:image()});
+    assert.equal(method,'sendTouch');
+    touches.push(...schema.lookupType('TouchEvent').decode(body.subarray(5)).touches);
+    send(stream,'Empty',{});
+  });
+  let consoleOutput='';
+  const run=async(file,args)=>{
+    assert.equal(file,adbPath);
+    assert.deepEqual(args.slice(0,2),['-s','emulator-5554']);
+    calls.push(args.slice(2));
+    if(args[2]==='emu'){assert.deepEqual(args.slice(2),['emu','avd','name']);return {stdout:consoleOutput.trim()};}
+    if(args.includes('sys.boot_completed')||args.includes("'sys.boot_completed'"))return {stdout:'1'};
+    if(args.includes("'dumpsys'"))return {stdout:'Viewport INTERNAL: displayId=0, orientation=0'};
+    if(args[2]==='exec-out')return {stdout:'<?xml version="1.0"?><hierarchy rotation="0"><node text="Ready" bounds="[0,0][30,30]" clickable="true" enabled="true"/></hierarchy>'};
+    if(args[2]==='logcat')return {stdout:logLine};
+    assert.fail('Unexpected ADB command: '+args.join(' '));
+  };
+  const devices=require(path.join(A,'devices.cjs')).createDevices({root,sdk,run,children:new Set()});
+  const {udid}=await devices.create({name:'Console fixture',runtime,deviceType:'android:phone'}),device=await devices.target({udid},false);
+  const record='pid_'+process.pid+'.ini',list=fs.readdir,read=fs.readFile;
+  t.mock.method(fs,'readdir',async(dir,...args)=>String(dir).endsWith(path.join('avd','running'))?[record]:list(dir,...args));
+  t.mock.method(fs,'readFile',async(file,...args)=>path.basename(String(file))===record?
+    `avd.id=${device.avdName}\navd.dir=${device.directory}\ngrpc.port=${endpoint.port}\ngrpc.token=${endpoint.token}\nport.serial=5554\n`:read(file,...args));
+  const target=await devices.target({udid}),agent=require(path.join(A,'agent.cjs')).createAgent({root,devices,run});
+  for(const [label,ending] of [['LF','\n'],['CRLF','\r\n']])await t.test(label,async()=>{
+    consoleOutput=[device.avdName,'OK',''].join(ending);
+    assert.equal((await devices.adb(target,['shell','getprop','sys.boot_completed'])).stdout,'1');
+  });
+  consoleOutput=[device.avdName,'OK',''].join('\r\r\n');
+  await t.test('Windows boot confirms an already running device',async()=>{
+    assert.equal((await devices.devices())[0].state,'Booted');
+    const {state,execution}=await devices.boot({udid,_deadline:Date.now()+1500});
+    assert.deepEqual({state,execution},{state:'Booted',execution:'not_executed'});
+  });
+  await t.test('Windows screenshot, UI tree, tap and logs pass the same check',async()=>{
+    assert.equal((await agent.screenshot(target,{format:'png'})).mimeType,'image/png');
+    assert.equal((await agent.describe(target)).elements[0].label,'Ready');
+    assert.equal((await agent.tap(target,{x:10,y:12,observe:'none'})).execution,'executed');
+    assert.ok(touches.some(touch=>touch.pressure===1024));
+    assert.deepEqual((await agent.logs(target,{_since:1})).lines,[logLine]);
+  });
+  await t.test('a different AVD is refused before dispatch',async()=>{
+    consoleOutput=[device.avdName+'_other','OK',''].join('\r\r\n');
+    calls.length=0;touches.length=0;
+    await assert.rejects(agent.tap(target,{x:10,y:12,observe:'none'}),e=>e.code==='DEVICE_NOT_OWNED'&&e.execution==='not_executed');
+    assert.deepEqual(calls,[['emu','avd','name']]);
+    assert.deepEqual(touches,[]);
+  });
+});
 for(const rediscovered of [false,true])test('Android audio waits for the old process before restarting: '+(rediscovered?'previous worker':'current worker'),async t=>{
   const root=await temp(t),runtime='android:android-36:google_apis:arm64-v8a',launches=[];
   const {EventEmitter}=require('node:events');let d,child,running=false,exiting=false;
