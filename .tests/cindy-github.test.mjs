@@ -3841,58 +3841,122 @@ test('older host without card scheduler checks live PR state and instructs follo
     const uRes = await uModern.tool({ card_id: uOpen.callId });
     assert.equal(uRes.reply.result.follow_state, 'active');
     assert.equal(JSON.parse(uModern.files.get(`pr-cards/${uOpen.callId}.json`)).pending, null);
+
+    // 4) Restarting an older host AFTER pending='resume' already expired settles automatically on wake
+    //    without requiring any manual card refresh.
+    const bootPureSrc = createPrRuntime({ github: prGraphql(), files: new Map(modern.files) });
+    await bootPureSrc.click(opened.callId, 'pr:resume');
+    const bootPureRec = JSON.parse(bootPureSrc.files.get(key));
+    bootPureRec.claimedAt = Date.now() - 11 * 60 * 1000;
+    bootPureSrc.files.set(key, JSON.stringify(bootPureRec));
+    const bootPure = createPrRuntime({ github: prGraphql(), files: new Map(bootPureSrc.files) });
+    await flushAsync();
+    const bootPureSaved = JSON.parse(bootPure.files.get(key));
+    assert.equal(bootPureSaved.pending, null);
+    assert.equal(bootPureSaved.following, false);
+    assert.equal(bootPureSaved.scheduleStatus, 'unverified');
+    const bootPureHtml = bootPure.lastCard(opened.callId)?.html || '';
+    assert.doesNotMatch(bootPureHtml, /正在恢复跟进|data-ghost-live-label="跟进中"/);
+    assert.match(visibleText(bootPureHtml).join('\n'), /跟进待核实/);
+    const bootPureLate = await bootPure.tool({ card_id: opened.callId, following: true });
+    assert.equal(bootPureLate.reply.result.follow_state, 'active');
+
+    const bq = followScheduler();
+    const bqInit = createPrRuntime({ github: prGraphql(), hostApi: bq.hostApi, kv: { prCard: { autoFollow: true } } });
+    const bqOpen = await bqInit.tool({ repo: 'octo/repo', pr: 42, published: true });
+    bq.rows.get('sch-1').status = 'paused';
+    await bqInit.tool({ card_id: bqOpen.callId });
+    const bqOld = createPrRuntime({ github: prGraphql(), hostApi: { host: bq.hostApi.host }, files: new Map(bqInit.files) });
+    await bqOld.click(bqOpen.callId, 'pr:resume');
+    const bqKey = `pr-cards/${bqOpen.callId}.json`;
+    const bqRec = JSON.parse(bqOld.files.get(bqKey));
+    bqRec.claimedAt = Date.now() - 11 * 60 * 1000;
+    bqOld.files.set(bqKey, JSON.stringify(bqRec));
+    const bqRestarted = createPrRuntime({ github: prGraphql(), hostApi: { host: bq.hostApi.host }, files: new Map(bqOld.files) });
+    await flushAsync();
+    const bqSaved = JSON.parse(bqRestarted.files.get(bqKey));
+    assert.equal(bqSaved.pending, null);
+    assert.equal(bqSaved.scheduleStatus, 'paused');
+    const bqHtml = bqRestarted.lastCard(bqOpen.callId)?.html || '';
+    assert.doesNotMatch(bqHtml, /正在恢复跟进/);
+    assert.match(bqHtml, /<button data-ghost-action="pr:resume"/);
   }
 });
 
-test('pre-1.5.37 cards missing manualStop verify live schedule provenance instead of misclassifying all old cards', async () => {
-  // Unmodified card-created schedule migrates to manualStop=false on refresh and on direct Stop (active or paused).
-  for (const flow of ['refresh-then-stop', 'direct-stop-active', 'direct-stop-paused']) {
-    const { hostApi, rows, calls } = followScheduler();
-    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
-    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
-    const key = `pr-cards/${opened.callId}.json`;
-    const old = JSON.parse(rt.files.get(key));
-    delete old.manualStop;
-    if (flow === 'direct-stop-paused') {
-      old.following = false;
-      old.scheduleStatus = 'paused';
-      rows.get('sch-1').status = 'paused';
+test('cards without a trusted creation baseline stay manualStop fail-closed, while baselined cards verify live config before Stop', async () => {
+  // Old cards lacking scheduleDefaults (pre-1.5.37 missing manualStop, or pre-1.5.49 with manualStop=false
+  // but no baseline snapshot) MUST keep manual stop and issue zero schedule_delete calls — even when a
+  // pre-migration user edit happens to match the current default model and timezone.
+  const currentDefaultModel = { route: { agentKind: 'cc', providerId: 'chosen', model: 'sonnet', effort: 'high', fastMode: 'ultrafast', agentDeviceId: 'remote' } };
+  for (const variant of ['missing-manualStop-and-defaults', 'manualStop-false-without-defaults', 'edited-before-migration-matches-current-default']) {
+    for (const flow of ['refresh-then-stop', 'direct-stop-active', 'direct-stop-paused']) {
+      const { hostApi, rows, calls } = followScheduler();
+      const rt = createPrRuntime({
+        github: prGraphql(),
+        hostApi,
+        kv: { prCard: { autoFollow: true, ...(variant === 'edited-before-migration-matches-current-default' ? { followModel: currentDefaultModel } : {}) } },
+      });
+      const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+      const key = `pr-cards/${opened.callId}.json`;
+      const old = JSON.parse(rt.files.get(key));
+      delete old.scheduleDefaults;
+      if (variant === 'missing-manualStop-and-defaults') delete old.manualStop;
+      else old.manualStop = false;
+      if (flow === 'direct-stop-paused') {
+        old.following = false;
+        old.scheduleStatus = 'paused';
+        rows.get('sch-1').status = 'paused';
+      }
+      rt.files.set(key, JSON.stringify(old));
+      const before = structuredClone(rows.get('sch-1'));
+
+      if (flow === 'refresh-then-stop') {
+        const refreshed = await rt.tool({ card_id: opened.callId });
+        assert.equal(refreshed.reply.result.follow_state, 'active', `${variant}:${flow}`);
+        assert.equal(JSON.parse(rt.files.get(key)).manualStop, true, `${variant}:${flow}`);
+        const html = rt.lastCard(opened.callId).html;
+        assert.doesNotMatch(html, /<button data-ghost-action="pr:stop"/, `${variant}:${flow}`);
+        assert.match(html, /<button data-ghost-action="pr:manual-stop" aria-label="手动停止"/, `${variant}:${flow}`);
+        assert.doesNotMatch(html, /已有调度请在自动化设置手动停止/, `${variant}:${flow}`);
+      }
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(calls.filter(c => c === 'schedule_delete').length, 0, `${variant}:${flow}`);
+      assert.equal(rows.size, 1, `${variant}:${flow}`);
+      assert.deepEqual(structuredClone(rows.get('sch-1')), before, `${variant}:${flow}`);
+      assert.equal(JSON.parse(rt.files.get(key)).manualStop, true, `${variant}:${flow}`);
+      const stopHtml = rt.lastCard(opened.callId).html;
+      assert.doesNotMatch(stopHtml, /<button data-ghost-action="pr:stop"/, `${variant}:${flow}`);
+      assert.match(stopHtml, /<button data-ghost-action="pr:manual-stop" aria-label="手动停止"/, `${variant}:${flow}`);
+      assert.match(stopHtml, /已有调度请在自动化设置手动停止（ID：sch-1）/, `${variant}:${flow}`);
+      if (flow === 'direct-stop-paused') {
+        assert.match(stopHtml, /<button data-ghost-action="pr:resume"/, `${variant}:${flow}`);
+        await rt.click(opened.callId, 'pr:resume');
+        assert.equal(rows.get('sch-1').status, 'active', `${variant}:${flow}`);
+        assert.equal(JSON.parse(rt.files.get(key)).manualStop, true, `${variant}:${flow}`);
+        assert.equal(calls.filter(c => c === 'schedule_delete').length, 0, `${variant}:${flow}`);
+      }
     }
-    rt.files.set(key, JSON.stringify(old));
-    if (flow === 'refresh-then-stop') {
-      const refreshed = await rt.tool({ card_id: opened.callId });
-      assert.equal(refreshed.reply.result.follow_state, 'active');
-      assert.equal(refreshed.reply.result.note, undefined);
-      assert.equal(JSON.parse(rt.files.get(key)).manualStop, false);
-      assert.match(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/);
-      assert.doesNotMatch(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止/);
-    }
-    await rt.click(opened.callId, 'pr:stop');
-    assert.equal(rows.size, 0, flow);
-    assert.equal(calls.includes('schedule_delete'), true, flow);
-    assert.match(rt.lastCard(opened.callId).html, /data-ghost-action="pr:follow"/, flow);
   }
 
-  // User-edited or adopted schedule with manualStop missing locks to manualStop=true without deleting,
-  // while still allowing pr:resume when paused.
+  // Baselined card-created schedule edited in Automation locks to manualStop=true on refresh or direct Stop
+  // without deleting, while still allowing pr:resume when paused.
   for (const mutation of [
     'prompt', 'interval', 'timeout', 'name', 'silentWhenIdle',
     'notify-desktop', 'notify-feishu', 'notify-extra',
     'prTrigger-change', 'manual', 'useWorktree', 'persistentSession',
     'workingDir', 'webhookTrigger', 'expireAt', 'executionMode',
+    'model', 'timezone', 'effort', 'fastMode', 'agentKind',
   ]) {
     for (const via of ['refresh', 'direct-stop']) {
       const { hostApi, rows, calls } = followScheduler();
       const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
       const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
       const key = `pr-cards/${opened.callId}.json`;
-      const old = JSON.parse(rt.files.get(key));
-      delete old.manualStop;
-      old.following = false;
-      old.scheduleStatus = 'paused';
-      rt.files.set(key, JSON.stringify(old));
       const row = rows.get('sch-1');
       row.status = 'paused';
+      await rt.tool({ card_id: opened.callId });
+      assert.equal(JSON.parse(rt.files.get(key)).manualStop, false, `${mutation}:${via}`);
+
       if (mutation === 'prompt') row.prompt = 'Custom user prompt for https://github.com/octo/repo/pull/42';
       else if (mutation === 'interval') row.intervalMs = 600000;
       else if (mutation === 'timeout') row.preRunHook = { ...row.preRunHook, timeoutMs: 90000 };
@@ -3908,14 +3972,23 @@ test('pre-1.5.37 cards missing manualStop verify live schedule provenance instea
       else if (mutation === 'workingDir') row.workingDir = '/tmp/custom';
       else if (mutation === 'webhookTrigger') row.webhookTrigger = { source: { preset: 'custom' } };
       else if (mutation === 'expireAt') row.expireAt = 9999999999999;
-      else row.executionMode = 'script';
+      else if (mutation === 'executionMode') row.executionMode = 'script';
+      else if (mutation === 'model') { row.model = 'claude-opus-4-6'; row.providerId = 'anthropic'; row.modelAgentKind = 'claude-code'; }
+      else if (mutation === 'timezone') row.timezone = row.timezone === 'UTC' ? 'America/New_York' : 'UTC';
+      else if (mutation === 'effort') row.effort = 'high';
+      else if (mutation === 'fastMode') row.fastMode = true;
+      else row.agentKind = 'claude-code';
+      const before = structuredClone(row);
 
       if (via === 'refresh') await rt.tool({ card_id: opened.callId });
       else await rt.click(opened.callId, 'pr:stop');
 
       assert.equal(rows.size, 1, `${mutation}:${via}`);
       assert.equal(calls.includes('schedule_delete'), false, `${mutation}:${via}`);
-      assert.equal(JSON.parse(rt.files.get(key)).manualStop, true, `${mutation}:${via}`);
+      assert.deepEqual(structuredClone(rows.get('sch-1')), before, `${mutation}:${via}`);
+      const after = JSON.parse(rt.files.get(key));
+      assert.equal(after.manualStop, true, `${mutation}:${via}`);
+      assert.equal(after.scheduleDefaults, undefined, `${mutation}:${via}`);
       const html = rt.lastCard(opened.callId).html;
       assert.doesNotMatch(html, /<button data-ghost-action="pr:stop"/, `${mutation}:${via}`);
       assert.match(html, /<button data-ghost-action="pr:manual-stop" aria-label="手动停止"/, `${mutation}:${via}`);
@@ -3933,91 +4006,56 @@ test('pre-1.5.37 cards missing manualStop verify live schedule provenance instea
     }
   }
 
-  // Regression: old/new card (manualStop=false) -> user edits prompt, notify, model, or timezone in Automation -> Stop on original card preserves the edited schedule.
-  for (const edit of ['prompt', 'notify-feishu', 'notify-desktop', 'model', 'timezone', 'effort', 'fastMode', 'agentKind']) {
-    for (const fromLegacy of [true, false]) {
-      const { hostApi, rows, calls } = followScheduler();
-      const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
-      const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
-      const key = `pr-cards/${opened.callId}.json`;
-      if (fromLegacy) {
-        const old = JSON.parse(rt.files.get(key));
-        delete old.manualStop;
-        delete old.scheduleDefaults;
-        rt.files.set(key, JSON.stringify(old));
-        const refreshed = await rt.tool({ card_id: opened.callId });
-        assert.equal(refreshed.reply.result.follow_state, 'active', `${edit}:${fromLegacy}`);
-      }
-      assert.equal(JSON.parse(rt.files.get(key)).manualStop, false, `${edit}:${fromLegacy}`);
-      assert.match(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, `${edit}:${fromLegacy}`);
-
-      // User edits the schedule in Automation without refreshing the card first.
-      const row = rows.get('sch-1');
-      if (edit === 'prompt') row.prompt = 'User customized prompt for https://github.com/octo/repo/pull/42';
-      else if (edit === 'notify-feishu') row.notify = { desktop: true, feishu: true };
-      else if (edit === 'notify-desktop') row.notify = { desktop: false, feishu: false };
-      else if (edit === 'model') { row.model = 'claude-opus-4-6'; row.providerId = 'anthropic'; row.modelAgentKind = 'claude-code'; }
-      else if (edit === 'timezone') row.timezone = row.timezone === 'UTC' ? 'America/New_York' : 'UTC';
-      else if (edit === 'effort') row.effort = 'high';
-      else if (edit === 'fastMode') row.fastMode = true;
-      else row.agentKind = 'claude-code';
-      const snapshotBeforeStop = structuredClone(row);
-
-      await rt.click(opened.callId, 'pr:stop');
-      assert.equal(calls.includes('schedule_delete'), false, `${edit}:${fromLegacy}`);
-      assert.equal(rows.size, 1, `${edit}:${fromLegacy}`);
-      assert.deepEqual(structuredClone(rows.get('sch-1')), snapshotBeforeStop, `${edit}:${fromLegacy}`);
-      const afterStop = JSON.parse(rt.files.get(key));
-      assert.equal(afterStop.manualStop, true, `${edit}:${fromLegacy}`);
-      assert.equal(afterStop.pending, null, `${edit}:${fromLegacy}`);
-      assert.equal(afterStop.scheduleAction, null, `${edit}:${fromLegacy}`);
-      const stopHtml = rt.lastCard(opened.callId).html;
-      assert.doesNotMatch(stopHtml, /<button data-ghost-action="pr:stop"/, `${edit}:${fromLegacy}`);
-      assert.match(stopHtml, /<button data-ghost-action="pr:manual-stop" aria-label="手动停止"/, `${edit}:${fromLegacy}`);
-      assert.match(stopHtml, /已有调度请在自动化设置手动停止（ID：sch-1）/, `${edit}:${fromLegacy}`);
-    }
-  }
-
-  // Schedule created with a chosen followModel still deletes when untouched, but is preserved if user edits model or timezone.
-  for (const edit of ['none', 'model', 'timezone']) {
+  // Schedule created with followModel + fastMode (false, true, 'ultrafast') deletes when untouched,
+  // and preserves the schedule when model, timezone, or fastMode speed tier (true <-> 'ultrafast') changes.
+  for (const [initialFast, edit, editedFast] of [
+    [false, 'none', false],
+    [true, 'none', true],
+    ['ultrafast', 'none', 'ultrafast'],
+    [false, 'model', false],
+    [false, 'timezone', false],
+    [true, 'fastMode', 'ultrafast'],
+    ['ultrafast', 'fastMode', true],
+    [true, 'fastMode', false],
+  ]) {
+    const label = `${String(initialFast)}:${edit}:${String(editedFast)}`;
     const { hostApi, rows, calls } = followScheduler();
     const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: {
       autoFollow: true,
-      followModel: { route: { agentKind: 'cc', providerId: 'chosen', model: 'sonnet', effort: 'high', fastMode: false, agentDeviceId: 'remote' } },
+      followModel: { route: { agentKind: 'cc', providerId: 'chosen', model: 'sonnet', effort: 'high', fastMode: initialFast, agentDeviceId: 'remote' } },
     } } });
     const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
     const row = rows.get('sch-1');
     if (edit === 'model') row.model = 'opus';
     else if (edit === 'timezone') row.timezone = row.timezone === 'UTC' ? 'Asia/Tokyo' : 'UTC';
+    else if (edit === 'fastMode') row.fastMode = editedFast;
     const before = structuredClone(row);
     await rt.click(opened.callId, 'pr:stop');
     if (edit === 'none') {
-      assert.equal(calls.includes('schedule_delete'), true, edit);
-      assert.equal(rows.size, 0, edit);
+      assert.equal(calls.includes('schedule_delete'), true, label);
+      assert.equal(rows.size, 0, label);
     } else {
-      assert.equal(calls.includes('schedule_delete'), false, edit);
-      assert.equal(rows.size, 1, edit);
-      assert.deepEqual(structuredClone(rows.get('sch-1')), before, edit);
+      assert.equal(calls.includes('schedule_delete'), false, label);
+      assert.equal(rows.size, 1, label);
+      assert.deepEqual(structuredClone(rows.get('sch-1')), before, label);
+      assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).manualStop, true, label);
     }
   }
 
-  // Transient failDir on an unmigrated card does not delete and does not permanently lock manualStop=true.
+  // Transient failDir on a baselined card does not delete and does not permanently lock manualStop=true.
   {
     const fault = { failDir: false };
     const { hostApi, rows, calls } = followScheduler(fault);
     const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
     const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
     const key = `pr-cards/${opened.callId}.json`;
-    const old = JSON.parse(rt.files.get(key));
-    delete old.manualStop;
-    rt.files.set(key, JSON.stringify(old));
     fault.failDir = true;
     await rt.tool({ card_id: opened.callId });
-    assert.equal(JSON.parse(rt.files.get(key)).manualStop, undefined);
+    assert.equal(JSON.parse(rt.files.get(key)).manualStop, false);
     await rt.click(opened.callId, 'pr:stop');
     assert.equal(rows.size, 1);
     assert.equal(calls.includes('schedule_delete'), false);
-    assert.equal(JSON.parse(rt.files.get(key)).manualStop, undefined);
+    assert.equal(JSON.parse(rt.files.get(key)).manualStop, false);
     fault.failDir = false;
     const recovered = await rt.tool({ card_id: opened.callId });
     assert.equal(recovered.reply.result.follow_state, 'active');
@@ -4027,7 +4065,7 @@ test('pre-1.5.37 cards missing manualStop verify live schedule provenance instea
     assert.equal(calls.includes('schedule_delete'), true);
   }
 
-  // Legacy host without card scheduler stays fail-closed on unmigrated scheduleId cards.
+  // Legacy host without card scheduler stays fail-closed on cards without a trusted creation baseline.
   {
     const { hostApi } = followScheduler();
     const modern = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
@@ -4035,6 +4073,7 @@ test('pre-1.5.37 cards missing manualStop verify live schedule provenance instea
     const key = `pr-cards/${opened.callId}.json`;
     const old = JSON.parse(modern.files.get(key));
     delete old.manualStop;
+    delete old.scheduleDefaults;
     modern.files.set(key, JSON.stringify(old));
     const legacy = createPrRuntime({ github: prGraphql(), files: new Map(modern.files) });
     await legacy.click(opened.callId, 'pr:stop');

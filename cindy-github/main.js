@@ -2665,7 +2665,7 @@ function unverifiedLegacyFollow(card) {
 }
 
 function manualFollowStop(card) {
-  return !!card.scheduleId && (card.manualStop === true || (card.manualStop !== false && !hasCardScheduler()));
+  return !!card.scheduleId && (card.manualStop !== false || !card.scheduleDefaults);
 }
 
 function canResumePrFollow(card) {
@@ -3838,6 +3838,10 @@ function normScheduleStr(v) {
   return typeof v === 'string' ? v : '';
 }
 
+function normFastMode(v) {
+  return v === undefined || v === null || v === false || v === '' ? false : v;
+}
+
 function scheduleConfigSnapshot(src) {
   return {
     timezone: normScheduleStr(src && src.timezone),
@@ -3846,23 +3850,9 @@ function scheduleConfigSnapshot(src) {
     model: normScheduleStr(src && src.model),
     providerId: normScheduleStr(src && src.providerId),
     modelAgentDeviceId: normScheduleStr(src && src.modelAgentDeviceId),
-    fastMode: Boolean(src && src.fastMode),
+    fastMode: normFastMode(src && src.fastMode),
     effort: normScheduleStr(src && src.effort),
   };
-}
-
-function expectedScheduleConfig(settings) {
-  var model = settings && !settings.unreadable ? prSettingsForAgent(settings, true).follow_model : null;
-  return scheduleConfigSnapshot({
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-    agentKind: model ? model.model_agent_kind : 'codex',
-    modelAgentKind: model ? model.model_agent_kind : '',
-    model: model ? model.model : '',
-    providerId: model ? model.provider_id : '',
-    modelAgentDeviceId: model ? model.agent_device_id || '' : '',
-    fastMode: model ? Boolean(model.fast_mode) : false,
-    effort: model && model.effort ? model.effort : '',
-  });
 }
 
 function sameScheduleConfig(a, b) {
@@ -3909,7 +3899,7 @@ function isCardCreatedSchedule(row, card, skillEnv, expectedConfig) {
 
 // Single-owner bound schedule read reconciliation used by pr_card refresh,
 // stale pr:resume clicks on draft/terminal PRs, and expired resume handoffs.
-async function reconcileBoundSchedule(card, row, settings, options) {
+async function reconcileBoundSchedule(card, row, options) {
   var opts = options || {};
   if (!row) {
     card.following = false;
@@ -3932,7 +3922,7 @@ async function reconcileBoundSchedule(card, row, settings, options) {
   var checkEnv = null;
   var checkErr = null;
   var needsHookCheck = !!(opts.verifyHook || card.scheduleError || card.scheduleStatus === 'unverified');
-  var needsProvenance = !opts.skipProvenance && card.manualStop !== true;
+  var needsProvenance = !opts.skipProvenance && card.manualStop !== true && !!card.scheduleDefaults;
   if (needsHookCheck || needsProvenance) {
     try { checkEnv = await cardFollowSkillEnv(); }
     catch (err) { checkErr = err; }
@@ -3954,15 +3944,15 @@ async function reconcileBoundSchedule(card, row, settings, options) {
     card.following = row.status === 'active';
     card.scheduleStatus = card.following ? null : row.status;
   }
-  if (needsProvenance && checkEnv && (!needsHookCheck || verifiedHook)) {
-    var expected = card.scheduleDefaults || (settings && !settings.unreadable ? expectedScheduleConfig(settings) : null);
-    if (expected) {
-      card.manualStop = !isCardCreatedSchedule(row, card, checkEnv, expected);
-      if (card.manualStop) {
+  if (!opts.skipProvenance && card.manualStop !== true) {
+    if (!card.scheduleDefaults) {
+      card.manualStop = true;
+    } else if (checkEnv && (!needsHookCheck || verifiedHook)) {
+      if (!isCardCreatedSchedule(row, card, checkEnv, card.scheduleDefaults)) {
+        card.manualStop = true;
         delete card.scheduleDefaults;
       } else {
         delete card.manualStopOpen;
-        if (!card.scheduleDefaults) card.scheduleDefaults = scheduleConfigSnapshot(row);
       }
     }
   }
@@ -4147,14 +4137,11 @@ async function syncCardSchedule(card, settings, mode) {
           }
           repair = await resolveLegacyHookRepair(finalHook, finalSchedule);
           if (card.manualStop !== true) {
-            var resumeExpected = card.scheduleDefaults || (settings && !settings.unreadable ? expectedScheduleConfig(settings) : null);
-            if (resumeExpected) {
-              card.manualStop = !isCardCreatedSchedule(finalSchedule, card, resumeEnv, resumeExpected);
-              if (card.manualStop) delete card.scheduleDefaults;
-              else {
-                delete card.manualStopOpen;
-                if (!card.scheduleDefaults) card.scheduleDefaults = scheduleConfigSnapshot(finalSchedule);
-              }
+            if (!card.scheduleDefaults || !isCardCreatedSchedule(finalSchedule, card, resumeEnv, card.scheduleDefaults)) {
+              card.manualStop = true;
+              delete card.scheduleDefaults;
+            } else {
+              delete card.manualStopOpen;
             }
           }
           card.following = true;
@@ -4177,17 +4164,14 @@ async function syncCardSchedule(card, settings, mode) {
           errorSource = 'verify';
           throw new Error(t('prScheduleHookUnknown'));
         }
-        // Always re-verify the live schedule before deleting: a card that was
-        // previously verified as manualStop=false may since have been edited in Automation
-        // (prompt, notify, model, timezone, timing, etc.).
-        var stopExpected = card.scheduleDefaults || (settings && !settings.unreadable ? expectedScheduleConfig(settings) : null);
-        if (!stopExpected) {
-          errorSource = 'read';
-          throw new Error(t('prSettingsUnreadable'));
-        }
-        if (!isCardCreatedSchedule(owned, card, stopEnv, stopExpected)) {
+        // Always re-verify the live schedule against the creation baseline before
+        // deleting: cards without a trusted baseline or edited in Automation stay
+        // protected with manual stop.
+        if (!card.scheduleDefaults || !isCardCreatedSchedule(owned, card, stopEnv, card.scheduleDefaults)) {
           card.manualStop = true;
           delete card.scheduleDefaults;
+          card.following = owned.status === 'active';
+          card.scheduleStatus = card.following ? null : owned.status;
           card.pending = card.scheduleAction = null;
           clearCardScheduleError(card);
           card.note = deriveCardNote(card, t('prManualStop', { id: card.scheduleId }));
@@ -4273,14 +4257,11 @@ async function syncCardSchedule(card, settings, mode) {
                 clearLegacyScheduleNotice(card);
                 card.legacyHookRepair = await resolveLegacyHookRepair(afterHook, afterResume);
                 if (card.manualStop !== true) {
-                  var afterExpected = card.scheduleDefaults || (settings && !settings.unreadable ? expectedScheduleConfig(settings) : null);
-                  if (afterExpected) {
-                    card.manualStop = !isCardCreatedSchedule(afterResume, card, afterEnv, afterExpected);
-                    if (card.manualStop) delete card.scheduleDefaults;
-                    else {
-                      delete card.manualStopOpen;
-                      if (!card.scheduleDefaults) card.scheduleDefaults = scheduleConfigSnapshot(afterResume);
-                    }
+                  if (!card.scheduleDefaults || !isCardCreatedSchedule(afterResume, card, afterEnv, card.scheduleDefaults)) {
+                    card.manualStop = true;
+                    delete card.scheduleDefaults;
+                  } else {
+                    delete card.manualStopOpen;
                   }
                 }
                 card.note = null;
@@ -4375,7 +4356,7 @@ async function expirePrClaim(card, now) {
     if (hasCardScheduler()) {
       try {
         var live = await prSchedule('schedule_get', { id: card.scheduleId });
-        await reconcileBoundSchedule(card, live, await readPrSettings(), { verifyHook: true });
+        await reconcileBoundSchedule(card, live, { verifyHook: true });
       } catch (err) {
         card.following = false;
         card.legacyHookRepair = null;
@@ -4483,14 +4464,14 @@ function prClaimReleasable(card) {
 }
 
 function prClaimRearm(card) {
-  if (prResumeWaiting(card)) return !prClaimExpired(card);
+  if (prResumeWaiting(card)) return true;
   return (prClaimReleasable(card) && hasSchedulerQuery()) || !prClaimExpired(card);
 }
 
 function prClaimDelay(card) {
   if (typeof card.claimedAt !== 'number') return 0;
   var remaining = card.claimedAt + PR_CLAIM_TTL - Date.now();
-  return remaining > 0 ? remaining : PR_CLAIM_RETRY;
+  return remaining > 0 ? remaining : (prResumeWaiting(card) ? 0 : PR_CLAIM_RETRY);
 }
 
 function armPrClaimTimer(id, delay) {
@@ -4633,7 +4614,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
   // user pause, deletion, or change of ownership during refresh is reflected
   // in the receipt and no stale hook is used for a repair suggestion.
   var settings = await readPrSettings();
-  var legacyStop = card.scheduleAction === 'stop' && card.manualStop !== false;
+  var legacyStop = card.scheduleAction === 'stop' && manualFollowStop(card);
   var terminalResume = card.scheduleAction === 'resume' && (card.stage !== 'open' || (card.pr && card.pr.draft));
   var showManualStop = false;
   if (card.scheduleId && hasCardScheduler() && (!card.scheduleAction || legacyStop || terminalResume)) {
@@ -4668,7 +4649,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
         card.pending = null;
         delete card.claimedAt;
       }
-      await reconcileBoundSchedule(card, currentSchedule, settings, {
+      await reconcileBoundSchedule(card, currentSchedule, {
         verifyHook: terminalResume || pendingResume,
         skipProvenance: legacyStop,
       });
@@ -5078,7 +5059,7 @@ async function prCardAction(msg) {
           if (hasCardScheduler() && card.scheduleId) {
             try {
               var currentPaused = await prSchedule('schedule_get', { id: card.scheduleId });
-              await reconcileBoundSchedule(card, currentPaused, settings, { verifyHook: true });
+              await reconcileBoundSchedule(card, currentPaused, { verifyHook: true });
             } catch (err) {
               card.following = false;
               card.legacyHookRepair = null;
@@ -5119,6 +5100,8 @@ async function prCardAction(msg) {
       card.manualStopOpen = hadManualStopNote ? false : !card.manualStopOpen;
     }
   } else if (action === 'pr:stop' && card.stage === 'open' && manualFollowStop(card) && !card.pending) {
+    card.manualStop = true;
+    delete card.scheduleDefaults;
     card.note = t('prManualStop', { id: card.scheduleId });
   } else if (msg.userActionToken && hasCardScheduler() && (action === 'pr:follow' && card.publishedHere ||
       action === 'pr:stop' && card.scheduleId) && PR_AGENT_ACTIONS[action](card)) {
@@ -5620,7 +5603,14 @@ void enqueuePr(async function () {
     var record = null;
     try { record = saved && saved.ok ? JSON.parse(saved.content) : null; } catch (_) {}
     if (record && record.id === match[1] && prPendingTimed(record) && prClaimRearm(record)) {
-      armPrClaimTimer(record.id, prClaimDelay(record));
+      if (prResumeWaiting(record) && prClaimExpired(record)) {
+        try {
+          await ensureLocale();
+          await settlePrClaim(record);
+        } catch (_) {}
+      } else {
+        armPrClaimTimer(record.id, prClaimDelay(record));
+      }
     }
   }
 }).catch(function () {});
