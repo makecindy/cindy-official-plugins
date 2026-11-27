@@ -210,6 +210,15 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     const [given] = await warmup.ready;
     assert.ok(Date.now() - started < 1_000, 'the warm-up does not wait for the stream to end');
     assert.notDeepEqual(given, entry, 'the handshake was still warmed');
+    // agy's own stream request goes to the server; the relay passes on the open stream without waiting for an event.
+    const controller = new AbortController();
+    t.after(() => controller.abort());
+    const opened = await Promise.race([
+      fetch(given.url, { headers: { authorization: TOKEN, accept: 'text/event-stream' }, signal: controller.signal }),
+      new Promise((resolve) => setTimeout(() => resolve(null), 2_000)),
+    ]);
+    assert.ok(opened, 'agy sees the event stream open before any event arrives');
+    assert.equal(opened.status, 200);
   });
 
   // Why: the refusal is read to replay it; an abnormal server must not make this process keep megabytes.

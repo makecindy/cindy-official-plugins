@@ -241,6 +241,8 @@ function forward(req, res, server, body) {
     const out = {};
     for (const [name, value] of Object.entries(answer.headers)) if (!HOP_HEADERS.has(name)) out[name] = value;
     res.writeHead(answer.statusCode || 502, out);
+    // An event stream may stay quiet for a while; agy must see it open as soon as the server does.
+    res.flushHeaders();
     answer.pipe(res);
     // The server dropped the connection mid-answer: agy must see it broken, as it would directly.
     answer.on('error', () => res.destroy());
