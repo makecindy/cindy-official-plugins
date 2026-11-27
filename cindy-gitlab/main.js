@@ -2193,6 +2193,7 @@ async function readKv(requireObject) {
 
 // Keep this in sync with the Host scheduler routes accepted by the model picker.
 var PR_AGENT_KINDS = { acp: 1, cc: 1, codex: 1, pi: 1 };
+var PR_ACP_PROVIDER_PREFIX = 'acp-plugin:';
 
 /**
  * 宿主选择器返回的完整组合(引擎、来源、模型、档位、速度),只认合法形状。卡内下拉框还可能带运行位置
@@ -2203,6 +2204,11 @@ function prFollowModelFrom(value) {
   var r = v && v.route && typeof v.route === 'object' ? v.route : null;
   if (!r || !PR_AGENT_KINDS[r.agentKind] || typeof r.providerId !== 'string' || typeof r.model !== 'string' || !r.model ||
       typeof r.effort !== 'string' || !(typeof r.fastMode === 'boolean' || r.fastMode === 'ultrafast')) return null;
+  if (r.agentKind === 'acp' && (
+    r.providerId.indexOf(PR_ACP_PROVIDER_PREFIX) !== 0 ||
+    r.providerId.length <= PR_ACP_PROVIDER_PREFIX.length ||
+    r.fastMode !== false
+  )) return null;
   var device = typeof r.agentDeviceId === 'string' && r.agentDeviceId && r.agentDeviceId.length <= 128 && r.agentDeviceId !== 'local'
     ? r.agentDeviceId : null;
   if (r.agentDeviceId !== undefined && !device) return null;
@@ -2998,7 +3004,15 @@ async function prSchedule(tool, args) {
   var result = await cindy.host.call('cindy_scheduler', tool, Object.assign({ device: 'local' }, args));
   var block = result && result.content && result.content.find(function (item) { return item.type === 'text'; });
   var body = block && JSON.parse(block.text);
-  if (!body || result.isError || body.ok !== true) throw new Error(body && (body.message || body.code || body.errorCode) || tool);
+  if (!body || result.isError || body.ok !== true) {
+    var detail = body && (body.message || body.code || body.errorCode);
+    var verr = body && body.data && Array.isArray(body.data.validation_errors) && body.data.validation_errors[0];
+    if (verr && verr.message) {
+      var vpath = Array.isArray(verr.path) && verr.path.length ? verr.path.join('.') + ': ' : '';
+      detail = (detail ? detail + ': ' : '') + vpath + verr.message;
+    }
+    throw new Error(detail || tool);
+  }
   return body.data;
 }
 
@@ -3039,9 +3053,8 @@ async function readOwnedFollowSchedule(card) {
   return saved;
 }
 
-async function createCardSchedule(card, settings) {
+function buildCardScheduleInput(card, model) {
   var url = followUrl(card);
-  var model = prSettingsForAgent(settings, true).follow_model;
   var input = {
     name: 'MR !' + card.pr.number, targetSessionId: card.sessionId,
     prompt: 'Follow ' + url + ' using the GitLab plugin in this task. Read the MR, pipeline and unresolved discussions. ' +
@@ -3061,7 +3074,26 @@ async function createCardSchedule(card, settings) {
     input.fastMode = model.fast_mode;
     if (model.effort) input.effort = model.effort;
   }
-  return prSchedule('schedule_create', input);
+  return input;
+}
+
+function isUnsupportedBoundPluginEngineOverride(err) {
+  var msg = String(err && (err.message || err) || '');
+  return /A plugin engine schedule starts a new task each run|Plugin engines run on the automation host only|Explicit scheduled model Harness requires a supported Harness and model|A plugin engine schedule must choose the plugin engine as its model|SSH automation targets must keep their current Harness|Collaborative tasks cannot switch to or from a plugin engine|This task cannot switch to or from a plugin engine|INVALID_ARGS[^\n]*\b(?:modelAgentKind|agentKind)\b|Invalid (?:enum value|option)[^\n]*\bacp\b/i.test(msg);
+}
+
+async function createCardSchedule(card, settings) {
+  var model = prSettingsForAgent(settings, true).follow_model;
+  try {
+    return await prSchedule('schedule_create', buildCardScheduleInput(card, model));
+  } catch (err) {
+    if (!model || model.model_agent_kind !== 'acp' || !isUnsupportedBoundPluginEngineOverride(err)) throw err;
+    var existing = await schedulesForPr(card);
+    if (existing.length > 0) throw err;
+    // Older hosts or tasks that disallow explicit bound ACP overrides still accept
+    // a bound schedule without model override fields, using the task's current model.
+    return prSchedule('schedule_create', buildCardScheduleInput(card, null));
+  }
 }
 
 // Save the intent first. After a lost receipt or a restart, look up the schedule

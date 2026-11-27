@@ -6,9 +6,9 @@ import { runInNewContext } from 'node:vm';
 const source = readFileSync(new URL('../cindy-gitlab/main.js', import.meta.url), 'utf8');
 const url = 'https://git.team.test/group/sub/repo/-/merge_requests/2';
 
-function runtime(draft = false, followModel = null, nativeScheduler = true) {
+function runtime(draft = false, followModel = null, nativeScheduler = true, onCreateSchedule = null) {
   let handler, card, result, call = 0;
-  const files = new Map(), schedules = new Map(), requests = [], merges = [];
+  const files = new Map(), schedules = new Map(), requests = [], merges = [], createAttempts = [];
   const failures = new Set(), handoffs = [];
   const viewer = { id: 19 };
   let mergeOutcome = 'merged';
@@ -70,6 +70,11 @@ function runtime(draft = false, followModel = null, nativeScheduler = true) {
         let data;
         if (tool === 'schedule_list') data = [...schedules.values()];
         else if (tool === 'schedule_create') {
+          createAttempts.push({ ...args });
+          if (onCreateSchedule) {
+            const rejected = onCreateSchedule(args);
+            if (rejected) return { isError: true, content: [{ type: 'text', text: JSON.stringify(rejected) }] };
+          }
           assert.equal(schedules.size, 0);
           data = { ...args, id: 'schedule', status: 'active' }; schedules.set(data.id, data);
         } else if (tool === 'schedule_get') data = schedules.get(args.id) ?? null;
@@ -80,7 +85,7 @@ function runtime(draft = false, followModel = null, nativeScheduler = true) {
     },
   });
   return {
-    files, schedules, mr, viewer, requests, failures, merges, handoffs,
+    files, schedules, mr, viewer, requests, failures, merges, handoffs, createAttempts,
     setMergeOutcome(value) { mergeOutcome = value; },
     lastCard: () => card,
     setSettingsReadable(value) { settingsReadable = value; },
@@ -355,6 +360,101 @@ test('plugin-engine (acp) follow models survive card validation and reach auto-f
   assert.equal(r.schedules.get('schedule')?.effort, 'high');
   assert.equal(r.schedules.get('schedule')?.fastMode, false);
   assert.equal(r.schedules.get('schedule')?.targetSessionId, 's1');
+});
+
+test('malformed plugin-engine (acp) routes are dropped by card validation', async () => {
+  for (const badRoute of [
+    { agentKind: 'acp', providerId: 'not-a-plugin-prefix', model: 'gemini-4-neon', effort: 'high', fastMode: false },
+    { agentKind: 'acp', providerId: 'acp-plugin:', model: 'gemini-4-neon', effort: 'high', fastMode: false },
+    { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: true },
+  ]) {
+    const r = runtime(false, { route: badRoute, label: 'Invalid ACP' });
+    const view = await r.show({ mr: url, published: true });
+    assert.equal(view.follow_state, 'active');
+    assert.equal(r.schedules.get('schedule')?.modelAgentKind, undefined);
+    assert.equal(r.schedules.get('schedule')?.providerId, undefined);
+    assert.equal(r.schedules.get('schedule')?.targetSessionId, 's1');
+  }
+});
+
+test('bound ACP follow-up falls back to the task model when the host explicitly rejects bound ACP overrides', async () => {
+  const route = {
+    agentKind: 'acp',
+    providerId: 'acp-plugin:antigravity:agy',
+    model: 'gemini-4-neon',
+    effort: 'high',
+    fastMode: false,
+  };
+  const hostRejections = [
+    { ok: false, message: 'A plugin engine schedule starts a new task each run' },
+    { ok: false, message: 'Plugin engines run on the automation host only' },
+    { ok: false, message: 'Explicit scheduled model Harness requires a supported Harness and model' },
+    { ok: false, message: 'Collaborative tasks cannot switch to or from a plugin engine' },
+    {
+      ok: false,
+      errorCode: 'INVALID_ARGS',
+      data: {
+        validation_errors: [
+          { path: ['modelAgentKind'], message: "Invalid enum value. Expected 'claude-code' | 'codex' | 'pi', received 'acp'" },
+        ],
+      },
+    },
+  ];
+  for (const rejection of hostRejections) {
+    const r = runtime(false, { route, label: 'Gemini 4 Neon · Antigravity' }, true, (args) => {
+      if (args.modelAgentKind === 'acp' && args.targetSessionId) return rejection;
+      return null;
+    });
+    const view = await r.show({ mr: url, published: true });
+    assert.equal(view.follow_state, 'active', view.note);
+    assert.equal(r.createAttempts.length, 2);
+    assert.equal(r.createAttempts[0].modelAgentKind, 'acp');
+    assert.equal(r.createAttempts[0].targetSessionId, 's1');
+    assert.equal(r.createAttempts[1].modelAgentKind, undefined);
+    assert.equal(r.createAttempts[1].model, undefined);
+    assert.equal(r.createAttempts[1].providerId, undefined);
+    assert.equal(r.createAttempts[1].modelAgentDeviceId, undefined);
+    assert.equal(r.createAttempts[1].targetSessionId, 's1');
+    assert.equal(r.schedules.size, 1);
+    assert.equal(r.schedules.get('schedule')?.modelAgentKind, undefined);
+  }
+});
+
+test('bound ACP follow-up fails closed on non-compatibility errors and never falls back for non-ACP overrides', async () => {
+  const acpRoute = {
+    agentKind: 'acp',
+    providerId: 'acp-plugin:antigravity:agy',
+    model: 'gemini-4-neon',
+    effort: 'high',
+    fastMode: false,
+  };
+  for (const errorBody of [
+    { ok: false, message: 'Plugin engine is currently unavailable' },
+    { ok: false, message: 'A plugin engine schedule cannot use a persistent session' },
+    { ok: false, errorCode: 'INVALID_ARGS', data: { validation_errors: [{ path: ['cronExpr'], message: 'Invalid cron' }] } },
+  ]) {
+    const r = runtime(false, { route: acpRoute, label: 'Gemini 4 Neon · Antigravity' }, true, () => errorBody);
+    const view = await r.show({ mr: url, published: true });
+    assert.equal(view.follow_state, 'failed');
+    assert.equal(r.createAttempts.length, 1);
+    assert.equal(r.schedules.size, 0);
+  }
+
+  const codexRoute = {
+    agentKind: 'codex',
+    providerId: 'openai',
+    model: 'gpt-5.6',
+    effort: 'high',
+    fastMode: false,
+  };
+  const rCodex = runtime(false, { route: codexRoute, label: 'GPT-5.6' }, true, () => ({
+    ok: false,
+    message: 'A plugin engine schedule starts a new task each run',
+  }));
+  const viewCodex = await rCodex.show({ mr: url, published: true });
+  assert.equal(viewCodex.follow_state, 'failed');
+  assert.equal(rCodex.createAttempts.length, 1);
+  assert.equal(rCodex.schedules.size, 0);
 });
 
 test('plugin-engine (acp) follow models are preserved in agent handoff when native scheduler is absent', async () => {
