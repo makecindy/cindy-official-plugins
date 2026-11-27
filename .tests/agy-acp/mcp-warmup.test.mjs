@@ -35,7 +35,7 @@ const DISCOVER = { jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _
 const INITIALIZE = { jsonrpc: '2.0', id: 2, method: 'initialize', params: { clientInfo: CLIENT_INFO, protocolVersion: '2025-11-25', capabilities: CAPABILITIES } };
 
 /** A server like Cindy's bridge behind the tunnel; `log` lists what reached it. */
-async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false, paginate = false, failInitialize = false, failInitializeJsonRpc = false } = {}) {
+async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false, paginate = false, failInitialize = false, failInitializeJsonRpc = false, initializeResponse = null, onRequest = null } = {}) {
   const sessions = new Map();
   const log = [];
   let activeToken = TOKEN;
@@ -44,9 +44,12 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
     req.on('data', (chunk) => { body += chunk; });
     req.on('end', () => {
       if (hang) return;
+      const incoming = body ? JSON.parse(body) : {};
+      onRequest?.({ method: req.method, rpc: incoming.method, sid: req.headers['mcp-session-id'], id: incoming.id });
       setTimeout(() => {
+        if (res.destroyed) return;
         const sid = req.headers['mcp-session-id'];
-        const message = body ? JSON.parse(body) : {};
+        const message = incoming;
         log.push({ method: req.method, rpc: message.method, sid, id: message.id });
         if (req.headers.authorization !== activeToken) return res.writeHead(401).end();
         if (req.method === 'GET' && acceptStream) {
@@ -63,6 +66,7 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
         }
         if (!sid) {
           if (message.method !== 'initialize') return res.writeHead(400).end('Expected initialize request');
+          if (initializeResponse) return initializeResponse(message, req, res, sessions);
           // A failing initialize that still echoes a session header belonging to another caller.
           if (failInitialize) {
             sessions.set('foreign-session', 'other');
@@ -261,22 +265,137 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     assert.equal(mismatchedDeletes.length, 1, 'mismatched warmed session was deleted only once across mismatch + close()');
   });
 
-  // Why: only a session confirmed created by a 200 JSON-RPC initialize result belongs to this warm-up;
-  // a failed initialize (HTTP error or JSON-RPC error) that still echoes a session header must never trigger DELETE.
-  test('a failed initialize never closes another session even if its headers name one', async (t) => {
-    const httpFail = await bridgeServer(t, { failInitialize: true });
-    const w1 = warmMcpServers([httpFail.entry]);
-    assert.deepEqual(await w1.ready, [httpFail.entry], 'agy connects directly after HTTP error');
-    await w1.close();
-    assert.ok(httpFail.sessions.has('foreign-session'), 'foreign session stays untouched on HTTP 500');
-    assert.equal(httpFail.log.some((item) => item.method === 'DELETE'), false);
+  // Why: only a session confirmed created by a valid HTTP 200 JSON-RPC 2.0 initialize result belongs to
+  // this warm-up; HTTP errors, JSON-RPC errors, and malformed/invalid responses must never trigger DELETE
+  // and must fall back to connecting agy directly.
+  test('failed or malformed initialize responses never close another session and fall back to direct connection', async (t) => {
+    const cases = [
+      {
+        name: 'HTTP 500 with foreign session header',
+        sid: 'foreign-http-500',
+        respond: (_message, _req, res) => res.writeHead(500, { 'mcp-session-id': 'foreign-http-500' }).end(),
+      },
+      {
+        name: 'JSON-RPC error with foreign session header',
+        sid: 'foreign-jsonrpc-error',
+        respond: (message, _req, res) => {
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-jsonrpc-error' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: 'rejected' } }));
+        },
+      },
+      {
+        name: 'malformed JSON body with foreign session header',
+        sid: 'foreign-malformed-json',
+        respond: (_message, _req, res) => {
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-malformed-json' });
+          res.end('{"jsonrpc":"2.0","result":');
+        },
+      },
+      {
+        name: 'missing jsonrpc 2.0 field',
+        sid: 'foreign-no-jsonrpc',
+        respond: (message, _req, res) => {
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-no-jsonrpc' });
+          res.end(JSON.stringify({ id: message.id, result: { protocolVersion: '2025-11-25' } }));
+        },
+      },
+      {
+        name: 'mismatched JSON-RPC response id',
+        sid: 'foreign-wrong-id',
+        respond: (_message, _req, res) => {
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-wrong-id' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: 'other-request', result: { protocolVersion: '2025-11-25' } }));
+        },
+      },
+      {
+        name: 'both result and error in JSON-RPC payload',
+        sid: 'foreign-both-result-error',
+        respond: (message, _req, res) => {
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-both-result-error' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {}, error: { code: -32000, message: 'ambiguous' } }));
+        },
+      },
+      {
+        name: 'non-MCP text/plain response carrying JSON',
+        sid: 'foreign-text-plain',
+        respond: (message, _req, res) => {
+          res.writeHead(200, { 'content-type': 'text/plain', 'mcp-session-id': 'foreign-text-plain' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-11-25' } }));
+        },
+      },
+      {
+        name: 'malformed SSE payload with foreign session header',
+        sid: 'foreign-bad-sse',
+        respond: (_message, _req, res) => {
+          res.writeHead(200, { 'content-type': 'text/event-stream', 'mcp-session-id': 'foreign-bad-sse' });
+          res.end('event: message\ndata: not-json\n\n');
+        },
+      },
+    ];
+    for (const item of cases) {
+      const server = await bridgeServer(t, {
+        initializeResponse: (message, req, res, sessions) => {
+          sessions.set(item.sid, 'other');
+          item.respond(message, req, res);
+        },
+      });
+      const warmup = warmMcpServers([server.entry]);
+      assert.deepEqual(await warmup.ready, [server.entry], `${item.name}: agy connects directly`);
+      await warmup.close();
+      assert.ok(server.sessions.has(item.sid), `${item.name}: foreign session stays untouched`);
+      assert.equal(server.log.some((entry) => entry.method === 'DELETE'), false, `${item.name}: no DELETE sent`);
+    }
 
-    const rpcFail = await bridgeServer(t, { failInitializeJsonRpc: true });
-    const w2 = warmMcpServers([rpcFail.entry]);
-    assert.deepEqual(await w2.ready, [rpcFail.entry], 'agy connects directly after JSON-RPC error');
-    await w2.close();
-    assert.ok(rpcFail.sessions.has('foreign-jsonrpc-session'), 'foreign session stays untouched on JSON-RPC error');
-    assert.equal(rpcFail.log.some((item) => item.method === 'DELETE'), false);
+    // Even if close() arrives while a delayed invalid initialize is still in flight, no DELETE is sent.
+    let resolveReceived;
+    const initReceived = new Promise((resolve) => { resolveReceived = resolve; });
+    const delayedBad = await bridgeServer(t, {
+      delayMs: 150,
+      onRequest: (item) => { if (item.rpc === 'initialize') resolveReceived(); },
+      initializeResponse: (_message, _req, res, sessions) => {
+        sessions.set('foreign-delayed-invalid', 'other');
+        res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-delayed-invalid' });
+        res.end('{broken');
+      },
+    });
+    const warmup = warmMcpServers([delayedBad.entry]);
+    await initReceived;
+    await warmup.close();
+    assert.deepEqual(await warmup.ready, [delayedBad.entry], 'cancelled invalid initialize falls back to direct');
+    assert.ok(delayedBad.sessions.has('foreign-delayed-invalid'), 'delayed invalid initialize leaves foreign session untouched');
+    assert.equal(delayedBad.log.some((entry) => entry.method === 'DELETE'), false, 'no DELETE for delayed invalid initialize');
+  });
+
+  // Why: close() can arrive before the loopback relay finishes listening; no handshake may start afterwards.
+  test('closing before the relay is listening starts no handshake', async (t) => {
+    const { entry, log } = await bridgeServer(t);
+    const warmup = warmMcpServers([entry]);
+    const closing = warmup.close();
+    assert.deepEqual(await warmup.ready, [entry], 'agy connects directly');
+    await closing;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(log.length, 0, 'no handshake request reached the server');
+  });
+
+  // Why: if close() fires after initialize was already sent to upstream but before its reply arrives,
+  // warm-up must keep waiting within INITIALIZE_GRACE_MS to confirm ownership and DELETE the created session.
+  test('closing while initialize is in flight before its reply arrives still confirms and deletes the created session', async (t) => {
+    let resolveReceived;
+    const initReceived = new Promise((resolve) => { resolveReceived = resolve; });
+    const { entry, log, sessions } = await bridgeServer(t, {
+      delayMs: 300,
+      onRequest: (item) => { if (item.rpc === 'initialize') resolveReceived(); },
+    });
+    const warmup = warmMcpServers([entry]);
+    await initReceived;
+    assert.equal(sessions.size, 0, 'server has not replied to initialize yet when close() fires');
+    await warmup.close();
+    assert.deepEqual(await warmup.ready, [entry], 'agy connects directly after close');
+    assert.equal(sessions.size, 0, 'session created by in-flight initialize was deleted before close() resolved');
+    assert.equal(log.filter((item) => item.rpc === 'initialize').length, 1);
+    assert.equal(log.filter((item) => item.rpc === 'notifications/initialized').length, 0, 'did not continue handshake after close');
+    assert.equal(log.filter((item) => item.rpc === 'tools/list').length, 0, 'did not call tools/list after close');
+    assert.equal(log.filter((item) => item.method === 'DELETE').length, 1, 'confirmed session was deleted once');
   });
 
   // Why: if close() fires while warmServer already confirmed initialize and is still awaiting tools/list,

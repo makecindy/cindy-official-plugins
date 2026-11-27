@@ -50,7 +50,7 @@ const {
 } = require('./agy-mcp.js');
 const { createSteeringRelay } = require('./agy-steering.js');
 const { accountErrorRelay, classifyAccountErrorResponse } = require('./agy-account-errors.js');
-const { warmMcpServers } = require('./mcp-warmup.js');
+const { CLOSE_BUDGET_MS, warmMcpServers } = require('./mcp-warmup.js');
 
 const REMOTE_WORKSPACE_ARG = '--cindy-remote-workspace';
 const GUEST_WORKSPACE_ARG = '--cindy-guest-workspace';
@@ -65,6 +65,11 @@ const MAX_SERVERS = 64;
 /** Remote-workspace mode could not be established, or was broken by the agent; agy is not left running. */
 const REMOTE_WORKSPACE_EXIT_CODE = 78;
 const LAUNCH_DIR_PREFIX = 'cindy-agy-remote-';
+/**
+ * How long ending the task waits for unhanded warmed MCP sessions (including an initialize already
+ * in flight) to confirm ownership and be deleted: covers the warm-up's full close budget.
+ */
+const WARMUP_CLOSE_GRACE_MS = CLOSE_BUDGET_MS + 250;
 /** A launch directory this old belongs to a task that ended without cleaning up (a crash, a hard kill). */
 const STALE_LAUNCH_DIR_MS = 24 * 60 * 60 * 1000;
 
@@ -275,7 +280,7 @@ function startRemoteWorkspace(agyPath, host) {
   let agentExited = false;
   let sessionRequest = null;
   let warmup = null;
-  let warmupCleanup = null;
+  const warmupCleanups = new Set();
   let finished = false;
   let stopCode = null;
   let forceTimer = null;
@@ -342,7 +347,8 @@ function startRemoteWorkspace(agyPath, host) {
     if (!warmup) return;
     const current = warmup;
     warmup = null;
-    warmupCleanup = current.close();
+    const done = Promise.resolve(current.close()).catch(() => {}).finally(() => warmupCleanups.delete(done));
+    warmupCleanups.add(done);
   };
 
   const finish = (code) => {
@@ -352,19 +358,33 @@ function startRemoteWorkspace(agyPath, host) {
     clearTimeout(forceTimer);
     clearTimeout(agentCloseTimer);
     let exiting = false;
+    let exitTimer = null;
     const done = () => {
       if (exiting) return;
       exiting = true;
+      clearTimeout(exitTimer);
       process.exit(code);
     };
     const pending = [];
+    let budget = 0;
     if (process.stdout.writableLength > 0) {
-      pending.push(new Promise((resolve) => process.stdout.once('drain', resolve)));
+      pending.push(new Promise((resolve) => {
+        const flushTimer = setTimeout(resolve, timings.flush);
+        flushTimer.unref();
+        process.stdout.once('drain', () => {
+          clearTimeout(flushTimer);
+          resolve();
+        });
+      }));
+      budget = Math.max(budget, timings.flush);
     }
-    if (warmupCleanup) pending.push(warmupCleanup);
+    if (warmupCleanups.size > 0) {
+      pending.push(Promise.all([...warmupCleanups]));
+      budget = Math.max(budget, WARMUP_CLOSE_GRACE_MS);
+    }
     if (pending.length) {
       Promise.all(pending).then(done, done);
-      setTimeout(done, timings.flush).unref();
+      exitTimer = setTimeout(done, budget);
     } else {
       done();
     }
@@ -387,6 +407,10 @@ function startRemoteWorkspace(agyPath, host) {
     stopCode = 128 + (os.constants.signals[signal] || os.constants.signals.SIGTERM);
     closeWarmup();
     terminate();
+    if (!running(probe) && !running(agent)) {
+      finish(stopCode);
+      return;
+    }
     setTimeout(() => finish(stopCode), timings.signalGrace + 300).unref();
   };
 
@@ -408,6 +432,10 @@ function startRemoteWorkspace(agyPath, host) {
       // ignore
     }
     terminate();
+    if (!running(probe) && !running(agent)) {
+      finish(stopCode);
+      return;
+    }
     setTimeout(() => finish(stopCode), timings.signalGrace + 300).unref();
   };
 
@@ -493,8 +521,13 @@ function startRemoteWorkspace(agyPath, host) {
       if (phase === 'failed') return;
       if (current.pid === undefined) {
         agentExited = true;
-        finished = true;
-        exitAfterStderr(`[agy-acp] Could not start Antigravity at ${agyPath} (${describe(error)}).`, host.notFoundExitCode);
+        closeWarmup();
+        try {
+          process.stderr.write(`[agy-acp] Could not start Antigravity at ${agyPath} (${describe(error)}).\n`);
+        } catch {
+          // ignore
+        }
+        finish(host.notFoundExitCode);
         return;
       }
       process.stderr.write(`[agy-acp] Antigravity process error: ${describe(error)}\n`);
@@ -556,7 +589,9 @@ function startRemoteWorkspace(agyPath, host) {
         failOpen(message.error);
         return;
       }
+      if (finished || stopCode !== null || stdinEnded || !warmup) return;
       phase = 'warming';
+      const currentWarmup = warmup;
       const sendSessionOpen = (mcpServers) => {
         if (finished || stopCode !== null || stdinEnded || agentExited || phase !== 'warming') return;
         const openMessage = { ...sessionRequest, params: { ...sessionRequest.params, mcpServers } };
@@ -564,7 +599,7 @@ function startRemoteWorkspace(agyPath, host) {
         toAgent(openMessage);
         phase = 'opening-session';
       };
-      warmup.ready.then(sendSessionOpen, () => sendSessionOpen(sessionRequest.params.mcpServers));
+      currentWarmup.ready.then(sendSessionOpen, () => sendSessionOpen(sessionRequest.params.mcpServers));
       return;
     }
     if (phase === 'opening-session' && message.id === sessionRequest.id && message.method === undefined) {
@@ -705,6 +740,7 @@ function startRemoteWorkspace(agyPath, host) {
   process.stdin.on('data', lineSplitter(onClientLine));
   process.stdin.on('end', () => {
     stdinEnded = true;
+    if (phase === 'opening' || phase === 'warming') closeWarmup();
     if (agent && phase !== 'failed') {
       endAgentInput();
       return;

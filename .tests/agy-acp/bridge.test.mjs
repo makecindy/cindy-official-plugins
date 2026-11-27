@@ -3657,6 +3657,130 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
     assert.equal(deletedSessions.length, 1, 'interrupted in-flight warm-up session was deleted before exit');
     assert.equal(activeSessions.size, 0, 'no leaked upstream session remained after exit');
   });
+
+  // Why: when a task is cancelled after initialize was already sent to a slow upstream MCP server but before
+  // its reply arrives, remote-workspace exit must wait past the 2 s stdout flush limit (within CLOSE_BUDGET_MS)
+  // so the in-flight initialize can confirm ownership and DELETE the created session before process exit.
+  test('waits past the 2s flush limit to confirm and delete an in-flight initialize session when cancelled before reply', async (t) => {
+    const authHeader = `Bearer ${randomUUID()}`;
+    const activeSessions = new Set();
+    const deletedSessions = [];
+    const seenMethods = [];
+    let resolveInitReceived;
+    const initReceived = new Promise((resolve) => { resolveInitReceived = resolve; });
+    const mcp = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
+        const sid = req.headers['mcp-session-id'];
+        if (req.method === 'GET') return res.writeHead(405).end();
+        if (req.method === 'DELETE') {
+          setTimeout(() => {
+            deletedSessions.push(sid);
+            activeSessions.delete(sid);
+            if (!res.destroyed) res.writeHead(200).end();
+          }, 150);
+          return;
+        }
+        const message = body ? JSON.parse(body) : {};
+        seenMethods.push(message.method);
+        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+        if (!sid) {
+          resolveInitReceived();
+          // Answer after 2.2 s (> the 2 s FLUSH_TIMEOUT_MS, inside INITIALIZE_GRACE_MS = 3 s).
+          setTimeout(() => {
+            if (res.destroyed) return;
+            const id = 'warm-slow-init';
+            activeSessions.add(id);
+            res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }));
+          }, 2_200);
+          return;
+        }
+        if (message.id === undefined) return res.writeHead(202).end();
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [] } }));
+      });
+    });
+    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
+    t.after(() => mcp.close());
+
+    const { bridge, send, reply } = remoteSteerHarness(t);
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    const exec = {
+      type: 'http',
+      name: 'cindy_exec',
+      url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
+      headers: [{ name: 'Authorization', value: authHeader }],
+    };
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec] } });
+    await initReceived;
+    assert.equal(activeSessions.size, 0, 'initialize has not replied yet at cancellation time');
+    const cancelledAt = Date.now();
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.ok(Date.now() - cancelledAt >= 2_100, 'exit waited past the 2 s flush timer for warmup close budget');
+    assert.deepEqual(deletedSessions, ['warm-slow-init'], 'confirmed in-flight session was deleted before exit');
+    assert.equal(activeSessions.size, 0, 'no leaked upstream session remained after exit');
+    assert.equal(seenMethods.includes('notifications/initialized'), false, 'did not continue handshake after cancel');
+    assert.equal(seenMethods.includes('tools/list'), false, 'did not send tools/list after cancel');
+  });
+
+  // Why: when an in-flight initialize returns an invalid/malformed response with a foreign session header,
+  // cancelling the task must not send DELETE for that unconfirmed session.
+  test('does not delete foreign sessions on invalid initialize responses when cancelled in flight', async (t) => {
+    const authHeader = `Bearer ${randomUUID()}`;
+    const activeSessions = new Set(['foreign-invalid']);
+    const deletedSessions = [];
+    let resolveInitReceived;
+    const initReceived = new Promise((resolve) => { resolveInitReceived = resolve; });
+    const mcp = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
+        const sid = req.headers['mcp-session-id'];
+        if (req.method === 'GET') return res.writeHead(405).end();
+        if (req.method === 'DELETE') {
+          deletedSessions.push(sid);
+          activeSessions.delete(sid);
+          return res.writeHead(200).end();
+        }
+        const message = body ? JSON.parse(body) : {};
+        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+        if (!sid) {
+          resolveInitReceived();
+          setTimeout(() => {
+            if (res.destroyed) return;
+            res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-invalid' });
+            res.end('{not-valid-json');
+          }, 150);
+          return;
+        }
+        res.writeHead(404).end();
+      });
+    });
+    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
+    t.after(() => mcp.close());
+
+    const { bridge, send, reply } = remoteSteerHarness(t);
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    const exec = {
+      type: 'http',
+      name: 'cindy_exec',
+      url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
+      headers: [{ name: 'Authorization', value: authHeader }],
+    };
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec] } });
+    await initReceived;
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.deepEqual(deletedSessions, [], 'no DELETE was sent for malformed initialize response');
+    assert.ok(activeSessions.has('foreign-invalid'), 'foreign session remained untouched');
+  });
 });
 
 test('a disconnected input rejects pending and subsequent ACP calls', async () => {

@@ -32,6 +32,15 @@ const http = require('node:http');
 
 /** The longest `session/new` waits for the handshakes; Cindy waits 60 s for its answer. */
 const WARMUP_DEADLINE_MS = 20_000;
+/** After the deadline or close(), how long an initialize already sent may still take to confirm its session. */
+const INITIALIZE_GRACE_MS = 3_000;
+/** How long one DELETE of a confirmed warmed session may take. */
+const DELETE_TIMEOUT_MS = 2_000;
+/**
+ * The longest close() takes: a late initialize confirming ownership, then the DELETE of the session it named.
+ * Anything still open after this budget is ended by Cindy on the task's computer when the remote run ends.
+ */
+const CLOSE_BUDGET_MS = INITIALIZE_GRACE_MS + DELETE_TIMEOUT_MS + 250;
 /** What agy 1.5.17+ sends; a request that does not match is not answered from the warm-up. */
 const CLIENT_INFO = Object.freeze({ name: 'antigravity-client', version: 'v1.0.0' });
 const CLIENT_CAPABILITIES = Object.freeze({ elicitation: { form: {}, url: {} }, roots: { listChanged: true } });
@@ -159,16 +168,20 @@ function serverHeaders(server) {
   return out;
 }
 
+function mediaTypeOf(headers) {
+  return String(headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase();
+}
+
 /** The answer with the JSON-RPC id of the request it now answers (JSON or event-stream bodies). */
 function withId(kept, id) {
-  const type = String(kept.headers['content-type'] || '');
+  const mediaType = mediaTypeOf(kept.headers);
   const text = kept.body.toString('utf8');
-  if (type.includes('application/json')) {
+  if (mediaType === 'application/json') {
     const message = parseJson(text);
     return isObject(message) && 'id' in message ? Buffer.from(JSON.stringify({ ...message, id })) : kept.body;
   }
-  if (type.includes('text/event-stream')) {
-    return Buffer.from(text.split('\n').map((line) => {
+  if (mediaType === 'text/event-stream') {
+    return Buffer.from(text.split(/\r?\n/).map((line) => {
       if (!line.startsWith('data:')) return line;
       const message = parseJson(line.slice(5).trim());
       return isObject(message) && 'id' in message && !('method' in message) ? `data: ${JSON.stringify({ ...message, id })}` : line;
@@ -177,18 +190,35 @@ function withId(kept, id) {
   return kept.body;
 }
 
-/** The first JSON-RPC response in an answer body. */
+/** The first JSON-RPC response in a valid JSON or SSE answer body. */
 function firstResponse(kept) {
-  const type = String(kept.headers['content-type'] || '');
+  const mediaType = mediaTypeOf(kept.headers);
   const text = kept.body.toString('utf8');
-  const candidates = type.includes('text/event-stream')
-    ? text.split('\n').filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim())
-    : [text];
-  for (const candidate of candidates) {
-    const message = parseJson(candidate);
-    if (isObject(message) && 'id' in message && !('method' in message)) return message;
+  if (mediaType === 'application/json') {
+    const message = parseJson(text);
+    return isObject(message) && 'id' in message && !('method' in message) ? message : undefined;
+  }
+  if (mediaType === 'text/event-stream') {
+    for (const rawEvent of text.split(/\r?\n\r?\n/)) {
+      const dataLines = rawEvent.split(/\r?\n/)
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).replace(/^ /, ''));
+      if (!dataLines.length) continue;
+      const message = parseJson(dataLines.join('\n').trim());
+      if (isObject(message) && 'id' in message && !('method' in message)) return message;
+    }
   }
   return undefined;
+}
+
+/** Only a valid JSON-RPC 2.0 success response matching `expectedId` with an object result and no error. */
+function isJsonRpcResult(message, expectedId) {
+  return isObject(message)
+    && message.jsonrpc === '2.0'
+    && message.id === expectedId
+    && !('method' in message)
+    && !('error' in message)
+    && isObject(message.result);
 }
 
 /** JSON with object keys in a fixed order, so equal values compare equal. */
@@ -212,26 +242,32 @@ function sameEmptyParams(params) {
  * server cannot be warmed (it is then given to agy at its own address). A session the server opened
  * for a handshake that did not finish is ended.
  */
-async function warmServer(server, signal, closing) {
+async function warmServer(server, signal, closing, initializeSignal) {
   if (!isLoopback(server.url)) return null;
   const auth = serverHeaders(server);
   /** Set only once the server confirmed creating this session for our initialize; only it may be ended here. */
   let sessionId = null;
-  const post = (message, extra = {}) => exchange(server.url, {
+  const post = (message, extra = {}, requestSignal = signal) => exchange(server.url, {
     headers: { ...auth, accept: ACCEPT, 'content-type': 'application/json', ...extra },
     body: JSON.stringify(message),
-    signal,
+    signal: requestSignal,
   });
   const handshake = async () => {
     const discover = post({ jsonrpc: '2.0', id: 'cindy-warm-discover', method: 'server/discover', params: DISCOVER_PARAMS },
       { 'mcp-method': 'server/discover', 'mcp-protocol-version': DISCOVER_PROTOCOL }).catch(() => null);
-    const initialize = await post({ jsonrpc: '2.0', id: 'cindy-warm-initialize', method: 'initialize', params: INITIALIZE_PARAMS });
+    // An initialize already sent is bounded by `initializeSignal` so close()/deadline lets upstream confirm
+    // ownership and immediately DELETE the created session instead of abandoning it on the remote host.
+    const initialize = await post({ jsonrpc: '2.0', id: 'cindy-warm-initialize', method: 'initialize', params: INITIALIZE_PARAMS },
+      {}, initializeSignal);
     const result = firstResponse(initialize);
     const created = initialize.headers['mcp-session-id'];
-    // A failed initialize names no session of ours, whatever its headers say: nothing is ended for it.
-    if (initialize.status !== 200 || typeof created !== 'string' || !created
-      || !isObject(result) || result.id !== 'cindy-warm-initialize' || !isObject(result.result)) return null;
+    // Only a confirmed HTTP 200 JSON-RPC 2.0 success response proves ownership; failed or malformed
+    // responses leave sessionId unset so nothing is ended for them and agy connects directly.
+    if (initialize.status !== 200 || typeof created !== 'string' || !created.trim()
+      || !isJsonRpcResult(result, 'cindy-warm-initialize')) return null;
     sessionId = created;
+    // Deadline or close() already fired while initialize was in flight: skip the rest and DELETE now.
+    if (signal.aborted) return null;
     const protocol = typeof result.result.protocolVersion === 'string' ? result.result.protocolVersion : INITIALIZE_PROTOCOL;
     const session = { ...auth, 'mcp-session-id': sessionId, 'mcp-protocol-version': protocol };
     const initialized = await post({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, session);
@@ -241,7 +277,7 @@ async function warmServer(server, signal, closing) {
       post({ jsonrpc: '2.0', id: 'cindy-warm-tools', method: 'tools/list', params: {} }, session),
     ]);
     const listed = firstResponse(tools);
-    if (tools.status !== 200 || !isObject(listed) || !isObject(listed.result)) return null;
+    if (tools.status !== 200 || !isJsonRpcResult(listed, 'cindy-warm-tools')) return null;
     const discoverRes = await discover;
     const keptDiscover = discoverRes && discoverRes.status !== 401 && discoverRes.status !== 403 && discoverRes.status < 500
       ? discoverRes : null;
@@ -254,9 +290,19 @@ async function warmServer(server, signal, closing) {
 
 /** Ends a warmed MCP session nobody will use; `closing` tracks DELETEs still in flight. */
 function closeWarmSession(server, warm, closing) {
-  const done = exchange(server.url, { method: 'DELETE', headers: { ...serverHeaders(server), 'mcp-session-id': warm.sessionId } })
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), DELETE_TIMEOUT_MS);
+  timer.unref();
+  const done = exchange(server.url, {
+    method: 'DELETE',
+    headers: { ...serverHeaders(server), 'mcp-session-id': warm.sessionId },
+    signal: abort.signal,
+  })
     .catch(() => {})
-    .finally(() => closing?.delete(done));
+    .finally(() => {
+      clearTimeout(timer);
+      closing?.delete(done);
+    });
   closing?.add(done);
   return done;
 }
@@ -325,6 +371,17 @@ function forward(req, res, state, body) {
 function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => {} } = {}) {
   const token = crypto.randomBytes(24).toString('base64url');
   const abort = new AbortController();
+  /** Bounds initialize requests already sent: aborted INITIALIZE_GRACE_MS after deadline or close(). */
+  const initializeAbort = new AbortController();
+  let initializeGraceTimer = null;
+  let deadlineTimer = null;
+  let finishWarmup = null;
+  let closePromise = null;
+  const armInitializeGrace = () => {
+    if (initializeGraceTimer || initializeAbort.signal.aborted) return;
+    initializeGraceTimer = setTimeout(() => initializeAbort.abort(), INITIALIZE_GRACE_MS);
+    initializeGraceTimer.unref();
+  };
   /** Per server: kept answers, whether warm-up still owns the upstream session, and whether agy left it. */
   const states = servers.map((server) => ({
     server,
@@ -337,7 +394,7 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
   let closed = false;
   let relayPort = 0;
   let warming = Promise.resolve();
-  /** DELETEs of warmed sessions still in flight; close() waits for them. */
+  /** DELETEs of warmed sessions still in flight; close() waits for them within CLOSE_BUDGET_MS. */
   const closing = new Set();
 
   /** Ends a warmed upstream session that warm-up still owns (never handed to agy), at most once. */
@@ -429,17 +486,19 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
       const finish = () => {
         if (done) return;
         done = true;
-        clearTimeout(timer);
-        const warmed = states.filter((state) => state.warm).length;
+        clearTimeout(deadlineTimer);
+        const warmed = closed ? 0 : states.filter((state) => state.warm).length;
         if (warmed < states.length) log(`MCP warm-up finished for ${warmed} of ${states.length} servers; the others connect directly.`);
         if (warmed === 0 && relay.listening) relay.close();
-        resolve(states.map((state, index) => (state.warm ? { ...state.server, url: `http://127.0.0.1:${port}/${token}/${index}` } : state.server)));
+        resolve(states.map((state, index) => (!closed && state.warm ? { ...state.server, url: `http://127.0.0.1:${port}/${token}/${index}` } : state.server)));
       };
-      const timer = setTimeout(() => {
+      finishWarmup = finish;
+      deadlineTimer = setTimeout(() => {
         abort.abort();
+        armInitializeGrace();
         finish();
       }, deadlineMs);
-      warming = Promise.all(states.map((state) => warmServer(state.server, abort.signal, closing).then((warm) => {
+      warming = Promise.all(states.map((state) => warmServer(state.server, abort.signal, closing, initializeAbort.signal).then((warm) => {
         if (!warm) return;
         // A late warm-up after the deadline or close is not used: the server was already given at its own address.
         if (abort.signal.aborted || closed) closeWarmSession(state.server, warm, closing);
@@ -447,20 +506,44 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
           state.warm = warm;
           state.owned = true;
         }
-      }, () => {})));
+      }, () => {}))).finally(() => {
+        clearTimeout(initializeGraceTimer);
+      });
       warming.then(finish);
     });
   });
   return {
     ready,
     close() {
-      closed = true;
-      abort.abort();
-      if (relay.listening) relay.close();
-      for (const state of states) releaseOwned(state);
-      return warming.then(() => Promise.all([...closing])).then(() => {});
+      if (!closed) {
+        closed = true;
+        clearTimeout(deadlineTimer);
+        abort.abort();
+        armInitializeGrace();
+        finishWarmup?.();
+        if (relay.listening) relay.close();
+        for (const state of states) releaseOwned(state);
+      }
+      if (!closePromise) {
+        let budgetTimer = null;
+        const reclaimed = warming
+          .then(() => Promise.all([...closing]))
+          .then(() => {})
+          .finally(() => {
+            clearTimeout(budgetTimer);
+            clearTimeout(initializeGraceTimer);
+          });
+        closePromise = Promise.race([
+          reclaimed,
+          new Promise((resolve) => {
+            budgetTimer = setTimeout(resolve, CLOSE_BUDGET_MS);
+            budgetTimer.unref();
+          }),
+        ]);
+      }
+      return closePromise;
     },
   };
 }
 
-module.exports = { WARMUP_DEADLINE_MS, warmMcpServers };
+module.exports = { CLOSE_BUDGET_MS, DELETE_TIMEOUT_MS, INITIALIZE_GRACE_MS, WARMUP_DEADLINE_MS, warmMcpServers };
