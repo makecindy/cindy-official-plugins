@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -85,7 +86,9 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
       lines = lines.slice(index + 1);
       if (!line.trim()) continue;
       const message = JSON.parse(line);
-      if (message.method === 'initialize') {
+      if (message.method === 'initialize' && process.env.FAKE_AGY_REMOTE_INIT_ERROR === '1') {
+        send({ id: message.id, error: { code: -32603, message: 'agy could not start' } });
+      } else if (message.method === 'initialize') {
         send({ id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [] } });
       } else if (message.method === 'session/new' || message.method === 'session/resume') {
         record({ method: message.method, session: message.params });
@@ -511,6 +514,146 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
       [['tool_call', 'Bash', 'execute'], ['tool_call_update', 'Bash', 'execute']]);
     bridge.child.stdin.end();
     assert.equal((await bridge.closed).code, 0);
+  });
+
+  // Why: agy leaves out MCP servers that are not connected within five seconds, and here every handshake
+  // crosses the device link. session/new must reach agy only after the warm-up, naming the local relay
+  // for a server that was warmed (mcp-warmup.test.mjs covers the relay itself).
+  /** A loopback MCP server like Cindy's tunnel, answering after `delayMs`; `sessions` lists the open ones. */
+  const tunnelServer = async (t, delayMs = 300) => {
+    const sessions = new Set();
+    const counts = { requests: 0 };
+    let created = 0;
+    const mcp = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        counts.requests += 1;
+        const message = body ? JSON.parse(body) : {};
+        const sid = req.headers['mcp-session-id'];
+        // The session exists on the server as soon as initialize arrives, before its answer is sent.
+        const id = !sid && message.method === 'initialize' ? `s${created++}` : null;
+        if (id) sessions.add(id);
+        setTimeout(() => {
+          if (req.method === 'GET') return res.writeHead(405).end();
+          if (req.method === 'DELETE') {
+            sessions.delete(sid);
+            return res.writeHead(200).end();
+          }
+          if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+          if (id) {
+            res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
+            return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id,
+              result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
+          }
+          if (message.id === undefined) return res.writeHead(202).end();
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [] } }));
+        }, delayMs);
+      });
+    });
+    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
+    t.after(() => mcp.close());
+    return { sessions, counts, url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec` };
+  };
+
+  /**
+   * Makes the entry's start of the session process fail: `throw` throws from spawn itself, `missing`
+   * starts a program that does not exist (spawn reports it asynchronously). Preloaded into the entry only.
+   */
+  const failSessionLaunch = (t, mode) => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agy-acp-spawn-')), 'fail-launch.cjs');
+    t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }));
+    fs.writeFileSync(file, `'use strict';
+if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
+  const childProcess = require('node:child_process');
+  const spawn = childProcess.spawn;
+  childProcess.spawn = function (command, args, options) {
+    if (Array.isArray(args) && args.includes('--agent')) {
+      if (${JSON.stringify(mode)} === 'throw') throw new Error('spawn failed');
+      return spawn.call(this, '/nonexistent/agy-for-test', args, options);
+    }
+    return spawn.apply(this, arguments);
+  };
+}
+`);
+    return { NODE_OPTIONS: `--require=${file}` };
+  };
+
+  if (official) test('remote-workspace mode hands agy its MCP servers only after their handshake is done', async (t) => {
+    const { sessions, url } = await tunnelServer(t);
+    const { launchFile, bridge, send, reply, server } = remoteSession(t);
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    const exec = { ...server('cindy_exec'), url };
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec, server('cindy')] } });
+    await reply(1, 'session/new answer');
+    const { session } = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
+    assert.equal(sessions.size, 1, 'the server was warmed before agy got session/new');
+    assert.match(session.mcpServers[0].url, /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{32}\/0$/);
+    assert.deepEqual(session.mcpServers[0].headers, exec.headers);
+    assert.deepEqual(session.mcpServers[1], server('cindy'), 'a server that could not be warmed keeps its own address');
+    // The task ends before agy connected (the fake never does): its warmed session must not stay on the other computer.
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.equal(sessions.size, 0, 'the warmed session agy never took over was ended before the entry exited');
+  });
+
+  // Why: when agy itself cannot start, nobody will take over the warmed sessions; they must be ended at
+  // once, not left on the other computer while the task stays open.
+  if (official) test('remote-workspace mode ends the warmed sessions when agy fails to start', async (t) => {
+    const { sessions, url } = await tunnelServer(t, 50);
+    const { bridge, send, reply, server } = remoteSession(t, { FAKE_AGY_REMOTE_INIT_ERROR: '1' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    assert.equal((await reply(1, 'session/new answer')).error.message, 'agy could not start');
+    await waitFor(() => sessions.size === 0, 3_000, 'the warmed session to be ended while the task is still open');
+    assert.equal(bridge.child.exitCode, null, 'released without waiting for the task to end');
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  // Why: the task can end while a handshake is still on its way. The server may already have created the
+  // session; the entry waits for the answer that names it and ends it before exiting.
+  // The answer takes longer than a short exit wait would allow: the entry's wait covers the warm-up's close budget.
+  if (official) test('remote-workspace mode ends a session whose handshake was still on its way at exit', async (t) => {
+    const { sessions, url } = await tunnelServer(t, 1_800);
+    const { bridge, send, reply, server } = remoteSession(t);
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    await waitFor(() => sessions.size === 1, 3_000, 'the server to create the session');
+    bridge.child.stdin.end(); // before the initialize answer arrives
+    assert.equal((await bridge.closed).code, 0);
+    assert.equal(sessions.size, 0, 'the session was ended before the entry exited');
+  });
+
+  // Why: starting the session process can fail synchronously (spawnAgy refuses unsafe paths or arguments)
+  // or asynchronously (the program is gone). Either way agy never runs, so no warmed session may stay.
+  if (official) test('remote-workspace mode leaves no warm-up running when agy cannot be started', async (t) => {
+    const { counts, url } = await tunnelServer(t, 50);
+    const { bridge, send, reply, server } = remoteSession(t, failSessionLaunch(t, 'throw'));
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    assert.match((await reply(1, 'session/new answer')).error.message, /could not be started/);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(counts.requests, 0, 'no handshake was started for an agy that never ran');
+    bridge.child.stdin.end();
+    await bridge.closed;
+  });
+
+  if (official) test('remote-workspace mode ends the warmed sessions when the agy program is gone', async (t) => {
+    const { sessions, url } = await tunnelServer(t, 50);
+    const { bridge, send, reply, server } = remoteSession(t, failSessionLaunch(t, 'missing'));
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    await bridge.closed;
+    assert.match(bridge.stderr.text(), /Could not start Antigravity/);
+    // Whether the handshake got as far as creating a session or was stopped before it, none is left.
+    assert.equal(sessions.size, 0, 'no warmed session is left on the other computer');
   });
 
   test('remote-workspace mode does not start a session without Cindy’s file and command tools', async (t) => {
@@ -1761,18 +1904,19 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     // active install/update locks the custom path controls.
     const checksBefore = cliActions.filter((a) => a === 'check').length;
     main.postMessage({ type: 'cli-state', reqId: 'inst-1', action: 'update', active: true });
-    await waitFor(() => element('custom-path-input').disabled === true, 3_000, 'path locked during update');
+    await waitFor(() => element('custom-path-input').disabled === true, 8_000, 'path locked during update');
     assert.equal(element('custom-path-save').disabled, true);
     assert.equal(element('custom-path-reset').disabled, true);
     main.postMessage({ type: 'cli-state', reqId: 'inst-1', action: 'update', active: false, result: { state: 'installed', version: '2.0.0' } });
-    await waitFor(() => element('cli-status').textContent === 'Installed 2.0.0', 3_000, 'installed status shown');
+    await waitFor(() => element('cli-status').textContent === 'Installed 2.0.0', 8_000, 'installed status shown');
     assert.equal(element('custom-path-input').disabled, false);
 
     element('custom-path-input').value = '/opt/older/agy';
     element('custom-path-input').listeners.input();
     element('custom-path-save').click();
-    await waitFor(() => cliActions.filter((a) => a === 'check').length > checksBefore, 3_000, 'fresh check triggered after switching from installed binary');
-    assert.notEqual(element('cli-status').textContent, 'Installed 2.0.0');
+    await waitFor(() => cliActions.filter((a) => a === 'check').length > checksBefore, 8_000, 'fresh check triggered after switching from installed binary');
+    // The page clears the status asynchronously; on a loaded CI runner an earlier check can move the counter first.
+    await waitFor(() => element('cli-status').textContent !== 'Installed 2.0.0', 8_000, '"Installed" cleared after switching binary');
   });
 
   test('worker.js serializes overlapping setCustomPath calls and cancels active login on path switch', async (t) => {
