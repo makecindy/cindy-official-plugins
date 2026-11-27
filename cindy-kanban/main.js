@@ -126,7 +126,7 @@ async function paneRead(args) {
 }
 
 function herdrFailure(prefix, message) {
-  const unknown = /outcome_unknown/.test(String(message ?? ''));
+  const unknown = /outcome_unknown|timeout|timed out/i.test(String(message ?? ''));
   return {
     ok: false,
     errorCode: unknown ? 'HERDR_OUTCOME_UNKNOWN' : 'HERDR_ERROR',
@@ -196,7 +196,9 @@ async function boardState() {
   const reports = Array.isArray(kv.reports) ? kv.reports : [];
   const blockedPanes = [];
   for (const a of (data.herdrAgents ?? []).filter(x => x.status === 'blocked').slice(0, 3)) {
-    blockedPanes.push(await blockedPaneDigest(a.paneId, a.title));
+    // 终端正文可能含敏感信息：默认不随快照交给模型，由用户显式开启。
+    if (kv.includeTerminalText === true) blockedPanes.push(await blockedPaneDigest(a.paneId, a.title));
+    else blockedPanes.push({ paneId: a.paneId, title: a.title, screen: '', skipped: 'terminal text disabled' });
   }
   return {
     observedAt: data.observedAt,
@@ -316,18 +318,27 @@ async function scheduleList() {
   return Array.isArray(list) ? list : [];
 }
 
+class ScheduleAmbiguous extends Error {}
+
 async function scheduleFind() {
   const arr = await scheduleList();
   const kv = await kvGet();
   const boundId = typeof kv.patrolScheduleId === 'string' ? kv.patrolScheduleId : null;
   if (boundId) {
     const bound = arr.find(x => x.id === boundId);
+    // 绑定 id 找不到时不许按名字猜，要求用户重新确认目标。
     if (bound) return bound;
+    throw new ScheduleAmbiguous('绑定的巡检自动化已不存在，请到「策略 · 巡检计划」重新确认目标');
   }
-  // 没有绑定记录时，只认名字精确、且提示词确实在驱动这个看板的自动化。
   const kvName = typeof kv.patrolAutomationName === 'string' ? kv.patrolAutomationName : null;
   const candidates = ['看板巡检', kvName].filter(Boolean);
-  return arr.find(x => candidates.includes(x.name) && /board_state|看板巡检/.test(String(x.prompt ?? ''))) ?? null;
+  const matches = arr.filter(x => candidates.includes(x.name) && /board_state|看板巡检/.test(String(x.prompt ?? '')));
+  // 多个同名候选时不自动选，要求用户确认，避免改错别的自动化。
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    throw new ScheduleAmbiguous(`找到 ${matches.length} 个同名巡检自动化，请手动打开其中一个再点「应用」确认目标`);
+  }
+  return null;
 }
 
 async function scheduleGet() {
@@ -337,7 +348,10 @@ async function scheduleGet() {
     if (!s) return { ok: true, found: false, message: '未找到名为「看板巡检」的自动化，请先用「自动机制」创建' };
     return { ok: true, found: true, id: s.id, name: s.name, cronExpr: s.cronExpr, intervalMs: s.intervalMs ?? null, timezone: s.timezone,
       status: s.status, nextFireAt: s.nextFireAt ?? null, silentWhenIdle: s.silentWhenIdle === true };
-  } catch (e) { return { ok: false, errorCode: e?.code ?? 'SCHEDULER_ERROR', message: String(e?.message ?? e) }; }
+  } catch (e) {
+    if (e instanceof ScheduleAmbiguous) return { ok: false, errorCode: 'SCHEDULE_AMBIGUOUS', message: e.message };
+    return { ok: false, errorCode: e?.code ?? 'SCHEDULER_ERROR', message: String(e?.message ?? e) };
+  }
 }
 
 async function scheduleApply(args) {
@@ -376,7 +390,10 @@ async function scheduleApply(args) {
       await kvWrite(kv => { kv.patrolScheduleId = s.id; return null; });
     } catch { /* 绑定失败不阻断结果，下次仍按名字兜底 */ }
     return { ok: true, id: s.id, cronExpr: cron.cronExpr, intervalMs: cron.intervalMs ?? null, enabled: args.enabled !== false };
-  } catch (e) { return { ok: false, errorCode: e?.code ?? 'SCHEDULER_ERROR', message: String(e?.message ?? e) }; }
+  } catch (e) {
+    if (e instanceof ScheduleAmbiguous) return { ok: false, errorCode: 'SCHEDULE_AMBIGUOUS', message: e.message };
+    return { ok: false, errorCode: e?.code ?? 'SCHEDULER_ERROR', message: String(e?.message ?? e) };
+  }
 }
 
 const RUN_TERMINAL = new Set(['completed', 'done', 'failed', 'error', 'cancelled', 'interrupted']);
@@ -427,6 +444,8 @@ async function runTaskAndWait({ title, text, route }) {
   return waitRun(task.taskId, run.runId);
 }
 
+let chatCreating = null;
+
 async function chat(args) {
   const initial = await kvGet();
   const text = String(args.text ?? '').trim();
@@ -444,11 +463,34 @@ async function chat(args) {
   }
   let first = false;
   if (!task) {
-    const create = { requestKey: `kanban-chat-${Date.now()}-create`, title: '看板指挥', autoTitle: false };
-    if (args.route) create.route = args.route;
-    task = await cindy.tasks.create(create);
-    taskId = task.taskId;
-    first = true;
+    // 首次创建串行化：并发两条指令只建一个任务，另一条等待后复用。
+    while (chatCreating) await chatCreating.catch(() => {});
+    const fresh = await kvGet();
+    const freshId = typeof fresh.chatTaskId === 'string' ? fresh.chatTaskId : null;
+    if (freshId && freshId !== taskId) {
+      try {
+        const reused = await cindy.tasks.get({ taskId: freshId });
+        if (reused && reused.status === 'active') { task = reused; taskId = freshId; }
+      } catch { /* 忽略，继续新建 */ }
+    }
+    if (!task) {
+      chatCreating = (async () => {
+        const create = { requestKey: `kanban-chat-${Date.now()}-create`, title: '看板指挥', autoTitle: false };
+        if (args.route) create.route = args.route;
+        const created = await cindy.tasks.create(create);
+        await kvWrite(kv => { kv.chatTaskId = created.taskId; return null; });
+        return created;
+      })();
+      try {
+        task = await chatCreating;
+        taskId = task.taskId;
+        first = true;
+      } catch (e) {
+        return kvFailure(e);
+      } finally {
+        chatCreating = null;
+      }
+    }
   }
   let fullText = text;
   if (first) {

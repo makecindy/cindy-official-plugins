@@ -4,7 +4,7 @@
   "name": "Agent 看板",
   "description": "侧栏看板：四列展示 Cindy 伙伴与 Herdr agent，点卡片跳转对话或 pane，支持策略、启发分析和自动机制。",
   "whenToUse": "用户想一眼看清各个 agent 和任务谁在跑、谁卡住、谁排队、谁空闲，要制定调度策略、分析现状或设置自动机制时使用。",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "minCindyVersion": "0.1.144",
   "entry": "main.js",
   "icon": "assets/icon.png",
@@ -113,6 +113,10 @@
           "termInputVisible": {
             "type": "boolean",
             "description": "终端输入行是否显示"
+          },
+          "includeTerminalText": {
+            "type": "boolean",
+            "description": "是否把 Herdr 终端正文摘要交给模型（默认关闭）"
           }
         },
         "required": [
@@ -471,6 +475,6 @@
     "ja": "locales/ja.json",
     "ko": "locales/ko.json"
   },
-  "releaseNotes": "修复第四轮评审：聊天优先透出服务端错误原因（仅超时/无回复才提示结果未知）；离线伙伴统一归入空闲列，指挥官与页面口径一致。",
+  "releaseNotes": "修复维护者首发清单：同名/多匹配巡检计划拒绝自动写入并要求确认、指挥聊天首次创建串行化且失败回滚、Herdr 外层超时按结果未知提示、立即巡检接入巡检分支、终端正文改为显式开启并在界面披露数据去向。",
   "author": "joei4cm"
 }

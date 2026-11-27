@@ -206,6 +206,10 @@ body.patrolling .col:nth-child(4){animation-delay:1.26s}
   </div>
   <div class="panel">
     <h3 id="t-patrol-title"></h3>
+    <p class="hint" id="t-disclosure"></p>
+    <div class="row" style="margin-top:0">
+      <label style="font-size:12px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="term-text" style="width:auto"><span id="t-term-text"></span></label>
+    </div>
     <p class="hint" id="t-patrol-hint"></p>
     <textarea id="patrol-text"></textarea>
     <div class="row"><button class="btn primary" id="patrol-save"><span id="t-patrol-save"></span></button>
@@ -300,6 +304,8 @@ const I18N = {
     keyTab: 'Tab completion', keyEsc: 'Escape', keyInt: 'Ctrl+C (interrupt)', keyUp: 'Previous', keyDown: 'Next',
     sendFailedKeepDraft: 'Send failed, draft kept: {e}',
     taskStatus: 'Task status',
+    disclosure: 'Data handed to models: the board snapshot (companion, task and agent status) is sent to the analysis, patrol, automation and chat tasks; the patrol log is stored on this machine. Terminal text is only included when you enable it below.',
+    termText: 'Include Herdr terminal text in snapshots (off by default)',
     enterFailedCheck: 'Text sent but Enter failed — check the pane: {e}',
 
   },
@@ -344,6 +350,8 @@ const I18N = {
     keyTab: 'Tab 补全', keyEsc: 'Esc', keyInt: 'Ctrl+C 中断', keyUp: '上一条', keyDown: '下一条',
     sendFailedKeepDraft: '发送失败，草稿已保留：{e}',
     taskStatus: '任务状态',
+    disclosure: '交给模型的内容：看板快照（伙伴、任务、agent 状态）会发送给分析、巡检、自动机制与聊天任务；巡检记录只存在本机。下方开关控制是否附带 Herdr 终端正文。',
+    termText: '看板快照附带 Herdr 终端正文（默认关闭）',
     enterFailedCheck: '文字已发送，但回车失败，请检查 pane：{e}',
 
   },
@@ -790,6 +798,8 @@ function applyStatic() {
   document.querySelector('#t-apply').textContent = t('apply');
   document.querySelector('#t-patrol-title').textContent = t('patrolTitle');
   document.querySelector('#t-patrol-hint').textContent = t('patrolHint');
+  document.querySelector('#t-disclosure').textContent = t('disclosure');
+  document.querySelector('#t-term-text').textContent = t('termText');
   document.querySelector('#patrol-text').placeholder = t('patrolPh');
   document.querySelector('#t-patrol-save').textContent = t('patrolSave');
   document.querySelector('#t-patrol-now').textContent = t('patrolOn');
@@ -1289,6 +1299,7 @@ async function loadPolicy(d) {
     const r = await call('board_policy', { op: 'get' });
     if (!dirty.policy) document.querySelector('#policy-text').value = r.policy ?? '';
     if (!dirty.patrol) document.querySelector('#patrol-text').value = r.patrol ?? '';
+    document.querySelector('#term-text').checked = r.includeTerminalText === true;
     const box = document.querySelector('#reports');
     box.textContent = '';
     const reports = r.reports ?? [];
@@ -1429,7 +1440,7 @@ document.querySelector('#patrol-now').onclick = async () => {
   document.body.classList.add('patrolling');
   out.textContent = t('analyzing');
   try {
-    const r = await call('board_analyze', { focus: document.querySelector('#patrol-text').value.trim(), route });
+    const r = await call('board_analyze', { focus: document.querySelector('#patrol-text').value.trim(), route, patrol: true });
     out.textContent = r.ok ? (r.analysis || '—') : t('analyzeFailed', { e: r.message ?? r.status ?? '' });
     last = await call('board_snapshot', {});
     if (last) { render(last); await loadPolicy(last); }
