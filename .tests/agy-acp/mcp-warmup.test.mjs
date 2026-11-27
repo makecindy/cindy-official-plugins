@@ -34,8 +34,14 @@ const DISCOVER = { jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _
 } } };
 const INITIALIZE = { jsonrpc: '2.0', id: 2, method: 'initialize', params: { clientInfo: CLIENT_INFO, protocolVersion: '2025-11-25', capabilities: CAPABILITIES } };
 
+/** One event-stream event; `multiline` splits the JSON over several data lines, as a server may. */
+function event(message, multiline) {
+  const json = multiline ? JSON.stringify(message, null, 1) : JSON.stringify(message);
+  return `event: message\n${json.split('\n').map((line) => `data: ${line}`).join('\n')}\n\n`;
+}
+
 /** A server like Cindy's bridge behind the tunnel; `log` lists what reached it. */
-async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false, failInitialize = false, open = false, initializeAnswer = null } = {}) {
+async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false, failInitialize = false, open = false, initializeAnswer = null, multiline = false } = {}) {
   const sessions = new Map();
   const log = [];
   const server = http.createServer((req, res) => {
@@ -76,8 +82,8 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
           const id = crypto.randomUUID();
           sessions.set(id, message.params.clientInfo.name);
           res.writeHead(200, { 'content-type': 'text/event-stream', 'mcp-session-id': id });
-          return res.end(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: message.id,
-            result: { protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'cindy_exec', version: '1' } } })}\n\n`);
+          return res.end(event({ jsonrpc: '2.0', id: message.id,
+            result: { protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'cindy_exec', version: '1' } } }, multiline));
         }
         if (!sessions.has(sid)) return res.writeHead(404).end();
         if (message.id === undefined) return res.writeHead(202).end();
@@ -95,7 +101,7 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
           ? { tools: [{ name: 'Bash', description: 'Run a command.', inputSchema: { type: 'object' } }], nextCursor: 'page-2' }
           : { content: [{ type: 'text', text: `${message.params.name} ran for ${sessions.get(sid)}` }] };
         res.writeHead(200, { 'content-type': 'text/event-stream' });
-        res.end(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: message.id, result })}\n\n`);
+        res.end(event({ jsonrpc: '2.0', id: message.id, result }, multiline));
       }, delayMs);
     });
   });
@@ -112,8 +118,10 @@ async function agyRequest(url, { method = 'POST', message, sid, auth = TOKEN } =
   if (message) Object.assign(headers, { accept: 'application/json, text/event-stream', 'content-type': 'application/json' });
   const response = await fetch(url, { method, headers, body: message ? JSON.stringify(message) : undefined });
   const text = await response.text();
-  const data = text.split('\n').find((line) => line.startsWith('data:'));
-  return { status: response.status, sid: response.headers.get('mcp-session-id'), body: data ? JSON.parse(data.slice(5)) : text };
+  // The first event's data, its data lines joined (an SSE reader's view).
+  const first = text.split(/\n\n/).find((block) => block.includes('data:'));
+  const data = first && first.split('\n').filter((line) => line.startsWith('data:')).map((line) => line.replace(/^data: ?/, '')).join('\n');
+  return { status: response.status, sid: response.headers.get('mcp-session-id'), body: data ? JSON.parse(data) : text };
 }
 
 describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () => {
@@ -327,14 +335,18 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
   // unparsable or ambiguous body, or another content type leaves it to the server and ends nothing.
   test('an initialize answer that is not a clear success ends no session', async (t) => {
     const json = 'application/json';
+    const COMPLETE = { protocolVersion: '2025-11-25', capabilities: {}, serverInfo: { name: 's', version: '1' } };
     const shapes = {
       error: (id) => ({ type: json, body: JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32603, message: 'no' } }) }),
       'result and error': (id) => ({ type: json, body: JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '2025-11-25' }, error: { code: 1, message: 'x' } }) }),
       'not JSON-RPC 2.0': (id) => ({ type: json, body: JSON.stringify({ id, result: { protocolVersion: '2025-11-25' } }) }),
       'no protocol version': (id) => ({ type: json, body: JSON.stringify({ jsonrpc: '2.0', id, result: {} }) }),
+      'no capabilities': (id) => ({ type: json, body: JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '2025-11-25', serverInfo: { name: 's', version: '1' } } }) }),
+      'no server info': (id) => ({ type: json, body: JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '2025-11-25', capabilities: {} } }) }),
+      'server info without version': (id) => ({ type: json, body: JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '2025-11-25', capabilities: {}, serverInfo: { name: 's' } } }) }),
       unparsable: () => ({ type: json, body: '{"jsonrpc":"2.0",' }),
-      'other content type': (id) => ({ type: 'text/plain', body: JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '2025-11-25' } }) }),
-      'two answers': (id) => ({ type: 'text/event-stream', body: [1, 2].map(() => `data: ${JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '2025-11-25' } })}\n\n`).join('') }),
+      'other content type': (id) => ({ type: 'text/plain', body: JSON.stringify({ jsonrpc: '2.0', id, result: COMPLETE }) }),
+      'two answers': (id) => ({ type: 'text/event-stream', body: [1, 2].map(() => event({ jsonrpc: '2.0', id, result: COMPLETE })).join('') }),
     };
     for (const [shape, initializeAnswer] of Object.entries(shapes)) {
       const { entry, log, sessions } = await bridgeServer(t, { initializeAnswer });
@@ -344,6 +356,24 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
       assert.ok(sessions.has('unclear-session'), `${shape}: the named session is left to the server`);
       assert.ok(!log.some((item) => item.method === 'DELETE'), `${shape}: no cleanup request was sent`);
     }
+  });
+
+  // Why: a server may split one SSE message over several data lines. The warm-up must read it as one
+  // message and hand it to agy with agy's own request id, or agy waits for an answer that never comes.
+  test('multi-line event-stream answers are read whole and replayed with agy’s ids', async (t) => {
+    const { entry, log } = await bridgeServer(t, { multiline: true });
+    const warmup = warmMcpServers([entry]);
+    t.after(() => warmup.close());
+    const [given] = await warmup.ready;
+    assert.notDeepEqual(given, entry, 'the multi-line handshake was understood');
+    const warmed = log.length;
+    const init = await agyRequest(given.url, { message: INITIALIZE });
+    assert.equal(init.body.id, 2, 'initialize is answered with agy’s id');
+    assert.equal(init.body.result.serverInfo.name, 'cindy_exec');
+    const list = await agyRequest(given.url, { message: { jsonrpc: '2.0', id: 7, method: 'tools/list', params: {} }, sid: init.sid });
+    assert.equal(list.body.id, 7, 'tools/list is answered with agy’s id');
+    assert.deepEqual(list.body.result.tools.map((tool) => tool.name), ['Bash']);
+    assert.equal(log.length, warmed, 'both came from the warm-up');
   });
 
   test('a session handed to agy is never reclaimed', async (t) => {

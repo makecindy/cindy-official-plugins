@@ -543,7 +543,8 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
           if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
           if (id) {
             res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
-            return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }));
+            return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id,
+              result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
           }
           if (message.id === undefined) return res.writeHead(202).end();
           res.writeHead(200, { 'content-type': 'application/json' });
@@ -1903,18 +1904,19 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     // active install/update locks the custom path controls.
     const checksBefore = cliActions.filter((a) => a === 'check').length;
     main.postMessage({ type: 'cli-state', reqId: 'inst-1', action: 'update', active: true });
-    await waitFor(() => element('custom-path-input').disabled === true, 3_000, 'path locked during update');
+    await waitFor(() => element('custom-path-input').disabled === true, 8_000, 'path locked during update');
     assert.equal(element('custom-path-save').disabled, true);
     assert.equal(element('custom-path-reset').disabled, true);
     main.postMessage({ type: 'cli-state', reqId: 'inst-1', action: 'update', active: false, result: { state: 'installed', version: '2.0.0' } });
-    await waitFor(() => element('cli-status').textContent === 'Installed 2.0.0', 3_000, 'installed status shown');
+    await waitFor(() => element('cli-status').textContent === 'Installed 2.0.0', 8_000, 'installed status shown');
     assert.equal(element('custom-path-input').disabled, false);
 
     element('custom-path-input').value = '/opt/older/agy';
     element('custom-path-input').listeners.input();
     element('custom-path-save').click();
-    await waitFor(() => cliActions.filter((a) => a === 'check').length > checksBefore, 3_000, 'fresh check triggered after switching from installed binary');
-    assert.notEqual(element('cli-status').textContent, 'Installed 2.0.0');
+    await waitFor(() => cliActions.filter((a) => a === 'check').length > checksBefore, 8_000, 'fresh check triggered after switching from installed binary');
+    // The page clears the status asynchronously; on a loaded CI runner an earlier check can move the counter first.
+    await waitFor(() => element('cli-status').textContent !== 'Installed 2.0.0', 8_000, '"Installed" cleared after switching binary');
   });
 
   test('worker.js serializes overlapping setCustomPath calls and cancels active login on path switch', async (t) => {

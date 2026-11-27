@@ -160,6 +160,38 @@ function serverHeaders(server) {
   return out;
 }
 
+/**
+ * The events of an event-stream body. An event ends at a blank line; its data is every `data:` line
+ * joined with newlines (one optional space after the colon removed), so a message split over several
+ * lines reads as one. `fields` keeps the event's other lines (event, id, retry, comments) as they are.
+ */
+function parseEvents(text) {
+  return text.split(/\r?\n\r?\n/).filter((block) => block.trim()).map((block) => {
+    const fields = [];
+    const data = [];
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith('data:')) data.push(line.slice(line.startsWith('data: ') ? 6 : 5));
+      else fields.push(line);
+    }
+    return { fields, data: data.length ? data.join('\n') : null };
+  });
+}
+
+function serializeEvents(events) {
+  return events.map(({ fields, data }) => [...fields, ...(data === null ? [] : data.split('\n').map((line) => `data: ${line}`))].join('\n') + '\n\n').join('');
+}
+
+/** The JSON-RPC messages of an answer body (JSON, or the data of each event of an event stream). */
+function answerMessages(kept) {
+  const type = String(kept.headers['content-type'] || '');
+  const text = kept.body.toString('utf8');
+  if (type.includes('text/event-stream')) return parseEvents(text).map((event) => (event.data === null ? undefined : parseJson(event.data)));
+  if (type.includes('application/json')) return [parseJson(text)];
+  return [];
+}
+
+const isResponse = (message) => isObject(message) && 'id' in message && !('method' in message);
+
 /** The answer with the JSON-RPC id of the request it now answers (JSON or event-stream bodies). */
 function withId(kept, id) {
   const type = String(kept.headers['content-type'] || '');
@@ -169,27 +201,37 @@ function withId(kept, id) {
     return isObject(message) && 'id' in message ? Buffer.from(JSON.stringify({ ...message, id })) : kept.body;
   }
   if (type.includes('text/event-stream')) {
-    return Buffer.from(text.split('\n').map((line) => {
-      if (!line.startsWith('data:')) return line;
-      const message = parseJson(line.slice(5).trim());
-      return isObject(message) && 'id' in message && !('method' in message) ? `data: ${JSON.stringify({ ...message, id })}` : line;
-    }).join('\n'));
+    // Rewritten per event, at the same boundaries it was read with; other events stay as they were.
+    return Buffer.from(serializeEvents(parseEvents(text).map((event) => {
+      const message = event.data === null ? undefined : parseJson(event.data);
+      return isResponse(message) ? { ...event, data: JSON.stringify({ ...message, id }) } : event;
+    })));
   }
   return kept.body;
 }
 
 /** The first JSON-RPC response in an answer body. */
 function firstResponse(kept) {
-  const type = String(kept.headers['content-type'] || '');
-  const text = kept.body.toString('utf8');
-  const candidates = type.includes('text/event-stream')
-    ? text.split('\n').filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim())
-    : [text];
-  for (const candidate of candidates) {
-    const message = parseJson(candidate);
-    if (isObject(message) && 'id' in message && !('method' in message)) return message;
-  }
-  return undefined;
+  return answerMessages(kept).find(isResponse);
+}
+
+/**
+ * The result of an initialize answer that is unmistakably a success for the request `id`: a JSON or
+ * event-stream body holding exactly one JSON-RPC 2.0 response with that id, no error, and a complete
+ * MCP InitializeResult. Anything else is null: no session is taken as ours for it.
+ */
+function successfulInitialize(answer, id) {
+  if (answer.status !== 200) return null;
+  const responses = answerMessages(answer).filter((message) => isResponse(message) && message.id === id);
+  if (responses.length !== 1) return null;
+  const [response] = responses;
+  if (response.jsonrpc !== '2.0' || 'error' in response) return null;
+  // A complete MCP InitializeResult: protocol version, capabilities, and server name and version.
+  const result = response.result;
+  const info = isObject(result) ? result.serverInfo : undefined;
+  const complete = isObject(result) && typeof result.protocolVersion === 'string' && result.protocolVersion !== ''
+    && isObject(result.capabilities) && isObject(info) && typeof info.name === 'string' && typeof info.version === 'string';
+  return complete ? result : null;
 }
 
 /** JSON with object keys in a fixed order, so equal values compare equal. */
@@ -197,26 +239,6 @@ function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (isObject(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
   return JSON.stringify(value);
-}
-
-/**
- * The result of an initialize answer that is unmistakably a success for the request `id`: a JSON or
- * event-stream body holding exactly one JSON-RPC 2.0 response with that id, with a result naming the
- * protocol version and no error. Anything else is null: no session is taken as ours for it.
- */
-function successfulInitialize(answer, id) {
-  if (answer.status !== 200) return null;
-  const type = String(answer.headers['content-type'] || '');
-  const text = answer.body.toString('utf8');
-  let candidates;
-  if (type.includes('text/event-stream')) candidates = text.split('\n').filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim());
-  else if (type.includes('application/json')) candidates = [text];
-  else return null;
-  const responses = candidates.map(parseJson).filter((message) => isObject(message) && message.id === id && !('method' in message));
-  if (responses.length !== 1) return null;
-  const [response] = responses;
-  if (response.jsonrpc !== '2.0' || 'error' in response || !isObject(response.result)) return null;
-  return typeof response.result.protocolVersion === 'string' ? response.result : null;
 }
 
 /** Whether agy's request is exactly the one sent ahead (client, version and capabilities included). */
@@ -265,7 +287,7 @@ async function warmServer(server, signal, closing, initializeSignal) {
       post({ jsonrpc: '2.0', id: 'cindy-warm-tools', method: 'tools/list', params: {} }, session),
     ]);
     const listed = firstResponse(tools);
-    if (tools.status !== 200 || !isObject(listed) || !isObject(listed.result)) return null;
+    if (tools.status !== 200 || !isObject(listed) || !isObject(listed.result) || !Array.isArray(listed.result.tools)) return null;
     return { sessionId, discover: await discover, initialize, stream, tools };
   };
   const warm = await handshake().catch(() => null);
