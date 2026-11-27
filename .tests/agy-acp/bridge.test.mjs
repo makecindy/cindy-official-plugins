@@ -3600,6 +3600,63 @@ process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
     await new Promise((resolve) => setTimeout(resolve, 60));
     assert.equal(deletedSessions.length, 1, 'closing the bridge did not send a duplicate DELETE');
   });
+
+  // Why: when restricted agy fails initialize (or the bridge exits) while MCP warm-up already opened a session
+  // and is still awaiting tools/list, failOpen/finish must finish deleting that session before process exit.
+  test('finishes deleting an in-flight warmed MCP session when restricted initialize fails and the bridge exits', async (t) => {
+    const authHeader = `Bearer ${randomUUID()}`;
+    const activeSessions = new Set();
+    const deletedSessions = [];
+    const mcp = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
+        const sid = req.headers['mcp-session-id'];
+        if (req.method === 'GET') return res.writeHead(405).end();
+        if (req.method === 'DELETE') {
+          deletedSessions.push(sid);
+          activeSessions.delete(sid);
+          return res.writeHead(200).end();
+        }
+        const message = body ? JSON.parse(body) : {};
+        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+        if (!sid) {
+          const id = `warm-inflight-${activeSessions.size}`;
+          activeSessions.add(id);
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
+          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {} } }));
+        }
+        if (message.id === undefined) return res.writeHead(202).end();
+        // Hold tools/list open longer than restricted agy's 80ms fail-open error so warm-up is still in flight.
+        setTimeout(() => {
+          if (res.destroyed) return;
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [] } }));
+        }, 400);
+      });
+    });
+    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
+    t.after(() => mcp.close());
+
+    const { bridge, send, reply } = remoteSteerHarness(t, { mode: 'fail-open' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    const exec = {
+      type: 'http',
+      name: 'cindy_exec',
+      url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
+      headers: [{ name: 'Authorization', value: authHeader }],
+    };
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec] } });
+    const openErr = await reply(1, 'failed restricted initialize answer');
+    assert.equal(openErr.error.code, -32000);
+    // End stdin immediately so finish(0) must wait for the interrupted in-flight handshake's DELETE before exiting.
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.equal(deletedSessions.length, 1, 'interrupted in-flight warm-up session was deleted before exit');
+    assert.equal(activeSessions.size, 0, 'no leaked upstream session remained after exit');
+  });
 });
 
 test('a disconnected input rejects pending and subsequent ACP calls', async () => {

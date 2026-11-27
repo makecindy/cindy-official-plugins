@@ -47,6 +47,15 @@ const EMPTY_PARAMS = Object.freeze({});
 const ACCEPT = 'application/json, text/event-stream';
 /** Request headers that describe this hop only. */
 const HOP_HEADERS = new Set(['host', 'connection', 'content-length', 'transfer-encoding', 'keep-alive', 'upgrade', 'proxy-connection']);
+/** Standard transport and MCP headers a legitimate agy client may send alongside `server.headers`. */
+const ALLOWED_EXTRA_HEADERS = new Set([
+  'host', 'user-agent', 'accept', 'accept-encoding', 'accept-language',
+  'content-type', 'content-length', 'transfer-encoding', 'connection', 'keep-alive',
+  'te', 'expect', 'cache-control', 'pragma', 'sec-fetch-mode', 'sec-fetch-site', 'sec-fetch-dest',
+  'mcp-session-id', 'mcp-protocol-version', 'mcp-method',
+]);
+/** The Host header of a request agy sends to the loopback relay. */
+const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(?::(\d+))?$/i;
 /** Answers larger than this are not kept (a tools/list of a few hundred KB is the largest expected). */
 const MAX_KEPT_BYTES = 8 * 1024 * 1024;
 
@@ -79,13 +88,15 @@ function sameString(a, b) {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
-/** Whether the incoming request carries the exact authorization/headers used during warm-up. */
+/** Whether the incoming request matches the exact warm-up auth/custom headers with no extra credential headers. */
 function sameAuth(reqHeaders, expectedAuth) {
   for (const [key, value] of Object.entries(expectedAuth)) {
     if (!sameString(reqHeaders[key], value)) return false;
   }
-  if (!Object.prototype.hasOwnProperty.call(expectedAuth, 'authorization') && reqHeaders.authorization !== undefined) {
-    return false;
+  for (const key of Object.keys(reqHeaders)) {
+    if (!Object.prototype.hasOwnProperty.call(expectedAuth, key) && !ALLOWED_EXTRA_HEADERS.has(key)) {
+      return false;
+    }
   }
   return true;
 }
@@ -123,7 +134,8 @@ function streamRefusal(url, headers, signal) {
   return new Promise((resolve) => {
     const request = http.request(new URL(url), { method: 'GET', headers, signal }, (response) => {
       const status = response.statusCode || 0;
-      if (status < 400) {
+      // Never cache accepted streams, auth errors (401/403), or server errors (5xx).
+      if (status < 400 || status === 401 || status === 403 || status >= 500) {
         request.destroy();
         resolve(null);
         return;
@@ -135,11 +147,14 @@ function streamRefusal(url, headers, signal) {
   });
 }
 
-/** `headers` of an ACP MCP server entry as an HTTP header object. */
+/** `headers` of an ACP MCP server entry as an HTTP header object (excluding hop-by-hop headers). */
 function serverHeaders(server) {
   const out = {};
   for (const header of Array.isArray(server.headers) ? server.headers : []) {
-    if (isObject(header) && typeof header.name === 'string' && typeof header.value === 'string') out[header.name.toLowerCase()] = header.value;
+    if (isObject(header) && typeof header.name === 'string' && typeof header.value === 'string') {
+      const key = header.name.toLowerCase();
+      if (!HOP_HEADERS.has(key)) out[key] = header.value;
+    }
   }
   return out;
 }
@@ -197,9 +212,10 @@ function sameEmptyParams(params) {
  * server cannot be warmed (it is then given to agy at its own address). A session the server opened
  * for a handshake that did not finish is ended.
  */
-async function warmServer(server, signal) {
+async function warmServer(server, signal, closing) {
   if (!isLoopback(server.url)) return null;
   const auth = serverHeaders(server);
+  /** Set only once the server confirmed creating this session for our initialize; only it may be ended here. */
   let sessionId = null;
   const post = (message, extra = {}) => exchange(server.url, {
     headers: { ...auth, accept: ACCEPT, 'content-type': 'application/json', ...extra },
@@ -210,9 +226,12 @@ async function warmServer(server, signal) {
     const discover = post({ jsonrpc: '2.0', id: 'cindy-warm-discover', method: 'server/discover', params: DISCOVER_PARAMS },
       { 'mcp-method': 'server/discover', 'mcp-protocol-version': DISCOVER_PROTOCOL }).catch(() => null);
     const initialize = await post({ jsonrpc: '2.0', id: 'cindy-warm-initialize', method: 'initialize', params: INITIALIZE_PARAMS });
-    if (typeof initialize.headers['mcp-session-id'] === 'string') sessionId = initialize.headers['mcp-session-id'];
     const result = firstResponse(initialize);
-    if (initialize.status !== 200 || !sessionId || !isObject(result) || !isObject(result.result)) return null;
+    const created = initialize.headers['mcp-session-id'];
+    // A failed initialize names no session of ours, whatever its headers say: nothing is ended for it.
+    if (initialize.status !== 200 || typeof created !== 'string' || !created
+      || !isObject(result) || result.id !== 'cindy-warm-initialize' || !isObject(result.result)) return null;
+    sessionId = created;
     const protocol = typeof result.result.protocolVersion === 'string' ? result.result.protocolVersion : INITIALIZE_PROTOCOL;
     const session = { ...auth, 'mcp-session-id': sessionId, 'mcp-protocol-version': protocol };
     const initialized = await post({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, session);
@@ -223,16 +242,23 @@ async function warmServer(server, signal) {
     ]);
     const listed = firstResponse(tools);
     if (tools.status !== 200 || !isObject(listed) || !isObject(listed.result)) return null;
-    return { sessionId, discover: await discover, initialize, stream, tools };
+    const discoverRes = await discover;
+    const keptDiscover = discoverRes && discoverRes.status !== 401 && discoverRes.status !== 403 && discoverRes.status < 500
+      ? discoverRes : null;
+    return { sessionId, discover: keptDiscover, initialize, stream, tools };
   };
   const warm = await handshake().catch(() => null);
-  if (!warm && sessionId) closeWarmSession(server, { sessionId });
+  if (!warm && sessionId) closeWarmSession(server, { sessionId }, closing);
   return warm;
 }
 
-/** Ends a warmed MCP session nobody will use. */
-function closeWarmSession(server, warm) {
-  return exchange(server.url, { method: 'DELETE', headers: { ...serverHeaders(server), 'mcp-session-id': warm.sessionId } }).catch(() => {});
+/** Ends a warmed MCP session nobody will use; `closing` tracks DELETEs still in flight. */
+function closeWarmSession(server, warm, closing) {
+  const done = exchange(server.url, { method: 'DELETE', headers: { ...serverHeaders(server), 'mcp-session-id': warm.sessionId } })
+    .catch(() => {})
+    .finally(() => closing?.delete(done));
+  closing?.add(done);
+  return done;
 }
 
 function readBody(req) {
@@ -254,15 +280,21 @@ function reply(res, kept, body) {
 }
 
 /** Passes one request to the server as it is and streams the answer back. */
-function forward(req, res, server, body) {
-  const target = new URL(server.url);
+function forward(req, res, state, body) {
+  const target = new URL(state.server.url);
   const headers = {};
   for (const [name, value] of Object.entries(req.headers)) if (!HOP_HEADERS.has(name)) headers[name] = value;
   if (body.length) headers['content-length'] = String(body.length);
   const upstream = http.request(target, { method: req.method, headers }, (answer) => {
+    // If upstream now rejects the warm-up credentials, invalidate any remaining kept answers.
+    if ((answer.statusCode === 401 || answer.statusCode === 403) && sameAuth(req.headers, state.auth)) {
+      state.live = true;
+    }
     const out = {};
     for (const [name, value] of Object.entries(answer.headers)) if (!HOP_HEADERS.has(name)) out[name] = value;
     res.writeHead(answer.statusCode || 502, out);
+    // An event stream may stay quiet for a while; agy must see it open as soon as the server does.
+    res.flushHeaders();
     answer.pipe(res);
     // The server dropped the connection mid-answer: agy must see it broken, as it would directly.
     answer.on('error', () => res.destroy());
@@ -287,7 +319,8 @@ function forward(req, res, server, body) {
 
 /**
  * Starts warming `servers` (the HTTP entries of `session/new`). `ready` resolves with the entries to
- * give agy: a warmed server at the relay, any other at its own address. `close` stops the relay.
+ * give agy: a warmed server at the relay, any other at its own address. `close` stops the relay
+ * and resolves once every unhanded warmed session (including any interrupted handshake) is deleted.
  */
 function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => {} } = {}) {
   const token = crypto.randomBytes(24).toString('base64url');
@@ -302,16 +335,32 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
     pending: { discover: true, initialize: true, initialized: true, stream: true, tools: true },
   }));
   let closed = false;
+  let relayPort = 0;
+  let warming = Promise.resolve();
+  /** DELETEs of warmed sessions still in flight; close() waits for them. */
+  const closing = new Set();
 
   /** Ends a warmed upstream session that warm-up still owns (never handed to agy), at most once. */
   const releaseOwned = (state) => {
     if (!state.owned || !state.warm) return null;
     state.owned = false;
-    return closeWarmSession(state.server, state.warm);
+    return closeWarmSession(state.server, state.warm, closing);
   };
 
   const relay = http.createServer((req, res) => {
     void (async () => {
+      // Only local non-browser agy requests to this exact loopback listener may reach the relay.
+      const hostMatch = LOOPBACK_HOST.exec(String(req.headers.host || ''));
+      if (!hostMatch || (hostMatch[2] && Number(hostMatch[2]) !== relayPort)) {
+        res.writeHead(421);
+        res.end();
+        return;
+      }
+      if (req.headers.origin !== undefined) {
+        res.writeHead(403);
+        res.end();
+        return;
+      }
       const match = /^\/([A-Za-z0-9_-]+)\/(\d+)$/.exec(req.url || '');
       const state = match && sameString(match[1], token) ? states[Number(match[2])] : undefined;
       if (!state || !state.warm) {
@@ -322,7 +371,7 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
       const body = await readBody(req);
       const answer = state.live ? null : keptAnswer(state, req, body);
       if (answer) reply(res, answer.kept, answer.body);
-      else forward(req, res, state.server, body);
+      else forward(req, res, state, body);
     })().catch(() => {
       if (!res.headersSent) res.writeHead(500);
       res.end();
@@ -331,7 +380,7 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
 
   /** The kept answer for agy's request, or null to pass it on (and everything after it). */
   const keptAnswer = (state, req, body) => {
-    // Mismatched authorization must neither receive nor consume any cached warm-up response.
+    // Mismatched authorization or unexpected credential headers must neither receive nor consume any cached answer.
     if (!sameAuth(req.headers, state.auth)) return null;
     const { warm, pending } = state;
     const sameSession = req.headers['mcp-session-id'] === warm.sessionId;
@@ -370,6 +419,12 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
     });
     relay.listen(0, '127.0.0.1', () => {
       const { port } = relay.address();
+      relayPort = port;
+      if (closed) {
+        if (relay.listening) relay.close();
+        resolve(servers);
+        return;
+      }
       let done = false;
       const finish = () => {
         if (done) return;
@@ -384,15 +439,16 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
         abort.abort();
         finish();
       }, deadlineMs);
-      Promise.all(states.map((state) => warmServer(state.server, abort.signal).then((warm) => {
+      warming = Promise.all(states.map((state) => warmServer(state.server, abort.signal, closing).then((warm) => {
         if (!warm) return;
         // A late warm-up after the deadline or close is not used: the server was already given at its own address.
-        if (abort.signal.aborted || closed) closeWarmSession(state.server, warm);
+        if (abort.signal.aborted || closed) closeWarmSession(state.server, warm, closing);
         else {
           state.warm = warm;
           state.owned = true;
         }
-      }, () => {}))).then(finish);
+      }, () => {})));
+      warming.then(finish);
     });
   });
   return {
@@ -401,8 +457,8 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
       closed = true;
       abort.abort();
       if (relay.listening) relay.close();
-      const releases = states.map(releaseOwned).filter(Boolean);
-      return releases.length ? Promise.all(releases).then(() => {}) : Promise.resolve();
+      for (const state of states) releaseOwned(state);
+      return warming.then(() => Promise.all([...closing])).then(() => {});
     },
   };
 }

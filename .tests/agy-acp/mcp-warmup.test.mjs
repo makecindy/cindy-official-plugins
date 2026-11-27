@@ -35,9 +35,10 @@ const DISCOVER = { jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _
 const INITIALIZE = { jsonrpc: '2.0', id: 2, method: 'initialize', params: { clientInfo: CLIENT_INFO, protocolVersion: '2025-11-25', capabilities: CAPABILITIES } };
 
 /** A server like Cindy's bridge behind the tunnel; `log` lists what reached it. */
-async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false, paginate = false } = {}) {
+async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false, paginate = false, failInitialize = false, failInitializeJsonRpc = false } = {}) {
   const sessions = new Map();
   const log = [];
+  let activeToken = TOKEN;
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (chunk) => { body += chunk; });
@@ -47,7 +48,7 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
         const sid = req.headers['mcp-session-id'];
         const message = body ? JSON.parse(body) : {};
         log.push({ method: req.method, rpc: message.method, sid, id: message.id });
-        if (req.headers.authorization !== TOKEN) return res.writeHead(401).end();
+        if (req.headers.authorization !== activeToken) return res.writeHead(401).end();
         if (req.method === 'GET' && acceptStream) {
           // A server that keeps an event stream open and sends nothing on it.
           res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -62,6 +63,16 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
         }
         if (!sid) {
           if (message.method !== 'initialize') return res.writeHead(400).end('Expected initialize request');
+          // A failing initialize that still echoes a session header belonging to another caller.
+          if (failInitialize) {
+            sessions.set('foreign-session', 'other');
+            return res.writeHead(500, { 'mcp-session-id': 'foreign-session' }).end();
+          }
+          if (failInitializeJsonRpc) {
+            sessions.set('foreign-jsonrpc-session', 'other');
+            res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'foreign-jsonrpc-session' });
+            return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: 'rejected' } }));
+          }
           const id = crypto.randomUUID();
           sessions.set(id, message.params.clientInfo.name);
           res.writeHead(200, { 'content-type': 'text/event-stream', 'mcp-session-id': id });
@@ -99,12 +110,12 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
   t.after(() => server.close());
   server.unref();
   const entry = { type: 'http', name: 'cindy_exec', url: `http://127.0.0.1:${server.address().port}/mcp/cindy_exec`, headers: [{ name: 'Authorization', value: TOKEN }] };
-  return { entry, log, sessions };
+  return { entry, log, sessions, setToken: (next) => { activeToken = next; } };
 }
 
 /** One request as agy sends it; the answer as agy reads it. */
-async function agyRequest(url, { method = 'POST', message, sid, authorization = TOKEN } = {}) {
-  const headers = { ...(authorization ? { authorization } : {}), ...(sid ? { 'mcp-session-id': sid } : {}) };
+async function agyRequest(url, { method = 'POST', message, sid, authorization = TOKEN, extraHeaders = {} } = {}) {
+  const headers = { ...(authorization ? { authorization } : {}), ...(sid ? { 'mcp-session-id': sid } : {}), ...extraHeaders };
   if (message) Object.assign(headers, { accept: 'application/json, text/event-stream', 'content-type': 'application/json' });
   const response = await fetch(url, { method, headers, body: message ? JSON.stringify(message) : undefined });
   const text = await response.text();
@@ -250,6 +261,106 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     assert.equal(mismatchedDeletes.length, 1, 'mismatched warmed session was deleted only once across mismatch + close()');
   });
 
+  // Why: only a session confirmed created by a 200 JSON-RPC initialize result belongs to this warm-up;
+  // a failed initialize (HTTP error or JSON-RPC error) that still echoes a session header must never trigger DELETE.
+  test('a failed initialize never closes another session even if its headers name one', async (t) => {
+    const httpFail = await bridgeServer(t, { failInitialize: true });
+    const w1 = warmMcpServers([httpFail.entry]);
+    assert.deepEqual(await w1.ready, [httpFail.entry], 'agy connects directly after HTTP error');
+    await w1.close();
+    assert.ok(httpFail.sessions.has('foreign-session'), 'foreign session stays untouched on HTTP 500');
+    assert.equal(httpFail.log.some((item) => item.method === 'DELETE'), false);
+
+    const rpcFail = await bridgeServer(t, { failInitializeJsonRpc: true });
+    const w2 = warmMcpServers([rpcFail.entry]);
+    assert.deepEqual(await w2.ready, [rpcFail.entry], 'agy connects directly after JSON-RPC error');
+    await w2.close();
+    assert.ok(rpcFail.sessions.has('foreign-jsonrpc-session'), 'foreign session stays untouched on JSON-RPC error');
+    assert.equal(rpcFail.log.some((item) => item.method === 'DELETE'), false);
+  });
+
+  // Why: if close() fires while warmServer already confirmed initialize and is still awaiting tools/list,
+  // close() must wait for the interrupted handshake to DELETE its opened upstream session before resolving.
+  test('closing while warm-up is still in flight deletes the opened session before close() resolves', async (t) => {
+    const { entry, log, sessions } = await bridgeServer(t, { delayMs: 120 });
+    const warmup = warmMcpServers([entry]);
+    // Wait until initialize succeeded (session created) while notifications/initialized or tools/list is still in flight.
+    const deadline = Date.now() + 4_000;
+    while (sessions.size === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    }
+    assert.equal(sessions.size, 1, 'initialize opened a session before close()');
+    const openedSid = [...sessions.keys()][0];
+    await warmup.close();
+    assert.equal(sessions.size, 0, 'interrupted handshake session was already deleted before close() resolved');
+    assert.equal(log.filter((item) => item.method === 'DELETE' && item.sid === openedSid).length, 1);
+  });
+
+  // Why: the loopback relay must enforce the upstream server's auth boundary — rejecting non-loopback hosts,
+  // cross-origin browser requests, guessed paths, extra credential headers, and revoking remaining cached answers
+  // once upstream rejects the warmed credentials (e.g., auth rotation/revocation).
+  test('relay enforces host/origin/token boundaries and respects upstream authentication changes', async (t) => {
+    const { entry, log, setToken } = await bridgeServer(t, { paginate: true });
+    const warmup = warmMcpServers([entry]);
+    t.after(() => warmup.close());
+    const [given] = await warmup.ready;
+    const url = new URL(given.url);
+    const rawSend = (pathName, headers) => new Promise((resolve, reject) => {
+      const request = http.request({ host: '127.0.0.1', port: url.port, path: pathName, method: 'POST', headers },
+        (response) => { response.resume(); response.on('end', () => resolve(response.statusCode)); });
+      request.on('error', reject);
+      request.end(JSON.stringify(INITIALIZE));
+    });
+    const baseHeaders = {
+      host: url.host,
+      authorization: TOKEN,
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    };
+    const beforeBoundary = log.length;
+    assert.equal(await rawSend(url.pathname, { ...baseHeaders, host: `evil.example.test:${url.port}` }), 421);
+    assert.equal(await rawSend(url.pathname, { ...baseHeaders, host: '127.0.0.1:9' }), 421);
+    assert.equal(await rawSend(url.pathname, { ...baseHeaders, origin: 'https://evil.example.test' }), 403);
+    assert.equal(await rawSend(url.pathname.replace(/\/[^/]+\/0$/, '/not-the-token/0'), baseHeaders), 404);
+    assert.equal(log.length, beforeBoundary, 'boundary rejections never reached upstream');
+
+    // Extra credential header alongside matching Authorization bypasses the cache to upstream.
+    const extraCred = await agyRequest(given.url, {
+      message: INITIALIZE,
+      extraHeaders: { 'x-api-key': crypto.randomUUID() },
+    });
+    assert.equal(extraCred.status, 200);
+    assert.equal(log.length, beforeBoundary + 1, 'request with extra credential header bypassed cache to upstream');
+
+    // Legitimate initialize still hits the warmed session (previous bypass did not consume cache).
+    const init = await agyRequest(given.url, { message: INITIALIZE });
+    assert.equal(init.status, 200);
+    assert.equal(log.length, beforeBoundary + 1, 'warmed initialize still served from cache');
+
+    // Upstream rotates/revokes the warm-up token: a forwarded same-auth request gets 401 and invalidates
+    // remaining cached answers so subsequent tools/list also sees 401 instead of stale cached tools.
+    const rotatedToken = `Bearer ${crypto.randomUUID()}`;
+    setToken(rotatedToken);
+    const revokedPage2 = await agyRequest(given.url, {
+      message: { jsonrpc: '2.0', id: 20, method: 'tools/list', params: { cursor: 'p2' } },
+      sid: init.sid,
+    });
+    assert.equal(revokedPage2.status, 401);
+    const staleTools = await agyRequest(given.url, {
+      message: { jsonrpc: '2.0', id: 21, method: 'tools/list', params: {} },
+      sid: init.sid,
+    });
+    assert.equal(staleTools.status, 401, 'revoked warm-up credentials no longer receive stale cached tools/list');
+    // The new token still works directly through the relay.
+    const newAuthTools = await agyRequest(given.url, {
+      message: { jsonrpc: '2.0', id: 22, method: 'tools/list', params: {} },
+      sid: init.sid,
+      authorization: rotatedToken,
+    });
+    assert.equal(newAuthTools.status, 200);
+    assert.deepEqual(newAuthTools.body.result.tools.map((tool) => tool.name), ['Bash']);
+  });
+
   // Only the client's capabilities differ: the server may answer such a client differently.
   test('a handshake that differs from the warm-up goes to the server, and the warmed session is closed', async (t) => {
     const { entry, log, sessions } = await bridgeServer(t);
@@ -285,6 +396,15 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     const [given] = await warmup.ready;
     assert.ok(Date.now() - started < 1_000, 'the warm-up does not wait for the stream to end');
     assert.notDeepEqual(given, entry, 'the handshake was still warmed');
+    // Forwarded idle SSE streams must flush their 200 response headers immediately without waiting for events.
+    const controller = new AbortController();
+    t.after(() => controller.abort());
+    const response = await Promise.race([
+      fetch(given.url, { headers: { authorization: TOKEN, accept: 'text/event-stream' }, signal: controller.signal }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('idle SSE headers did not flush in time')), 2_000)),
+    ]);
+    assert.equal(response.status, 200);
+    controller.abort();
   });
 
   // Why: the refusal is read to replay it; an abnormal server must not make this process keep megabytes.

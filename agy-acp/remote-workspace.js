@@ -349,7 +349,12 @@ function startRemoteWorkspace(agyPath, host) {
     closeWarmup();
     clearTimeout(forceTimer);
     clearTimeout(agentCloseTimer);
-    const done = () => process.exit(code);
+    let exiting = false;
+    const done = () => {
+      if (exiting) return;
+      exiting = true;
+      process.exit(code);
+    };
     const pending = [];
     if (process.stdout.writableLength > 0) {
       pending.push(new Promise((resolve) => process.stdout.once('drain', resolve)));
@@ -357,7 +362,7 @@ function startRemoteWorkspace(agyPath, host) {
     if (warmupCleanup) pending.push(warmupCleanup);
     if (pending.length) {
       Promise.all(pending).then(done, done);
-      setTimeout(done, timings.flush);
+      setTimeout(done, timings.flush).unref();
     } else {
       done();
     }
@@ -378,6 +383,7 @@ function startRemoteWorkspace(agyPath, host) {
   const stop = (signal) => {
     if (stopCode !== null) return;
     stopCode = 128 + (os.constants.signals[signal] || os.constants.signals.SIGTERM);
+    closeWarmup();
     terminate();
     setTimeout(() => finish(stopCode), timings.signalGrace + 300).unref();
   };
@@ -386,6 +392,7 @@ function startRemoteWorkspace(agyPath, host) {
   const abandon = (line, sessionId) => {
     if (stopCode !== null || finished) return;
     stopCode = REMOTE_WORKSPACE_EXIT_CODE;
+    closeWarmup();
     if (sessionId) {
       toClient({
         jsonrpc: '2.0',
