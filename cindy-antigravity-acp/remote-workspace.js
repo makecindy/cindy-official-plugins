@@ -57,6 +57,8 @@ const MAX_SERVERS = 64;
 /** Remote-workspace mode could not be established, or was broken by the agent; agy is not left running. */
 const REMOTE_WORKSPACE_EXIT_CODE = 78;
 const LAUNCH_DIR_PREFIX = 'cindy-agy-remote-';
+/** How long ending the task waits for the warmed MCP sessions agy did not take over to be ended. */
+const WARMUP_CLOSE_GRACE_MS = 1_500;
 /** A launch directory this old belongs to a task that ended without cleaning up (a crash, a hard kill). */
 const STALE_LAUNCH_DIR_MS = 24 * 60 * 60 * 1000;
 
@@ -288,7 +290,15 @@ function startRemoteWorkspace(agyPath, host) {
     if (finished) return;
     finished = true;
     clearTimeout(forceTimer);
-    const done = () => process.exit(code);
+    let exiting = false;
+    const done = () => {
+      if (exiting) return;
+      exiting = true;
+      // Warmed MCP sessions agy never took over are ended on the other computer before the process goes.
+      const reclaimed = warmup ? warmup.close() : Promise.resolve();
+      Promise.race([reclaimed, new Promise((resolve) => setTimeout(resolve, WARMUP_CLOSE_GRACE_MS))])
+        .finally(() => process.exit(code));
+    };
     if (process.stdout.writableLength > 0) {
       process.stdout.once('drain', done);
       setTimeout(done, timings.flush);

@@ -247,6 +247,31 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
       'the answer ends in an error instead of hanging');
   });
 
+  // Why: a task can fail or be cancelled after the warm-up opened sessions on the other computer and before
+  // agy connected. Nobody else ends those sessions; the relay's close must, without touching one agy took.
+  test('closing ends the warmed sessions agy never took over', async (t) => {
+    const taken = await bridgeServer(t);
+    const untaken = await bridgeServer(t);
+    const warmup = warmMcpServers([taken.entry, { ...untaken.entry, name: 'cindy' }]);
+    t.after(() => warmup.close());
+    const [given] = await warmup.ready;
+    const init = await agyRequest(given.url, { message: INITIALIZE });
+    await warmup.close();
+    assert.ok(taken.sessions.has(init.sid), 'the session agy took over is left to agy');
+    assert.equal(untaken.sessions.size, 0, 'the session agy never took over is ended');
+    assert.equal(untaken.log.at(-1).method, 'DELETE');
+  });
+
+  test('closing during the warm-up ends the sessions its interrupted handshakes opened', async (t) => {
+    const { entry, sessions } = await bridgeServer(t, { delayMs: 200 });
+    const warmup = warmMcpServers([entry]);
+    await new Promise((resolve) => setTimeout(resolve, 300)); // initialize answered, the rest still on its way
+    assert.equal(sessions.size, 1);
+    await warmup.close();
+    assert.equal(sessions.size, 0, 'no session is left on the other computer');
+    assert.deepEqual(await warmup.ready, [entry]);
+  });
+
   test('a server that is not warmed in time, or not on this computer, is given to agy at its own address', async (t) => {
     const { entry, log } = await bridgeServer(t, { hang: true });
     const unreachable = { ...entry, name: 'cindy', url: 'http://127.0.0.1:9/mcp/cindy' };

@@ -175,7 +175,7 @@ function sameParams(params, sent) {
  * server cannot be warmed (it is then given to agy at its own address). A session the server opened
  * for a handshake that did not finish is ended.
  */
-async function warmServer(server, signal) {
+async function warmServer(server, signal, closing) {
   if (!isLoopback(server.url)) return null;
   const auth = serverHeaders(server);
   let sessionId = null;
@@ -204,13 +204,17 @@ async function warmServer(server, signal) {
     return { sessionId, discover: await discover, initialize, stream, tools };
   };
   const warm = await handshake().catch(() => null);
-  if (!warm && sessionId) closeWarmSession(server, { sessionId });
+  if (!warm && sessionId) closeWarmSession(server, { sessionId }, closing);
   return warm;
 }
 
-/** Ends a warmed MCP session nobody will use. */
-function closeWarmSession(server, warm) {
-  exchange(server.url, { method: 'DELETE', headers: { ...serverHeaders(server), 'mcp-session-id': warm.sessionId } }).catch(() => {});
+/** Ends a warmed MCP session nobody will use; `closing` holds the DELETEs still on their way. */
+function closeWarmSession(server, warm, closing) {
+  const done = exchange(server.url, { method: 'DELETE', headers: { ...serverHeaders(server), 'mcp-session-id': warm.sessionId } })
+    .catch(() => {})
+    .finally(() => closing.delete(done));
+  closing.add(done);
+  return done;
 }
 
 function readBody(req) {
@@ -275,6 +279,9 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
   /** Per server: the kept answers not given yet, and whether agy left the warmed session. */
   const states = servers.map((server) => ({ server, warm: null, live: false, pending: { discover: true, initialize: true, initialized: true, stream: true, tools: true } }));
   let closed = false;
+  let warming = Promise.resolve();
+  /** DELETEs of warmed sessions still on their way; close() waits for them. */
+  const closing = new Set();
 
   const relay = http.createServer((req, res) => {
     void (async () => {
@@ -320,7 +327,7 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
       // agy opened an MCP session of its own (another agy version): the warmed one is not used, and
       // from here on the server sees agy's requests only.
       if (method === 'initialize') {
-        if (pending.initialize) closeWarmSession(state.server, warm);
+        if (pending.initialize) closeWarmSession(state.server, warm, closing);
         state.live = true;
       }
       return null;
@@ -351,20 +358,33 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
         abort.abort();
         finish();
       }, deadlineMs);
-      Promise.all(states.map((state) => warmServer(state.server, abort.signal).then((warm) => {
+      warming = Promise.all(states.map((state) => warmServer(state.server, abort.signal, closing).then((warm) => {
         if (!warm) return;
         // A late warm-up after the deadline is not used: the server was already given at its own address.
-        if (abort.signal.aborted || closed) closeWarmSession(state.server, warm);
+        if (abort.signal.aborted || closed) closeWarmSession(state.server, warm, closing);
         else state.warm = warm;
-      }, () => {}))).then(finish);
+      }, () => {})));
+      warming.then(finish);
     });
   });
   return {
     ready,
+    /**
+     * Stops the relay and ends every warmed session agy did not take over (it never sent the kept
+     * initialize): the task failed to start, was cancelled, or agy left before connecting. Resolves
+     * once those DELETEs, and the ones of handshakes it interrupted, are answered.
+     */
     close() {
       closed = true;
       abort.abort();
       if (relay.listening) relay.close();
+      for (const state of states) {
+        if (state.warm && state.pending.initialize && !state.live) {
+          state.live = true;
+          closeWarmSession(state.server, state.warm, closing);
+        }
+      }
+      return warming.then(() => Promise.all([...closing])).then(() => {});
     },
   };
 }

@@ -486,6 +486,10 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
         const message = body ? JSON.parse(body) : {};
         const sid = req.headers['mcp-session-id'];
         if (req.method === 'GET') return res.writeHead(405).end();
+        if (req.method === 'DELETE') {
+          sessions.delete(sid);
+          return res.writeHead(200).end();
+        }
         if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
         if (!sid) {
           const id = `s${sessions.size}`;
@@ -511,8 +515,10 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.match(session.mcpServers[0].url, /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{32}\/0$/);
     assert.deepEqual(session.mcpServers[0].headers, exec.headers);
     assert.deepEqual(session.mcpServers[1], server('cindy'), 'a server that could not be warmed keeps its own address');
+    // The task ends before agy connected (the fake never does): its warmed session must not stay on the other computer.
     bridge.child.stdin.end();
     assert.equal((await bridge.closed).code, 0);
+    assert.equal(sessions.size, 0, 'the warmed session agy never took over was ended before the entry exited');
   });
 
   test('remote-workspace mode does not start a session without Cindy’s file and command tools', async (t) => {
