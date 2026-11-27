@@ -2945,6 +2945,8 @@ var PR_CSS = '<style>' + PR_BASE_CSS +
   'a{color:inherit;text-decoration:none}a:hover{text-decoration:underline;text-underline-offset:2px}' +
   'button[data-ghost-action="pr:stop"]{opacity:0;visibility:hidden;transition:opacity var(--motion-fast,120ms) var(--motion-ease-out,ease-out),visibility 0s linear var(--motion-fast,120ms)}' +
   'div:hover>div>button[data-ghost-action="pr:stop"],div:focus-within>div>button[data-ghost-action="pr:stop"]{opacity:1;visibility:visible;transition-delay:0s}' +
+  'div[style*="flex-direction"]>div[style*="order:0"],div[style*="flex-direction"]>div[style*="order: 0"]{display:none}' +
+  'div[data-ghost-width="full"]>div[style*="flex-direction"]>div[style*="order:0"],div[data-ghost-width="full"]>div[style*="flex-direction"]>div[style*="order: 0"]{display:block}' +
   '@keyframes prspin{to{transform:rotate(360deg)}}' +
   '</style>';
 
@@ -3238,27 +3240,33 @@ function prModelRow(settings) {
 }
 
 function prSettingsPanel(settings, card) {
-  // Include read-only manual-stop guidance inside the settings panel so host
-  // PR summary popovers (which project settingsPanel into the PR Settings dialog)
-  // always surface the schedule ID and instructions without a dead popover button.
-  var manual = card && manualFollowStop(card)
-    ? '<div style="margin-top:4px;padding:8px;border-top:1px solid var(--border-default)">' +
-      '<div style="font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prManualStopEntry')) + '</div>' +
-      '<div style="margin-top:4px;font-size:12px;line-height:1.5;color:var(--text-secondary);user-select:text;overflow-wrap:anywhere">' +
-      prEsc(t('prManualStop', { id: card.scheduleId })) + '</div></div>'
-    : '';
-  return '<div style="padding:8px 8px 10px;border-top:1px solid var(--border-default)">' +
-    '<div style="padding:4px 8px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prSettings')) + '</div>' +
-    prSettingRow('prset:rename', t('prAutoRename'), t('prAutoRenameHint'), settings.autoRename) +
+  var controls = prSettingRow('prset:rename', t('prAutoRename'), t('prAutoRenameHint'), settings.autoRename) +
     prSettingRow('prset:follow', t('prAutoFollow'), t('prAutoFollowHint'), settings.autoFollow) +
     prSettingRow('prset:archive', t('prAutoArchive'), t('prAutoArchiveHint'), settings.autoArchive) +
-    prModelRow(settings) +
-    manual +
+    prModelRow(settings);
+  if (!card || !manualFollowStop(card)) {
+    return '<div style="padding:8px 8px 10px;border-top:1px solid var(--border-default)">' +
+      '<div style="padding:4px 8px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prSettings')) + '</div>' +
+      controls +
+      '</div>';
+  }
+  // Place read-only manual-stop guidance before the settings heading in DOM order
+  // (visually last via flex order:2 on desktop) so mobile's trailing text projection
+  // keeps [heading, model label, optional model hint] at the end, while an empty
+  // first child protects the guidance from desktop projectPrCard's heading.remove().
+  return '<div style="display:flex;flex-direction:column;padding:8px 8px 10px;border-top:1px solid var(--border-default)">' +
+    '<div style="display:none"></div>' +
+    '<div style="order:2;margin-top:4px;padding:8px;border-top:1px solid var(--border-default)">' +
+      '<div style="font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prManualStopEntry')) + '</div>' +
+      '<div style="margin-top:4px;font-size:12px;line-height:1.5;color:var(--text-secondary);user-select:text;overflow-wrap:anywhere">' +
+      prEsc(t('prManualStop', { id: card.scheduleId })) + '</div></div>' +
+    '<div style="order:0;padding:4px 8px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prSettings')) + '</div>' +
+    controls +
     '</div>';
 }
 
-function prGearButton(open) {
-  return prButton('prui:settings', open ? t('prHideSettings') : t('prSettings'),
+function prGearButton(open, keepSettingsLabel) {
+  return prButton('prui:settings', open && !keepSettingsLabel ? t('prHideSettings') : t('prSettings'),
     'display:grid;flex:none;align-self:flex-start;place-items:center;width:32px;height:32px;border-radius:9999px;' +
     'color:' + (open ? 'var(--text-primary);--bg:' + PR_HOVER : 'var(--text-tertiary)') + ';--hover:' + PR_HOVER,
     prGearGlyph());
@@ -3386,7 +3394,7 @@ function renderPrCard(card, settings) {
     left += '<div style="margin-top:4px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
   }
   var openOnly = card.stage === 'open' ? prOpenOnly(card) : '';
-  var body = prHeader(tile, title, meta, card.pr, gear ? prGearButton(card.settingsOpen) : '') +
+  var body = prHeader(tile, title, meta, card.pr, gear ? prGearButton(card.settingsOpen, manualFollowStop(card)) : '') +
     prFooter(left, actions, openOnly, prArchiveButton(card, settings), persistentActions);
   // Host copy-link accepts only HTTP(S) URLs. Keep the repair guidance and
   // command together in one panel so ordinary card clicks (e.g. settings) never

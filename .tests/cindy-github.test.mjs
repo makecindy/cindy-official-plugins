@@ -3275,11 +3275,14 @@ test('manual-stop guidance works in both host PR summary popovers and open cards
 
   await rt.click(opened.callId, 'prui:settings');
   const settingsHtml = rt.lastCard(opened.callId).html;
-  const settingsStart = settingsHtml.indexOf('data-ghost-action="prset:rename"');
-  assert.ok(settingsStart > 0);
-  const settingsTail = settingsHtml.slice(settingsStart);
-  assert.match(settingsTail, /手动停止/);
-  assert.match(settingsTail, /已有调度请在自动化设置手动停止（ID：old）/);
+  const panelStart = settingsHtml.lastIndexOf('display:flex;flex-direction:column;padding:8px 8px 10px');
+  assert.ok(panelStart > 0, 'manualFollowStop settingsPanel must exist');
+  const settingsPanelHtml = settingsHtml.slice(panelStart);
+  assert.match(settingsPanelHtml, /<div style="display:none"><\/div><div style="order:2;/, 'empty first child protects manual guidance from projectPrCard heading.remove()');
+  assert.match(settingsPanelHtml, /手动停止/);
+  assert.match(settingsPanelHtml, /已有调度请在自动化设置手动停止（ID：old）/);
+  assert.match(settingsPanelHtml, /data-ghost-action="prset:rename"/);
+  assert.match(settingsHtml, /<button data-ghost-action="prui:settings" aria-label="PR 设置"/, 'gear aria-label stays PR 设置 so projectPrCard dialog title stays PR 设置');
   assert.deepEqual(rows.get('old'), old);
   await rt.click(opened.callId, 'prui:settings');
 
@@ -3297,6 +3300,74 @@ test('manual-stop guidance works in both host PR summary popovers and open cards
   assert.deepEqual(rows.get('old'), old);
   assert.equal(calls.includes('schedule_delete'), false);
   assert.equal(rt.agentRuns.length, 0);
+});
+
+function projectMobileRichTextLines(html) {
+  let source = html.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
+  const cutMarked = (input, marker) => {
+    const cuts = [];
+    const tags = /<(\/?)([a-z][a-z0-9]*)\b([^>]*)>/gi;
+    for (let open = tags.exec(input); open; open = tags.exec(input)) {
+      const name = open[2].toLowerCase();
+      if (open[1] || ['br', 'hr', 'img'].includes(name) || !marker(name, open[3])) continue;
+      const innerStart = tags.lastIndex;
+      let depth = 1;
+      for (let next = tags.exec(input); next; next = tags.exec(input)) {
+        if (next[2].toLowerCase() !== name) continue;
+        depth += next[1] ? -1 : 1;
+        if (depth === 0) { cuts.push([innerStart, next.index]); break; }
+      }
+    }
+    cuts.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+    const merged = [];
+    for (const [from, to] of cuts) {
+      const last = merged.at(-1);
+      if (last && from <= last[1]) last[1] = Math.max(last[1], to);
+      else merged.push([from, to]);
+    }
+    let out = input;
+    for (let i = merged.length - 1; i >= 0; i--) out = out.slice(0, merged[i][0]) + out.slice(merged[i][1]);
+    return out;
+  };
+  source = cutMarked(source, (name, attrs) =>
+    /data-ghost-toggle="(?:on|off)"/.test(attrs) ||
+    /data-ghost-live-label="[^"]+"/.test(attrs) ||
+    /data-ghost-pr-status="[^"]+"/.test(attrs) ||
+    (name === 'button' && /data-ghost-action="[^"]+"/.test(attrs) && /aria-label="[^"]+"/.test(attrs)));
+  const text = source
+    .replace(/<[^>]+>/g, (tag) => /^(?:<br\b|<hr\b|<\/(?:p|div|h[1-4]|li|tr|section|header|footer|blockquote|pre)\b)/i.test(tag) ? '\n' : '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+  return text.split('\n').map(l => l.trim()).filter(Boolean);
+}
+
+test('mobile settings projection preserves trailing heading and follow-model lines for default, custom and no-picker configs', async () => {
+  const url = 'https://github.com/octo/repo/pull/42';
+  for (const [label, kv, pickModel, expectedTail] of [
+    ['default-model', {}, async () => ({ ok: false }), ['PR 设置', '自动跟进用的模型', '每次跟进用这个任务当时的模型']],
+    ['custom-model', { prCard: { followModel: { label: 'Claude Sonnet', route: { agentKind: 'cc', providerId: 'p', model: 'sonnet', effort: 'high', fastMode: false } } } },
+      async () => ({ ok: false }), ['PR 设置', '自动跟进用的模型']],
+    ['no-model-picker', {}, undefined, ['PR 设置']],
+  ]) {
+    const { hostApi, rows, runs } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv, pickModel });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, following: true });
+    rows.set('old', { id: 'old', targetSessionId: 's1', status: 'active', recurring: true, updatedAt: 1000, lastFiredAt: 2000, preRunHook: oldFollowHook(url) });
+    runs.set('old', [verifiedNodeRun('old', { firedAt: 2000 })]);
+    await rt.tool({ card_id: opened.callId });
+    await rt.click(opened.callId, 'prui:settings');
+
+    const html = rt.lastCard(opened.callId).html;
+    const projectedLines = projectMobileRichTextLines(html);
+    const hasModelChoices = html.includes('data-ghost-action="prset:modelTask"') && html.includes('data-ghost-action="prset:model"');
+    const hasModelPicker = html.includes('data-ghost-action="prset:modelPick"');
+    const settingsLineCount = 1 + (hasModelChoices ? (hasModelPicker ? 1 : 2) : 0);
+    const settingsLines = projectedLines.slice(-settingsLineCount);
+    const bodyLines = projectedLines.slice(0, -settingsLineCount);
+
+    assert.deepEqual(settingsLines, expectedTail, label);
+    assert.ok(bodyLines.includes('手动停止'), `${label}: manual-stop title should stay in body lines`);
+    assert.ok(bodyLines.some(line => line.includes('已有调度请在自动化设置手动停止（ID：old）')), `${label}: manual-stop guidance with ID should stay in body lines`);
+  }
 });
 
 test('repair guidance survives settings clicks and non-complete chips avoid checkmark glyph', async () => {
