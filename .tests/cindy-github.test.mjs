@@ -102,7 +102,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.51');
+  assert.equal(manifest.version, '1.5.52');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -769,6 +769,201 @@ function createPrRuntime(options = {}) {
     }),
   };
 }
+
+function mergeablePrRuntime(options = {}) {
+  const pr = {
+    id: 'PR_node', number: 42, title: 'Mergeable PR', url: 'https://example.test/octo/repo/pull/42',
+    state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN',
+    headRefOid: 'a'.repeat(40), baseRefName: 'main', mergeQueue: null,
+    baseRef: { name: 'main', branchProtectionRule: null, rules: { nodes: [], pageInfo: { hasNextPage: false } } },
+  };
+  const repository = { id: 'REPO_node', viewerPermission: 'WRITE', viewerDefaultMergeMethod: 'SQUASH',
+    mergeCommitAllowed: true, squashMergeAllowed: true, rebaseMergeAllowed: false, pullRequest: pr };
+  const viewer = { id: 'VIEWER_node' };
+  const rulesets = new Map();
+  const writes = [];
+  let outcome = 'merged';
+  const runtime = createPrRuntime({
+    ...options,
+    github(request) {
+      if (request.method === 'PUT') {
+        assert.equal(request.url, 'https://api.github.com/repos/octo/repo/pulls/42/merge');
+        writes.push(JSON.parse(request.body));
+        if (outcome === 'unknown') return { ok: false, message: 'connection lost' };
+        if (outcome === 'conflict') return jsonResponse({ message: 'Head changed' }, 409);
+        pr.state = 'MERGED';
+        pr.merged = true;
+        return jsonResponse({ merged: true });
+      }
+      const rulesetMatch = /^https:\/\/api\.github\.com\/repos\/octo\/repo\/rulesets\/(\d+)$/.exec(request.url);
+      if (rulesetMatch) {
+        const entry = rulesets.get(Number(rulesetMatch[1]));
+        if (!entry) return jsonResponse({ message: 'Not Found' }, 404);
+        return typeof entry === 'function' ? entry(request) : jsonResponse(entry);
+      }
+      assert.equal(request.url, 'https://api.github.com/graphql');
+      const { query, variables } = JSON.parse(request.body);
+      assert.deepEqual(variables, { owner: 'octo', name: 'repo', number: 42 });
+      return jsonResponse({ data: query.includes('viewerDefaultMergeMethod') ? { viewer, repository } : { repository: { pullRequest: pr } } });
+    },
+  });
+  return { ...runtime, pr, repository, viewer, rulesets, writes, setOutcome(value) { outcome = value; } };
+}
+
+test('the PR merge button requires a clean direct merge and write permission on the base branch', async () => {
+  const runtime = mergeablePrRuntime();
+  runtime.repository.viewerPermission = 'READ';
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  const button = /data-ghost-action="pr:merge"/;
+  const dormant = /data-ghost-pr-merge-ready="octo\/repo#42"/;
+  assert.doesNotMatch(runtime.lastCard(cardId).html, button);
+  assert.doesNotMatch(runtime.lastCard(cardId).html, dormant);
+  runtime.repository.viewerPermission = 'WRITE';
+  await runtime.tool({ card_id: cardId });
+  assert.match(runtime.lastCard(cardId).html, button);
+  assert.match(runtime.lastCard(cardId).html, dormant);
+  // Not yet CLEAN (e.g. CI still running) keeps the active button off, but leaves a dormant
+  // merge-ready slot for newer hosts while keeping older hosts and mobile hidden.
+  runtime.pr.mergeStateStatus = 'BLOCKED';
+  await runtime.tool({ card_id: cardId });
+  assert.doesNotMatch(runtime.lastCard(cardId).html, button);
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-pr-merge-ready="octo\/repo#42" data-ghost-pr-merge-action="pr:merge"/);
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-pr-merge-ready="octo\/repo#42"[^>]*style="display:none;/);
+  runtime.pr.mergeStateStatus = 'CLEAN';
+  // Hard blockers and non-bypassable rules emit neither an active nor a dormant button.
+  for (const changes of [
+    { isDraft: true }, { state: 'CLOSED' },
+    { mergeQueue: { id: 'queue' } },
+    { baseRef: { ...runtime.pr.baseRef, branchProtectionRule: { restrictsPushes: true, lockBranch: false } } },
+    { baseRef: { ...runtime.pr.baseRef, rules: { nodes: [{ type: 'UPDATE' }], pageInfo: { hasNextPage: false } } } },
+    { baseRef: { ...runtime.pr.baseRef, rules: { nodes: [{ type: 'LOCK_BRANCH' }], pageInfo: { hasNextPage: false } } } },
+  ]) {
+    const original = Object.fromEntries(Object.keys(changes).map((key) => [key, runtime.pr[key]]));
+    Object.assign(runtime.pr, changes);
+    await runtime.tool({ card_id: cardId });
+    assert.doesNotMatch(runtime.lastCard(cardId).html, button);
+    assert.doesNotMatch(runtime.lastCard(cardId).html, dormant);
+    Object.assign(runtime.pr, original);
+  }
+  assert.equal(runtime.writes.length, 0);
+});
+
+test('an UPDATE ruleset allows the PR merge button only when the current account can bypass it', async () => {
+  const runtime = mergeablePrRuntime();
+  runtime.pr.baseRef = {
+    name: 'main',
+    branchProtectionRule: null,
+    rules: { nodes: [{ type: 'UPDATE', repositoryRuleset: { databaseId: 26112310 } }], pageInfo: { hasNextPage: false } },
+  };
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  // Ruleset lookup 404 fails closed.
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-pr-merge-ready=/);
+  for (const bypass of ['never', null, 'unknown']) {
+    runtime.rulesets.set(26112310, { id: 26112310, current_user_can_bypass: bypass });
+    await runtime.tool({ card_id: cardId });
+    assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge"/);
+    assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-pr-merge-ready=/);
+  }
+  for (const bypass of ['exempt', 'always', 'pull_requests_only']) {
+    runtime.rulesets.set(26112310, { id: 26112310, current_user_can_bypass: bypass });
+    await runtime.tool({ card_id: cardId });
+    assert.match(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge"/);
+  }
+  assert.equal(runtime.writes.length, 0);
+});
+
+test('clicking a host-revealed dormant PR merge button verifies live status before confirming', async () => {
+  const runtime = mergeablePrRuntime();
+  runtime.pr.mergeStateStatus = 'UNSTABLE';
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge"/);
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-pr-merge-action="pr:merge"/);
+  // Stale host reveal while GitHub is still not CLEAN refuses to confirm.
+  await runtime.click(cardId, 'pr:merge');
+  assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prMergeChanged));
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge-confirm:/);
+  // Once CI finishes on GitHub (CLEAN), clicking the revealed button refreshes and opens confirmation.
+  runtime.pr.mergeStateStatus = 'CLEAN';
+  runtime.pr.headRefOid = 'c'.repeat(40);
+  await runtime.click(cardId, 'pr:merge');
+  const confirmation = runtime.lastCard(cardId).html;
+  assert.match(confirmation, /data-ghost-action="pr:merge-confirm:1" aria-label="确认合并"/);
+  assert.ok(visibleText(confirmation).includes('将提交 cccccccccccc 合并到 main？ · 压缩合并'));
+  await runtime.click(cardId, 'pr:merge-confirm:1');
+  assert.deepEqual(runtime.writes, [{ sha: 'c'.repeat(40), merge_method: 'squash' }]);
+});
+
+test('clicking after a new commit refreshes a previously cached merge target before confirmation', async () => {
+  const runtime = mergeablePrRuntime();
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  runtime.pr.headRefOid = 'b'.repeat(40);
+  await runtime.click(cardId, 'pr:merge');
+  const confirmation = runtime.lastCard(cardId).html;
+  assert.match(confirmation, /data-ghost-action="pr:merge-confirm:1" aria-label="确认合并"/);
+  assert.ok(visibleText(confirmation).includes('将提交 bbbbbbbbbbbb 合并到 main？ · 压缩合并'));
+  assert.doesNotMatch(confirmation, /aaaaaaaaaaaa/);
+  await runtime.click(cardId, 'pr:merge-confirm:1');
+  assert.deepEqual(runtime.writes, [{ sha: 'b'.repeat(40), merge_method: 'squash' }]);
+});
+
+test('the PR merge confirmation is unique, checks the expected head and uses an allowed method', async () => {
+  const runtime = mergeablePrRuntime();
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  await runtime.click(cardId, 'pr:merge');
+  const confirmation = runtime.lastCard(cardId).html;
+  assert.match(confirmation, /data-ghost-action="pr:merge-confirm:1" aria-label="确认合并"/);
+  assert.ok(visibleText(confirmation).includes('将提交 aaaaaaaaaaaa 合并到 main？ · 压缩合并'));
+  assert.equal(runtime.writes.length, 0);
+  await runtime.click(cardId, 'pr:merge-cancel:1');
+  await runtime.click(cardId, 'pr:merge');
+  await runtime.click(cardId, 'pr:merge-confirm:1');
+  await runtime.click(cardId, 'pr:merge-confirm:2', { userActionToken: undefined });
+  assert.equal(runtime.writes.length, 0);
+  await Promise.all([runtime.click(cardId, 'pr:merge-confirm:2'), runtime.click(cardId, 'pr:merge-confirm:2')]);
+  assert.deepEqual(runtime.writes, [{ sha: runtime.pr.headRefOid, merge_method: 'squash' }]);
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-task-archive-state="merged"/);
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge/);
+  assert.equal(runtime.agentRuns.length, 0);
+});
+
+test('the PR merge confirmation is invalidated by a changed commit, base, account or permission', async () => {
+  for (const change of [
+    (runtime) => { runtime.pr.headRefOid = 'b'.repeat(40); },
+    (runtime) => { runtime.pr.baseRef.name = runtime.pr.baseRefName = 'release'; },
+    (runtime) => { runtime.viewer.id = 'DIFFERENT_viewer'; },
+    (runtime) => { runtime.repository.viewerPermission = 'READ'; },
+  ]) {
+    const runtime = mergeablePrRuntime();
+    const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+    await runtime.click(cardId, 'pr:merge');
+    change(runtime);
+    await runtime.click(cardId, 'pr:merge-confirm:1');
+    assert.equal(runtime.writes.length, 0);
+    assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prMergeChanged));
+  }
+});
+
+test('the PR merge card distinguishes definitive refusal from a lost receipt', async () => {
+  for (const outcome of ['conflict', 'unknown']) {
+    const runtime = mergeablePrRuntime();
+    const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+    runtime.setOutcome(outcome);
+    await runtime.click(cardId, 'pr:merge');
+    await runtime.click(cardId, 'pr:merge-confirm:1');
+    const expected = outcome === 'conflict' ? zhCopy.prMergeRejected : zhCopy.prMergeUnknown;
+    assert.ok(visibleText(runtime.lastCard(cardId).html).includes(expected));
+    assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="pr:merge"/);
+    if (outcome === 'unknown') {
+      await runtime.click(cardId, 'pr:merge-recheck');
+      assert.ok(visibleText(runtime.lastCard(cardId).html).includes(expected));
+      runtime.pr.state = 'MERGED';
+      runtime.pr.merged = true;
+      await runtime.click(cardId, 'pr:merge-recheck');
+      assert.match(runtime.lastCard(cardId).html, /data-ghost-task-archive-state="merged"/);
+    }
+    assert.equal(runtime.writes.length, 1);
+  }
+});
 
 test('pr_card asks first, hands the click to the task agent, then updates the same card with the PR', async () => {
   const runtime = createPrRuntime({ github: prGraphql() });
@@ -2208,6 +2403,35 @@ function followScheduler(options = {}) {
   return { hostApi, calls, rows, runs };
 }
 
+test('a merge from the PR card preserves the existing follow-up for the terminal round', async () => {
+  for (const outcome of ['merged', 'unknown']) {
+    const { hostApi, calls, rows } = followScheduler();
+    const runtime = mergeablePrRuntime({ hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await runtime.tool({ repo: 'octo/repo', pr: 42, published: true });
+    const cardId = opened.reply.result.card_id;
+    assert.equal(opened.reply.result.follow_state, 'active');
+
+    runtime.setOutcome(outcome);
+    await runtime.click(cardId, 'pr:merge');
+    await runtime.click(cardId, 'pr:merge-confirm:1');
+    if (outcome === 'unknown') {
+      runtime.pr.state = 'MERGED';
+      runtime.pr.merged = true;
+      await runtime.click(cardId, 'pr:merge-recheck');
+    }
+    assert.match(runtime.lastCard(cardId).html, /data-ghost-task-archive-state="merged"/);
+    assert.equal(rows.get('sch-1').status, 'active');
+    assert.equal(calls.includes('schedule_delete'), false);
+    assert.equal(calls.filter(call => call === 'schedule_create').length, 1);
+    assert.equal((await runtime.tool({ card_id: cardId })).reply.result.stage, 'merged');
+    assert.equal(rows.get('sch-1').status, 'active');
+
+    rows.delete('sch-1');
+    const finished = await runtime.tool({ card_id: cardId, following: false });
+    assert.equal(finished.reply.result.follow_state, 'stopped');
+  }
+});
+
 test('first card selection before publishing sets the model on the first follow-up', async () => {
   const { hostApi, rows } = followScheduler();
   const runtime = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } },
@@ -2434,7 +2658,9 @@ test('owning card reports an active old hook only, never rewrites it or touches 
   assert.deepEqual(rows.get('sch-1').preRunHook, oldFollowHook(url));
   assert.equal(calls.includes('schedule_update'), false);
   await rt.click(opened.callId, 'pr:stop');
-  assert.equal(rows.size, 0);
+  assert.equal(rows.size, 1);
+  assert.equal(calls.includes('schedule_delete'), false);
+  assert.deepEqual(rows.get('sch-1').preRunHook, oldFollowHook(url));
 });
 
 test('same-name project script, custom shell command and terminal PR remain untouched', async () => {
@@ -4034,6 +4260,52 @@ test('pr:resume validates ownership, hook, draft/terminal state and reconciles r
     assert.equal(calls.filter(c => c === 'schedule_resume').length, 2);
   }
 
+  // Transient pre-write failure on initial schedule_get during pr:resume keeps button retryable
+  // without requiring a separate pr_card refresh, and re-verifies ownership and hook on retry.
+  for (const afterRecovery of ['retry-ok', 'mutated-hook', 'mutated-owner']) {
+    const fault = {};
+    const { hostApi, rows, calls } = followScheduler(fault);
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    rows.get('sch-1').status = 'paused';
+    await rt.tool({ card_id: opened.callId });
+
+    fault.failGet = true;
+    await rt.click(opened.callId, 'pr:resume');
+    assert.equal(calls.includes('schedule_resume'), false, afterRecovery);
+    assert.equal(rows.get('sch-1').status, 'paused', afterRecovery);
+    const failedCard = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+    assert.equal(failedCard.pending, null, afterRecovery);
+    assert.equal(failedCard.scheduleAction, null, afterRecovery);
+    assert.equal(failedCard.scheduleStatus, 'paused', afterRecovery);
+    assert.equal(failedCard.scheduleError, null, afterRecovery);
+    const failHtml = rt.lastCard(opened.callId).html;
+    assert.match(failHtml, /cannot verify/, afterRecovery);
+    assert.match(failHtml, /<button data-ghost-action="pr:resume"/, afterRecovery);
+
+    fault.failGet = false;
+    if (afterRecovery === 'mutated-hook') {
+      rows.get('sch-1').preRunHook = { command: 'node "/project/scripts/pr-heartbeat-gate.mjs" ' + url, timeoutMs: 180000 };
+    } else if (afterRecovery === 'mutated-owner') {
+      rows.get('sch-1').targetSessionId = 's2';
+    }
+    await rt.click(opened.callId, 'pr:resume');
+    if (afterRecovery === 'retry-ok') {
+      assert.equal(calls.filter(c => c === 'schedule_resume').length, 1, afterRecovery);
+      assert.equal(rows.get('sch-1').status, 'active', afterRecovery);
+      assert.match(rt.lastCard(opened.callId).html, /data-ghost-live-label="跟进中"/, afterRecovery);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /cannot verify/, afterRecovery);
+    } else {
+      assert.equal(calls.includes('schedule_resume'), false, afterRecovery);
+      assert.equal(rows.get('sch-1').status, 'paused', afterRecovery);
+      const blocked = JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`));
+      assert.equal(blocked.scheduleStatus, 'unverified', afterRecovery);
+      assert.equal(blocked.scheduleErrorSource, 'verify', afterRecovery);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:resume"/, afterRecovery);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, afterRecovery);
+    }
+  }
+
   // Lost receipt with unreadable scheduler keeps pending resume until refresh reconciles;
   // terminal PR on refresh settles read-only without calling schedule_resume again.
   for (const mergedBeforeRefresh of [false, true]) {
@@ -4499,6 +4771,56 @@ test('cards without a trusted creation baseline stay manualStop fail-closed, whi
     assert.equal(rows.size, 1, earlyEdit);
     assert.deepEqual(structuredClone(rows.get('sch-1')), beforeStop, earlyEdit);
     assert.match(rt.lastCard(opened.callId).html, /已有调度请在自动化设置手动停止（ID：sch-1）/, earlyEdit);
+  }
+
+  // Changing a card-created schedule's hook command to the legacy direct Node command still keeps
+  // legacy hook identification and repair hints, but revokes Stop deletion authority (0 schedule_delete).
+  for (const flow of ['direct-stop', 'refresh-then-stop', 'early-before-first-get']) {
+    const legacyHook = oldFollowHook('https://github.com/octo/repo/pull/42');
+    let earlyMutated = false;
+    const { hostApi, rows, calls } = followScheduler(flow === 'early-before-first-get' ? {
+      beforeGet(liveRows, id) {
+        if (earlyMutated) return;
+        const row = liveRows.get(id);
+        if (!row) return;
+        earlyMutated = true;
+        row.preRunHook = structuredClone(legacyHook);
+      },
+    } : {});
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    const key = `pr-cards/${opened.callId}.json`;
+    if (flow !== 'early-before-first-get') {
+      rows.get('sch-1').preRunHook = structuredClone(legacyHook);
+    }
+    const beforeStop = structuredClone(rows.get('sch-1'));
+
+    if (flow === 'refresh-then-stop') {
+      const refreshed = await rt.tool({ card_id: opened.callId });
+      assert.equal(refreshed.reply.result.follow_state, 'unverified', flow);
+      assert.equal(refreshed.reply.result.legacy_hook_repair.schedule_id, 'sch-1', flow);
+      assert.equal(JSON.parse(rt.files.get(key)).manualStop, true, flow);
+      const html = rt.lastCard(opened.callId).html;
+      assert.match(visibleText(html).join('\n'), /跟进待修复/, flow);
+      assert.doesNotMatch(html, /<button data-ghost-action="pr:stop"/, flow);
+      assert.match(html, /<button data-ghost-action="pr:manual-stop" aria-label="手动停止"/, flow);
+    } else if (flow === 'early-before-first-get') {
+      assert.equal(opened.reply.result.legacy_hook_repair.schedule_id, 'sch-1', flow);
+      assert.equal(JSON.parse(rt.files.get(key)).manualStop, true, flow);
+      assert.doesNotMatch(rt.lastCard(opened.callId).html, /<button data-ghost-action="pr:stop"/, flow);
+    }
+
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(calls.filter(c => c === 'schedule_delete').length, 0, flow);
+    assert.equal(rows.size, 1, flow);
+    assert.deepEqual(structuredClone(rows.get('sch-1')), beforeStop, flow);
+    const afterStop = JSON.parse(rt.files.get(key));
+    assert.equal(afterStop.manualStop, true, flow);
+    assert.equal(afterStop.scheduleDefaults, undefined, flow);
+    const stopHtml = rt.lastCard(opened.callId).html;
+    assert.doesNotMatch(stopHtml, /<button data-ghost-action="pr:stop"/, flow);
+    assert.match(stopHtml, /<button data-ghost-action="pr:manual-stop" aria-label="手动停止"/, flow);
+    assert.match(stopHtml, /已有调度请在自动化设置手动停止（ID：sch-1）/, flow);
   }
 
   // Legacy host without card scheduler stays fail-closed on cards without a trusted creation baseline.

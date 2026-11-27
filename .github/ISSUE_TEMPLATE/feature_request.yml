@@ -6,33 +6,33 @@ body:
     id: plugin
     attributes:
       label: Plugin / 插件
-      description: Directory name of an existing plugin, e.g. "x-manager" / 现有插件的目录名，如 "x-manager"
+      description: Plugin name or directory, e.g. `x-manager` / 插件名或目录名，如 `x-manager`
     validations:
       required: true
 
   - type: textarea
     id: usecase
     attributes:
-      label: Use case / 使用场景
-      description: What are you trying to do, and why does the current behaviour fall short? / 你想完成什么？现在的行为为什么不够？
+      label: What would you like to do / 想要什么功能
+      description: Briefly describe the scenario and expected improvement / 简述使用场景和期望改进
     validations:
       required: true
 
   - type: textarea
     id: outcome
     attributes:
-      label: Expected outcome / 期望结果
+      label: Additional context (optional) / 补充说明（可选）
     validations:
-      required: true
+      required: false
 
   - type: markdown
     attributes:
       value: |
-        Proposing a **new official plugin**? Use the dedicated
+        Proposing a **new official plugin**? You can open a PR directly, or
+        optionally start a discussion with the
         [New plugin proposal](https://github.com/makecindy/cindy-official-plugins/issues/new?template=new_plugin_proposal.yml)
-        form instead — it covers scope alignment, overlap check, capability
-        declaration, and side-effect disclosure required for review.
+        template.
 
-        提议**新增官方插件**？请使用专用的
+        提议**新增官方插件**？可以直接提交 PR，也可选用
         [新插件提案](https://github.com/makecindy/cindy-official-plugins/issues/new?template=new_plugin_proposal.yml)
-        表单——涵盖定位对齐、查重、能力声明与副作用披露，审查必需。
+        先讨论（非必需）。
