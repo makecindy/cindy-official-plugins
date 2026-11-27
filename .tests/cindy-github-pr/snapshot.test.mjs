@@ -762,4 +762,53 @@ process.exit(2);
   const r7 = runSnap(54, { ...baseCfg, headSha: 'head-2', pullEtag: 'W/"pull-v2"', rulesError: 'gh: Resource not accessible (HTTP 403)' });
   assert.equal(r7.snap.gate.requiredChecksUnavailable, true);
   assert.notEqual(r7.snap.verdict, 'READY');
+
+  // 8. CINDY_PR_STATE_DIR env var enables ETag 304 without passing --state-dir on CLI,
+  //    and omitting both writes no cache files.
+  const envStateDir = path.join(dir, 'env-state');
+  fs.writeFileSync(cfgFile, JSON.stringify(baseCfg));
+  const envRun = (useEnv) => {
+    fs.writeFileSync(logFile, '');
+    const env = { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, GH_LOG: logFile, CFG_FILE: cfgFile };
+    if (useEnv) env.CINDY_PR_STATE_DIR = envStateDir;
+    else delete env.CINDY_PR_STATE_DIR;
+    const res = spawnSync(process.execPath, [script, 'https://github.com/acme/game/pull/54'], { encoding: 'utf8', env });
+    assert.equal(res.status, 0, res.stderr);
+    return fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  };
+  assert.equal(envRun(false).find(c => c.kind === 'pull').status, 200);
+  assert.equal(fs.existsSync(envStateDir), false);
+  assert.equal(envRun(true).find(c => c.kind === 'pull').status, 200);
+  const envSecond = envRun(true);
+  assert.equal(envSecond.find(c => c.kind === 'pull').status, 304);
+  assert.equal(envSecond.find(c => c.kind === 'rules').status, 304);
+
+  // 9. Branch-rules cache refreshes updatedAt on 304 hits so hot entries survive >20-entry eviction.
+  const rulesCachePath = path.join(stateDir, 'acme__game.rules-cache.json');
+  const seededEntries = {
+    'alice:main': { etag: 'W/"rules-v2"', rules: [], updatedAt: 1000 },
+  };
+  for (let i = 1; i <= 19; i++) {
+    seededEntries[`cold-${String(i).padStart(2, '0')}:main`] = {
+      etag: `W/"cold-${i}"`,
+      rules: [],
+      updatedAt: 1000 + i * 1000,
+    };
+  }
+  fs.writeFileSync(rulesCachePath, JSON.stringify({ schema: 1, entries: seededEntries }));
+  // Hot entry `alice:main` hits 304 (even with unchanged ETag) -> refreshes updatedAt above cold entries.
+  const hotHit = runSnap(54, { ...baseCfg, headSha: 'head-2', pullEtag: 'W/"pull-v2"', rulesEtag: 'W/"rules-v2"', rules: [] });
+  assert.equal(hotHit.calls.find(c => c.kind === 'rules').status, 304);
+  // Adding a 21st entry (`newbie:main`) triggers eviction down to 20 entries.
+  const twentyFirst = runSnap(54, { ...baseCfg, viewer: 'newbie', headSha: 'head-2', pullEtag: 'W/"pull-v2"', rulesEtag: 'W/"rules-newbie"', rules: [] });
+  assert.equal(twentyFirst.calls.find(c => c.kind === 'rules').status, 200);
+  const afterEvict = JSON.parse(fs.readFileSync(rulesCachePath, 'utf8'));
+  assert.equal(Object.keys(afterEvict.entries).length, 20);
+  assert.ok(afterEvict.entries['alice:main'], 'frequently reused entry must survive >20-entry eviction');
+  assert.ok(afterEvict.entries['alice:main'].updatedAt > 20000, '304 hit must refresh updatedAt');
+  assert.ok(afterEvict.entries['newbie:main'], 'newly added entry must be retained');
+  assert.equal(afterEvict.entries['cold-01:main'], undefined, 'oldest unused entry should be evicted');
+  // Confirm alice:main still gets 304 immediately after eviction.
+  const afterEvictHit = runSnap(54, { ...baseCfg, headSha: 'head-2', pullEtag: 'W/"pull-v2"', rulesEtag: 'W/"rules-v2"', rules: [] });
+  assert.equal(afterEvictHit.calls.find(c => c.kind === 'rules').status, 304);
 });

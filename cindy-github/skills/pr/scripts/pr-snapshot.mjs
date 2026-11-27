@@ -38,7 +38,7 @@ function parseArgs(argv, env = process.env) {
   let strictExit = false;
   let probe = false;
   let expectHead = null;
-  let stateDir = env.CINDY_PR_STATE_DIR || null;
+  let stateDir = env.CINDY_PR_STATE_DIR?.trim() || null;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '-h' || arg === '--help') {
@@ -53,8 +53,8 @@ function parseArgs(argv, env = process.env) {
     }
     if (arg === '--state-dir') {
       const value = argv[++i];
-      if (!value || value.startsWith('--')) throw new Error(`${arg} needs a directory path`);
-      stateDir = value;
+      if (!value || !value.trim() || value.startsWith('--')) throw new Error(`${arg} needs a directory path`);
+      stateDir = value.trim();
       continue;
     }
     if (arg === '--repo') {
@@ -150,6 +150,19 @@ async function fetchPrView(repo, number, stateDir) {
   return data;
 }
 
+function upsertBranchRulesCache(cachePath, cacheKey, entry) {
+  if (!cachePath) return;
+  const freshStore = readJsonCache(cachePath);
+  const prevEntries = freshStore?.schema === 1 && freshStore.entries && typeof freshStore.entries === 'object'
+    ? { ...freshStore.entries }
+    : {};
+  prevEntries[cacheKey] = entry;
+  const sortedEntries = Object.entries(prevEntries)
+    .sort((a, b) => (Number(b[1]?.updatedAt) || 0) - (Number(a[1]?.updatedAt) || 0))
+    .slice(0, MAX_RULES_CACHE_ENTRIES);
+  writeJsonCacheAtomic(cachePath, { schema: 1, entries: Object.fromEntries(sortedEntries) });
+}
+
 async function fetchBranchRules(repo, baseRefName, viewer, stateDir) {
   const apiPath = `repos/${repo}/rules/branches/${encodeURIComponent(baseRefName)}?per_page=100`;
   const cachePath = stateDir ? repoRulesCachePath(stateDir, repo) : null;
@@ -168,9 +181,12 @@ async function fetchBranchRules(repo, baseRefName, viewer, stateDir) {
     retries: 1,
   });
   if (res.notModified && validEntry) {
-    if (cachePath && res.etag && res.etag !== validEntry.etag) {
-      const entries = { ...(store?.entries ?? {}), [cacheKey]: { etag: res.etag, rules: validEntry.rules, updatedAt: Date.now() } };
-      writeJsonCacheAtomic(cachePath, { schema: 1, entries });
+    if (cachePath) {
+      upsertBranchRulesCache(cachePath, cacheKey, {
+        etag: res.etag || validEntry.etag,
+        rules: validEntry.rules,
+        updatedAt: Date.now(),
+      });
     }
     return validEntry.rules;
   }
@@ -180,15 +196,7 @@ async function fetchBranchRules(repo, baseRefName, viewer, stateDir) {
   // A full page may be truncated. Unknown is not an empty inventory; never cache incomplete rules.
   if (!Array.isArray(rules) || rules.length >= 100) throw new Error('Incomplete branch rules');
   if (cachePath && res.etag) {
-    const freshStore = readJsonCache(cachePath);
-    const prevEntries = freshStore?.schema === 1 && freshStore.entries && typeof freshStore.entries === 'object'
-      ? { ...freshStore.entries }
-      : {};
-    prevEntries[cacheKey] = { etag: res.etag, rules, updatedAt: Date.now() };
-    const sortedKeys = Object.entries(prevEntries)
-      .sort((a, b) => (Number(b[1]?.updatedAt) || 0) - (Number(a[1]?.updatedAt) || 0))
-      .slice(0, MAX_RULES_CACHE_ENTRIES);
-    writeJsonCacheAtomic(cachePath, { schema: 1, entries: Object.fromEntries(sortedKeys) });
+    upsertBranchRulesCache(cachePath, cacheKey, { etag: res.etag, rules, updatedAt: Date.now() });
   }
   return rules;
 }

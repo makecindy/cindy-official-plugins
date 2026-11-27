@@ -1314,14 +1314,20 @@ function promotePending(state, now) {
 }
 
 /** 跑快照。永不 throw:把退出码与输出原样交回,由调用方翻译成协议语义。 */
-function runSnapshot(snapshotPath, repo, number, stateDir = null) {
+function runSnapshot(snapshotPath, repo, number, { stateDir = null, env = process.env } = {}) {
   return new Promise((resolve) => {
-    const argv = [snapshotPath, String(number), '--repo', repo];
-    if (stateDir) argv.push('--state-dir', stateDir);
+    // Preserve the legacy CLI argument contract (`<number> --repo <owner/repo>`) for
+    // older/custom `--snapshot` and `PR_SNAPSHOT_SCRIPT` scripts; pass cache location
+    // via `CINDY_PR_STATE_DIR`, and explicitly strip it in diagnostic read-only runs.
+    const childEnv = { ...env };
+    for (const key of Object.keys(childEnv)) {
+      if (key.toUpperCase() === 'CINDY_PR_STATE_DIR') delete childEnv[key];
+    }
+    if (stateDir) childEnv.CINDY_PR_STATE_DIR = stateDir;
     execFile(
       process.execPath,
-      argv,
-      { encoding: 'utf8', maxBuffer: SNAPSHOT_MAX_BUFFER },
+      [snapshotPath, String(number), '--repo', repo],
+      { encoding: 'utf8', maxBuffer: SNAPSHOT_MAX_BUFFER, env: childEnv },
       (err, stdout, stderr) => {
         resolve({
           code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
@@ -1686,7 +1692,10 @@ async function gateMain(argv, ctx) {
   );
   const run = probeRateLimited
     ? { code: probeRun.code, stdout: '', stderr: String(probeRun.stderr ?? '') }
-    : await ctx.runSnapshot(args.snapshot, args.repo, args.number, args.stateDir);
+    : await ctx.runSnapshot(args.snapshot, args.repo, args.number, {
+        stateDir: diagnostic ? null : args.stateDir,
+        env,
+      });
 
   let snap = null;
   if (run.code === 0) {

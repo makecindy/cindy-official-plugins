@@ -2586,7 +2586,7 @@ test('reconcile watch trigger bypasses pacing but runs lightweight probe first; 
   assert.equal(fx.snapshotRuns(), runsBeforeWatch + 1, 'real pr-status change must still read full snapshot');
 });
 
-test('real CLI preserves trigger.reason=reconcile from host stdin and passes --state-dir to pr-snapshot', async (t) => {
+test('real CLI preserves trigger.reason=reconcile, keeps legacy snapshot argv, and passes CINDY_PR_STATE_DIR via env', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-gate-reconcile-cli-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const stateDir = path.join(dir, 'state');
@@ -2594,29 +2594,57 @@ test('real CLI preserves trigger.reason=reconcile from host stdin and passes --s
   const fakeSnap = path.join(dir, 'fake-snap.mjs');
   const s = snap();
   const baseProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0 0', base: 'base-1' };
+  // Strict legacy parser mirroring the previous official pr-snapshot.mjs:
+  // rejects any unknown option such as `--state-dir`.
   fs.writeFileSync(fakeSnap, `
 import fs from 'node:fs';
-fs.appendFileSync(${JSON.stringify(argvLog)}, JSON.stringify(process.argv.slice(2)) + '\\n');
-if (process.argv.includes('--probe')) {
+const argv = process.argv.slice(2);
+let prArg = null;
+let probe = false;
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === '--repo') { i++; continue; }
+  if (a === '--probe') { probe = true; continue; }
+  if (a === '--strict-exit') continue;
+  if (a === '--expect-head') { i++; continue; }
+  if (!prArg && !a.startsWith('-')) { prArg = a; continue; }
+  throw new Error('Unexpected argument: ' + a);
+}
+fs.appendFileSync(${JSON.stringify(argvLog)}, JSON.stringify({ argv, stateDirEnv: process.env.CINDY_PR_STATE_DIR ?? null }) + '\\n');
+if (probe) {
   process.stdout.write(${JSON.stringify(JSON.stringify(baseProbe))});
 } else {
   process.stdout.write(${JSON.stringify(JSON.stringify(s))});
 }
 `, 'utf8');
 
-  const invoke = (extra = [], payload = null) => spawnSync(
+  const invoke = (extra = [], payload = null, envExtra = {}) => spawnSync(
     process.execPath,
     [gatePath, PR_URL, '--state-dir', stateDir, '--snapshot', fakeSnap, '--min-pass-spacing-minutes', '0', ...extra],
-    { encoding: 'utf8', input: payload ? JSON.stringify(payload) : '', env: { ...process.env, CINDY_PR_TRACE: '0' } },
+    { encoding: 'utf8', input: payload ? JSON.stringify(payload) : '', env: { ...process.env, CINDY_PR_TRACE: '0', ...envExtra } },
   );
 
-  // First full snapshot should receive --state-dir <stateDir>.
+  // First full snapshot must keep the legacy argv (no --state-dir) and pass CINDY_PR_STATE_DIR via env.
   const first = invoke(['--no-pacing', '--json']);
   assert.equal(first.status, 0, first.stderr);
   assert.equal(invoke(['--ack', '--json']).status, 0);
   const firstCalls = fs.readFileSync(argvLog, 'utf8').trim().split('\n').map(l => JSON.parse(l));
-  assert.ok(firstCalls.some(argv => !argv.includes('--probe') && argv.includes('--state-dir') && argv.includes(stateDir)),
-    'full snapshot invocation must receive --state-dir');
+  const fullCall = firstCalls.find(call => !call.argv.includes('--probe'));
+  assert.ok(fullCall, 'expected a full snapshot invocation');
+  assert.deepEqual(fullCall.argv, [String(NUMBER), '--repo', REPO], 'must preserve legacy snapshot CLI argv');
+  assert.equal(fullCall.stateDirEnv, stateDir, 'full snapshot must receive stateDir via CINDY_PR_STATE_DIR');
+
+  // PR_SNAPSHOT_SCRIPT env override also works with the strict legacy parser.
+  fs.writeFileSync(argvLog, '');
+  const viaEnv = spawnSync(
+    process.execPath,
+    [gatePath, PR_URL, '--state-dir', stateDir, '--triggered', '--no-pacing', '--json'],
+    { encoding: 'utf8', env: { ...process.env, CINDY_PR_TRACE: '0', PR_SNAPSHOT_SCRIPT: fakeSnap } },
+  );
+  assert.equal(viaEnv.status, 2, viaEnv.stderr);
+  const envCalls = fs.readFileSync(argvLog, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  assert.deepEqual(envCalls[0].argv, [String(NUMBER), '--repo', REPO]);
+  assert.equal(envCalls[0].stateDirEnv, stateDir);
 
   // Seed probe to match fakeSnap's probe output, then send host reconcile trigger via stdin.
   const statePath = stateFilePath(stateDir, REPO, NUMBER);
@@ -2637,5 +2665,107 @@ if (process.argv.includes('--probe')) {
   assert.equal(JSON.parse(rec.stdout).reason, 'unchanged');
   const recCalls = fs.readFileSync(argvLog, 'utf8').trim().split('\n').map(l => JSON.parse(l));
   assert.equal(recCalls.length, 1, 'reconcile trigger should only run --probe when unchanged');
-  assert.ok(recCalls[0].includes('--probe'));
+  assert.ok(recCalls[0].argv.includes('--probe'));
+});
+
+test('diagnostic test-run disables snapshot cache writes even with --state-dir and inherited CINDY_PR_STATE_DIR', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim' : false }, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-gate-diag-readonly-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const freshDir = path.join(dir, 'fresh-state');
+  const cfgFile = path.join(dir, 'cfg.json');
+  const prUrl = 'https://github.com/acme/game/pull/54';
+
+  fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+const cfg = JSON.parse(fs.readFileSync(process.env.CFG_FILE, 'utf8'));
+if (args[0] === '--version') process.exit(0);
+if (args[0] === 'pr' && args[1] === 'view') {
+  process.stdout.write(JSON.stringify({
+    headRefOid: cfg.headSha,
+    statusCheckRollup: [{ __typename: 'CheckRun', name: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+  }));
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1] === 'graphql') {
+  process.stdout.write(JSON.stringify({
+    data: {
+      viewer: { login: 'alice' },
+      repository: {
+        pullRequest: {
+          state: 'OPEN', headRefOid: cfg.headSha, mergeStateStatus: 'CLEAN', baseRefName: 'main',
+          baseRef: { target: { oid: 'base-1' }, branchProtectionRule: null },
+          reviewThreads: { nodes: [] }, mergeQueueEntry: null, timelineItems: { nodes: [] },
+        },
+      },
+    },
+  }));
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1] === 'repos/acme/game/pulls/54') {
+  process.stdout.write(
+    'HTTP/2.0 200 OK\\nETag: ' + cfg.pullEtag + '\\n\\n' +
+    JSON.stringify({
+      base: { sha: 'base-1' }, head: { sha: cfg.headSha }, mergeable: true, state: 'open',
+      html_url: 'https://github.com/acme/game/pull/54',
+    }),
+  );
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1].includes('/rules/branches/')) {
+  process.stdout.write('HTTP/2.0 200 OK\\nETag: ' + cfg.rulesEtag + '\\n\\n' + JSON.stringify(cfg.rules));
+  process.exit(0);
+}
+process.stderr.write('Unexpected gh call: ' + args.join(' ') + '\\n');
+process.exit(2);
+`, { mode: 0o755 });
+
+  const baseEnv = { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, CFG_FILE: cfgFile };
+
+  // 1. Prime an existing production stateDir with gate state + snapshot ETag caches.
+  fs.writeFileSync(cfgFile, JSON.stringify({ headSha: 'head-1', pullEtag: 'W/"pull-v1"', rulesEtag: 'W/"rules-v1"', rules: [] }));
+  const primed = spawnSync(
+    process.execPath,
+    [gatePath, prUrl, '--state-dir', stateDir, '--no-pacing', '--json'],
+    { encoding: 'utf8', env: baseEnv },
+  );
+  assert.equal(primed.status, 0, primed.stderr);
+  const filesBefore = fs.readdirSync(stateDir).sort();
+  assert.ok(filesBefore.some(f => f.endsWith('.rest-cache.json')), 'normal run should prime pull REST cache');
+  assert.ok(filesBefore.some(f => f.endsWith('.rules-cache.json')), 'normal run should prime rules cache');
+  const snapshotDirState = (targetDir) => Object.fromEntries(
+    fs.readdirSync(targetDir).sort().map(name => {
+      const full = path.join(targetDir, name);
+      const st = fs.statSync(full);
+      return [name, { content: fs.readFileSync(full, 'utf8'), mtimeMs: st.mtimeMs }];
+    }),
+  );
+  const before = snapshotDirState(stateDir);
+
+  // 2. Change upstream ETags/data and run a diagnostic hook with BOTH --state-dir AND inherited CINDY_PR_STATE_DIR.
+  fs.writeFileSync(cfgFile, JSON.stringify({
+    headSha: 'head-2',
+    pullEtag: 'W/"pull-v2"',
+    rulesEtag: 'W/"rules-v2"',
+    rules: [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'ci' }] } }],
+  }));
+  const diagPayload = JSON.stringify({ event: 'schedule-pre-run', scheduleId: 'test', runId: 'test', firedAt: Date.now() });
+  const diag = spawnSync(
+    process.execPath,
+    [gatePath, prUrl, '--state-dir', stateDir, '--json'],
+    { encoding: 'utf8', input: diagPayload, env: { ...baseEnv, CINDY_PR_STATE_DIR: stateDir } },
+  );
+  assert.equal(diag.status, 0, diag.stderr);
+  assert.match(JSON.parse(diag.stdout).detail, /diagnostic only, follow-up state unchanged/);
+  assert.deepEqual(snapshotDirState(stateDir), before, 'diagnostic run must not create or modify any state or cache file');
+
+  // 3. Diagnostic run with only inherited CINDY_PR_STATE_DIR pointing at a non-existent directory creates nothing.
+  const diagFresh = spawnSync(
+    process.execPath,
+    [gatePath, prUrl, '--json'],
+    { encoding: 'utf8', input: diagPayload, env: { ...baseEnv, CINDY_PR_STATE_DIR: freshDir } },
+  );
+  assert.equal(diagFresh.status, 0, diagFresh.stderr);
+  assert.equal(fs.existsSync(freshDir), false, 'diagnostic run must not create inherited CINDY_PR_STATE_DIR');
 });

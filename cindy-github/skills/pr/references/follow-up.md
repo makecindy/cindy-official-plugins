@@ -212,7 +212,7 @@ Rules-read failures do not discard checks or feedback. After two consecutive fai
 resume/ack and brief recoveries, and repeats at most daily once acknowledged; normal new events still wake. Unacknowledged
 notices retain the existing retry/backoff. Do not report ready with unreadable rules. Ordinary check completion still wakes, and human
 approval waits remain available during the outage. Transient rule calls retain one retry. No stale rules
-cache or new polling loop is added: when `--state-dir` is passed, REST pull and per-repo branch-rules
+cache or new polling loop is added: when a state directory is configured via `--state-dir` or `CINDY_PR_STATE_DIR` (omitted during read-only diagnostic runs), REST pull and per-repo branch-rules
 reads still revalidate live on every full snapshot via conditional HTTP `ETag` (`If-None-Match` / `304`),
 saving REST rate-limit quota on unchanged responses without serving stale data. The lightweight probe may
 defer a rules-only change until the existing full-read cadence; the final snapshot always revalidates rules live.
