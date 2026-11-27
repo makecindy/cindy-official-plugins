@@ -2,8 +2,7 @@
   "strictness": 2,
   "commentTypes": [
     "logic",
-    "syntax",
-    "info"
+    "syntax"
   ],
   "triggerOnUpdates": true,
   "triggerOnDrafts": false,
@@ -15,7 +14,10 @@
     "filters": {
       "excludePaths": [
         ".greptile/**",
-        "AGENTS.md"
+        "AGENTS.md",
+        ".github/workflows/**",
+        ".github/plugin-owners.json",
+        "provisioning.json"
       ]
     }
   },
@@ -23,50 +25,35 @@
   "includeConfidenceScore": true,
   "shouldUpdateDescription": false,
   "ignorePatterns": "**/.DS_Store\n**/THIRD-PARTY-LICENSES.txt",
-  "instructions": "这是 Cindy 官方插件仓：合入 main 后向 Global Plugin Platform 提交包，批准后才对用户可见。审查契约为 rules.md 与本配置的安全规则，README 是提交者摘要。按实际变更、触发条件与影响判断，不因文件路径、生成物、打包脚本或依赖版本变化本身升级 high/critical 或索要人工确认。普通打包正确性修复、已有依赖维护、可复现 worker/vendor 补丁、图标与文案可在来源、产物、相关验证充分且无真实阻断时自动 approve；置信度分数只表达判断把握，不另设必须 5/5 的仓库要求。新插件、新供应商和 audience 变更按 rules.md「插件准入与受众标准」直接判定：多数用户受益、开箱即用且无需自备第三方密钥或账号、不绑定某一个人或某一个团队的流程、质量稳定，才可用 audience all；热度或投稿数量本身不能证明该用 all。有用但小众，或需要用户自己的密钥或账号，接受为自选（provisioning audience {\"emails\":[]}，用户在市场自行选择）。只服务作者自己的数据、流程或私有服务，纯演示或示例（放到 docs/），或 Agent 不装插件就能直接完成的，不予接受。author 必须是真实作者，不得冒充官方团队。符合标准不另要维护者批准，也不因新插件或 audience 变更本身把风险标成 high。与标准不符是具体审查意见，按该意见阻断，不是待维护者决定。只有真实边界扩大才需要维护者的明确决定：实际扩大权限、凭证或发布信任，未在清单中声明的网络访问，以及重命名或删除已发布插件；审查策略或安全门禁被削弱同样需要。没有该范围内的有效决定时标 high，并在 summary 单列待维护者决定的具体边界。已有决定必须核对原始链接、维护者权限及变更范围，不接受 PR 作者自称已获批；范围未变不重复索要，新增越界改动才重新判断。规则本身不授予任何自动合并权限。敏感路由或验收缺项不是代码缺陷，不凭路由生成 P1、降低 confidence 或让代码 review check 失败；有证据的真实缺陷仍阻断。固定实机 checkbox、作者身份或 CI 绿色都不证明运行验收；按 rules.md 的影响范围审查实际证据，缺口只列具体待补测场景。修改文档或已验证行为未受影响时不全量重验。安全结论列出实际核查的文件/数据流和证据，不把未读内容说成安全。先核实其它 reviewer 的意见；已修复或有据拒绝的问题无新证据不重开，不为风格或范围外建议要求改码。审插件 PR 时，除插件自己申请的第三方 OAuth scope，还要核对它用到或依赖的 Cindy 本体（宿主）授权：依赖哪项、平台是否已批准、宿主是否已发布。本体授权有变化或未就绪（未批准或宿主未发布）则 summary 单列「等平台批准」且不要自动 approve，并把需要申请的范围按插件与本体一起规划（如通讯录只读和修改）；用不上的不要申请，未一次规划不阻断。就绪后由作者更新说明，再按其余规则判定。审查只核对说明，不代替平台做授权决定。这不是代码 P1，不列入待维护者决定，也不因此让代码 review check 失败。未涉及这类授权不要提本条，也不要把其它符合现有标准的改动转成人工批。回复跟随 PR 作者主语言：中文作者用简体中文，其余或不确定用英文。",
+  "instructions": "Cindy 官方插件仓：合入 main 后向 Global Plugin Platform 提交待审包（上架审核在 Platform 侧完成）。按 .greptile/rules.md 与下列安全红线审查。核心原则：只阻断确认的 P0/P1（安全/权限越界、数据损坏、崩溃、核心主路径回归），不阻断 P2/风格偏好/低概率理论假设，不索要实机验证记录，不复查 CI 已验项目（版本格式、四语言、manifest schema、DCO 等）。防熔断：2-3 轮内收敛；复审只核对原 P0/P1 是否修复及修复本身是否引入新崩溃或安全洞，禁止在开发者新补的防御代码上循环挑刺。对照 provisioning.json：非 all（自选/早期）插件不强求多代本地缓存迁移，允许干净重置或降级。对照 .github/plugin-owners.json：已有插件的常规迭代（L1，尤其由维护者或插件 Owner 提交且未扩大边界）无 P0/P1 时直接 autoApprove。仅在真实边界扩大（L2：新增权限/凭证/自主域名/子进程、未就绪的 OAuth/宿主授权、不符标准的 audience）或删除/重命名已发布插件时标注具体边界并暂停自动批准；未涉及则不提。回复跟随 PR 作者主语言：中文作者用简体中文，其余用英文。",
   "rules": [
     {
       "id": "no-hardcoded-secrets",
       "severity": "high",
-      "rule": "代码与配置中禁止出现 token/密钥/密码/授权码的硬编码字面量。OAuth clientSecret 只允许出现在 ghost.json 声明中，不得出现在 main.js/settings.js/worker 源码。测试 fixture 必须用 example.test 类占位域名与假 UUID。"
+      "rule": "代码与配置中禁止硬编码 token/密钥/密码/授权码字面量。OAuth clientSecret 只允许出现在 ghost.json，不得出现在 main.js/settings.js/worker 源码。测试夹具使用 example.test 类占位域名与假 UUID。"
     },
     {
       "id": "approved-credential-injection-only",
       "severity": "high",
-      "rule": "凭证注入只认可本仓三种已声明机制：普通插件的 network.secrets[].inject、多实例插件的 network.connections[].inject、Node 插件的 node.secretBindings[]。三者都由主机保管并注入，插件代码不得读取、复制、转存凭证到 KV/localStorage/日志/页面状态/网络请求体。出现三种之外的注入字段、或绕过主机注入自行处理凭证，均按 P1 违规处理。若官方第三方运行时自管凭证（如 taptap-maker），插件只允许把凭证交给该运行时，不得复制进 Cindy KV/Secret 或留存明文。例外：设置页把用户输入的凭证通过同源 PUT /secrets/<key> 写入宿主只写通道，是本仓唯一批准的保存路径，不属于『转存』；该禁令只针对外部/插件自控的请求目标。"
+      "rule": "凭证注入只认可三种宿主机制：network.secrets[].inject、network.connections[].inject、node.secretBindings[]。插件代码不得读取、复制或转存凭证到 KV/localStorage/日志/页面状态/外部请求体。两项已批准例外勿误报：设置页通过同源 PUT /secrets/<key> 写入宿主只写通道；以及把凭证交给已批准的第三方运行时（如 taptap-maker）且不复制到 Cindy KV/Secret 或留存明文。"
     },
     {
       "id": "network-allowlist",
       "severity": "high",
-      "rule": "插件自主联网（Panel/订阅/scheduler/常驻进程等脱离当前 Agent 调用的场景）的所有目标必须命中 ghost.json 的 network.hosts 白名单。当前 Agent 工具调用内的普通 HTTPS 可以经 cindy.fetch 携带 Host 下发且严格在途的 callId 复用 Agent 授权，review 不得因未声明该域名误报；此途径不得注入未在 manifest 声明并命中目标 host 的托管凭证。发现硬编码内网或调试地址（localhost/127.x/192.168.x/10.x）、或绕过 cindy.fetch 的直连（原生 fetch/XMLHttpRequest/WebSocket/EventSource）必须按 P1 指出。宿主本地预览例外：ghost.json 的 preview.hosts 可声明宿主明确支持的 localhost、127.0.0.1、[::1]；通过宿主 preview 能力打开命中该声明的本地预览 URL，不得仅因使用这些回环地址或 HTTP 判 P1。审查须核对本地预览用途、声明与宿主 URL 校验链路；此例外不扩展到 network.hosts、其他内网地址或插件自行直连。自主白名单新增条目时，必须能在 PR 描述或源码中找到必要性出处。例外：声明顶层 node 字段的插件，其 node/worker.cjs 网络按 node 自主能力边界审查（固定 IMAP/SMTP/API 端点）。"
+      "rule": "脱离当前 Agent 调用的自主联网（Panel/订阅/scheduler/常驻进程）目标必须命中 ghost.json 的 network.hosts。当前 Agent 工具调用内经 cindy.fetch 携带在途 callId 的普通 HTTPS 复用既有 Agent 授权，勿因未列域名误报（托管凭证仍需显式声明且命中 host）。禁止绕过 cindy.fetch 直连或硬编码内网/调试地址；两项例外勿误报：ghost.json 的 preview.hosts 声明的回环本地预览地址，以及声明顶层 node 字段插件的固定 worker 端点。"
     },
     {
       "id": "capability-minimization",
       "severity": "high",
-      "rule": "ghost.json 变更时：所有直接能力字段、node/network.hosts 只能最小化声明，新增任何能力（新顶层能力字段、新域名、新 secret、新 tool）必须在 PR 描述中有对应必要性说明。声明 node 的插件必须固定 entry/entries 入口；childSpawn 产生的子进程边界必须最小——固定命令、参数不可注入外部输入。任何 spawn/exec 调用路径的变更（包括从受控封装改回原生 spawn）都必须分析新的参数注入面并在评论中给出结论。新插件和实际打包内容有变化的现有插件必须使用 schemaVersion 3、按该插件实际依赖填写首个已发布版本（正式稳定版或 Beta 版） minCindyVersion、移除 slots；仓库不设置统一 Cindy 版本下限，未触及的 v2 插件不得被要求批量迁移。"
+      "scope": [
+        "**/ghost.json"
+      ],
+      "rule": "ghost.json 变更时，新增顶层能力字段、自主域名、secret 或子进程边界须最小化并在 PR 说明中写明必要性。声明 node 的插件须固定 entry/entries；childSpawn 须固定命令且防止外部参数注入。现有插件未触及部分不要求顺手重构。"
     },
     {
       "id": "irreversible-side-effect-tri-state",
       "severity": "high",
-      "rule": "凡工具会产生外部可见副作用（发帖、发邮件、创建/修改/删除远端资源、发消息），其每一条失败路径（含超时、5xx、异常抛出、连接中断、全局 catch）必须区分三态：确定未执行 / 确定已执行 / 不确定。不确定态禁止向用户或 Agent 提示『可以重试』，必须提示先核对远端实际状态。逐条检查该工具的所有失败分支（包括 tool 无关的全局错误处理器），任何一条把不确定态当『未执行』处理都按 P1 报。"
-    },
-    {
-      "id": "no-weak-randomness",
-      "severity": "high",
-      "rule": "禁止用 Math.random、时间戳拼接或递增计数器生成任何送往外部服务的 id/nonce/state/boundary 等标识；一律要求 crypto.getRandomValues（或 Node crypto），不可用时的降级方案不得回退到弱随机。"
-    },
-    {
-      "id": "vendor-dist-evidence",
-      "severity": "high",
-      "rule": "第三方依赖与生成物必须可追溯：核对官方来源、固定版本/哈希、许可证、源码或可重放补丁与产物的一致性。已有 vendor 的局部兼容补丁、按源码重建 worker、依赖维护更新不因路径或版本变化自动判 P1/转人工。审查实际差异引入的网络、下载、动态执行和凭证风险；未变内容不逐项重审。来源/生成输入缺失时明确列出缺口并暂停放行，不猜测内容安全；存在不明篡改、注入或权限扩大时按实际风险阻断。项目已有兼容补丁在等价行为验证前保留。"
-    },
-    {
-      "id": "provisioning-audience",
-      "severity": "high",
-      "scope": [
-        "provisioning.json"
-      ],
-      "rule": "provisioning.json 的 audience/tier 按 rules.md「插件准入与受众标准」判定，不把新插件登记或扩大到 all 标成待维护者决定。audience 为 all（装给所有人）须同时满足：多数用户受益；开箱即用且无需自备第三方密钥或账号；不绑定某一个人或某一个团队的流程；质量稳定。热度或投稿数量本身不能登记为 all。有用但小众，或需要用户自己的密钥或账号，应接受为自选：{\"emails\":[]}，由用户在市场自行选择，而不是自动安装。只服务作者自己的数据、流程或私有服务，纯演示或示例（应放 docs/），或 Agent 不装插件就能直接完成的，不予接受。与标准不符是具体审查意见，说明违反哪一条。范围未变的修复不重复审查同一 audience。实际绕过已登记受众的代码按影响阻断。真实权限、凭证或发布信任扩大，未声明的网络访问，以及重命名或删除已发布插件，才需要维护者对具体范围的明确决定。"
+      "rule": "产生不可逆外部副作用的工具（发邮件、发帖、发消息、修改/删除远端资源），其失败路径必须区分「确定未执行 / 确定已执行 / 不确定」，不确定态禁止提示用户或 Agent 盲目重试，应提示先核对远端状态。"
     },
     {
       "id": "publish-pipeline",
@@ -74,22 +61,31 @@
       "scope": [
         ".github/**"
       ],
-      "rule": "发布链路审查以实际信任边界为准：OIDC、secrets、permissions、发布目标、未审代码执行或包安全门禁的放宽/移除须有维护者明确批准。保持这些边界的打包计数、目录处理、错误提示及 CI 正确性修复，可在相关实际打包回归与代码审查通过后自动批准，不仅因修改 .github/scripts 或 workflow 转人工。发布权限最小化，持有凭据的 job 不运行 PR/插件代码或依赖收集，目标仍只能来自受保护配置。"
+      "rule": "涉及 OIDC、secrets、permissions、发布目标、未审代码执行或放宽包安全门禁的改动必须由维护者人工批准；持有发布凭据的 job 不得运行插件代码或依赖收集。"
     },
     {
-      "id": "server-public-release-policy",
+      "id": "provisioning-audience",
       "severity": "high",
-      "rule": "官方仓发布的是 Server public release，必须符合其公开发布边界：network.secrets[].source 禁止 oidc-token；携带 manual 的插件必须声明 minCindyVersion。CI 在本仓执行 manifest、包结构与这些准入检查，不得 checkout Cindy 或私有 Server 仓库；review 中发现绕过、弱化或移除对应门禁必须按 P1 报。"
-    },
-    {
-      "id": "minimum-client-version-evidence",
-      "severity": "high",
-      "rule": "按 rules.md 的运行验证与证据复用要求核对受影响场景，不强制固定实机勾选、不按作者身份豁免。新增插件、宿主能力、认证、安装/升级等变化需对应的真实 Cindy 集成证据；只改已验证行为之外的说明/资源不要求全部重测。记录实际版本/渠道与限制，本地构建不得冒充正式版/Beta。CI 绿灯不证明实测；缺口是待验证状态，不凭缺项判代码 P1。minCindyVersion 必须有实际兼容依据；降低/删除时需维护者确认扩大支持范围及相关旧版本证据。"
+      "scope": [
+        "provisioning.json"
+      ],
+      "rule": "按 rules.md「插件准入与受众标准」判定 audience：all 仅用于多数用户受益、开箱即用无需自备第三方密钥/账号、非个人/单团队流程且质量稳定的插件；其余有用插件为自选 {\"emails\":[]}。符合标准直接通过，不符则指出违反哪一条。"
     },
     {
       "id": "third-party-oauth-scope-approval",
       "severity": "high",
-      "rule": "审插件 PR 时，除插件自己申请的 oauth.scopes（或同类会被平台安全审核卡住的授权），还要核对插件用到或依赖的 Cindy 本体（宿主）授权，即使清单 scope 未改。说明须列出插件自己的 scope、为什么要、平台审核状态；用到本体授权时还须写明依赖哪一项、平台是否已批准、宿主是否已发布。本体授权有变化或未就绪则 summary 单列「等平台批准」并建议先不合，且不要自动 approve，并提醒把需要申请的范围按插件与本体一起规划（例如通讯录只读和修改）。用不上的不要申请；未一次规划不阻断。就绪后作者更新说明，再按其余规则判定，不重复拦截。审查只核对说明是否写清，不代替平台做授权决定，也不把此事写成待维护者决定或代码 P1，不因此让代码 review check 失败。未涉及这类授权不要提本条，也不要因此把符合现有标准的其它改动转成人工批。"
+      "rule": "仅当本次改动新增/变更插件 oauth.scopes，或（即使未改 ghost.json）新增/变更对尚未发布或未获平台批准的 Cindy 宿主 OAuth 授权的依赖时检查：说明须列出相关 scope 及平台批准/宿主发布状态；未就绪时在 summary 标明「等平台批准」并暂停自动批准（不标代码 P1，不让 review check 失败）。未涉及此类授权时完全跳过本条。"
+    },
+    {
+      "id": "vendor-dist-evidence",
+      "severity": "medium",
+      "scope": [
+        "**/vendor/**",
+        "**/dist/**",
+        "**/node/worker.cjs",
+        "**/binary-dependencies.json"
+      ],
+      "rule": "核查新增或变更的第三方生成物与二进制依赖的官方来源、固定版本/哈希与许可证；聚焦本次差异新增的网络、下载、动态执行或凭证风险，未变内容不重审。可追溯的常规更新与按源码重建可直接放行，来源不明或存在恶意注入/权限扩大时阻断。"
     }
   ]
 }

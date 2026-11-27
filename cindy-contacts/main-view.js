@@ -82,8 +82,7 @@
       ],
       accessDenied: '你没有允许整理任务自动执行，整理时每一步都会请你确认。想改：在 Cindy 侧边栏「插件」→「通讯录」详情页的「任务设置」里，把动手权限改成「自动审查」。',
       lastOk: (w) => `上次整理（${w}）`, lastFail: '上次整理没有完成', lastIncomplete: '上次整理没有走完：AI 没有记下结果，可以再整理一次。',
-      stale: '每天自动整理好像没在跑：已经两天多没有整理了。去自动化页看看「整理通讯录」是不是没保存或被暂停了。', openAutomationShort: '打开自动化页',
-      footFail: '上次整理没有完成', footStale: '自动整理好像没在跑',
+      footFail: '上次整理没有完成',
       runsTitle: '最近几次', runLine: (r) => `${r.scope === 'contact' ? '单人回补' : r.scope === 'backfill' ? '往前补' : '整理'} · 新增 ${r.created} · 更新 ${r.updated}`,
       noSchedule: '当前 Cindy 版本还不支持由插件发起自动化。',
       secClose: '常联系', secRecent2: '最近来往',
@@ -176,8 +175,7 @@
       ],
       accessDenied: 'You did not let tidy-up tasks run on their own, so every step asks you. To change it, set the permission to Auto-review in Task settings on this plugin’s page under Plugins.',
       lastOk: (w) => `Last tidy-up (${w})`, lastFail: 'The last tidy-up did not finish', lastIncomplete: 'The last tidy-up stopped early without recording a result; run it again.',
-      stale: 'The daily tidy-up seems to have stopped: nothing for over two days. Check whether “整理通讯录” was saved or paused on the Automations page.', openAutomationShort: 'Open Automations',
-      footFail: 'Last tidy-up did not finish', footStale: 'Daily tidy-up seems stopped',
+      footFail: 'Last tidy-up did not finish',
       runsTitle: 'Recent runs', runLine: (r) => `${r.scope === 'contact' ? 'One person' : r.scope === 'backfill' ? 'Backfill' : 'Tidy'} · ${r.created} new · ${r.updated} updated`,
       noSchedule: 'This Cindy version cannot start automations from plugins yet.',
       secClose: 'Close contacts', secRecent2: 'Recently in touch',
@@ -546,15 +544,6 @@
 
   const tidyRunning = () => [...S.tasks.values()].some((t) => t.key === 'maintain' && t.status === 'running');
 
-  /** 每天自动整理请求过、但两天多没有任何整理：多半没保存或被暂停了。 */
-  function tidyStale() {
-    const req = S.meta?.automationRequested;
-    if (!req || !req.at) return false;
-    const last = S.meta?.maintenance?.lastRunAt || '';
-    const ref = last && last > req.at ? last : req.at;
-    return Date.now() - Date.parse(ref) > 50 * 3600 * 1000;
-  }
-
   /** 资料库已有档案、旧版智能通讯录还没导入时，提示并给出导入入口（不自动合并）。 */
   function legacyNotice() {
     const legacy = S.meta?.legacy;
@@ -573,7 +562,6 @@
       else if (lt.reply) h += `<div class="notice"><b>${esc(T.lastOk(fmtWhen(lt.at)))}</b><p>${esc(lt.reply)}</p></div>`;
     }
     if (m.autoAccess && m.autoAccess.granted === false) h += `<div class="notice warn"><p>${esc(T.accessDenied)}</p></div>`;
-    if (tidyStale()) h += `<div class="notice warn"><p>${esc(T.stale)}</p><button class="pill" data-action="requestAutomation">${esc(T.openAutomationShort)}</button></div>`;
     const ss = m.sourcesStatus;
     if (ss && ss.items && ss.items.length) {
       const enabled = m.settings?.sources || {};
@@ -603,7 +591,6 @@
     const lt = S.meta.lastTidy;
     if (tidyRunning()) text = `<span class="spin s"></span><span>${esc(T.footRunning)}</span>`;
     else if (lt && (lt.status === 'failed' || lt.status === 'incomplete') && (!m || !m.lastRunAt || m.lastRunAt < lt.at)) text = `<span class="warnline">${esc(T.footFail)}</span>`;
-    else if (tidyStale()) text = `<span class="warnline">${esc(T.footStale)}</span>`;
     else if (m && m.lastRunAt) text = `<span>${esc(T.footLast(fmtWhen(m.lastRunAt)))}</span>`;
     else text = `<span>${esc(T.footNever)}</span>`;
     footer.innerHTML = `${I('spark', 's')}${text}<b>${esc(T.footSettings)}</b>`;
@@ -931,7 +918,7 @@
       h += statusBlock();
       h += '<div class="acts">';
       if (S.meta?.tasks) h += `<button class="pill pri" data-action="tidyRecent">${esc(T.helloStart(days))}</button>`;
-      if (S.meta?.schedule) h += `<button class="pill" data-action="requestAutomation">${esc(T.helloDaily)}</button>`;
+      if (S.role?.isPrimary && S.role.localSchedule === 'none' && S.meta?.schedule) h += `<button class="pill" data-action="requestAutomation">${esc(T.helloDaily)}</button>`;
       h += '</div>';
       h += `<p class="small">${esc(T.helloOther)} ${mac ? `<button class="link" data-action="import">${esc(T.helloMac)}</button> · ` : ''}<button class="link" data-action="new">${esc(T.helloManual)}</button></p>`;
     }
@@ -1569,8 +1556,8 @@
     }
     if (a === 'requestAutomation') {
       try {
-        S.meta.automationRequested = await rpc('requestAutomation');
-        S.autoOpened = true;
+        const result = await rpc('requestAutomation');
+        S.autoOpened = !!result.opened;
       } catch (err) {
         failToast(err);
       }
@@ -1723,6 +1710,7 @@
       /* 没有「上次看过」也能用 */
     }
     S.boot = 'ready';
+    rpc('automationStatus').then(role => { S.role = role; if (S.mode === 'hello') renderDetail(); }).catch(() => {});
     await refreshAll();
   }
 

@@ -52,16 +52,19 @@ function usageFromReport(report) {
   return windows.length ? { updatedAt: Date.now(), windows } : null;
 }
 
+function usageEnvironment(options) {
+  // The Windows updater can open a terminal of its own even when agy is hidden.
+  const env = options?.env ?? process.env;
+  return (options?.platform ?? process.platform) === 'win32'
+    ? { ...env, AGY_CLI_DISABLE_AUTO_UPDATE: 'true' }
+    : env;
+}
+
 async function readUsage(options) {
   const executable = resolveAgy(options);
   if (!executable) return null;
-  // The Windows updater can open a terminal of its own even when agy is hidden.
-  const env = options?.env ?? process.env;
-  const usageEnv = (options?.platform ?? process.platform) === 'win32'
-    ? { ...env, AGY_CLI_DISABLE_AUTO_UPDATE: 'true' }
-    : env;
   const child = spawnAgy(executable, ['--settings', SESSION_SETTINGS, '--output-format', 'json', '--print', '/usage'],
-    { ...options, env: usageEnv, stdio: ['ignore', 'pipe', 'ignore'] });
+    { ...options, env: usageEnvironment(options), stdio: ['ignore', 'pipe', 'ignore'] });
   const chunks = [];
   let length = 0;
   const stop = () => killTree(child, 'SIGKILL');
@@ -84,4 +87,4 @@ async function readUsage(options) {
   }
 }
 
-module.exports = { readUsage, usageFromReport, windowMinutesOf };
+module.exports = { usageEnvironment, readUsage, usageFromReport, windowMinutesOf };

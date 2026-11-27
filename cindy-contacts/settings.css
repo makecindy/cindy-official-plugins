@@ -24,6 +24,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .seg button { height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--c-line); color: var(--c-text-2); font-size: 12.5px; }
 .seg button[aria-pressed="true"] { background: var(--c-ink); color: var(--c-ink-fg); border-color: var(--c-ink); }
 .pill { justify-self: start; height: 30px; padding: 0 14px; border-radius: 999px; background: var(--c-ink); color: var(--c-ink-fg); font-size: 13px; }
+.pill.secondary { background: transparent; border: 1px solid var(--c-line); color: var(--c-text); }
 .pill:hover { opacity: 0.88; }
 .pill[disabled] { opacity: 0.5; cursor: default; }
 .checks { display: flex; flex-wrap: wrap; gap: 6px 18px; padding-top: 4px; }

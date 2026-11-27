@@ -272,6 +272,7 @@ test('dependency collection cannot use the publishing job credentials', () => {
     const publishing = workflow.split('\n  publish:\n')[1];
     assert.ok(packaging && publishing);
     assert.match(packaging, /contents: read/);
+    assert.match(packaging, /fetch-depth: 0/);
     assert.match(packaging, /persist-credentials: false/);
     assert.match(packaging, /package-plugin\.sh/);
     assert.match(packaging, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);

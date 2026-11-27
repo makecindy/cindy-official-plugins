@@ -20,7 +20,9 @@
  */
 
 const os = require('node:os');
+const { createVerification } = require('./agy-verification.js');
 const { attachSteering } = require('./agy-steering.js');
+const { accountErrorRelay } = require('./agy-account-errors.js');
 const { ACP_ARGS, detectAgy, readCustomAgyConfig, resolveAgy, spawnAgy, killTree } = require('./resolve-agy.js');
 const remoteWorkspace = require('./remote-workspace.js');
 
@@ -58,10 +60,12 @@ function exitCodeFor(code, signal) {
 }
 
 function run(agyPath) {
+  const verification = createVerification(agyPath);
   let child;
   try {
-    child = spawnAgy(agyPath, ACP_ARGS, { stdio: ['pipe', 'pipe', 'pipe'] });
+    child = spawnAgy(agyPath, ACP_ARGS, { logFile: verification?.taskLog, stdio: ['pipe', 'pipe', 'pipe'] });
   } catch (error) {
+    verification?.dispose();
     exitAfterStderr(`[agy-acp] Could not start Antigravity at ${agyPath} (${describe(error)}).`, NOT_FOUND_EXIT_CODE);
     return;
   }
@@ -130,7 +134,14 @@ function run(agyPath) {
     });
   });
 
-  const { detach: detachSteering, relay: stdoutRelay } = attachSteering(process.stdin, process.stdout, child, () => stop('SIGTERM'));
+  const { detach: detachSteering, relay: stdoutRelay } = attachSteering(
+    process.stdin,
+    process.stdout,
+    child,
+    () => stop('SIGTERM'),
+    accountErrorRelay(),
+    verification,
+  );
   child.stdin.on('error', () => {
     // EPIPE after agy exited; the exit handler takes care of shutting down.
   });
@@ -162,6 +173,7 @@ function run(agyPath) {
   // Last line of defence for any exit path: never leave agy running.
   process.on('exit', () => {
     if (!childExited) killTree(child, 'SIGKILL');
+    verification?.dispose();
   });
 }
 

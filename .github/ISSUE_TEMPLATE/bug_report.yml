@@ -7,58 +7,42 @@ body:
       value: |
         Do not post access tokens, mailbox authorization codes, app-specific
         passwords, private keys, or real user data. Security vulnerabilities go
-        through the private channel in [SECURITY.md](https://github.com/makecindy/cindy-official-plugins/blob/main/SECURITY.md),
+        through [SECURITY.md](https://github.com/makecindy/cindy-official-plugins/blob/main/SECURITY.md),
         not a public issue.
 
         请不要贴出访问令牌、邮箱授权码、App 专用密码、私钥或真实用户数据。安全漏洞
-        请走 [SECURITY.zh-CN.md](https://github.com/makecindy/cindy-official-plugins/blob/main/SECURITY.zh-CN.md) 的私密渠道，不要开公开 issue。
+        请走 [SECURITY.zh-CN.md](https://github.com/makecindy/cindy-official-plugins/blob/main/SECURITY.zh-CN.md)，不要开公开 issue。
 
   - type: input
     id: plugin
     attributes:
       label: Plugin / 插件
-      description: Directory name, e.g. `cindy-github` / 目录名，例如 `cindy-github`
-    validations:
-      required: true
-
-  - type: input
-    id: version
-    attributes:
-      label: Plugin version / 插件版本
-      description: The `version` field in that plugin's `ghost.json` / 该插件 `ghost.json` 里的 `version`
-    validations:
-      required: true
-
-  - type: input
-    id: platform
-    attributes:
-      label: Platform / 平台
-      description: OS and Cindy client version / 操作系统与 Cindy 客户端版本
-    validations:
-      required: true
-
-  - type: textarea
-    id: steps
-    attributes:
-      label: Steps to reproduce / 复现步骤
-      placeholder: |
-        1. …
-        2. …
-        3. …
-    validations:
-      required: true
-
-  - type: textarea
-    id: expected
-    attributes:
-      label: Expected behaviour / 期望行为
+      description: Plugin name or directory, e.g. `cindy-github` / 插件名或目录名，例如 `cindy-github`
     validations:
       required: true
 
   - type: textarea
     id: actual
     attributes:
-      label: What actually happened / 实际行为
-      description: Include error messages and redacted logs / 附上报错信息和脱敏后的日志
+      label: What happened / 问题描述
+      description: Describe the issue, error message, or redacted logs / 描述遇到的问题、报错信息或脱敏日志
     validations:
       required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce (optional) / 复现步骤（可选）
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Plugin & Cindy version / platform (optional) / 版本与系统（可选）
+      description: e.g. macOS, Cindy 0.1.x, plugin 1.x / 例如 macOS、Cindy 版本或插件版本
+    validations:
+      required: false
