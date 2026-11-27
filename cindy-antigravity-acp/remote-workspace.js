@@ -13,6 +13,15 @@
  *  - agy's permission rules do not stop its own tools over ACP, so they are not used. The agent
  *    definition's `tools` allow-list does: with only `search_web` allowed, the file and command
  *    tools do not exist in the session.
+ *  - From agy 1.5.18 the allow-list also holds timers and subagents (checked with the real CLI on
+ *    2026-11-27). A subagent runs under a definition the agent names in `agents`, which is this
+ *    same restricted agent. With `inheritCustomizations: false` agy refuses every other one: the
+ *    user's own agents, whose tools would run here, and the built-in `browser`, `pro`, `self`,
+ *    `image-generator`…. This has to hold inside agy because agy does not report a subagent's own
+ *    tool calls over ACP, only its MCP calls and permission requests: the relay check below would
+ *    not see a subagent read a file here. Tools that run code or make agents here stay out:
+ *    `define_subagent` (its agents may have any tool), `run_workflow` (a Python script on this
+ *    computer) and `swarm`.
  *  - A restricted agent can use an MCP server only when the server is named in its definition
  *    AND passed in `session/new`. The definition names the servers; their addresses and the task
  *    token stay in the `session/new` request and never reach a file.
@@ -34,7 +43,7 @@
  * It fails closed. An agy older than the checked version is refused. agy offers no way to read
  * the effective tool set back before a session, so the relay watches the session instead: the
  * first tool call that is not an MCP call but reads, edits or runs something on this computer
- * ends the task.
+ * ends the task, and so does a subagent that agy started under any agent but the restricted one.
  */
 
 const fs = require('node:fs');
@@ -59,6 +68,14 @@ const AGENT_NAME = 'cindy-remote';
 const EXEC_SERVER = 'cindy_exec';
 /** First agy version this mode was checked against. */
 const MIN_VERSION = Object.freeze([1, 5, 13]);
+/** First agy version the full tool set was checked against; an older agy keeps the basic set. */
+const FULL_TOOLS_MIN_VERSION = Object.freeze([1, 5, 18]);
+/** agy's own tools that touch no computer: they run at the model service or inside agy's session. */
+const BASIC_TOOLS = Object.freeze(['search_web', 'ask_question', 'update_steps']);
+const FULL_TOOLS = Object.freeze([
+  ...BASIC_TOOLS, 'schedule', 'invoke_subagent', 'manage_subagents', 'send_message',
+]);
+const SUBAGENT_TOOL = 'invoke_subagent';
 /** Names that can be written into the definition's YAML as they are. */
 const SERVER_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const MAX_SERVERS = 64;
@@ -74,7 +91,7 @@ const WARMUP_CLOSE_GRACE_MS = CLOSE_BUDGET_MS + 250;
 const STALE_LAUNCH_DIR_MS = 24 * 60 * 60 * 1000;
 
 /** Non-local agy tools explicitly allow-listed in `agentDefinition` (never touch host files or shell). */
-const REMOTE_SAFE_NATIVE_TOOLS = new Set(['search_web', 'ask_question', 'update_steps']);
+const REMOTE_SAFE_NATIVE_TOOLS = new Set(FULL_TOOLS);
 /** ACP tool kinds that mean "touched this computer" when the call is not an MCP call. */
 const LOCAL_KINDS = new Set(['read', 'edit', 'delete', 'move', 'execute']);
 /** agy's own file and command tools, by the name it reports. */
@@ -102,15 +119,24 @@ function isRemoteWorkspaceLaunch(argv) {
   return Array.isArray(argv) && (argv.slice(2).includes(REMOTE_WORKSPACE_ARG) || argv.slice(2).includes(GUEST_WORKSPACE_ARG));
 }
 
-/** `1.5.13`, `agy 1.6.0-beta.2`, … at or above the checked version. Unreadable versions are not. */
-function versionSupported(version) {
+/** `1.5.13`, `agy 1.6.0-beta.2`, … at or above `min`. Unreadable versions are not. */
+function versionAtLeast(version, min) {
   const match = /(\d+)\.(\d+)\.(\d+)/.exec(typeof version === 'string' ? version : '');
   if (!match) return false;
   for (let index = 0; index < 3; index += 1) {
     const part = Number(match[index + 1]);
-    if (part !== MIN_VERSION[index]) return part > MIN_VERSION[index];
+    if (part !== min[index]) return part > min[index];
   }
   return true;
+}
+
+function versionSupported(version) {
+  return versionAtLeast(version, MIN_VERSION);
+}
+
+/** Whether a task on this agy gets the full tool set, subagents included. */
+function fullToolsSupported(version) {
+  return versionAtLeast(version, FULL_TOOLS_MIN_VERSION);
 }
 
 /** A private, otherwise empty directory agy runs in for this task; it holds the agent definition. */
@@ -149,20 +175,21 @@ function removeStaleLaunchDirs(root, now = Date.now()) {
 }
 
 /**
- * The agent the session runs under. `tools` is an allow-list of agy's own tools: `search_web`
- * runs at the model service and touches no computer. `mcpServers` only names the servers the
- * agent may use; where they are comes with `session/new`.
+ * The agent the session runs under. `tools` is an allow-list of agy's own tools, all of which
+ * touch no computer. With the full set, `agents` makes this same definition the one subagent
+ * there is, and `inheritCustomizations: false` keeps every other agent out. `mcpServers` only
+ * names the servers the agent may use; where they are comes with `session/new`.
  */
-function agentDefinition(serverNames) {
+function agentDefinition(serverNames, { fullTools = false } = {}) {
   const others = serverNames.filter((name) => name !== EXEC_SERVER);
   return [
     '---',
     `name: ${AGENT_NAME}`,
     'description: Works on a project that is on another computer, through the tools Cindy provides.',
+    ...(fullTools ? ['inheritCustomizations: false'] : []),
     'tools:',
-    '  - search_web',
-    '  - ask_question',
-    '  - update_steps',
+    ...(fullTools ? FULL_TOOLS : BASIC_TOOLS).map((tool) => `  - ${tool}`),
+    ...(fullTools ? ['agents:', `  - ${AGENT_NAME}.md`] : []),
     'mcpServers:',
     ...serverNames.map((name) => `  - name: ${name}`),
     '---',
@@ -171,6 +198,9 @@ function agentDefinition(serverNames) {
     `You have no file or shell tools of your own in this task. Everything that reads or changes files, or runs commands, goes through the MCP server \`${EXEC_SERVER}\` (Bash, BashOutput, KillShell, Read, Write, Edit, NotebookEdit). Those tools run on the computer the project is on.`,
     ...(others.length
       ? [`The other MCP servers of this task (${others.map((name) => `\`${name}\``).join(', ')}) are Cindy's own tools on that computer. List a server's tools before you use them.`]
+      : []),
+    ...(fullTools
+      ? [`To delegate, start a subagent with ${SUBAGENT_TOOL} and the type \`${AGENT_NAME}\`; it works the same way, through the same MCP servers.`]
       : []),
     '',
     '- Use the workspace path given in the conversation for file paths and as the directory of commands. Paths on this computer mean nothing for the project.',
@@ -181,10 +211,10 @@ function agentDefinition(serverNames) {
   ].join('\n');
 }
 
-function writeAgentDefinition(dir, serverNames) {
+function writeAgentDefinition(dir, serverNames, options) {
   const agents = path.join(dir, '.agents', 'agents');
   fs.mkdirSync(agents, { recursive: true });
-  fs.writeFileSync(path.join(agents, `${AGENT_NAME}.md`), agentDefinition(serverNames), 'utf8');
+  fs.writeFileSync(path.join(agents, `${AGENT_NAME}.md`), agentDefinition(serverNames, options), 'utf8');
 }
 
 /** The HTTP MCP servers of a session request that the agent can be given, in order, by unique name. */
@@ -206,6 +236,17 @@ function remoteToolIdentity({ server, tool }) {
   if (server === EXEC_SERVER) return { title: tool, kind: EXEC_TOOL_KINDS[tool] || 'other' };
 }
 
+/**
+ * A subagent that agy started under another agent than the restricted one. agy refuses those
+ * (the call ends `failed`); one that `completed` means it was let through.
+ */
+function foreignSubagent(toolCall) {
+  const input = isObject(toolCall.rawInput) ? toolCall.rawInput : null;
+  if (toolCall.name !== SUBAGENT_TOOL || toolCall.status !== 'completed' || !input) return null;
+  const type = typeof input.TypeName === 'string' ? input.TypeName : '';
+  return type === AGENT_NAME ? null : `${SUBAGENT_TOOL} ${type || '(no type)'}`;
+}
+
 /** Keep the remote restriction on native file and command tools after normalizing MCP calls. */
 function inspectToolCall(toolCall, seen, serverNames = [], seenSafeTools = null) {
   if (!isObject(toolCall)) return { type: 'other' };
@@ -213,6 +254,8 @@ function inspectToolCall(toolCall, seen, serverNames = [], seenSafeTools = null)
     allowLegacyEnvelope: true, toolIdentity: remoteToolIdentity,
   });
   if (mcpCall) return { type: 'mcp', toolCall: mcpCall };
+  const subagent = foreignSubagent(toolCall);
+  if (subagent) return { type: 'local', tool: subagent };
   const id = typeof toolCall.toolCallId === 'string' ? toolCall.toolCallId : null;
   const name = typeof toolCall.name === 'string' ? toolCall.name : '';
   if (REMOTE_SAFE_NATIVE_TOOLS.has(name)) {
@@ -259,8 +302,9 @@ function parseLine(line) {
 const NEWLINE = Buffer.from('\n');
 
 /**
- * Runs one task in remote-workspace mode. `host` carries the launcher and the process helpers of
- * agy-acp.js: { acpArgs, spawnAgy, killTree, exitAfterStderr, describe, exitCodeFor, timings }.
+ * Runs one task in remote-workspace mode. `host` carries the launcher, the version of the agy it
+ * checked and the process helpers of agy-acp.js:
+ * { acpArgs, agyVersion, spawnAgy, killTree, exitAfterStderr, describe, exitCodeFor, timings }.
  */
 function startRemoteWorkspace(agyPath, host) {
   const { acpArgs, spawnAgy, killTree, exitAfterStderr, describe, exitCodeFor, timings } = host;
@@ -499,7 +543,7 @@ function startRemoteWorkspace(agyPath, host) {
       process.stderr.write(`[agy-acp] These MCP servers cannot be given to Antigravity and were left out: ${dropped.join(', ')}\n`);
     }
     try {
-      writeAgentDefinition(dir, servers.map((server) => server.name));
+      writeAgentDefinition(dir, servers.map((server) => server.name), { fullTools: fullToolsSupported(host.agyVersion) });
       agent = launch([...acpArgs, '--agent', AGENT_NAME]);
       // Started only once agy is: a launch that throws leaves no warm-up running. session/new waits for
       // it (see onAgentLine).
@@ -762,12 +806,15 @@ function startRemoteWorkspace(agyPath, host) {
 module.exports = {
   AGENT_NAME,
   EXEC_SERVER,
+  FULL_TOOLS,
+  FULL_TOOLS_MIN_VERSION,
   GUEST_WORKSPACE_ARG,
   MIN_VERSION,
   REMOTE_WORKSPACE_ARG,
   REMOTE_WORKSPACE_EXIT_CODE,
   agentDefinition,
   completeInitializeResult,
+  fullToolsSupported,
   inspectToolCall,
   isGuestWorkspaceLaunch,
   isRemoteWorkspaceLaunch,

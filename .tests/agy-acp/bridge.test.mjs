@@ -106,6 +106,22 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
         // An agy that ignored the agent's tool list: one of its own tools runs, and the turn stays open.
         send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'call-n',
           name: 'write_to_file', kind: 'edit', title: 'note.txt', status: 'in_progress' } } });
+      } else if (message.method === 'session/prompt' && /subagent/.test(process.env.FAKE_AGY_SCRIPT || '')) {
+        // Subagent launches as agy 1.5.18 reports them: a tool call that ends completed (started) or failed (refused).
+        const launch = (id, type, status) => {
+          const call = { toolCallId: id, name: 'invoke_subagent', kind: 'other', title: 'Run invoke_subagent',
+            rawInput: { TypeName: type, Role: 'Helper', Prompt: 'list the files' } };
+          send({ method: 'session/update', params: { sessionId: 'sess-1', update: Object.assign({ sessionUpdate: 'tool_call', status: 'in_progress' }, call) } });
+          send({ method: 'session/update', params: { sessionId: 'sess-1', update: Object.assign({ sessionUpdate: 'tool_call_update', status }, call) } });
+        };
+        if (process.env.FAKE_AGY_SCRIPT === 'foreign-subagent') {
+          // An agy that let a subagent run under another agent (whose own tools would act on this computer).
+          launch('call-s', 'local-helper', 'completed');
+        } else {
+          launch('call-b', 'browser', 'failed');
+          launch('call-s', 'cindy-remote', 'completed');
+          send({ id: message.id, result: { stopReason: 'end_turn' } });
+        }
       } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'cards') {
         // Native UI tools (even if tagged with edit/execute kinds) are adapted when elicitation.form is negotiated,
         // preserved unchanged on older hosts, and failure updates are never dropped.
@@ -865,6 +881,46 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     const pid = readPid(fixture.pidFile);
     assert.ok(pid, 'the session process had started');
     await waitFor(() => !isAlive(pid), 4_000, 'fake agy to be stopped');
+  });
+
+  // Why: users asked for subagents in tasks on another computer (2026-11-27). agy does not report a
+  // subagent's own tool calls, so only the definition keeps a subagent off this computer's files:
+  // the restricted agent must be the one subagent there is, with nothing inherited. Checked with
+  // the real agy 1.5.18 (a user-level agent with view_file read a file here until both were set);
+  // an older agy keeps the basic definition of the first remote-workspace test.
+  if (official) test('remote-workspace mode gives a checked agy subagents that are the restricted agent itself', async (t) => {
+    const { launchFile, bridge, messages, send, reply, server } = remoteSession(t, { FAKE_AGY_VERSION: '1.5.18', FAKE_AGY_SCRIPT: 'subagents' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [server('cindy_exec')] } });
+    await reply(1, 'session/new answer');
+    const { definition } = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
+    assert.match(definition, /^inheritCustomizations: false\ntools:\n  - search_web\n  - ask_question\n  - update_steps\n  - schedule\n  - invoke_subagent\n  - manage_subagents\n  - send_message\nagents:\n  - cindy-remote\.md\nmcpServers:\n  - name: cindy_exec\n---$/m);
+    assert.doesNotMatch(definition, /define_subagent|run_workflow|swarm|run_command|view_file/);
+
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'delegate' }] } });
+    // A refused launch and a launch of the restricted agent are both passed on; the task goes on.
+    assert.deepEqual((await reply(2, 'prompt answer')).result, { stopReason: 'end_turn' });
+    const launches = messages().filter((m) => m.method === 'session/update' && m.params.update.name === 'invoke_subagent')
+      .map((m) => [m.params.update.rawInput.TypeName, m.params.update.status]);
+    assert.deepEqual(launches, [['browser', 'in_progress'], ['browser', 'failed'], ['cindy-remote', 'in_progress'], ['cindy-remote', 'completed']]);
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  if (official) test('remote-workspace mode stops the task when agy lets a subagent run under another agent', async (t) => {
+    const { bridge, messages, send, reply, server } = remoteSession(t, { FAKE_AGY_VERSION: '1.5.18', FAKE_AGY_SCRIPT: 'foreign-subagent' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [server('cindy_exec')] } });
+    await reply(1, 'session/new answer');
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'delegate' }] } });
+    const closed = await Promise.race([bridge.closed, new Promise((resolve) => setTimeout(() => resolve(null), 8_000))]);
+    assert.ok(closed, 'the entry ended the task');
+    assert.equal(closed.code, 78);
+    assert.match(bridge.stderr.text(), /its own tool "invoke_subagent local-helper"/);
+    const updates = messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates.map((update) => [update.sessionUpdate, update.status]), [['tool_call', 'in_progress'], ['agent_message_chunk', undefined]]);
   });
 
   test('remote-workspace mode refuses an Antigravity CLI older than the version it was checked with', async (t) => {

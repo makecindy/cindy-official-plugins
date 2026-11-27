@@ -240,6 +240,7 @@ async function runRemoteWorkspace(options) {
   remoteWorkspace.startRemoteWorkspace(found.path, {
     acpArgs,
     ...(options && options.accountDir ? { accountDir: options.accountDir } : {}),
+    agyVersion: found.version,
     guest: remoteWorkspace.isGuestWorkspaceLaunch(process.argv),
     spawnAgy,
     killTree,
