@@ -56,7 +56,7 @@ function logSignedIn(tok) {
 }
 
 function tokenPath() {
-  if (forceFile) {
+  if (forceFile && process.env.FAKE_IGNORE_FILE_STORAGE !== '1') {
     const gemRoot = geminiDir || path.join(process.env.HOME || process.env.USERPROFILE || '', '.gemini');
     return path.join(gemRoot, appDataName, 'antigravity-oauth-token');
   }
@@ -148,6 +148,11 @@ process.stdin.on('data', (chunk) => {
         tier_display_name: spec.tier,
         fake_remaining: spec.remaining,
       }), { mode: 0o600 });
+      if (process.env.FAKE_WRITE_DECOY_ON_AUTH === '1' && geminiDir) {
+        const decoyDir = path.join(geminiDir, appDataName);
+        fs.mkdirSync(decoyDir, { recursive: true, mode: 0o700 });
+        fs.writeFileSync(path.join(decoyDir, 'decoy-state'), 'non-empty', { mode: 0o600 });
+      }
       send({ id, result: { _meta: { antigravity: { tier: { name: spec.tier } } } } });
     } else if (method === 'logout') {
       const file = tokenPath();
@@ -339,7 +344,7 @@ describe('agy-account-dir helpers', () => {
     const accountDirModule = require(path.join(root, 'agy-account-dir.js'));
     assert.equal(accountDirModule.readAccountTokenMeta, undefined);
     assert.equal(accountDirModule.tokenFileOf, undefined);
-    for (const file of ['agy-account.js', 'agy-account-dir.js', 'worker.js']) {
+    for (const file of ['agy-account.js', 'agy-account-dir.js', 'agy-account-errors.js', 'agy-acp.js', 'agy-usage.js', 'agy-verification.js', 'remote-workspace.js', 'worker.js']) {
       assert.doesNotMatch(fs.readFileSync(path.join(root, file), 'utf8'), /antigravity-oauth-token|id_token|refresh_token|access_token/, file);
     }
   });
@@ -717,5 +722,103 @@ describe('multi-account worker, ACP entry, remote workspace, and main.js', () =>
     assert.equal(snapshot.account, undefined);
     assert.deepEqual(received.filter((message) => /^account-|^harness-usage/.test(message.type)), []);
     assert.ok(!nodeCalls.some((method) => ['login', 'logout', 'cancelLogin', 'account', 'usage'].includes(method)));
+  });
+
+  test('isolation guard aborts login before overwriting default keyring when agy ignores file storage', async (t) => {
+    const fx = makeMultiFixture(t, { FAKE_IGNORE_FILE_STORAGE: '1' });
+    const originalDefault = JSON.stringify({ id_token_email: 'default@example.test', tier_display_name: 'Google AI Ultra' });
+    fs.writeFileSync(fx.defaultTokenFile, originalDefault);
+    fs.writeFileSync(fx.nextLoginFile, JSON.stringify({ email: 'new@example.test', tier: 'Google AI Pro' }));
+    const acct = path.join(fx.dir, 'acct-ignored');
+    fs.mkdirSync(acct, { recursive: true });
+
+    const worker = startWorker(fx.env);
+    t.after(() => worker.close());
+
+    // Pre-login probe catches that the empty isolated directory sees the default login, and aborts before authenticate.
+    const loginResult = (await worker.call('accountLogin', { harnessId: 'agy', accountDir: acct, methodId: 'oauth-personal' })).result;
+    assert.equal(loginResult.ok, false);
+    assert.equal(loginResult.error, 'failed');
+    assert.match(loginResult.message, /ignored isolated account storage/i);
+    assert.equal(fs.readFileSync(fx.defaultTokenFile, 'utf8'), originalDefault, 'default keyring login was not overwritten');
+    assert.equal(worker.notifications.some((n) => n.method === 'account-ready'), false);
+
+    // accountStatus and usage refuse to attribute the default login or quota to an isolated dir with no isolated store files.
+    assert.deepEqual((await worker.call('accountStatus', { harnessId: 'agy', accountDir: acct })).result, { state: 'signed-out' });
+    assert.equal((await worker.call('usage', { harnessId: 'agy', accountDir: acct })).result, null);
+  });
+
+  test('isolation guard rejects login when default was signed out and agy writes outside accountDir', async (t) => {
+    // Even if agy writes a decoy file in appDataDir, the post-login empty-dir probe catches global keyring leakage.
+    const fx = makeMultiFixture(t, { FAKE_IGNORE_FILE_STORAGE: '1', FAKE_WRITE_DECOY_ON_AUTH: '1' });
+    fs.writeFileSync(fx.nextLoginFile, JSON.stringify({ email: 'leaked@example.test', tier: 'Google AI Pro' }));
+    const acct = path.join(fx.dir, 'acct-leaked');
+    fs.mkdirSync(acct, { recursive: true });
+
+    const worker = startWorker(fx.env);
+    t.after(() => worker.close());
+
+    const loginResult = (await worker.call('accountLogin', { harnessId: 'agy', accountDir: acct, methodId: 'oauth-personal' })).result;
+    assert.equal(loginResult.ok, false);
+    assert.equal(loginResult.error, 'failed');
+    assert.match(loginResult.message, /leaked the sign-in outside/i);
+    assert.equal(worker.notifications.some((n) => n.method === 'account-ready'), false);
+  });
+
+  test('isolation guard rejects login when agy writes no sign-in file into accountDir', async (t) => {
+    const fx = makeMultiFixture(t, { FAKE_IGNORE_FILE_STORAGE: '1' });
+    fs.writeFileSync(fx.nextLoginFile, JSON.stringify({ email: 'nofile@example.test', tier: 'Google AI Pro' }));
+    const acct = path.join(fx.dir, 'acct-nofile');
+    fs.mkdirSync(acct, { recursive: true });
+
+    const worker = startWorker(fx.env);
+    t.after(() => worker.close());
+
+    const loginResult = (await worker.call('accountLogin', { harnessId: 'agy', accountDir: acct, methodId: 'oauth-personal' })).result;
+    assert.equal(loginResult.ok, false);
+    assert.equal(loginResult.error, 'failed');
+    assert.match(loginResult.message, /did not store the sign-in inside the isolated account directory/i);
+  });
+
+  test('agy-acp and remote-workspace block leaked session/new on empty accountDir when agy falls back to default login', async (t) => {
+    const fx = makeMultiFixture(t, { FAKE_IGNORE_FILE_STORAGE: '1' });
+    fs.writeFileSync(fx.defaultTokenFile, JSON.stringify({ id_token_email: 'default@example.test', tier_display_name: 'Google AI Ultra' }));
+
+    for (const extraArgs of [[], ['--cindy-remote-workspace']]) {
+      const acct = path.join(fx.dir, extraArgs.length ? 'acct-leak-remote' : 'acct-leak-local');
+      fs.mkdirSync(acct, { recursive: true });
+      const child = spawn(process.execPath, [path.join(root, 'agy-acp.js'), ...extraArgs, '--cindy-account-dir', acct], {
+        env: fx.env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      const exited = new Promise((resolve) => child.once('exit', resolve));
+      const responses = [];
+      let stderr = '';
+      child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
+      const rl = readline.createInterface({ input: child.stdout });
+      rl.on('line', (line) => { if (line.trim()) responses.push(JSON.parse(line)); });
+
+      const send = (obj) => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...obj }) + '\n');
+      send({ id: 1, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: {} } });
+      await waitFor(() => responses.some((m) => m.id === 1), 4_000, 'initialize');
+      send({
+        id: 2,
+        method: 'session/new',
+        params: {
+          cwd: fx.dir,
+          mcpServers: extraArgs.length ? [{ name: 'cindy_exec', type: 'http', url: 'http://127.0.0.1:9999/mcp' }] : [],
+        },
+      });
+      await waitFor(() => responses.some((m) => m.id === 2), 4_000, 'blocked session/new');
+
+      const resp = responses.find((m) => m.id === 2);
+      assert.equal(resp.result, undefined, 'leaked session result must never reach Cindy');
+      assert.equal(resp.error.code, -32000);
+      assert.deepEqual(resp.error.data._meta.cindy, { kind: 'auth-required' });
+
+      await exited;
+      rl.close();
+      assert.match(stderr, /without isolated sign-in files/i);
+    }
   });
 });

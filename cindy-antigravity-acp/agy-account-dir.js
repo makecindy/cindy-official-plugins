@@ -31,6 +31,20 @@ const MODEL_SESSION_FILE_NAME = 'cindy-model-session.json';
 const MAX_DIR_LENGTH = 1024;
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
+/** Files agy or the OS may create in appDataDir without a sign-in (verified with agy 1.5.18). */
+const NON_STORE_APPDATA_NAMES = new Set([
+  'installation_id',
+  'jetski_state.pbtxt',
+  'last_check.timestamp',
+  'cli.log',
+  'conversation_summaries.db',
+  'conversation_summaries.db-wal',
+  'conversation_summaries.db-shm',
+  'conversation_summaries.db-journal',
+  '.ds_store',
+  'thumbs.db',
+  'desktop.ini',
+]);
 
 function pathLib(options) {
   return (options && options.platform) === 'win32' || (!options?.platform && process.platform === 'win32')
@@ -100,6 +114,58 @@ function ensureAccountSubdirs(accountDir) {
   fs.mkdirSync(appDataDirOf(accountDir), { recursive: true, mode: 0o700 });
 }
 
+function isNonStoreAppDataName(name) {
+  const lower = name.toLowerCase();
+  return NON_STORE_APPDATA_NAMES.has(lower)
+    || lower.endsWith('.log')
+    || lower.startsWith('cindy-');
+}
+
+/**
+ * Metadata-only snapshot (`readdir` + `lstat`, never opening or reading any file) of non-empty
+ * regular files agy placed directly in `<accountDir>/.gemini/antigravity-cli`, excluding known
+ * startup/log metadata files. Used to detect whether agy actually wrote isolated sign-in state
+ * instead of silently falling back to the OS keyring.
+ */
+function snapshotIsolatedStoreFiles(accountDir, options) {
+  const files = new Map();
+  const dir = appDataDirOf(accountDir, options);
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return files;
+  }
+  const p = pathLib(options);
+  for (const name of names) {
+    if (isNonStoreAppDataName(name)) continue;
+    try {
+      const stat = fs.lstatSync(p.join(dir, name));
+      if (stat.isFile() && stat.size > 0) {
+        files.set(name, { size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino });
+      }
+    } catch {
+      // entry disappeared or is inaccessible
+    }
+  }
+  return files;
+}
+
+function hasIsolatedStoreFile(accountDir, options) {
+  return snapshotIsolatedStoreFiles(accountDir, options).size > 0;
+}
+
+function hasUpdatedIsolatedStoreFile(before, after) {
+  for (const [name, stat] of after.entries()) {
+    const prev = before.get(name);
+    if (!prev || prev.size !== stat.size || prev.mtimeMs !== stat.mtimeMs
+      || prev.ctimeMs !== stat.ctimeMs || prev.ino !== stat.ino) {
+      return true;
+    }
+  }
+  return false;
+}
+
 module.exports = {
   ACCOUNT_DIR_ARG,
   ACCOUNT_DIR_EXIT_CODE,
@@ -110,5 +176,8 @@ module.exports = {
   appDataDirOf,
   ensureAccountSubdirs,
   geminiDirOf,
+  hasIsolatedStoreFile,
+  hasUpdatedIsolatedStoreFile,
   parseAccountDirArg,
+  snapshotIsolatedStoreFiles,
 };

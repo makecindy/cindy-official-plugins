@@ -502,6 +502,16 @@ function spawnAgy(agyPath, args, options) {
     const isLogFileArg = allowedLogFile !== null && index > 0 && args[index - 1] === '--log-file' && arg === allowedLogFile;
     if (!constant && !isGeminiDirArg && !isLogFileArg) throw new Error('Refusing to pass a non-constant argument to agy');
   }
+  // Created by the relay in a private temp directory. Keep the task's original working directory.
+  const logFile = allowedLogFile;
+  if (logFile !== null && !args.includes('--log-file')) {
+    if (ctx.win && /["%!^&|<>]/.test(logFile)) {
+      const error = new Error('The agy log file path contains characters that cmd.exe cannot run safely');
+      error.code = 'UNSAFE_PATH';
+      throw error;
+    }
+    args = ['--log-file', logFile, ...args];
+  }
   const base = {
     env: childEnv(agyPath, options),
     stdio: (options && options.stdio) || 'pipe',

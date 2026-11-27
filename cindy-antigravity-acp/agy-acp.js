@@ -20,6 +20,7 @@
  */
 
 const os = require('node:os');
+const { createVerification } = require('./agy-verification.js');
 const { attachSteering } = require('./agy-steering.js');
 const {
   ACCOUNT_DIR_EXIT_CODE,
@@ -65,10 +66,16 @@ function exitCodeFor(code, signal) {
 }
 
 function run(agyPath, options) {
+  const verification = createVerification(agyPath, options && options.accountDir ? { accountDir: options.accountDir } : undefined);
   let child;
   try {
-    child = spawnAgy(agyPath, acpArgsFor(options), { ...options, stdio: ['pipe', 'pipe', 'pipe'] });
+    child = spawnAgy(agyPath, acpArgsFor(options), {
+      ...options,
+      ...(verification ? { logFile: verification.taskLog } : {}),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
   } catch (error) {
+    verification?.dispose();
     exitAfterStderr(`[agy-acp] Could not start Antigravity at ${agyPath} (${describe(error)}).`, NOT_FOUND_EXIT_CODE);
     return;
   }
@@ -142,7 +149,16 @@ function run(agyPath, options) {
     process.stdout,
     child,
     () => stop('SIGTERM'),
-    accountErrorRelay(),
+    accountErrorRelay(Date.now, options && options.accountDir ? {
+      accountDir: options.accountDir,
+      onIsolationViolation: () => {
+        try {
+          process.stderr.write('[agy-acp] Antigravity opened a session without isolated sign-in files; stopping to prevent default-login fallback.\n');
+        } catch { /* ignore */ }
+        setImmediate(() => stop('SIGTERM'));
+      },
+    } : undefined),
+    verification,
   );
   child.stdin.on('error', () => {
     // EPIPE after agy exited; the exit handler takes care of shutting down.
@@ -175,6 +191,7 @@ function run(agyPath, options) {
   // Last line of defence for any exit path: never leave agy running.
   process.on('exit', () => {
     if (!childExited) killTree(child, 'SIGKILL');
+    verification?.dispose();
   });
 }
 

@@ -21,7 +21,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { killTree } = require('./resolve-agy.js');
-const { accountDirProblem, ensureAccountSubdirs } = require('./agy-account-dir.js');
+const {
+  accountDirProblem,
+  ensureAccountSubdirs,
+  hasIsolatedStoreFile,
+  hasUpdatedIsolatedStoreFile,
+  snapshotIsolatedStoreFiles,
+} = require('./agy-account-dir.js');
 const { isSignInRequired, openAgy, tierFromMeta } = require('./agy-client.js');
 const { probeFolder } = require('./agy-models.js');
 
@@ -162,7 +168,14 @@ async function status(params, options) {
   const base = { supported: true };
   const sessionCaps = (init.agentCapabilities && init.agentCapabilities.sessionCapabilities) || {};
   const sessionId = params && typeof params.sessionId === 'string' && params.sessionId ? params.sessionId : null;
+  const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : undefined;
   const signedIn = async (tier) => {
+    if (accountDir && !hasIsolatedStoreFile(accountDir, options)) {
+      try {
+        process.stderr.write('[agy-acp] Ignoring signed-in status for isolated account directory without isolated sign-in files.\n');
+      } catch { /* ignore */ }
+      return { ...base, signedIn: false };
+    }
     const email = log ? await readStatusEmail(log) : undefined;
     return { ...base, signedIn: true, ...(tier ? { tier } : {}), ...(email ? { email } : {}) };
   };
@@ -222,6 +235,44 @@ async function accountStatus(params, options) {
 }
 
 /**
+ * Verifies that agy honours isolated storage by checking that a fresh empty account directory
+ * requires sign-in. If it appears signed in, agy is ignoring file-based isolation and falling back
+ * to the OS keyring / default login.
+ */
+async function probeEmptyDirIsolation(options, state) {
+  let tmpDir;
+  let probeAgy = null;
+  try {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-agy-iso-'));
+    ensureAccountSubdirs(tmpDir);
+    probeAgy = await openAgy({
+      ...(options && typeof options === 'object' ? options : null),
+      accountDir: tmpDir,
+      logFile: undefined,
+      onSpawn: (child) => {
+        if (state) {
+          state.child = child;
+          if (state.cancelled) stopAgy(child);
+        }
+      },
+    });
+    if (!probeAgy) return { ok: false, error: 'not-installed' };
+    if (state && state.cancelled) return { ok: false, error: 'cancelled' };
+    try {
+      await probeAgy.call('session/list', { cwd: probeFolder() });
+      return { ok: true, isolated: false };
+    } catch (error) {
+      if (state && state.cancelled) return { ok: false, error: 'cancelled' };
+      if (isSignInRequired(error)) return { ok: true, isolated: true };
+      throw error;
+    }
+  } finally {
+    if (probeAgy) probeAgy.close();
+    if (tmpDir) fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }, () => {});
+  }
+}
+
+/**
  * agy's Google sign-in: agy opens the browser and this resolves when the user finished there,
  * cancelled (cancelLogin) or timed out. `onProgress` runs every 10 s while waiting.
  * When `options.accountDir` is set, agy keeps the sign-in in that isolated directory.
@@ -247,6 +298,23 @@ async function login(options, onProgress) {
   activeLogin = state;
   const ticker = setInterval(() => { if (onProgress) onProgress(); }, PROGRESS_INTERVAL_MS);
   try {
+    let existingStore = null;
+    if (accountDir) {
+      existingStore = snapshotIsolatedStoreFiles(accountDir, options);
+      if (existingStore.size > 0) {
+        // Re-login into an existing isolated directory: check with a fresh empty directory first so
+        // an agy build that ignores file-based isolation cannot overwrite the default keyring login.
+        const preProbe = await probeEmptyDirIsolation(options, state);
+        if (!preProbe.ok) return preProbe;
+        if (!preProbe.isolated) {
+          return {
+            ok: false,
+            error: 'failed',
+            detail: 'Antigravity ignored isolated account storage; aborted sign-in to protect the default login.',
+          };
+        }
+      }
+    }
     state.agy = await openAgy({
       ...(options && typeof options === 'object' ? options : null),
       onSpawn: (child) => {
@@ -257,7 +325,48 @@ async function login(options, onProgress) {
     if (!state.agy) return { ok: false, error: 'not-installed' };
     if (state.cancelled) return { ok: false, error: 'cancelled' };
     if (!canSignIn(state.agy.init)) return { ok: false, error: 'unsupported' };
+    let beforeAuthStore = existingStore;
+    if (accountDir) {
+      if (existingStore.size === 0) {
+        // Fresh isolated directory: verify agy sees it as signed out before calling authenticate,
+        // protecting the user's default keyring login if a future agy ignores file token storage.
+        try {
+          await state.agy.call('session/list', { cwd: probeFolder() });
+          return {
+            ok: false,
+            error: 'failed',
+            detail: 'Antigravity ignored isolated account storage; aborted sign-in to protect the default login.',
+          };
+        } catch (error) {
+          if (state.cancelled) return { ok: false, error: 'cancelled' };
+          if (!isSignInRequired(error)) throw error;
+        }
+      }
+      beforeAuthStore = snapshotIsolatedStoreFiles(accountDir, options);
+    }
     const result = await state.agy.call('authenticate', { methodId: GOOGLE_METHOD }, timeoutMs);
+    if (state.cancelled) return { ok: false, error: 'cancelled' };
+    if (accountDir) {
+      const afterAuthStore = snapshotIsolatedStoreFiles(accountDir, options);
+      if (afterAuthStore.size === 0 || (beforeAuthStore.size === 0 && !hasUpdatedIsolatedStoreFile(beforeAuthStore, afterAuthStore))) {
+        return {
+          ok: false,
+          error: 'failed',
+          detail: 'Antigravity did not store the sign-in inside the isolated account directory.',
+        };
+      }
+      state.agy.close();
+      state.agy = null;
+      const postProbe = await probeEmptyDirIsolation(options, state);
+      if (!postProbe.ok) return postProbe;
+      if (!postProbe.isolated) {
+        return {
+          ok: false,
+          error: 'failed',
+          detail: 'Antigravity leaked the sign-in outside the isolated account directory.',
+        };
+      }
+    }
     const tier = tierFromMeta(result._meta);
     return { ok: true, ...(tier ? { tier } : {}) };
   } catch (error) {

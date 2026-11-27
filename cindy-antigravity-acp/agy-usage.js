@@ -1,7 +1,7 @@
 'use strict';
 
 const { resolveAgy, spawnAgy, SESSION_SETTINGS, killTree } = require('./resolve-agy.js');
-const { accountDirProblem } = require('./agy-account-dir.js');
+const { accountDirProblem, hasIsolatedStoreFile } = require('./agy-account-dir.js');
 
 const NAMED_PERIODS = { hourly: 60, daily: 1440, weekly: 10080 };
 const PERIOD_UNITS = {
@@ -53,20 +53,23 @@ function usageFromReport(report) {
   return windows.length ? { updatedAt: Date.now(), windows } : null;
 }
 
-async function readUsage(options) {
-  const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : undefined;
-  if (accountDir && accountDirProblem(accountDir, options)) return null;
-  const executable = resolveAgy(options);
-  if (!executable) return null;
+function usageEnvironment(options) {
   // The Windows updater can open a terminal of its own even when agy is hidden.
   const env = options?.env ?? process.env;
-  const usageEnv = (options?.platform ?? process.platform) === 'win32'
+  return (options?.platform ?? process.platform) === 'win32'
     ? { ...env, AGY_CLI_DISABLE_AUTO_UPDATE: 'true' }
     : env;
+}
+
+async function readUsage(options) {
+  const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : undefined;
+  if (accountDir && (accountDirProblem(accountDir, options) || !hasIsolatedStoreFile(accountDir, options))) return null;
+  const executable = resolveAgy(options);
+  if (!executable) return null;
   // A closed stdin pipe signals a non-interactive environment so agy never opens a browser if signed out.
   const child = spawnAgy(executable, ['--settings', SESSION_SETTINGS, '--output-format', 'json', '--print', '/usage'], {
     ...options,
-    env: usageEnv,
+    env: usageEnvironment(options),
     ...(accountDir ? { accountDir, accountHome: true } : {}),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -98,4 +101,4 @@ async function readUsage(options) {
   }
 }
 
-module.exports = { readUsage, usageFromReport, windowMinutesOf };
+module.exports = { usageEnvironment, readUsage, usageFromReport, windowMinutesOf };

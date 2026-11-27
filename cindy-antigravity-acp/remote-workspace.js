@@ -328,7 +328,15 @@ function startRemoteWorkspace(agyPath, host) {
     setTimeout(() => finish(stopCode), timings.signalGrace + 300).unref();
   };
 
-  const errorRelay = accountErrorRelay();
+  const errorRelay = accountErrorRelay(Date.now, host.accountDir ? {
+    accountDir: host.accountDir,
+    onIsolationViolation: () => {
+      try {
+        process.stderr.write('[agy-acp] Antigravity opened a session without isolated sign-in files; stopping to prevent default-login fallback.\n');
+      } catch { /* ignore */ }
+      setImmediate(() => stop('SIGTERM'));
+    },
+  } : undefined);
 
   const launch = (args) => {
     const child = spawnAgy(agyPath, args, {
@@ -451,7 +459,7 @@ function startRemoteWorkspace(agyPath, host) {
       return;
     }
     if (message.method === undefined && message.id !== undefined) {
-      const classified = errorRelay.response(message);
+      const classified = errorRelay.response(message, item => toClient(item, agent.stdout));
       if (classified !== message) {
         toClient(classified, agent.stdout);
         return;
