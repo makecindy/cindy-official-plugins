@@ -4,7 +4,7 @@
   "name": "Antigravity",
   "description": "Run Cindy tasks with the Google Antigravity CLI (agy) installed on this computer.",
   "version": "0.6.0",
-  "releaseNotes": "Antigravity accounts are now managed in Settings → Model Providers: add several Google accounts, see each one’s usage and let Cindy share tasks between them, with automatic switching when one runs out or needs a new sign-in. Also includes account-bound Google verification and native ask_question / update_steps ACP card adaptation. The plugin settings page keeps the CLI setup and points there. Tasks whose files are on another computer no longer start without Cindy's file and command tools when the connection between the computers is slow, and with agy 1.5.18 or later they can start subagents and set timers through Cindy's tools on that computer.",
+  "releaseNotes": "Antigravity accounts are now managed in Settings → Model Providers: add several Google accounts, see each one’s usage and let Cindy share tasks between them, with automatic switching when one runs out or needs a new sign-in. Also includes account-bound Google verification and native ask_question / update_steps ACP card adaptation. The plugin settings page keeps the CLI setup and points there. Tasks whose files are on another computer no longer start without Cindy's file and command tools when the connection between the computers is slow, and with agy 1.5.18 or later they can start subagents and set timers through Cindy's tools on that computer. They also take the instructions Cindy passes for the whole session (ACP systemPrompt), such as your custom instructions on Cindy versions that send them.",
   "minCindyVersion": "0.1.148",
   "icon": "icon.png",
   "locales": {
