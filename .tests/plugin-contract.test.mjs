@@ -699,6 +699,13 @@ test('packaging auto-resolves strictly monotonic patch versions without manual P
   });
   const packagedManifest = JSON.parse(execFileSync('unzip', ['-p', outPkg, 'ghost.json'], { encoding: 'utf8' }));
   assert.equal(packagedManifest.version, '0.5.1');
+
+  // Registered plugin ID rename inherits the old directory's effective version so version never regresses.
+  write('plugin-id-migrations.json', JSON.stringify([{ from: 'alpha', to: 'alpha-v2', serverPr: 'https://github.com/xindong/cindy-server/pull/1' }]));
+  fs.rmSync(path.join(cwd, 'alpha'), { recursive: true, force: true });
+  writePlugin('alpha-v2', '1.3.0', '// renamed with stale declared version');
+  commit('feat(alpha-v2): migrate id from alpha');
+  assert.equal(resolvePluginVersion('alpha-v2', { cwd, epoch }).effective, '1.3.2');
 });
 
 test('the pinned Cindy manifest contract rejects invalid manifest shapes', () => {

@@ -62,6 +62,48 @@ function formatSemver(parts) {
   return parts.map(String).join('.');
 }
 
+function collectDirectoryLineage(pluginDirectory, ref, cwd) {
+  const raw = tryGit(['show', `${ref}:plugin-id-migrations.json`], cwd);
+  if (!raw) return [pluginDirectory];
+  let migrations;
+  try {
+    migrations = JSON.parse(raw);
+  } catch {
+    return [pluginDirectory];
+  }
+  if (!Array.isArray(migrations)) return [pluginDirectory];
+  const byTarget = new Map();
+  for (const entry of migrations) {
+    if (entry && typeof entry.from === 'string' && typeof entry.to === 'string') {
+      byTarget.set(entry.to, entry.from);
+    }
+  }
+  const chain = [pluginDirectory];
+  const seen = new Set(chain);
+  let current = pluginDirectory;
+  while (byTarget.has(current)) {
+    const prev = byTarget.get(current);
+    if (!prev || seen.has(prev)) break;
+    chain.push(prev);
+    seen.add(prev);
+    current = prev;
+  }
+  return chain;
+}
+
+function readManifestAtCommit(sha, lineage, cwd) {
+  for (const dir of lineage) {
+    const raw = tryGit(['show', `${sha}:${dir}/ghost.json`], cwd);
+    if (raw === null) continue;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 export function resolvePluginVersion(pluginDirectory, options = {}) {
   const cwd = options.cwd ?? process.cwd();
   const ref = options.ref ?? 'HEAD';
@@ -78,14 +120,14 @@ export function resolvePluginVersion(pluginDirectory, options = {}) {
     throw new Error(`${pluginDirectory}: ghost.json.version must use major.minor.patch SemVer (got ${manifest.version})`);
   }
 
+  const lineage = collectDirectoryLineage(pluginDirectory, ref, cwd);
   let effective = null;
   let commitRange = ref;
 
   const hasEpoch = epoch && tryGit(['merge-base', '--is-ancestor', epoch, ref], cwd) !== null;
   if (hasEpoch) {
-    const epochRaw = tryGit(['show', `${epoch}:${pluginDirectory}/ghost.json`], cwd);
-    if (epochRaw !== null) {
-      const epochManifest = JSON.parse(epochRaw);
+    const epochManifest = readManifestAtCommit(epoch, lineage, cwd);
+    if (epochManifest) {
       const epochParts = parseStableSemver(epochManifest.version);
       if (epochParts) effective = epochParts;
     }
@@ -100,7 +142,7 @@ export function resolvePluginVersion(pluginDirectory, options = {}) {
   }
 
   const commits = git(
-    ['rev-list', '--first-parent', '--reverse', commitRange, '--', pluginDirectory, ...SHARED_PACKAGE_FILES],
+    ['rev-list', '--first-parent', '--reverse', commitRange, '--', ...lineage, ...SHARED_PACKAGE_FILES],
     cwd,
   )
     .trim()
@@ -108,14 +150,8 @@ export function resolvePluginVersion(pluginDirectory, options = {}) {
     .filter(Boolean);
 
   for (const sha of commits) {
-    const raw = tryGit(['show', `${sha}:${pluginDirectory}/ghost.json`], cwd);
-    if (raw === null) continue;
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      continue;
-    }
+    const parsed = readManifestAtCommit(sha, lineage, cwd);
+    if (!parsed) continue;
     const parts = parseStableSemver(parsed.version);
     if (!parts) continue;
     if (effective === null) {

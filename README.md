@@ -223,9 +223,11 @@ After approval, compatible clients receive that release; clients below its
 one exists. Desktop trusts this Server projection and does not add a second
 version-confirmation step.
 
-When changing plugin content you must bump `ghost.json.version` in the same
-change. The new `major.minor.patch` SemVer must be greater than the version on
-`main`; otherwise CI blocks the pull request before Server submission.
+When changing plugin content, do not lower `ghost.json.version` below `main`.
+Manual patch bumps are optional for routine updates — `.github/scripts/package-plugin.sh`
+auto-computes a strictly increasing `major.minor.patch` SemVer on `main` when
+`ghost.json.version` is unchanged; bump manually only for explicit minor/major
+releases.
 
 ## Local development
 
@@ -473,9 +475,9 @@ and returns bounded summaries for large reports with links to the full evidence.
 ## Community
 
 Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before opening a PR — it covers
-the PR title convention, the mandatory `ghost.json` version bump, the
-localization check, how to rebuild the bundled Node Workers, and the
-[DCO](./DCO) sign-off required on every commit (`git commit -s`).
+the PR title convention, versioning (auto-incremented patches on `main` without
+manual PR bumps), the localization check, how to rebuild the bundled Node
+Workers, and the [DCO](./DCO) sign-off required on every commit (`git commit -s`).
 
 Participation is governed by
 [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md). For usage questions and what
