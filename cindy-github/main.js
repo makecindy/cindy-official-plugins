@@ -210,6 +210,7 @@ var MESSAGES = {
     prFastMode: '快速',
     prUltrafastMode: '超快',
     prFollowModelFailed: '没能打开模型选择：{detail}',
+    prFollowModelFallback: '当前宿主不支持为绑定任务指定该插件引擎，本次跟进已沿用当前任务模型',
     prTurnOff: '关闭「{name}」',
     prCiPassed: 'CI 通过',
     prCiFailed: 'CI 未通过',
@@ -381,6 +382,7 @@ var MESSAGES = {
     prFastMode: 'Fast',
     prUltrafastMode: 'Ultra fast',
     prFollowModelFailed: 'Could not open the model picker: {detail}',
+    prFollowModelFallback: 'This host does not support an explicit plugin-engine override on a bound task; follow-up started with this task\'s current model',
     prTurnOff: 'Turn off "{name}"',
     prCiPassed: 'CI passed',
     prCiFailed: 'CI failed',
@@ -552,6 +554,7 @@ var MESSAGES = {
     prFastMode: '高速',
     prUltrafastMode: '超高速',
     prFollowModelFailed: 'モデルの選択を開けませんでした：{detail}',
+    prFollowModelFallback: 'このホストは紐付け済みタスクへのプラグインエンジン指定に対応していないため、現在のタスクのモデルでフォローを開始しました',
     prTurnOff: '「{name}」をオフ',
     prCiPassed: 'CI 成功',
     prCiFailed: 'CI 失敗',
@@ -723,6 +726,7 @@ var MESSAGES = {
     prFastMode: '빠름',
     prUltrafastMode: '초고속',
     prFollowModelFailed: '모델 선택을 열지 못했습니다: {detail}',
+    prFollowModelFallback: '이 호스트는 연결된 작업에 플러그인 엔진 지정을 지원하지 않아 현재 작업의 모델로 팔로우를 시작했습니다',
     prTurnOff: '"{name}" 끄기',
     prCiPassed: 'CI 통과',
     prCiFailed: 'CI 실패',
@@ -2970,6 +2974,7 @@ async function readKv(requireObject) {
 
 // Keep this in sync with the Host scheduler routes accepted by the model picker.
 var PR_AGENT_KINDS = { acp: 1, cc: 1, codex: 1, pi: 1 };
+var PR_ACP_PROVIDER_PREFIX = 'acp-plugin:';
 
 /**
  * 宿主选择器返回的完整组合(引擎、来源、模型、档位、速度),只认合法形状。卡内下拉框还可能带运行位置
@@ -2980,6 +2985,11 @@ function prFollowModelFrom(value) {
   var r = v && v.route && typeof v.route === 'object' ? v.route : null;
   if (!r || !PR_AGENT_KINDS[r.agentKind] || typeof r.providerId !== 'string' || typeof r.model !== 'string' || !r.model ||
       typeof r.effort !== 'string' || !(typeof r.fastMode === 'boolean' || r.fastMode === 'ultrafast')) return null;
+  if (r.agentKind === 'acp' && (
+    r.providerId.indexOf(PR_ACP_PROVIDER_PREFIX) !== 0 ||
+    r.providerId.length <= PR_ACP_PROVIDER_PREFIX.length ||
+    r.fastMode !== false
+  )) return null;
   var device = typeof r.agentDeviceId === 'string' && r.agentDeviceId && r.agentDeviceId.length <= 128 && r.agentDeviceId !== 'local'
     ? r.agentDeviceId : null;
   if (r.agentDeviceId !== undefined && !device) return null;
@@ -3253,7 +3263,7 @@ function newPrCard(id, repo) {
     id: id, repo: repo, head: '', base: '', commits: null, files: null, filesTotal: null,
     stage: 'ask', publishingDraft: false, queued: false, pr: null,
     renamed: false, following: false, followedEver: false, followDeclined: false, pending: null,
-    settingsOpen: false, note: null, settingsApplied: false,
+    settingsOpen: false, note: null, followNotice: null, settingsApplied: false,
   };
 }
 
@@ -3842,6 +3852,9 @@ function renderPrCard(card, settings) {
       }
     }
   }
+  if (card.followNotice && card.stage === 'open' && card.following && !boundFollowUnverified(card) && !card.note) {
+    left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(card.followNotice) + '</div>';
+  }
   if (card.note) {
     left += '<div style="margin-top:4px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
   }
@@ -3882,7 +3895,7 @@ function renderPrCard(card, settings) {
 /** 声明高度宁低勿高:宿主按实际内容量高只会往上调,声明偏高会在卡片下方留白。 */
 function prCardHeight(card) {
   var h = 120;
-  if (card.note) h += 22;
+  if (card.note || (card.followNotice && card.stage === 'open' && card.following && !boundFollowUnverified(card))) h += 22;
   if (card.stage === 'open' && card.legacyHookRepair) h += 68;
   var settingsShown = card.settingsOpen && prHasSettings(card);
   if (manualFollowStop(card) && card.manualStopOpen === true && !settingsShown && card.note !== t('prManualStop', { id: card.scheduleId })) h += 40;
@@ -3951,7 +3964,17 @@ async function prSchedule(tool, args) {
   var result = await cindy.host.call('cindy_scheduler', tool, Object.assign({ device: 'local' }, args));
   var block = result && result.content && result.content.find(function (item) { return item.type === 'text'; });
   var body = block && JSON.parse(block.text);
-  if (!body || result.isError || body.ok !== true) throw new Error(body && (body.message || body.code || body.errorCode) || tool);
+  if (!body || result.isError || body.ok !== true) {
+    var code = body && (body.code || body.errorCode);
+    var detail = body && (body.message || code);
+    if (code && detail && detail.indexOf(code) < 0) detail = code + ': ' + detail;
+    var verr = body && body.data && Array.isArray(body.data.validation_errors) && body.data.validation_errors[0];
+    if (verr && verr.message) {
+      var vpath = Array.isArray(verr.path) && verr.path.length ? verr.path.join('.') + ': ' : '';
+      detail = (detail ? detail + ': ' : '') + vpath + verr.message;
+    }
+    throw new Error(detail || tool);
+  }
   return body.data;
 }
 
@@ -4185,6 +4208,7 @@ async function reconcileLegacyFollow(card, readError, fromStop, hadClaim, clearO
   if (!row) delete card.manualStopOpen;
   card.following = !!row && row.status === 'active';
   card.scheduleStatus = unverified ? 'unverified' : row && !card.following ? row.status : null;
+  if (!card.following || (row && row.modelAgentKind)) card.followNotice = null;
   card.legacyHookRepair = card.stage === 'open' && card.following ? await resolveLegacyHookRepair(hook, row) : null;
   if (!row && hadClaim === false && isPreservedCreateError(card) &&
       ((!error && !clearOnStop) || errorSource === 'read')) {
@@ -4202,10 +4226,8 @@ async function reconcileLegacyFollow(card, readError, fromStop, hadClaim, clearO
   card.note = deriveCardNote(card, showManualStop && row ? t('prManualStop', { id: row.id }) : null);
 }
 
-async function createCardSchedule(card, settings) {
-  var dir = (await cardFollowSkillEnv()).dir;
+function buildCardScheduleInput(card, dir, model) {
   var url = followUrl(card);
-  var model = prSettingsForAgent(settings, true).follow_model;
   var input = {
     name: 'PR #' + card.pr.number, targetSessionId: card.sessionId,
     prompt: 'Follow ' + url + ' with the PR Skill (background round). Read ' + dir +
@@ -4225,7 +4247,27 @@ async function createCardSchedule(card, settings) {
     input.fastMode = model.fast_mode;
     if (model.effort) input.effort = model.effort;
   }
-  return prSchedule('schedule_create', input);
+  return input;
+}
+
+function isUnsupportedBoundPluginEngineOverride(err) {
+  var msg = String(err && (err.message || err) || '');
+  return /A plugin engine schedule starts a new task each run|Plugin engines run on the automation host only|Explicit scheduled model Harness requires a supported Harness and model|A plugin engine schedule must choose the plugin engine as its model|SSH automation targets must keep their current Harness|Collaborative tasks cannot switch to or from a plugin engine|This task cannot switch to or from a plugin engine|INVALID_ARGS[^\n]*\b(?:modelAgentKind|agentKind)\b|Invalid (?:enum value|option)[^\n]*\bacp\b/i.test(msg);
+}
+
+async function createCardSchedule(card, settings) {
+  var dir = (await cardFollowSkillEnv()).dir;
+  var model = prSettingsForAgent(settings, true).follow_model;
+  try {
+    return { schedule: await prSchedule('schedule_create', buildCardScheduleInput(card, dir, model)), usedTaskModelFallback: false };
+  } catch (err) {
+    if (!model || model.model_agent_kind !== 'acp' || !isUnsupportedBoundPluginEngineOverride(err)) throw err;
+    var existing = await schedulesForPr(card);
+    if (existing.length > 0) throw err;
+    // Older hosts or tasks that disallow explicit bound ACP overrides still accept
+    // a bound schedule without model override fields, using the task's current model.
+    return { schedule: await prSchedule('schedule_create', buildCardScheduleInput(card, dir, null)), usedTaskModelFallback: true };
+  }
 }
 
 // Save the intent first. After a lost receipt or a restart, look up the schedule
@@ -4246,12 +4288,15 @@ async function syncCardSchedule(card, settings, start) {
   try {
     var repair = null;
     var rows = start ? await schedulesForPr(card) : [];
+    var requestedModel = start ? prSettingsForAgent(settings, true).follow_model : null;
+    var usedTaskModelFallback = false;
     var createdId = null;
     if (start && rows.length === 0) {
       var creationError;
       try {
         var created = await createCardSchedule(card, settings);
-        createdId = created && typeof created.id === 'string' ? created.id : null;
+        createdId = created && created.schedule && typeof created.schedule.id === 'string' ? created.schedule.id : null;
+        usedTaskModelFallback = Boolean(created && created.usedTaskModelFallback);
       } catch (err) { creationError = err; }
       rows = await schedulesForPr(card);
       if (!rows.length) {
@@ -4285,6 +4330,10 @@ async function syncCardSchedule(card, settings, start) {
       if (!card.manualStop) delete card.manualStopOpen;
       card.scheduleStatus = null;
       card.followedEver = true;
+      card.followNotice = (usedTaskModelFallback ||
+        (requestedModel && requestedModel.model_agent_kind === 'acp' && !saved.modelAgentKind && !saved.model))
+        ? t('prFollowModelFallback')
+        : null;
     } else {
       errorSource = 'read';
       // Read the approved skill dir BEFORE the final schedule_get so edits to
@@ -4308,6 +4357,7 @@ async function syncCardSchedule(card, settings, start) {
       card.manualStop = false;
       delete card.manualStopOpen;
       card.scheduleStatus = null;
+      card.followNotice = null;
     }
     card.following = start;
     card.followDeclined = !start;
@@ -4319,6 +4369,7 @@ async function syncCardSchedule(card, settings, start) {
   } catch (err) {
     setCardScheduleError(card, String(err.message || err).slice(0, 160), errorSource);
     card.note = card.scheduleError;
+    card.followNotice = null;
     if (!start && card.scheduleId) {
       card.following = false;
       card.scheduleStatus = 'unverified';
@@ -4623,6 +4674,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
         card.manualStop = false;
         delete card.manualStopOpen;
         card.scheduleId = null;
+        card.followNotice = null;
         clearCardScheduleError(card);
         clearLegacyScheduleNotice(card);
       } else {
@@ -4643,6 +4695,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
           card.following = currentSchedule.status === 'active';
           card.scheduleStatus = card.following ? null : currentSchedule.status;
         }
+        if (!card.following || currentSchedule.modelAgentKind) card.followNotice = null;
       }
     } catch (err) { return fail(t('prScheduleFailed', { detail: String(err.message || err) })); }
   }
@@ -4655,6 +4708,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
       }
       card.following = false;
       card.scheduleId = card.scheduleStatus = null;
+      card.followNotice = null;
       card.manualStop = false;
       delete card.manualStopOpen;
       delete card.pendingStopNotice;
@@ -4731,6 +4785,9 @@ async function prCardTool(args, callId, fromLegacyStop) {
       await syncCardSchedule(card, settings, start);
     }
   }
+  if (card.stage !== 'open') card.followNotice = null;
+  var activeFollowNotice = card.stage === 'open' && card.following && !boundFollowUnverified(card) ? card.followNotice : null;
+  if (activeFollowNotice && !notes.includes(activeFollowNotice)) notes.push(activeFollowNotice);
   if (card.note && !notes.includes(card.note)) notes.push(card.note);
   if (card.legacyHookRepair && !notes.includes(t('prLegacyHookRepair'))) notes.push(t('prLegacyHookRepair'));
   var movedFrom = updating && a.to_latest === true && prAnchor(card) !== callId ? await movePrCard(card, callId) : null;
@@ -4772,6 +4829,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
     else result.follow_state = card.scheduleError ? 'failed' : 'stopped';
   }
   if (card.legacyHookRepair) result.legacy_hook_repair = card.legacyHookRepair;
+  if (activeFollowNotice) result.follow_model_fallback = true;
   if (!delivered) { result.card_shown = false; notes.push(t('prCardNotShown')); }
   if (a.claim_follow === true) result.follow_claimed = a.following !== false && card.stage === 'open' &&
     card.pending !== 'stop' && !card.scheduleId && !unverifiedLegacyFollow(card) && !(legacyFollow && hasCardScheduler()) && prFollowActive(card);

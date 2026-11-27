@@ -1570,44 +1570,271 @@ test('card settings pick the auto-follow model with the host picker and hand its
   assert.deepEqual(runtime.kv.prCard.followModel, { route: codex, label: 'gpt-5.6' });
 });
 
-test('plugin-engine follow models survive card validation and reach the scheduler route', async () => {
-  const route = { agentKind: 'acp', providerId: 'plugin-provider', model: 'plugin-model', effort: 'high', fastMode: false };
+test('plugin-engine follow models require acp-plugin provider prefix and fastMode=false, and reach agent handoff', async () => {
+  const validRoute = { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: false };
+  const invalidRoutes = [
+    { agentKind: 'acp', providerId: 'plugin-provider', model: 'gemini-4-neon', effort: 'high', fastMode: false },
+    { agentKind: 'acp', providerId: 'acp-plugin:', model: 'gemini-4-neon', effort: 'high', fastMode: false },
+    { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: true },
+    { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: 'ultrafast' },
+  ];
+  for (const badRoute of invalidRoutes) {
+    const runtime = createPrRuntime({
+      github: prGraphql({ number: 7 }),
+      pickModel: async () => ({ ok: true, route: badRoute }),
+      kv: { prCard: { followModel: { route: badRoute, label: 'Bad ACP' } } },
+    });
+    const opened = await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
+    assert.equal(opened.reply.result.settings.follow_model, undefined);
+    await runtime.click(opened.reply.result.card_id, 'prui:settings');
+    await runtime.click(opened.reply.result.card_id, 'prset:model');
+    assert.equal(runtime.kv.prCard.followModel?.route?.providerId === badRoute.providerId && runtime.kv.prCard.followModel?.route?.fastMode === badRoute.fastMode && runtime.lastCard(opened.reply.result.card_id).html.includes('INVALID_ROUTE') === false, false);
+    assert.match(visibleText(runtime.lastCard(opened.reply.result.card_id).html), /INVALID_ROUTE/);
+  }
+
   const runtime = createPrRuntime({
     github: prGraphql({ number: 7 }),
-    pickModel: async () => ({ ok: true, route }),
-    agentModels: [{ id: 'plugin-model', name: 'Plugin engine', providerId: 'plugin-provider', providerName: 'ACP' }],
+    pickModel: async () => ({ ok: true, route: validRoute }),
+    agentModels: [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon', providerId: 'acp-plugin:antigravity:agy', providerName: 'Antigravity' }],
   });
   const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' })).reply.result.card_id;
   await runtime.click(cardId, 'prui:settings');
   await runtime.click(cardId, 'prset:model');
-  assert.deepEqual(runtime.kv.prCard.followModel, { route, label: 'Plugin engine · ACP' });
+  assert.deepEqual(runtime.kv.prCard.followModel, { route: validRoute, label: 'Gemini 4 Neon · Antigravity' });
 
   await runtime.tool({ card_id: cardId, pr: '7' });
   await runtime.click(cardId, 'pr:follow');
   assert.deepEqual(runtime.agentRuns.at(-1).event.follow_model, {
-    model_agent_kind: 'acp', provider_id: 'plugin-provider', model: 'plugin-model', effort: 'high', fast_mode: false,
-    label: 'Plugin engine · ACP',
+    model_agent_kind: 'acp', provider_id: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fast_mode: false,
+    label: 'Gemini 4 Neon · Antigravity',
+  });
+
+  const remoteRoute = { ...validRoute, agentDeviceId: 'mac-mini' };
+  const remoteRuntime = createPrRuntime({
+    github: prGraphql({ number: 8 }),
+    kv: { prCard: { followModel: { route: remoteRoute, label: 'Gemini 4 Neon · Antigravity · Mac mini' } } },
+  });
+  const remoteCardId = (await remoteRuntime.tool({ repo: 'octo/repo', pr: '8' })).reply.result.card_id;
+  await remoteRuntime.click(remoteCardId, 'pr:follow');
+  assert.deepEqual(remoteRuntime.agentRuns.at(-1).event.follow_model, {
+    model_agent_kind: 'acp', provider_id: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fast_mode: false,
+    label: 'Gemini 4 Neon · Antigravity · Mac mini', agent_device_id: 'mac-mini',
   });
 });
 
-test('plugin-engine models survive publication-time auto-follow scheduling', async () => {
-  const { hostApi, rows } = followScheduler();
+test('plugin-engine models survive publication-time auto-follow scheduling without fallback notice when accepted', async () => {
+  const { hostApi, rows, createAttempts } = followScheduler();
+  const route = { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: false };
   const runtime = createPrRuntime({
     github: prGraphql({ number: 7 }),
     hostApi,
     kv: { prCard: {
       autoFollow: true,
-      followModel: { route: { agentKind: 'acp', providerId: 'plugin-provider', model: 'plugin-model', effort: 'high', fastMode: false }, label: 'Plugin engine · ACP' },
+      followModel: { route, label: 'Gemini 4 Neon · Antigravity' },
     } },
   });
   const { callId } = await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
   const result = (await runtime.tool({ card_id: callId, pr: 7, published: true })).reply.result;
   assert.equal(result.follow_state, 'active');
+  assert.equal(result.follow_model_fallback, undefined);
   assert.equal(runtime.agentRuns.length, 0);
+  assert.equal(createAttempts.length, 1);
   assert.deepEqual(rows.get('sch-1'), {
     ...rows.get('sch-1'),
-    modelAgentKind: 'acp', providerId: 'plugin-provider', model: 'plugin-model', effort: 'high', fastMode: false,
+    agentKind: 'acp', modelAgentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: false,
   });
+});
+
+test('bound ACP follow-up falls back to the task model with a card notice when the host rejects explicit ACP overrides', async () => {
+  const route = { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: false };
+  const hostRejections = [
+    { ok: false, message: 'A plugin engine schedule starts a new task each run' },
+    { ok: false, message: 'Plugin engines run on the automation host only' },
+    { ok: false, message: 'Explicit scheduled model Harness requires a supported Harness and model' },
+    { ok: false, message: 'Collaborative tasks cannot switch to or from a plugin engine' },
+    {
+      ok: false,
+      errorCode: 'INVALID_ARGS',
+      data: {
+        validation_errors: [
+          { path: ['modelAgentKind'], message: "Invalid enum value. Expected 'claude-code' | 'codex' | 'pi', received 'acp'" },
+        ],
+      },
+    },
+    {
+      ok: false,
+      errorCode: 'INVALID_ARGS',
+      message: 'Invalid tool arguments',
+      data: {
+        validation_errors: [
+          { path: ['modelAgentKind'], message: "Expected 'claude-code' | 'codex' | 'pi'" },
+        ],
+      },
+    },
+  ];
+  for (const rejection of hostRejections) {
+    const { hostApi, rows, createAttempts } = followScheduler({
+      onCreate(args) {
+        if (args.modelAgentKind === 'acp' && args.targetSessionId) return rejection;
+        return null;
+      },
+    });
+    let prState = 'OPEN';
+    const runtime = createPrRuntime({
+      github: () => jsonResponse({ data: { repository: { pullRequest: {
+        number: 7, title: 'Fix ACP follow', url: 'https://github.com/octo/repo/pull/7',
+        state: prState, isDraft: false, merged: prState === 'MERGED', mergeStateStatus: 'CLEAN',
+        reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] },
+      } } } }),
+      hostApi,
+      kv: { prCard: { autoFollow: true, followModel: { route, label: 'Gemini 4 Neon · Antigravity' } } },
+    });
+    const { callId } = await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
+    const result = (await runtime.tool({ card_id: callId, pr: 7, published: true })).reply.result;
+    assert.equal(result.follow_state, 'active');
+    assert.equal(result.follow_model_fallback, true);
+    assert.ok(result.note?.includes(zhCopy.prFollowModelFallback));
+    assert.ok(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prFollowModelFallback));
+    assert.equal(createAttempts.length, 2);
+    assert.equal(createAttempts[0].modelAgentKind, 'acp');
+    assert.equal(createAttempts[0].agentKind, 'acp');
+    assert.equal(createAttempts[0].targetSessionId, 'session-1');
+    assert.equal(createAttempts[1].agentKind, 'codex');
+    assert.equal(createAttempts[1].modelAgentKind, undefined);
+    assert.equal(createAttempts[1].model, undefined);
+    assert.equal(createAttempts[1].providerId, undefined);
+    assert.equal(createAttempts[1].modelAgentDeviceId, undefined);
+    assert.equal(createAttempts[1].fastMode, undefined);
+    assert.equal(createAttempts[1].effort, undefined);
+    assert.equal(createAttempts[1].targetSessionId, 'session-1');
+    assert.equal(rows.size, 1);
+    assert.equal(rows.get('sch-1').modelAgentKind, undefined);
+
+    // Refreshing while active preserves the fallback notice.
+    const refreshed = (await runtime.tool({ card_id: callId })).reply.result;
+    assert.equal(refreshed.follow_state, 'active');
+    assert.equal(refreshed.follow_model_fallback, true);
+    assert.ok(refreshed.note?.includes(zhCopy.prFollowModelFallback));
+
+    // Stopping from the card works directly (created schedule stays card-owned) and clears the notice.
+    await runtime.click(callId, 'pr:stop');
+    assert.equal(rows.size, 0);
+    assert.equal(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prFollowModelFallback), false);
+
+    // Clicking Follow again on the card re-runs fallback and surfaces the notice; switching to an explicit model clears it on refresh.
+    await runtime.click(callId, 'pr:follow');
+    assert.equal(rows.size, 1);
+    assert.ok(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prFollowModelFallback));
+    rows.get('sch-1').modelAgentKind = 'codex';
+    const afterOverride = (await runtime.tool({ card_id: callId })).reply.result;
+    assert.equal(afterOverride.follow_model_fallback, undefined);
+    assert.equal(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prFollowModelFallback), false);
+
+    // Re-trigger fallback then merge PR: terminal stage clears the notice.
+    await runtime.click(callId, 'pr:stop');
+    await runtime.click(callId, 'pr:follow');
+    assert.ok(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prFollowModelFallback));
+    prState = 'MERGED';
+    const merged = (await runtime.tool({ card_id: callId })).reply.result;
+    assert.equal(merged.stage, 'merged');
+    assert.equal(merged.follow_model_fallback, undefined);
+    assert.equal(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prFollowModelFallback), false);
+  }
+});
+
+test('bound ACP follow-up fails closed on non-compatibility errors, existing schedules, and non-ACP overrides', async () => {
+  const acpRoute = { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: false };
+  for (const errorBody of [
+    { ok: false, message: 'Plugin engine is currently unavailable' },
+    { ok: false, message: 'A plugin engine schedule cannot use a persistent session' },
+    { ok: false, errorCode: 'INVALID_ARGS', data: { validation_errors: [{ path: ['cronExpr'], message: 'Invalid cron' }] } },
+  ]) {
+    const { hostApi, rows, createAttempts } = followScheduler({ onCreate: () => errorBody });
+    const runtime = createPrRuntime({
+      github: prGraphql({ number: 7 }),
+      hostApi,
+      kv: { prCard: { autoFollow: true, followModel: { route: acpRoute, label: 'Gemini 4 Neon · Antigravity' } } },
+    });
+    const { callId } = await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
+    const result = (await runtime.tool({ card_id: callId, pr: 7, published: true })).reply.result;
+    assert.equal(result.follow_state, 'failed');
+    assert.equal(result.follow_model_fallback, undefined);
+    assert.equal(createAttempts.length, 1);
+    assert.equal(rows.size, 0);
+  }
+
+  // Do not create a second schedule when a matching schedule already exists after rejection.
+  const race = followScheduler({
+    onCreate(args, rows) {
+      rows.set('other-1', { ...args, id: 'other-1', targetSessionId: 'session-other', status: 'active', updatedAt: 1000 });
+      return { ok: false, message: 'A plugin engine schedule starts a new task each run' };
+    },
+  });
+  const raceRuntime = createPrRuntime({
+    github: prGraphql({ number: 7 }),
+    hostApi: race.hostApi,
+    kv: { prCard: { autoFollow: true, followModel: { route: acpRoute, label: 'Gemini 4 Neon · Antigravity' } } },
+  });
+  const raceAsk = await raceRuntime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
+  const raceResult = (await raceRuntime.tool({ card_id: raceAsk.callId, pr: 7, published: true })).reply.result;
+  assert.equal(raceResult.follow_state, 'failed');
+  assert.equal(race.createAttempts.length, 1);
+
+  // Non-ACP overrides never fall back even if the error string resembles an ACP rejection.
+  const codexRoute = { agentKind: 'codex', providerId: 'openai', model: 'gpt-5.6', effort: 'high', fastMode: false };
+  const codexSched = followScheduler({
+    onCreate: () => ({ ok: false, message: 'A plugin engine schedule starts a new task each run' }),
+  });
+  const codexRuntime = createPrRuntime({
+    github: prGraphql({ number: 7 }),
+    hostApi: codexSched.hostApi,
+    kv: { prCard: { autoFollow: true, followModel: { route: codexRoute, label: 'GPT-5.6' } } },
+  });
+  const codexAsk = await codexRuntime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' });
+  const codexResult = (await codexRuntime.tool({ card_id: codexAsk.callId, pr: 7, published: true })).reply.result;
+  assert.equal(codexResult.follow_state, 'failed');
+  assert.equal(codexResult.follow_model_fallback, undefined);
+  assert.equal(codexSched.createAttempts.length, 1);
+  assert.equal(codexSched.rows.size, 0);
+});
+
+test('marking a draft PR ready falls back to the task model when the host rejects bound ACP overrides', async () => {
+  const route = { agentKind: 'acp', providerId: 'acp-plugin:antigravity:agy', model: 'gemini-4-neon', effort: 'high', fastMode: false };
+  let draft = true;
+  const { hostApi, rows, createAttempts } = followScheduler({
+    onCreate(args) {
+      if (args.modelAgentKind === 'acp' && args.targetSessionId) {
+        return { ok: false, message: 'A plugin engine schedule starts a new task each run' };
+      }
+      return null;
+    },
+  });
+  const runtime = createPrRuntime({
+    github(request) {
+      const { query } = JSON.parse(request.body);
+      if (query.startsWith('mutation')) {
+        draft = false;
+        return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } });
+      }
+      if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+      return jsonResponse({ data: { repository: { pullRequest: {
+        number: 9, title: 'Draft ACP', url: 'https://github.com/octo/repo/pull/9',
+        state: 'OPEN', isDraft: draft, merged: false, mergeStateStatus: 'CLEAN',
+        reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] },
+      } } } });
+    },
+    hostApi,
+    kv: { prCard: { autoFollow: true, followModel: { route, label: 'Gemini 4 Neon · Antigravity' } } },
+  });
+  const { callId } = await runtime.tool({ repo: 'octo/repo', head: 'fix/draft', base: 'main' });
+  await runtime.tool({ card_id: callId, pr: 9, published: true });
+  assert.equal(rows.size, 0);
+  await runtime.click(callId, 'pr:ready');
+  assert.equal(createAttempts.length, 2);
+  assert.equal(createAttempts[0].modelAgentKind, 'acp');
+  assert.equal(createAttempts[1].modelAgentKind, undefined);
+  assert.equal(rows.size, 1);
+  assert.ok(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prFollowModelFallback));
 });
 
 // Remote providers: the card dropdown can pick a model on another computer or from a shared provider.
@@ -2384,6 +2611,7 @@ function followScheduler(options = {}) {
   const rows = new Map();
   const runs = new Map();
   const calls = [];
+  const createAttempts = [];
   const hostApi = {
     host: { async call(server, tool, args) {
       assert.equal(server, 'cindy_scheduler');
@@ -2391,6 +2619,11 @@ function followScheduler(options = {}) {
       calls.push(tool);
       let data;
       if (tool === 'schedule_create') {
+        createAttempts.push(JSON.parse(JSON.stringify(args)));
+        if (options.onCreate) {
+          const override = options.onCreate(args, rows, createAttempts);
+          if (override) return { content: [{ type: 'text', text: JSON.stringify(override) }] };
+        }
         if (options.createRace) {
           data = { ...args, id: 'other-entry', status: 'active', updatedAt: 1000 };
           rows.set(data.id, data);
@@ -2428,7 +2661,7 @@ function followScheduler(options = {}) {
       return { ok: true, result: options.platform === undefined ? dir : { dir, platform: options.platform } };
     } },
   };
-  return { hostApi, calls, rows, runs };
+  return { hostApi, calls, rows, runs, createAttempts };
 }
 
 test('a merge from the PR card preserves the existing follow-up for the terminal round', async () => {

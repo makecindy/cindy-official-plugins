@@ -6,7 +6,7 @@
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
   "version": "1.5.53",
-  "releaseNotes": "PR 跟进卡片可保留 ACP 模型路由，实际运行取决于宿主支持。收窄 PR 后台跟进在检查失败与批次结束时的打扰通知：Agent 已自主修复并推送重跑 CI，或仅在等待外部/基线修复（且无用户决策、未到卡死退避阈值或无 --wait notice）时保持静默，不再强制触发 schedule_notify_current_run；仅在需要用户决策、可合并/已合并/关闭、停止跟进、多次退避仍卡住或等待回执带 notice 时通知。沿用 1.5.40–1.5.51 优化：支持 PR 卡片内确认合并、分级防淘汰与停止读失败重试、已结束检查的基线等待降频、过滤仅自动批准机器人，以及经调度器确认为 Node.js 18+ 后不再标为「跟进待修复」。",
+  "releaseNotes": "PR 跟进卡片支持保留并校验插件引擎（ACP）模型路由；在不支持绑定任务显式插件引擎覆盖的宿主或任务上自动回退沿用当前任务模型，并在卡片和工具返回中给出提示。收窄 PR 后台跟进在检查失败与批次结束时的打扰通知：Agent 已自主修复并推送重跑 CI，或仅在等待外部/基线修复（且无用户决策、未到卡死退避阈值或无 --wait notice）时保持静默，不再强制触发 schedule_notify_current_run；仅在需要用户决策、可合并/已合并/关闭、停止跟进、多次退避仍卡住或等待回执带 notice 时通知。沿用 1.5.40–1.5.51 优化：支持 PR 卡片内确认合并、分级防淘汰与停止读失败重试、已结束检查的基线等待降频、过滤仅自动批准机器人，以及经调度器确认为 Node.js 18+ 后不再标为「跟进待修复」。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
