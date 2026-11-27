@@ -50,6 +50,9 @@ const HOP_HEADERS = new Set(['host', 'connection', 'content-length', 'transfer-e
 /** Answers larger than this are not kept (a tools/list of a few hundred KB is the largest expected). */
 const MAX_KEPT_BYTES = 8 * 1024 * 1024;
 
+/** The Host header of a request agy sends to the relay. */
+const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i;
+
 /** Cindy's tunnel listens on the loopback address; nothing else is warmed. */
 function isLoopback(url) {
   try {
@@ -178,6 +181,7 @@ function sameParams(params, sent) {
 async function warmServer(server, signal, closing) {
   if (!isLoopback(server.url)) return null;
   const auth = serverHeaders(server);
+  /** Set only once the server confirmed creating this session for our initialize; only it may be ended here. */
   let sessionId = null;
   const post = (message, extra = {}) => exchange(server.url, {
     headers: { ...auth, accept: ACCEPT, 'content-type': 'application/json', ...extra },
@@ -188,9 +192,12 @@ async function warmServer(server, signal, closing) {
     const discover = post({ jsonrpc: '2.0', id: 'cindy-warm-discover', method: 'server/discover', params: DISCOVER_PARAMS },
       { 'mcp-method': 'server/discover', 'mcp-protocol-version': DISCOVER_PROTOCOL }).catch(() => null);
     const initialize = await post({ jsonrpc: '2.0', id: 'cindy-warm-initialize', method: 'initialize', params: INITIALIZE_PARAMS });
-    if (typeof initialize.headers['mcp-session-id'] === 'string') sessionId = initialize.headers['mcp-session-id'];
     const result = firstResponse(initialize);
-    if (initialize.status !== 200 || !sessionId || !isObject(result) || !isObject(result.result)) return null;
+    const created = initialize.headers['mcp-session-id'];
+    // A failed initialize names no session of ours, whatever its headers say: nothing is ended for it.
+    if (initialize.status !== 200 || typeof created !== 'string' || !created || !isObject(result)
+      || result.id !== 'cindy-warm-initialize' || !isObject(result.result)) return null;
+    sessionId = created;
     const protocol = typeof result.result.protocolVersion === 'string' ? result.result.protocolVersion : INITIALIZE_PROTOCOL;
     const session = { ...auth, 'mcp-session-id': sessionId, 'mcp-protocol-version': protocol };
     const initialized = await post({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, session);
@@ -283,10 +290,22 @@ function warmMcpServers(servers, { deadlineMs = WARMUP_DEADLINE_MS, log = () => 
   /** DELETEs of warmed sessions still on their way; close() waits for them. */
   const closing = new Set();
 
+  const tokenBytes = Buffer.from(token);
+  const sameToken = (given) => {
+    const bytes = Buffer.from(given);
+    return bytes.length === tokenBytes.length && crypto.timingSafeEqual(bytes, tokenBytes);
+  };
   const relay = http.createServer((req, res) => {
     void (async () => {
+      // Only agy on this computer talks to the relay: a request naming another host (a web page that
+      // rebound a name to 127.0.0.1) is turned down before anything else.
+      if (!LOOPBACK_HOST.test(String(req.headers.host || ''))) {
+        res.writeHead(421);
+        res.end();
+        return;
+      }
       const match = /^\/([A-Za-z0-9_-]+)\/(\d+)$/.exec(req.url || '');
-      const state = match && match[1] === token ? states[Number(match[2])] : undefined;
+      const state = match && sameToken(match[1]) ? states[Number(match[2])] : undefined;
       if (!state || !state.warm) {
         res.writeHead(404);
         res.end();

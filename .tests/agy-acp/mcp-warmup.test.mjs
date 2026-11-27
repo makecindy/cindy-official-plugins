@@ -35,7 +35,7 @@ const DISCOVER = { jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _
 const INITIALIZE = { jsonrpc: '2.0', id: 2, method: 'initialize', params: { clientInfo: CLIENT_INFO, protocolVersion: '2025-11-25', capabilities: CAPABILITIES } };
 
 /** A server like Cindy's bridge behind the tunnel; `log` lists what reached it. */
-async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false } = {}) {
+async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, acceptStream = false, breakCall = false, hugeRefusal = false, failInitialize = false } = {}) {
   const sessions = new Map();
   const log = [];
   const server = http.createServer((req, res) => {
@@ -62,6 +62,11 @@ async function bridgeServer(t, { delayMs = 0, hang = false, failTools = false, a
         }
         if (!sid) {
           if (message.method !== 'initialize') return res.writeHead(400).end('Expected initialize request');
+          // A failing initialize that still names a session (one this handshake did not create).
+          if (failInitialize) {
+            sessions.set('someone-elses-session', 'other');
+            return res.writeHead(500, { 'mcp-session-id': 'someone-elses-session' }).end();
+          }
           const id = crypto.randomUUID();
           sessions.set(id, message.params.clientInfo.name);
           res.writeHead(200, { 'content-type': 'text/event-stream', 'mcp-session-id': id });
@@ -260,6 +265,53 @@ describe('Antigravity MCP warm-up', { concurrency: true, timeout: 20_000 }, () =
     assert.ok(taken.sessions.has(init.sid), 'the session agy took over is left to agy');
     assert.equal(untaken.sessions.size, 0, 'the session agy never took over is ended');
     assert.equal(untaken.log.at(-1).method, 'DELETE');
+  });
+
+  // Why: only a session the server confirmed creating for the warm-up's own initialize is ours to end.
+  test('a failed initialize ends no session', async (t) => {
+    const { entry, log, sessions } = await bridgeServer(t, { failInitialize: true });
+    const warmup = warmMcpServers([entry]);
+    assert.deepEqual(await warmup.ready, [entry], 'agy connects directly');
+    await warmup.close();
+    assert.ok(sessions.has('someone-elses-session'), 'the session named by the failed answer is left alone');
+    assert.ok(!log.some((item) => item.method === 'DELETE'), 'nothing was ended');
+  });
+
+  test('a session handed to agy is never reclaimed', async (t) => {
+    const { entry, log, sessions } = await bridgeServer(t);
+    const warmup = warmMcpServers([entry]);
+    const [given] = await warmup.ready;
+    // agy's whole handshake and a tool call, then the task ends.
+    const init = await agyRequest(given.url, { message: INITIALIZE });
+    await agyRequest(given.url, { message: { jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, sid: init.sid });
+    await agyRequest(given.url, { method: 'GET' });
+    await agyRequest(given.url, { message: { jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }, sid: init.sid });
+    await agyRequest(given.url, { message: { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'Bash', arguments: {} } }, sid: init.sid });
+    await warmup.close();
+    assert.ok(sessions.has(init.sid), 'agy’s session stays agy’s');
+    assert.ok(!log.some((item) => item.method === 'DELETE'), 'the relay ended nothing');
+  });
+
+  // Why: the relay must only ever answer agy on this computer; neither a guessed path nor a page that
+  // rebound a host name to 127.0.0.1 may reach the kept answers or the server through it.
+  test('the relay answers only its own path on a loopback host', async (t) => {
+    const { entry, log } = await bridgeServer(t);
+    const warmup = warmMcpServers([entry]);
+    t.after(() => warmup.close());
+    const [given] = await warmup.ready;
+    const url = new URL(given.url);
+    const send = (pathName, host) => new Promise((resolve, reject) => {
+      const request = http.request({ host: '127.0.0.1', port: url.port, path: pathName, method: 'POST',
+        headers: { host, authorization: TOKEN, 'content-type': 'application/json', accept: 'application/json, text/event-stream' } },
+      (response) => { response.resume(); response.on('end', () => resolve(response.statusCode)); });
+      request.on('error', reject);
+      request.end(JSON.stringify(INITIALIZE));
+    });
+    const before = log.length;
+    assert.equal(await send(url.pathname.replace(/\/[^/]+\/0$/, '/not-the-token/0'), url.host), 404);
+    assert.equal(await send(url.pathname, `evil.example.test:${url.port}`), 421);
+    assert.equal(log.length, before, 'neither request reached the server');
+    assert.equal(await send(url.pathname, url.host), 200, 'agy itself is still answered');
   });
 
   test('closing during the warm-up ends the sessions its interrupted handshakes opened', async (t) => {
