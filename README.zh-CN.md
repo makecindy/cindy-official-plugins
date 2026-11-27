@@ -65,6 +65,9 @@
 | <img src="./decision-gate/assets/icon.png" width="22" alt=""> | 决策闸门 | [`decision-gate`](./decision-gate) | 按你写的规则开新任务时选模型，并在自动化和例行任务运行前判断要不要跑 |
 | <img src="./agentcompass/assets/icon.png" width="22" alt=""> | AgentCompass | [`agentcompass`](./agentcompass) | 把独立工作交给最合适的模型：通过 Cindy 的 quick-text 通道由模型为任务做画像（需要 Cindy 账号），内置 AgentCompass 引擎在这台 Cindy 能运行的模型中选出 harness、模型与档位（仅按能力匹配，不做额度经济，也没有 fast 模式），在父项目目录以 `bypassPermissions`（Claude）/ `full-access`（Codex、Pi）启动普通 Cindy 任务并取回确切结果；自选安装 |
 
+GitHub 的[可选 CI 恢复](docs/github-ci-retry.zh-CN.md)默认关闭，可在贡献者无权重跑
+Actions 时，为已确认的临时故障提供有限恢复途径。
+
 想要的插件不在这里？[提议一个](#提交你的插件)——或者自己写一个提交上来。
 
 ## 提交你的插件

@@ -72,6 +72,9 @@ permission gate.
 | <img src="./decision-gate/assets/icon.png" width="22" alt=""> | Decision Gate | [`decision-gate`](./decision-gate) | Decides by your rules: picks a model when a new task starts and judges before an automation or routine runs whether it needs to |
 | <img src="./agentcompass/assets/icon.png" width="22" alt=""> | AgentCompass | [`agentcompass`](./agentcompass) | Hands independent work to the model that fits it: a model profiles the task through Cindy's quick-text channel (a Cindy account is required), the built-in AgentCompass engine picks harness, model and effort from the models this Cindy can run (capability fit only: no quota economy and no fast mode), starts an ordinary Cindy task with `bypassPermissions` (Claude) / `full-access` (Codex, Pi) in the parent project directory, and collects its exact result; opt-in |
 
+GitHub's default-off [optional CI recovery](docs/github-ci-retry.md) can recover
+confirmed transient failures when a contributor cannot rerun Actions.
+
 Missing a plugin you want? [Propose it](#submit-your-plugin) — or build it
 yourself and submit it here.
 

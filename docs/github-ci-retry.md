@@ -1,0 +1,150 @@
+<p align="right"><a href="github-ci-retry.zh-CN.md">简体中文</a> · <strong>English</strong></p>
+
+# Optional GitHub CI recovery
+
+GitHub contributors may be able to push to their PR branch without permission
+to rerun a failed Actions job. Improving tests and CI stability is the primary
+remedy for recurring failures. The GitHub plugin also offers a limited recovery
+route for a confirmed transient failure after a normal rerun is denied for
+permissions.
+
+In the PR card's top-right settings, enable
+**Repush CI when rerun permission is denied**. It is off by default, including
+for existing users without the field. It is stored in this computer's plugin
+user preferences, applies to subsequent follow-up rounds across all repositories
+and PRs, and does not sync to other computers. Turn it off from any PR card at
+any time. This preference neither starts auto-follow nor grants merge permission.
+
+The existing PR Skill reads the live `pr_follow_settings` preference when
+following starts, in each actual background round, and again before amend and
+push. Old prompts or card results cannot act as lasting rewrite authorization.
+Missing, disabled or unreadable preferences forbid CI-only rewrites; ordinary
+authorized fixes can continue. Card actions share the existing main-page queue
+and set their displayed target value rather than inverting a newer global value.
+The plugin account-settings page has no CI-repush authorization control. It does
+offer the separate auto-follow preference: the page reads `/kv` and saves through
+the main page's existing queue, preserving CI authorization. Retired CI-preference
+messages remain ignored; there is no account-page CI authorization writer.
+Unknown writes require read-back, not blind replay.
+Unreadable or malformed storage is displayed as unknown, with no toggle/model
+choices, rather than as Off. A read-only Refresh action can recover the current
+state. Every preference action reads back current settings, including a save
+whose response was lost; an unconfirmed result is not reported as not saved.
+If read-back also fails, the panel stays unknown and grants no new authorization.
+
+Recovery requires an open PR, diagnosed transient CI/installation/infrastructure
+failure unrelated to the change, and an explicit permission denial from the
+normal rerun. Approval-required workflows, protection blocks, deterministic
+failures and unknown outcomes are excluded. The head must be the task's verified
+exclusive branch with write permission, no WIP, no rewrite ban and no unknown or
+other people's commits. Required real fixes take priority and are batched into a
+normal push when possible.
+
+CI-only recovery supports only the verified head repository's canonical GitHub
+HTTPS Git URL. SSH/scp-style and all other transports are excluded before a
+remote read or budget operation, even without visible SSH overrides. The Agent
+does not change remotes, inspect/probe SSH routing or clear user configuration
+to qualify. Ordinary authorized work keeps its transport choices.
+
+The Agent resolves `COMMIT_EDITMSG` and both HEAD/branch reflogs through Git and
+applies one private-file check to every path. Each must be
+absent under verified real parents or a private regular file with a known single
+link and stable identity. Symlinks, multiple hard links, replacement or unknown
+state stop before budget/amend/push; the file is never removed or repaired to
+qualify. Missing parents stop too; these observations do not atomically bind Git
+to the files. Unexpected or unknown post-amend state leaves work unpushed.
+
+CI-only recovery also stops if there is any retained approval, a merge-queue
+entry, enabled auto-merge or unknown/incomplete information about those states.
+The Agent reads the complete reviews and live queue/auto-merge state before
+reservation/amend and again immediately before push. This option does not
+authorize invalidating approvals, dequeueing or disabling auto-merge; it cannot
+be used to clear those states to make a retry eligible. These read-backs are not
+an atomic lock; concurrent/unknown side effects are reported, not auto-repaired.
+
+When all conditions hold, the Agent may amend without editing the commit intent
+or changing its tree, parents or author, preserving the repository's DCO rules.
+This changes the commit SHA. Preserve signed-commit provenance: a signed head requires verified original
+signatures and an existing, available automatic signing configuration before
+budget consumption. Otherwise recovery stops, including one-off `git commit -S`
+without automatic signing. Verify the replacement signature before pushing;
+missing/invalid/unknown signatures remain unpushed. The explicit push uses
+`--force-with-lease=refs/heads/<branch>:<verified-remote-SHA>`. An intervening
+remote commit ends the attempt; the Agent must not update the lease and blindly
+push again. It checks the new SHA on the original PR and whether CI actually
+started; triggering is not passing.
+The push source is the full new commit SHA already checked for tree, parents,
+author, message and required signature, shared by signed and unsigned paths.
+It never re-resolves `HEAD` or a local branch at push time. Observed local
+movement stops recovery; a later unobserved HEAD advance cannot change the
+bound source. An unavailable object fails without a symbolic-source fallback.
+
+Dynamic refs, remotes, URLs, IDs and paths stay separate argument data, including
+the complete lease option and refspec. The existing Agent uses a no-shell argv
+call when available, or literal-quotes every argument for its actual task shell.
+Git ref validation and JSON encoding do not escape shell syntax. The
+[argument boundary](../cindy-github/skills/pr/references/ci-retry.md#argument-boundary)
+also covers reads, budget operations, signature checks and crash recovery.
+Both budget commands explicitly carry the current follower's effective
+observation directory with `--state-dir`, including status/crash recovery.
+An explicit follower directory must not be replaced by an environment/default
+cache, or old receipts may be missed. Unknown directory means stop; the durable
+receipt data root and quota remain unchanged.
+For a parsed budget request, legacy evidence is preserved before validating its
+CI options or reading the current diagnosis. Omitted/empty diagnosis options,
+missing/invalid ID or source SHA, conflicting modes, and missing/damaged/invalid
+diagnosis files cannot bypass preservation or create a new reservation. One
+completed parse selects the effective directory, including a later `--state-dir`;
+validation follows the raw copy, before adoption or trace/state writes. Help and
+unparseable CLI syntax/targets do not trigger automatic migration. Adoption only
+retains already-consumed older attempts.
+
+**At most two CI-only repush attempts per PR/computer, and at most one per
+diagnosed failure.** At the total limit, stop and report even for another fault.
+Before any amend, the existing gate exclusively creates one of two fixed durable
+slot receipts keyed by the immutable PR `node_id`, recording the stable diagnosis
+(workflow file, job name, failed step and normalized root cause).
+Both budget commands require the verified ID and
+`--ci-retry-failure <diagnosis.json>`. Exclude SHA, run/job IDs, attempts,
+timestamps and transient paths. Head changes, restarts, renames/transfers,
+observation resets and interrupted operations do not restore the same fault's
+budget. A distinct failure needs fresh logs, a normal rerun permission denial
+and every eligibility check before using the remaining slot. The gate normalizes case
+and whitespace but cannot verify the Agent's diagnosis; uncertainty stops
+recovery, rather than inventing a key. Earlier development receipts without a
+diagnosis require reconciliation, not deletion. Receipts are not pruned with
+traces or refunded. Do not delete them, move the directory or reset the budget.
+Unknown outcomes require read-back, not another push. Receipts live in user data,
+separate from disposable observation/trace cache. The gate exclusively copies
+earlier cache receipt files into durable storage before decoding or validating,
+without overwriting or
+deleting them; all older per-failure receipts count toward the two slots even
+when querying another diagnosis. Even status reads may perform this adoption.
+Missing diagnoses and malformed evidence remain fail-closed after cache cleanup.
+The earliest `*.json.ci-retry` URL receipts are also copied raw and block further
+budget operations: they lack an immutable ID/diagnosis, and another URL cannot
+prove they are unrelated after a rename/transfer. Never invent missing identity.
+Use the exact verified opaque PR node ID; legacy base64 IDs are supported too.
+More than two old attempts or damaged/unknown evidence stops recovery. Clearing/changing
+cache does not reset migrated budgets. Unknown evidence deleted before upgrade
+cannot be reconstructed and is not permission to retry. See the Skill reference
+for platform data paths; never change data-root variables to restore a budget.
+
+The plugin sandbox does not run Git itself or mechanically diagnose logs and
+branch ownership. Those checks and the Git operation remain in the existing
+task Agent workflow and task authorization; the gate enforces the retry budget,
+not those factual judgments. CI recovery itself adds no platform scopes,
+credentials, Host runtime or service changes. No empty commits, bare force pushes, merge, auto-merge,
+queue changes, direct main pushes or permission changes are authorized.
+
+The synchronized [upstream #352](https://github.com/makecindy/cindy-official-plugins/pull/352)
+separately adds native PR-card follow-up through local Node and the Host scheduler.
+Those declarations match main, with its existing update-consent requirement;
+they do not enable CI repush. The Node entry only locates the approved Skill,
+not a Git executor. This task has not installed that runtime or exercised its
+native scheduling flow. Its existing source-checkout follower remains unchanged.
+
+See the [runtime evidence and remaining gaps](verification/github-ci-retry-2026-11-13.md),
+including cropped actual screenshots and separately labeled generated previews.
+
+The recovery workflow also refuses any defined `GIT_CONFIG` (including empty), or an unknown execution environment, before reading Git configuration or quota. That variable can redirect only `git config`, so its empty output cannot establish what amend will execute. The Agent does not clear or override it to qualify; the same rule applies before amend/push and to signed/unsigned commits. This is a workflow prerequisite, not a new Git executor.
