@@ -23,9 +23,12 @@ const path = require('node:path');
 const { killTree } = require('./resolve-agy.js');
 const {
   accountDirProblem,
+  clearIsolationUnverified,
   ensureAccountSubdirs,
-  hasIsolatedStoreFile,
   hasUpdatedIsolatedStoreFile,
+  hasVerifiedIsolatedSignIn,
+  isIsolationUnverified,
+  markIsolationUnverified,
   snapshotIsolatedStoreFiles,
 } = require('./agy-account-dir.js');
 const { isSignInRequired, openAgy, tierFromMeta } = require('./agy-client.js');
@@ -170,9 +173,9 @@ async function status(params, options) {
   const sessionId = params && typeof params.sessionId === 'string' && params.sessionId ? params.sessionId : null;
   const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : undefined;
   const signedIn = async (tier) => {
-    if (accountDir && !hasIsolatedStoreFile(accountDir, options)) {
+    if (accountDir && !hasVerifiedIsolatedSignIn(accountDir, options)) {
       try {
-        process.stderr.write('[agy-acp] Ignoring signed-in status for isolated account directory without isolated sign-in files.\n');
+        process.stderr.write('[agy-acp] Ignoring signed-in status for an isolated account directory without a verified isolated sign-in.\n');
       } catch { /* ignore */ }
       return { ...base, signedIn: false };
     }
@@ -218,6 +221,8 @@ const MAX_PLAN = 64;
 async function accountStatus(params, options) {
   const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : undefined;
   if (accountDir && accountDirProblem(accountDir, options)) return null;
+  // Its last sign-in check did not prove isolation: agy is not even asked, it could answer for another account.
+  if (accountDir && isIsolationUnverified(accountDir, options)) return { state: 'signed-out' };
   const current = await status(params, options);
   if (!current.supported) return null;
   if (!current.signedIn) return { state: 'signed-out' };
@@ -273,6 +278,62 @@ async function probeEmptyDirIsolation(options, state) {
 }
 
 /**
+ * The unverified-isolation mark of an added account during one sign-in (see agy-account-dir.js).
+ * `begin` sets it before agy may touch the account's sign-in, `prove` clears it once the check after the
+ * sign-in proved isolation, `disprove` sets it when a check showed agy ignores the account directory,
+ * and `abandon` restores the earlier state when the sign-in ended before agy completed it and agy
+ * changed nothing in the directory. Every other way out of the sign-in keeps the mark.
+ */
+function isolationGuard(accountDir, options) {
+  const markedBefore = isIsolationUnverified(accountDir, options);
+  let started = null;
+  let agyFinished = false;
+  const failed = (error) => ({ ok: false, error: 'failed', detail: `Could not record the account's sign-in check (${detailOf(error)}).` });
+  return {
+    begin(storeBefore) {
+      try {
+        markIsolationUnverified(accountDir, options);
+      } catch (error) {
+        return failed(error);
+      }
+      started = storeBefore;
+      return { ok: true };
+    },
+    /** agy reported the sign-in done: from now on only `prove` clears the mark. */
+    finished() {
+      agyFinished = true;
+    },
+    prove() {
+      try {
+        clearIsolationUnverified(accountDir, options);
+      } catch (error) {
+        return failed(error);
+      }
+      started = null;
+      return { ok: true };
+    },
+    disprove() {
+      try {
+        markIsolationUnverified(accountDir, options);
+      } catch {
+        // An unwritable directory is refused anyway (accountDirProblem).
+      }
+    },
+    abandon() {
+      if (!started || agyFinished || markedBefore) return;
+      const now = snapshotIsolatedStoreFiles(accountDir, options);
+      if (now.size !== started.size || hasUpdatedIsolatedStoreFile(started, now)) return;
+      started = null;
+      try {
+        clearIsolationUnverified(accountDir, options);
+      } catch {
+        // Stays unusable until the next sign-in.
+      }
+    },
+  };
+}
+
+/**
  * agy's Google sign-in: agy opens the browser and this resolves when the user finished there,
  * cancelled (cancelLogin) or timed out. `onProgress` runs every 10 s while waiting.
  * When `options.accountDir` is set, agy keeps the sign-in in that isolated directory.
@@ -297,6 +358,7 @@ async function login(options, onProgress) {
   const state = { key: accountKeyOf(options), agy: null, child: null, cancelled: false };
   activeLogin = state;
   const ticker = setInterval(() => { if (onProgress) onProgress(); }, PROGRESS_INTERVAL_MS);
+  const isolation = accountDir ? isolationGuard(accountDir, options) : null;
   try {
     let existingStore = null;
     if (accountDir) {
@@ -307,6 +369,8 @@ async function login(options, onProgress) {
         const preProbe = await probeEmptyDirIsolation(options, state);
         if (!preProbe.ok) return preProbe;
         if (!preProbe.isolated) {
+          // The account's existing sign-in cannot be told apart from the original login any more either.
+          isolation.disprove();
           return {
             ok: false,
             error: 'failed',
@@ -332,6 +396,7 @@ async function login(options, onProgress) {
         // protecting the user's default keyring login if a future agy ignores file token storage.
         try {
           await state.agy.call('session/list', { cwd: probeFolder() });
+          isolation.disprove();
           return {
             ok: false,
             error: 'failed',
@@ -343,8 +408,12 @@ async function login(options, onProgress) {
         }
       }
       beforeAuthStore = snapshotIsolatedStoreFiles(accountDir, options);
+      // From here agy may change the account's sign-in: unusable until the check below proves isolation.
+      const marked = isolation.begin(beforeAuthStore);
+      if (!marked.ok) return marked;
     }
     const result = await state.agy.call('authenticate', { methodId: GOOGLE_METHOD }, timeoutMs);
+    if (isolation) isolation.finished();
     if (state.cancelled) return { ok: false, error: 'cancelled' };
     if (accountDir) {
       const afterAuthStore = snapshotIsolatedStoreFiles(accountDir, options);
@@ -366,10 +435,13 @@ async function login(options, onProgress) {
           detail: 'Antigravity leaked the sign-in outside the isolated account directory.',
         };
       }
+      const proven = isolation.prove();
+      if (!proven.ok) return proven;
     }
     const tier = tierFromMeta(result._meta);
     return { ok: true, ...(tier ? { tier } : {}) };
   } catch (error) {
+    if (isolation) isolation.abandon();
     if (state.cancelled) return { ok: false, error: 'cancelled' };
     if (error && error.code === 'TIMEOUT') return { ok: false, error: 'timeout' };
     return { ok: false, error: 'failed', detail: detailOf(error) };

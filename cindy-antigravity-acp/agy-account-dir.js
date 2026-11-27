@@ -27,6 +27,13 @@ const ACCOUNT_DIR_ARG = '--cindy-account-dir';
 const ACCOUNT_DIR_EXIT_CODE = 77;
 const APP_DATA_DIR_NAME = 'antigravity-cli';
 const MODEL_SESSION_FILE_NAME = 'cindy-model-session.json';
+/**
+ * Present while an added account's sign-in is not known to stay inside its directory. Written before
+ * agy signs the account in and removed only once the check after that sign-in proved it, so a failed,
+ * inconclusive or interrupted check keeps the account out of status, usage and tasks until it is
+ * signed in again.
+ */
+const ISOLATION_UNVERIFIED_FILE_NAME = 'cindy-isolation-unverified';
 
 const MAX_DIR_LENGTH = 1024;
 // eslint-disable-next-line no-control-regex
@@ -110,6 +117,28 @@ function accountModelSessionFileOf(accountDir, options) {
   return pathLib(options).join(accountDir, MODEL_SESSION_FILE_NAME);
 }
 
+function isolationUnverifiedFileOf(accountDir, options) {
+  return pathLib(options).join(accountDir, ISOLATION_UNVERIFIED_FILE_NAME);
+}
+
+/** Whether the last sign-in of an added account left its isolation unproven. Any doubt counts as unproven. */
+function isIsolationUnverified(accountDir, options) {
+  try {
+    fs.lstatSync(isolationUnverifiedFileOf(accountDir, options));
+    return true;
+  } catch (error) {
+    return !(error && error.code === 'ENOENT');
+  }
+}
+
+function markIsolationUnverified(accountDir, options) {
+  fs.writeFileSync(isolationUnverifiedFileOf(accountDir, options), `${new Date().toISOString()}\n`, { mode: 0o600 });
+}
+
+function clearIsolationUnverified(accountDir, options) {
+  fs.rmSync(isolationUnverifiedFileOf(accountDir, options), { force: true });
+}
+
 function ensureAccountSubdirs(accountDir) {
   fs.mkdirSync(appDataDirOf(accountDir), { recursive: true, mode: 0o700 });
 }
@@ -155,6 +184,14 @@ function hasIsolatedStoreFile(accountDir, options) {
   return snapshotIsolatedStoreFiles(accountDir, options).size > 0;
 }
 
+/**
+ * Whether the plugin may use an added account's own sign-in: agy stored it inside the account
+ * directory and the last sign-in check proved it stayed there.
+ */
+function hasVerifiedIsolatedSignIn(accountDir, options) {
+  return hasIsolatedStoreFile(accountDir, options) && !isIsolationUnverified(accountDir, options);
+}
+
 function hasUpdatedIsolatedStoreFile(before, after) {
   for (const [name, stat] of after.entries()) {
     const prev = before.get(name);
@@ -170,14 +207,19 @@ module.exports = {
   ACCOUNT_DIR_ARG,
   ACCOUNT_DIR_EXIT_CODE,
   APP_DATA_DIR_NAME,
+  ISOLATION_UNVERIFIED_FILE_NAME,
   MODEL_SESSION_FILE_NAME,
   accountDirProblem,
   accountModelSessionFileOf,
   appDataDirOf,
+  clearIsolationUnverified,
   ensureAccountSubdirs,
   geminiDirOf,
   hasIsolatedStoreFile,
   hasUpdatedIsolatedStoreFile,
+  hasVerifiedIsolatedSignIn,
+  isIsolationUnverified,
+  markIsolationUnverified,
   parseAccountDirArg,
   snapshotIsolatedStoreFiles,
 };

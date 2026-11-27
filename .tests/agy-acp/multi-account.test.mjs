@@ -159,6 +159,12 @@ process.stdin.on('data', (chunk) => {
       if (file) fs.rmSync(file, { force: true });
       send({ id, result: {} });
     } else if (method === 'session/list' || method === 'session/resume') {
+      if (process.env.FAKE_ISOLATION_PROBE_ERROR === '1' && geminiDir
+        && path.basename(path.dirname(geminiDir)).startsWith('cindy-agy-iso-')) {
+        // The plugin's empty-directory isolation check cannot reach a verdict.
+        send({ id, error: { code: -32603, message: 'Internal error: isolation check unavailable' } });
+        continue;
+      }
       const tok = readToken();
       if (!tok) {
         send({ id, error: { code: -32000, message: 'Authentication required' } });
@@ -290,6 +296,43 @@ function startWorker(env) {
       });
     },
   };
+}
+
+/** `env` without the given variables (a child given `undefined` would see the string "undefined"). */
+function envWithout(env, ...names) {
+  const copy = { ...env };
+  for (const name of names) delete copy[name];
+  return copy;
+}
+
+/** Starts a task for `accountDir` through the ACP entry and returns Cindy's view of its session/new. */
+async function openTaskSession(env, cwd, accountDir, extraArgs = []) {
+  const child = spawn(process.execPath, [path.join(root, 'agy-acp.js'), ...extraArgs, '--cindy-account-dir', accountDir], {
+    env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const exited = new Promise((resolve) => child.once('exit', resolve));
+  const responses = [];
+  let stderr = '';
+  child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
+  const rl = readline.createInterface({ input: child.stdout });
+  rl.on('line', (line) => { if (line.trim()) responses.push(JSON.parse(line)); });
+  const send = (obj) => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...obj }) + '\n');
+  send({ id: 1, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: {} } });
+  await waitFor(() => responses.some((m) => m.id === 1), 4_000, 'initialize');
+  send({
+    id: 2,
+    method: 'session/new',
+    params: {
+      cwd,
+      mcpServers: extraArgs.length ? [{ name: 'cindy_exec', type: 'http', url: 'http://127.0.0.1:9999/mcp' }] : [],
+    },
+  });
+  await waitFor(() => responses.some((m) => m.id === 2), 8_000, 'session/new');
+  try { child.stdin.end(); } catch { /* already gone */ }
+  await exited;
+  rl.close();
+  return { response: responses.find((m) => m.id === 2), stderr };
 }
 
 async function waitFor(predicate, timeoutMs = 4_000, label = 'condition') {
@@ -820,5 +863,100 @@ describe('multi-account worker, ACP entry, remote workspace, and main.js', () =>
       rl.close();
       assert.match(stderr, /without isolated sign-in files/i);
     }
+  });
+
+  // Reviewer request on #406: once the check after a sign-in cannot prove the added account signed in on its own,
+  // status, usage and tasks must refuse it until a later sign-in passes the check.
+  for (const scenario of [
+    {
+      name: 'the check shows agy kept the sign-in outside the account directory',
+      env: { FAKE_IGNORE_FILE_STORAGE: '1', FAKE_WRITE_DECOY_ON_AUTH: '1' },
+      message: /leaked the sign-in outside/i,
+    },
+    {
+      name: 'the check cannot reach a verdict',
+      env: { FAKE_ISOLATION_PROBE_ERROR: '1' },
+      message: /isolation check unavailable/i,
+    },
+  ]) {
+    test(`after a sign-in whose isolation check fails (${scenario.name}), status, usage and tasks refuse the account until it signs in again`, async (t) => {
+      const fx = makeMultiFixture(t, scenario.env);
+      fs.writeFileSync(fx.nextLoginFile, JSON.stringify({ email: 'unproven@example.test', tier: 'Google AI Pro', remaining: 0.4 }));
+      const acct = path.join(fx.dir, 'acct-unproven');
+      fs.mkdirSync(acct, { recursive: true });
+
+      const worker = startWorker(fx.env);
+      t.after(() => worker.close());
+      const login = (await worker.call('accountLogin', { harnessId: 'agy', accountDir: acct, methodId: 'oauth-personal' })).result;
+      assert.equal(login.ok, false);
+      assert.equal(login.error, 'failed');
+      assert.match(login.message, scenario.message);
+      assert.equal(worker.notifications.some((n) => n.method === 'account-ready'), false);
+      // agy did leave a non-empty file in the account directory, so the file check alone would pass.
+      assert.ok(fs.readdirSync(path.join(acct, '.gemini', 'antigravity-cli')).length > 0);
+
+      // Status: signed out, without asking agy (it could answer for another account).
+      const launchesBefore = fs.existsSync(fx.launchLog) ? fs.readFileSync(fx.launchLog, 'utf8') : '';
+      assert.deepEqual((await worker.call('accountStatus', { harnessId: 'agy', accountDir: acct })).result, { state: 'signed-out' });
+      const launchesAfter = fs.existsSync(fx.launchLog) ? fs.readFileSync(fx.launchLog, 'utf8') : '';
+      assert.equal(launchesAfter, launchesBefore, 'accountStatus started no agy for the unproven account');
+
+      // Usage: none, and agy's /usage never ran with the account's directory as HOME.
+      assert.equal((await worker.call('usage', { harnessId: 'agy', accountDir: acct })).result, null);
+      const usageRuns = fs.existsSync(fx.usageLog)
+        ? fs.readFileSync(fx.usageLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+        : [];
+      assert.equal(usageRuns.some((run) => run.home === acct), false);
+
+      // Tasks, local and remote: the session never opens, Cindy is told to sign the account in again.
+      for (const extraArgs of [[], ['--cindy-remote-workspace']]) {
+        const { response, stderr } = await openTaskSession(fx.env, fx.dir, acct, extraArgs);
+        assert.equal(response.result, undefined, `session result must not reach Cindy (${extraArgs.join(' ') || 'local'})`);
+        assert.equal(response.error.code, -32000);
+        assert.deepEqual(response.error.data._meta.cindy, { kind: 'auth-required' });
+        assert.match(stderr, /has not passed the isolated sign-in check/i);
+      }
+      await worker.close();
+
+      // A later sign-in whose check passes makes the account usable again.
+      const fixed = envWithout(fx.env, ...Object.keys(scenario.env));
+      fs.writeFileSync(fx.nextLoginFile, JSON.stringify({ email: 'again@example.test', tier: 'Google AI Pro', remaining: 0.4 }));
+      const again = startWorker(fixed);
+      t.after(() => again.close());
+      assert.deepEqual((await again.call('accountLogin', { harnessId: 'agy', accountDir: acct, methodId: 'oauth-personal' })).result, { ok: true });
+      const status = (await again.call('accountStatus', { harnessId: 'agy', accountDir: acct })).result;
+      assert.equal(status.state, 'signed-in');
+      assert.deepEqual(status.identity, { email: 'again@example.test' });
+      assert.equal((await again.call('usage', { harnessId: 'agy', accountDir: acct })).result.windows[0].remainingPercent, 40);
+      const { response } = await openTaskSession(fixed, fx.dir, acct);
+      assert.equal(response.error, undefined);
+      assert.equal(response.result.sessionId, 'sess-again@example.test');
+    });
+  }
+
+  test('cancelling a new sign-in of a verified account before agy finishes it keeps the account usable', async (t) => {
+    const fx = makeMultiFixture(t);
+    fs.writeFileSync(fx.nextLoginFile, JSON.stringify({ email: 'kept@example.test', tier: 'Google AI Pro', remaining: 0.5 }));
+    const acct = path.join(fx.dir, 'acct-kept');
+    fs.mkdirSync(acct, { recursive: true });
+    const worker = startWorker(fx.env);
+    t.after(() => worker.close());
+    assert.deepEqual((await worker.call('accountLogin', { harnessId: 'agy', accountDir: acct, methodId: 'oauth-personal' })).result, { ok: true });
+    await worker.close();
+
+    const hanging = startWorker({ ...fx.env, FAKE_LOGIN_HANG: '1' });
+    t.after(() => hanging.close());
+    const pendingLogin = hanging.call('accountLogin', { harnessId: 'agy', accountDir: acct, methodId: 'oauth-personal' });
+    // While agy may be changing the sign-in, the account is not used.
+    await waitFor(() => fs.existsSync(path.join(acct, 'cindy-isolation-unverified')), 8_000, 'sign-in in progress');
+    assert.deepEqual((await hanging.call('accountStatus', { harnessId: 'agy', accountDir: acct })).result, { state: 'signed-out' });
+    assert.deepEqual((await hanging.call('accountLoginCancel', { harnessId: 'agy', accountDir: acct })).result, { ok: true });
+    assert.deepEqual((await pendingLogin).result, { ok: false, error: 'cancelled' });
+
+    // agy changed nothing in the directory: the earlier, verified sign-in is used again.
+    assert.equal(fs.existsSync(path.join(acct, 'cindy-isolation-unverified')), false);
+    const status = (await hanging.call('accountStatus', { harnessId: 'agy', accountDir: acct })).result;
+    assert.equal(status.state, 'signed-in');
+    assert.deepEqual(status.identity, { email: 'kept@example.test' });
   });
 });

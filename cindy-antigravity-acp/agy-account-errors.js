@@ -13,7 +13,7 @@
  */
 
 const { isObject, isSessionOpen } = require('./agy-mcp.js');
-const { hasIsolatedStoreFile } = require('./agy-account-dir.js');
+const { hasIsolatedStoreFile, isIsolationUnverified } = require('./agy-account-dir.js');
 
 const QUOTA_REASONS = new Set([
   'QUOTA_EXHAUSTED',
@@ -160,6 +160,13 @@ function classifyAccountErrorResponse(message, now = Date.now()) {
   return attachCindyMeta(message, info);
 }
 
+/** The diagnostics line an entry writes before it stops a session the relay refused for `violation`. */
+function isolationViolationLine(violation) {
+  return violation === 'unverified'
+    ? '[agy-acp] This Antigravity account has not passed the isolated sign-in check since its last sign-in; stopping so another account is never used in its place.\n'
+    : '[agy-acp] Antigravity opened a session without isolated sign-in files; stopping to prevent default-login fallback.\n';
+}
+
 /**
  * Tracks session open / prompt request IDs and agy's warning chunks so both
  * explicit JSON-RPC errors and terminal `⚠ <error>` message chunks carry `_meta.cindy`.
@@ -240,17 +247,25 @@ function accountErrorRelay(nowFn = Date.now, options) {
       const held = tracked.canInferWarning ? tracked.warning : null;
       if (!held && tracked.warning) flush?.(tracked.warning.rawMessage);
 
-      if (tracked.sessionOpen && accountDir && message.error === undefined && isObject(message.result) && !hasIsolatedStoreFile(accountDir)) {
-        if (onIsolationViolation) onIsolationViolation();
-        return {
-          jsonrpc: '2.0',
-          id: message.id,
-          error: {
-            code: -32000,
-            message: 'Antigravity ignored isolated account storage; refusing to run on the default login.',
-            data: { _meta: { cindy: { kind: 'auth-required' } } },
-          },
-        };
+      if (tracked.sessionOpen && accountDir && message.error === undefined && isObject(message.result)) {
+        // Unproven isolation first: such a directory can hold agy's files and still not be the account agy used.
+        const violation = isIsolationUnverified(accountDir) ? 'unverified'
+          : !hasIsolatedStoreFile(accountDir) ? 'missing-store'
+            : null;
+        if (violation) {
+          if (onIsolationViolation) onIsolationViolation(violation);
+          return {
+            jsonrpc: '2.0',
+            id: message.id,
+            error: {
+              code: -32000,
+              message: violation === 'unverified'
+                ? 'This Antigravity account has not passed the isolated sign-in check; sign in to it again before using it.'
+                : 'Antigravity ignored isolated account storage; refusing to run on the default login.',
+              data: { _meta: { cindy: { kind: 'auth-required' } } },
+            },
+          };
+        }
       }
 
       if (isObject(message.error)) {
@@ -286,4 +301,4 @@ function accountErrorRelay(nowFn = Date.now, options) {
   };
 }
 
-module.exports = { accountErrorRelay, classifyAccountErrorResponse };
+module.exports = { accountErrorRelay, classifyAccountErrorResponse, isolationViolationLine };

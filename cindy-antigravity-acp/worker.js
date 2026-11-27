@@ -43,7 +43,7 @@
 
 const readline = require('node:readline');
 const maintain = require('./cli-installer.cjs');
-const { accountDirProblem } = require('./agy-account-dir.js');
+const { accountDirProblem, hasVerifiedIsolatedSignIn } = require('./agy-account-dir.js');
 const { detectAgy, readCustomAgyConfig, runVersion, validateCustomPath, writeCustomAgyPath } = require('./resolve-agy.js');
 const { listModels, readModelSession, rememberModelSession } = require('./agy-models.js');
 const account = require('./agy-account.js');
@@ -281,7 +281,7 @@ const handlers = {
         // Default login is signed out: fall back to a signed-in isolated account so Cindy still
         // learns the model catalog and working modes, while reporting defaultSignedOut to main.js.
         for (const dir of [...signedInAccountDirs]) {
-          if (accountDirProblem(dir)) {
+          if (accountDirProblem(dir) || !hasVerifiedIsolatedSignIn(dir)) {
             signedInAccountDirs.delete(dir);
             continue;
           }

@@ -28,7 +28,7 @@ const {
   ensureAccountSubdirs,
   parseAccountDirArg,
 } = require('./agy-account-dir.js');
-const { accountErrorRelay } = require('./agy-account-errors.js');
+const { accountErrorRelay, isolationViolationLine } = require('./agy-account-errors.js');
 const { acpArgsFor, detectAgy, readCustomAgyConfig, resolveAgy, spawnAgy, killTree } = require('./resolve-agy.js');
 const remoteWorkspace = require('./remote-workspace.js');
 
@@ -151,9 +151,9 @@ function run(agyPath, options) {
     () => stop('SIGTERM'),
     accountErrorRelay(Date.now, options && options.accountDir ? {
       accountDir: options.accountDir,
-      onIsolationViolation: () => {
+      onIsolationViolation: (violation) => {
         try {
-          process.stderr.write('[agy-acp] Antigravity opened a session without isolated sign-in files; stopping to prevent default-login fallback.\n');
+          process.stderr.write(isolationViolationLine(violation));
         } catch { /* ignore */ }
         setImmediate(() => stop('SIGTERM'));
       },

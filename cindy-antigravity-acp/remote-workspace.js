@@ -58,7 +58,7 @@ const {
   normalizeMcpToolCall,
 } = require('./agy-mcp.js');
 const { createSteeringRelay } = require('./agy-steering.js');
-const { accountErrorRelay, classifyAccountErrorResponse } = require('./agy-account-errors.js');
+const { accountErrorRelay, classifyAccountErrorResponse, isolationViolationLine } = require('./agy-account-errors.js');
 const { CLOSE_BUDGET_MS, warmMcpServers } = require('./mcp-warmup.js');
 
 const REMOTE_WORKSPACE_ARG = '--cindy-remote-workspace';
@@ -468,9 +468,9 @@ function startRemoteWorkspace(agyPath, host) {
 
   const errorRelay = accountErrorRelay(Date.now, host.accountDir ? {
     accountDir: host.accountDir,
-    onIsolationViolation: () => {
+    onIsolationViolation: (violation) => {
       try {
-        process.stderr.write('[agy-acp] Antigravity opened a session without isolated sign-in files; stopping to prevent default-login fallback.\n');
+        process.stderr.write(isolationViolationLine(violation));
       } catch { /* ignore */ }
       setImmediate(() => stop('SIGTERM'));
     },

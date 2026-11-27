@@ -1,7 +1,7 @@
 'use strict';
 
 const { resolveAgy, spawnAgy, SESSION_SETTINGS, killTree } = require('./resolve-agy.js');
-const { accountDirProblem, hasIsolatedStoreFile } = require('./agy-account-dir.js');
+const { accountDirProblem, hasVerifiedIsolatedSignIn } = require('./agy-account-dir.js');
 
 const NAMED_PERIODS = { hourly: 60, daily: 1440, weekly: 10080 };
 const PERIOD_UNITS = {
@@ -63,7 +63,7 @@ function usageEnvironment(options) {
 
 async function readUsage(options) {
   const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : undefined;
-  if (accountDir && (accountDirProblem(accountDir, options) || !hasIsolatedStoreFile(accountDir, options))) return null;
+  if (accountDir && (accountDirProblem(accountDir, options) || !hasVerifiedIsolatedSignIn(accountDir, options))) return null;
   const executable = resolveAgy(options);
   if (!executable) return null;
   // A closed stdin pipe signals a non-interactive environment so agy never opens a browser if signed out.
