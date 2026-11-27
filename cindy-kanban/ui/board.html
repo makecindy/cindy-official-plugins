@@ -1044,9 +1044,12 @@ async function sendChat() {
   try {
     const r = await call('board_chat', { text, route });
     thinking.remove();
-    const replyText = r.reply && String(r.reply).trim()
-      ? r.reply
-      : `${t('taskStatus')}: ${r.status ?? (r.ok ? 'ok' : '失败')}（结果未知，请打开任务核对）`;
+    // 服务端错误消息优先透出；仅在确实超时/无回复时才提示「结果未知」。
+    const replyText = (r.message && String(r.message).trim())
+      ? r.message
+      : (r.reply && String(r.reply).trim())
+        ? r.reply
+        : `${t('taskStatus')}: ${r.status ?? (r.ok ? 'ok' : '失败')}（结果未知，请打开任务核对）`;
     appendMsg('assistant', replyText);
   } catch (e) { thinking.textContent = t('sendFailed', { e: e?.message ?? e }); }
 }

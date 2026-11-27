@@ -215,8 +215,8 @@ async function boardState() {
       queued: data.companions.flatMap(x => x.interactions.map(i => ({
         id: x.id, title: i.title, kind: 'interaction', status: 'queued', project: null,
       }))),
-      idle: all.filter(x => (['idle', 'done', 'unread'].includes(x.status) && (x.kind !== 'companion' || x.online)) || x.status === 'offline').map(x => ({
-        id: x.id, title: x.title, kind: x.kind, status: x.status, project: x.project ?? null,
+      idle: all.filter(x => (['idle', 'done', 'unread'].includes(x.status) && (x.kind !== 'companion' || x.online)) || x.status === 'offline' || (x.kind === 'companion' && !x.online)).map(x => ({
+        id: x.id, title: x.title, kind: x.kind, status: x.status, project: x.project ?? null, online: x.kind === 'companion' ? x.online : null,
       })),
     },
     projects: (data.projects ?? []).map(p => ({ label: p.label, tasks: p.tasks })),
