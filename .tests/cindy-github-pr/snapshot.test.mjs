@@ -228,6 +228,28 @@ process.exitCode = 1;
   }
 });
 
+nodeTest('ghGraphQL preserves retryAt header when GitHub returns HTTP 200 with RATE_LIMITED errors', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim / symlink' : false }, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-graphql-200-rate-limit-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const retryAt = Math.floor(Date.now() / 1000) + 900;
+  fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
+if (!process.argv.includes('--include')) process.exit(2);
+process.stdout.write(
+  'HTTP/2.0 200 OK\\nX-RateLimit-Remaining: 0\\nX-RateLimit-Reset: ${retryAt}\\n\\n' +
+  JSON.stringify({ errors: [{ type: 'RATE_LIMITED', message: 'API rate limit already exceeded' }] })
+);
+process.exitCode = 0;
+`, { mode: 0o755 });
+  const moduleUrl = new URL('../../cindy-github/skills/pr/scripts/lib/gh.mjs', import.meta.url).href;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e',
+    `import { ghGraphQL } from ${JSON.stringify(moduleUrl)}; await ghGraphQL('query{}', {}, { includeHeaders: true });`], {
+    encoding: 'utf8', env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}` },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, new RegExp(`\\[gh-rate-limit\\] retryAt=${retryAt * 1000}`));
+  assert.match(result.stderr, /API rate limit already exceeded/);
+});
+
 nodeTest('graphql string variables stay raw strings; other types keep their JSON typing', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim / symlink' : false }, (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-graphql-vars-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

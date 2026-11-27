@@ -160,6 +160,13 @@ export async function ghJsonConditional(
   throw lastErr;
 }
 
+function hasGraphQLRateLimitError(parsed) {
+  return Array.isArray(parsed?.errors) && parsed.errors.some((err) =>
+    String(err?.type ?? '').toUpperCase() === 'RATE_LIMITED'
+    || /rate limit/i.test(String(err?.message ?? '')),
+  );
+}
+
 // `gh api graphql -f query=...` returning parsed JSON.
 export async function ghGraphQL(query, variables = {}, { retries = 1, includeHeaders = false } = {}) {
   const args = ['api', 'graphql', ...(includeHeaders ? ['--include'] : []), '-f', `query=${query}`];
@@ -173,7 +180,20 @@ export async function ghGraphQL(query, variables = {}, { retries = 1, includeHea
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const stdout = await runOnce(args);
-      return parseJson(includeHeaders ? splitHttpResponse(stdout).body : stdout, 'graphql');
+      const { headers, body } = includeHeaders ? splitHttpResponse(stdout) : { headers: '', body: stdout };
+      const parsed = parseJson(body, 'graphql');
+      // GitHub GraphQL can return HTTP 200 with RATE_LIMITED errors; preserve the reset header
+      // before returning/throwing so callers enter exact rate-limit backoff instead of a fallback.
+      if (hasGraphQLRateLimitError(parsed)) {
+        const message = parsed.errors.map((err) => err?.message || err?.type || '').filter(Boolean).join('; ');
+        if (includeHeaders) {
+          const retryAt = rateLimitRetryAt(headers);
+          process.stderr.write(`[gh-rate-limit] retryAt=${retryAt ?? 0}\n`);
+        }
+        process.stderr.write(`[gh] fatal on graphql: ${message.slice(0, 500)}\n`);
+        process.exit(1);
+      }
+      return parsed;
     } catch (e) {
       lastErr = e;
       const errStr = String(e.stderr || '') + String(e.message || '');
