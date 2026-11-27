@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.42",
-  "releaseNotes": "修复草稿 PR 与未关闭 PR 卡片按钮偶发点击无响应的问题：分级淘汰旧卡片状态（优先清理失效/过期别名与已合并/关闭的旧卡片，不再让已结束卡片或挪卡别名挤掉仍开放的草稿/PR 卡片，保护发布中及未确认状态，并成对保留活跃锚点别名）；点击已被旧版清理掉锚点别名的卡片时自动按锚点找回并补齐；点击确实过期的旧卡片时给出明确提示，不再静默无反应。沿用 1.5.40 旧版卡片优化：经调度器实际运行确认为 Node.js 18+ 后，不再将正常运行的旧启动命令标为「跟进待修复」。",
+  "version": "1.5.44",
+  "releaseNotes": "修复草稿 PR 与未关闭 PR 卡片按钮偶发点击无响应的问题：分级淘汰旧卡片状态（优先清理失效/过期别名与已合并/关闭的旧卡片，不再让已结束卡片或挪卡别名挤掉仍开放的草稿/PR 卡片，保护发布中及未确认状态，并成对保留活跃锚点别名）；点击已被旧版清理掉锚点别名的卡片时自动按锚点找回并补齐；点击确实过期的旧卡片时给出明确提示，不再静默无反应。沿用 1.5.40/1.5.43 旧版卡片核验优化：经调度器实际运行确认为 Node.js 18+ 后不再标为「跟进待修复」。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -171,7 +171,7 @@
           },
           "claim_follow": {
             "type": "boolean",
-            "description": "开始跟进前先传 true 申请在当前任务跟进。只有成功且 follow_claimed=true 才能创建定时任务；existing_task 表示其它任务正在跟进。following 仅报告已完成的开启或停止。"
+            "description": "开始跟进前先传 true 申请在当前任务跟进。只有成功且 follow_claimed=true 才能创建定时任务；认领不等于已开启，建好并确认后须用 following=true 回报，回报或用 following=false 释放之前认领一直保留。existing_task 表示其它任务正在跟进。following 仅报告已完成的开启或停止。"
           },
           "published": {
             "type": "boolean",
