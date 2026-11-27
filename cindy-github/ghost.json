@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.39",
-  "releaseNotes": "PR 跟进卡片可保留 ACP 模型路由，实际运行取决于宿主支持。进一步降低 PR 自动跟进的无效 API 与模型消耗：已合并/已关闭 PR 在前 3 次收口尝试后转入递增退避提醒（30 分钟→2 小时→6 小时→12 小时），且跨 --ack 保留，避免无法自动删除的复用调度每 5 分钟空转烧额度；base 分支频繁更新引起的瞬态 UNKNOWN 合并态不再打穿轻量探测缓存，且宿主事件触发的完整快照同步刷新探测基线；明确原任务已获准修复并推送到该 PR 分支时，后续普通修复提交沿用原仓库与目标分支授权、无需逐次再问，仅关注/评审/转交 PR 不构成推送授权。新建或已手动修复前置检查的调度会自动选用合适的 Node.js；仍使用旧启动命令的已有调度，请刷新 PR 卡片查看修复说明。",
+  "version": "1.5.40",
+  "releaseNotes": "PR 跟进卡片可保留 ACP 模型路由，实际运行取决于宿主支持。进一步降低 PR 自动跟进的 GitHub REST 配额消耗：全量快照的 PR 详情与仓库分支规则读取支持实时 HTTP ETag（If-None-Match / 304）条件缓存（仅落盘快照实际消费的最小字段，且诊断测试运行不写缓存），跨 PR 复用未变更分支规则且不引入陈旧数据；宿主补查触发（reason=reconcile）先走轻量探针核验变化，未变更时跳过全量快照。新建或已手动修复前置检查的调度会自动选用合适的 Node.js；仍使用旧启动命令的已有调度，请刷新 PR 卡片查看修复说明。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
