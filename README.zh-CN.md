@@ -341,7 +341,7 @@ unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 宿主能力接入，不再作为常规更新的合并硬门禁。
 
 `taptap-maker/vendor/taptap-maker/` 固定随插件分发官方
-`@taptap/maker@0.0.40`。升级时应整体替换 npm 包发布内容并同步更新插件版本，
+`@taptap/maker@0.0.42`。升级时应整体替换 npm 包发布内容并同步更新插件版本，
 在官方包包含等价修复前，保留以下经审查的 Cindy 兼容补丁：
 
 - `normalizeRemoteProxyExecutionState` 接受 `executed`，保留确定已执行状态
