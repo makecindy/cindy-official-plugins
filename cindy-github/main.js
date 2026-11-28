@@ -190,6 +190,17 @@ var MESSAGES = {
     prAutoFollowHint: '后台修 CI 和 review 意见，需要你时再通知',
     prAutoArchive: '合并后自动归档',
     prAutoArchiveHint: '你看过已合并的卡片、离开这个任务后归档；有未提交的改动时保留',
+    prIndependentFollow: '在独立任务中跟进 PR',
+    prIndependentFollowHint: '发布后自动为 PR 新建隔离工作区的独立任务跟进，避免与开发会话互相排队阻塞',
+    prRepoAutoMerge: '本仓库全绿自动合并（{repo}）',
+    prRepoAutoMergeHint: '仅限当前仓库与当前 GitHub 账号，绝不跨仓库继承；CI、评审与分支规则全部通过后自动合并',
+    prAutoMergeOn: '全绿后自动合并',
+    prAutoMergeOff: '取消自动合并',
+    prAutoMergeActive: '已设全绿自动合并',
+    prAutoMergeRepoActive: '本仓库已开启全绿自动合并',
+    prAutoMergeFailed: '未能保存自动合并策略，请稍后再试',
+    prAutoMergeActorUnknown: '无法确认当前 GitHub 账号或合并权限，未开启自动合并',
+    prTodoDecoupleFollow: '为 {url} 新建独立跟进任务（避免与当前任务串行阻塞）：用 cindy_helper 的 send_to_session（use_worktree: true，标题「{title}」）交接给独立任务建立并核实后台跟进（按 pr 技能第 4 节），完成后再刷新当前任务卡片使其显示只读状态与跳转入口',
     prArchiveTask: '归档任务',
     prTurnOn: '开启「{name}」',
     prFollowModel: '自动跟进用的模型',
@@ -360,6 +371,17 @@ var MESSAGES = {
     prAutoFollowHint: 'Fix CI and review feedback in the background and notify you only when needed',
     prAutoArchive: 'Archive after merge',
     prAutoArchiveHint: 'Archive the task after you have seen it merged and moved on; kept while anything is uncommitted',
+    prIndependentFollow: 'Follow PRs in an independent task',
+    prIndependentFollowHint: 'Hand off PR follow-up to a dedicated task with an isolated worktree so long dev sessions do not block it',
+    prRepoAutoMerge: 'Auto-merge green PRs in {repo}',
+    prRepoAutoMergeHint: 'Scoped strictly to this repository and your GitHub account, never inherited across repos; merges once CI, reviews and rules pass',
+    prAutoMergeOn: 'Auto-merge when green',
+    prAutoMergeOff: 'Cancel auto-merge',
+    prAutoMergeActive: 'Auto-merge when green is on',
+    prAutoMergeRepoActive: 'Repo auto-merge when green is on',
+    prAutoMergeFailed: 'Could not save the auto-merge policy. Try again later.',
+    prAutoMergeActorUnknown: 'Could not verify your GitHub account or merge eligibility; auto-merge was not enabled.',
+    prTodoDecoupleFollow: 'Hand off follow-up for {url} to a dedicated PR task (to avoid serial queue blocking): call cindy_helper send_to_session (use_worktree: true, title "{title}") to set up and verify background follow-up per section 4 of the pr Skill, then refresh this source card so it displays the read-only status and task link',
     prArchiveTask: 'Archive task',
     prTurnOn: 'Turn on "{name}"',
     prFollowModel: 'Model for auto-follow',
@@ -530,6 +552,17 @@ var MESSAGES = {
     prAutoFollowHint: 'バックグラウンドで CI とレビュー指摘を直し、必要なときだけ通知します',
     prAutoArchive: 'マージ後に自動でアーカイブ',
     prAutoArchiveHint: 'マージ済みのカードを見てこのタスクを離れたらアーカイブします。未コミットの変更があるときは残します',
+    prIndependentFollow: '独立タスクで PR をフォロー',
+    prIndependentFollowHint: '作成後に隔離 worktree 付きの専用タスクへ引き継ぎ、開発セッションのキュー詰まりを防ぎます',
+    prRepoAutoMerge: 'このリポジトリで全通過後に自動マージ（{repo}）',
+    prRepoAutoMergeHint: 'このリポジトリと現在の GitHub アカウントのみ有効（他リポジトリへ引き継ぎません）。CI・レビュー・ルール通過後にマージします',
+    prAutoMergeOn: '全通過後に自動マージ',
+    prAutoMergeOff: '自動マージを解除',
+    prAutoMergeActive: '全通過後の自動マージ有効',
+    prAutoMergeRepoActive: 'リポジトリ自動マージ有効',
+    prAutoMergeFailed: '自動マージ設定を保存できませんでした。しばらくしてから再試行してください',
+    prAutoMergeActorUnknown: 'GitHub アカウントまたはマージ権限を確認できないため、自動マージを有効にしませんでした',
+    prTodoDecoupleFollow: '{url} のフォローを専用タスクへ引き継ぐ（現在のセッションとの直列詰まりを防ぐため）：cindy_helper の send_to_session（use_worktree: true、タイトル「{title}」）で pr スキル第 4 節に沿ってフォローを作成・確認し、完了後にこの元カードを更新して読み取り専用リンクを表示する',
     prArchiveTask: 'タスクをアーカイブ',
     prTurnOn: '「{name}」をオン',
     prFollowModel: '自動フォローに使うモデル',
@@ -700,6 +733,17 @@ var MESSAGES = {
     prAutoFollowHint: '백그라운드에서 CI와 리뷰 의견을 고치고 필요할 때만 알립니다',
     prAutoArchive: '병합 후 자동 보관',
     prAutoArchiveHint: '병합된 카드를 보고 이 작업을 떠나면 보관합니다. 커밋하지 않은 변경이 있으면 남겨 둡니다',
+    prIndependentFollow: '독립 작업에서 PR 팔로우',
+    prIndependentFollowHint: '게시 후 격리된 worktree를 가진 전용 작업으로 넘겨 긴 개발 세션의 대기열 차단을 방지합니다',
+    prRepoAutoMerge: '이 저장소 전체 통과 시 자동 병합({repo})',
+    prRepoAutoMergeHint: '현재 저장소와 현재 GitHub 계정에만 적용되며 다른 저장소로 상속되지 않습니다. CI·리뷰·규칙 통과 후 자동 병합합니다',
+    prAutoMergeOn: '통과 시 자동 병합',
+    prAutoMergeOff: '자동 병합 해제',
+    prAutoMergeActive: '통과 시 자동 병합 켜짐',
+    prAutoMergeRepoActive: '저장소 자동 병합 켜짐',
+    prAutoMergeFailed: '자동 병합 정책을 저장하지 못했습니다. 잠시 후 다시 시도하세요',
+    prAutoMergeActorUnknown: '현재 GitHub 계정이나 병합 권한을 확인할 수 없어 자동 병합을 켜지 않았습니다',
+    prTodoDecoupleFollow: '{url} 팔로우를 전용 PR 작업으로 인계하세요(현재 작업의 직렬 대기열 차단 방지): cindy_helper send_to_session(use_worktree: true, 제목 "{title}")으로 pr 스킬 4절에 따라 팔로우를 설정·확인한 뒤 이 원본 카드를 새로 고쳐 읽기 전용 상태와 작업 링크를 표시하세요',
     prArchiveTask: '작업 보관',
     prTurnOn: '"{name}" 켜기',
     prFollowModel: '자동 팔로우에 쓸 모델',
@@ -3092,18 +3136,54 @@ function prFollowModelFrom(value) {
   };
 }
 
+function prAutoMergeReposFrom(raw) {
+  var out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  var keys = Object.keys(raw);
+  for (var i = 0; i < keys.length; i++) {
+    var k = String(keys[i] || '').trim().toLowerCase();
+    var v = raw[keys[i]];
+    if (!PR_REPO_RE.test(k) || !v || typeof v !== 'object' || v.enabled !== true) continue;
+    var actor = typeof v.actor === 'string' ? v.actor.trim().toLowerCase() : '';
+    if (!actor || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(actor)) continue;
+    out[k] = { enabled: true, actor: actor, authorizedAt: Number(v.authorizedAt) || 0 };
+  }
+  return out;
+}
+
+function isRepoAutoMergeEnabled(settings, repo) {
+  if (!settings || !settings.autoMergeRepos || !repo) return false;
+  var entry = settings.autoMergeRepos[String(repo).toLowerCase()];
+  return Boolean(entry && entry.enabled === true && entry.actor);
+}
+
+function isCardAutoMergeEnabled(card) {
+  return Boolean(
+    card && card.autoMerge && card.autoMerge.enabled === true &&
+    card.pr && card.stage === 'open' && !card.pr.draft &&
+    typeof card.autoMerge.actor === 'string' && card.autoMerge.actor &&
+    card.autoMerge.base === card.pr.base
+  );
+}
+
 function prSettingsFrom(kv) {
   var s = kv && kv.prCard && typeof kv.prCard === 'object' ? kv.prCard : {};
   // lastFollowModel:切回「跟随当前任务」时记住上次指定的模型,再切回「指定模型」直接用它。
   return {
-    autoRename: s.autoRename === true, autoFollow: s.autoFollow === true, autoArchive: s.autoArchive === true,
-    followModel: prFollowModelFrom(s.followModel), lastFollowModel: prFollowModelFrom(s.lastFollowModel),
+    autoRename: s.autoRename === true,
+    autoFollow: s.autoFollow === true,
+    autoArchive: s.autoArchive === true,
+    independentFollow: s.independentFollow === true,
+    autoMergeRepos: prAutoMergeReposFrom(s.autoMergeRepos),
+    followModel: prFollowModelFrom(s.followModel),
+    lastFollowModel: prFollowModelFrom(s.lastFollowModel),
   };
 }
 
 /** 交给 Agent 的设置:跟进模型按定时任务参数的写法给出,没选就不带(沿用当前任务)。 */
 function prSettingsForAgent(settings, autoFollow) {
   var out = { auto_rename: settings.autoRename, auto_follow: autoFollow };
+  if (settings.independentFollow) out.independent_follow = true;
   var m = settings.followModel;
   if (m) {
     out.follow_model = {
@@ -3130,11 +3210,34 @@ async function writePrSettings(change) {
   change(next);
   kv.prCard = { autoRename: next.autoRename, autoFollow: next.autoFollow };
   if (next.autoArchive) kv.prCard.autoArchive = true;
+  if (next.independentFollow) kv.prCard.independentFollow = true;
+  if (next.autoMergeRepos && Object.keys(next.autoMergeRepos).length > 0) {
+    kv.prCard.autoMergeRepos = prAutoMergeReposFrom(next.autoMergeRepos);
+  }
   if (next.followModel) kv.prCard.followModel = next.followModel;
   if (next.lastFollowModel) kv.prCard.lastFollowModel = next.lastFollowModel;
   var r = await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
   if (!r || r.ok === false) throw new Error('kv write failed');
   return next;
+}
+
+async function syncCardAutoMergePolicy(params) {
+  if (!cindy.node || typeof cindy.node.request !== 'function') {
+    return { ok: false, error: 'node unavailable' };
+  }
+  try {
+    var response = await cindy.node.request({ method: 'syncAutoMergePolicy', params: params });
+    if (response && response.ok === true) return { ok: true };
+    return { ok: false, error: (response && response.error && response.error.message) || 'sync failed' };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+
+async function fetchViewerLogin(callId) {
+  var res = await gql('query{viewer{login}}', {}, callId);
+  var login = res && !res.err && res.data && res.data.viewer && res.data.viewer.login;
+  return typeof login === 'string' && /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/.test(login.trim()) ? login.trim().toLowerCase() : null;
 }
 async function setPrAutoFollow(enabled) {
   if (typeof enabled !== 'boolean') return fail(t('required', { fields: 'auto_follow (boolean)' }));
@@ -3200,7 +3303,7 @@ var PR_THREADS_QUERY =
 var PR_THREAD_PAGES_MAX = 20;
 
 var PR_MERGE_QUERY =
-  'query($owner:String!,$name:String!,$number:Int!){viewer{id} repository(owner:$owner,name:$name){' +
+  'query($owner:String!,$name:String!,$number:Int!){viewer{id login} repository(owner:$owner,name:$name){' +
   'id viewerPermission viewerDefaultMergeMethod mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed ' +
   'pullRequest(number:$number){id state isDraft mergeable mergeStateStatus headRefOid mergeQueue{id} ' +
   'baseRef{name branchProtectionRule{restrictsPushes lockBranch requiresLinearHistory} ' +
@@ -3262,6 +3365,7 @@ async function fetchPrMergeInfo(variables, snapshot, callId) {
       pr.mergeable === 'MERGEABLE' && pr.mergeStateStatus === 'CLEAN' && pr.headRefOid === snapshot.headRefOid;
   return {
     eligible: true,
+    actorLogin: typeof viewer.login === 'string' && viewer.login.trim() ? viewer.login.trim().toLowerCase() : null,
     target: clean ? {
       id: repository.id + ':' + pr.id, actor: viewer.id, base: pr.baseRef.name, sha: pr.headRefOid, method: method.toLowerCase(),
     } : null,
@@ -3306,6 +3410,7 @@ async function fetchPrStatus(repo, number, callId) {
       review: pr.reviewDecision || null,
       merge: mergeInfo.target,
       mergeEligible: mergeInfo.eligible,
+      ...(mergeInfo.actorLogin ? { mergeActorLogin: mergeInfo.actorLogin } : {}),
     },
   };
 }
@@ -3691,7 +3796,11 @@ function prModelRow(settings) {
 function prSettingsPanel(settings, card) {
   var controls = prSettingRow('prset:rename', t('prAutoRename'), t('prAutoRenameHint'), settings.autoRename) +
     prSettingRow('prset:follow', t('prAutoFollow'), t('prAutoFollowHint'), settings.autoFollow) +
+    prSettingRow('prset:independent', t('prIndependentFollow'), t('prIndependentFollowHint'), settings.independentFollow) +
     prSettingRow('prset:archive', t('prAutoArchive'), t('prAutoArchiveHint'), settings.autoArchive) +
+    (card && card.repo && hasCardScheduler()
+      ? prSettingRow('prset:repo-auto-merge', t('prRepoAutoMerge', { repo: card.repo }), t('prRepoAutoMergeHint'), isRepoAutoMergeEnabled(settings, card.repo))
+      : '') +
     prModelRow(settings);
   if (!card || !manualFollowStop(card)) {
     return '<div style="padding:8px 8px 10px;border-top:1px solid var(--border-default)">' +
@@ -3925,9 +4034,25 @@ function renderPrCard(card, settings) {
           actions = prPillButton('pr:merge-cancel:' + confirmation.revision, t('prMergeCancel')) +
             prCtaButton('pr:merge-confirm:' + confirmation.revision, t('prMergeConfirm'));
         } else {
+          if (isRepoAutoMergeEnabled(settings, card.repo)) {
+            left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(t('prAutoMergeRepoActive')) + '</div>';
+          } else if (isCardAutoMergeEnabled(card)) {
+            left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(t('prAutoMergeActive')) + '</div>';
+            actions += prQuietButton('pr:auto-merge-off', t('prAutoMergeOff'));
+          } else if (hasCardScheduler()) {
+            actions += prQuietButton('pr:auto-merge-on', t('prAutoMergeOn'));
+          }
           actions += prMergeButton(card, true);
         }
       } else if (prMayMergeWhenClean(card)) {
+        if (isRepoAutoMergeEnabled(settings, card.repo)) {
+          left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(t('prAutoMergeRepoActive')) + '</div>';
+        } else if (isCardAutoMergeEnabled(card)) {
+          left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(t('prAutoMergeActive')) + '</div>';
+          actions += prQuietButton('pr:auto-merge-off', t('prAutoMergeOff'));
+        } else if (hasCardScheduler()) {
+          actions += prQuietButton('pr:auto-merge-on', t('prAutoMergeOn'));
+        }
         actions += prMergeButton(card, false);
       }
       if (manualFollowStop(card) && !card.pending && !unverifiedLegacyFollow(card)) {
@@ -4093,6 +4218,34 @@ function isFollowScheduleForUrl(row, url) {
   var command = String(row.preRunHook.command).replace(/\\/g, '/').toLowerCase();
   return /(?:^|\s)node\s+["']?[^\r\n]+\/scripts\/(?:pr-heartbeat-gate\.mjs["']?|pr-node\.cjs["']?\s+pr-heartbeat-gate\.mjs)\s+/.test(command) &&
     command.split(/\s+/).pop().replace(/^["']|["']$/g, '') === url && mentionsPr(row, url);
+}
+
+/** 是否为任意一条 GitHub PR 自动跟进调度（用于检测同一会话已挂其它活跃 PR 跟进）。 */
+function isAnyPrFollowSchedule(row) {
+  if (!row || row.status !== 'active' || !row.recurring) return false;
+  if (row.prTrigger && typeof row.prTrigger.url === 'string' && /\/pull\/\d+/.test(row.prTrigger.url)) return true;
+  if (!row.preRunHook || typeof row.preRunHook.command !== 'string') return false;
+  var command = String(row.preRunHook.command).replace(/\\/g, '/').toLowerCase();
+  return /(?:^|\s)node\s+["']?[^\r\n]+\/scripts\/(?:pr-heartbeat-gate\.mjs["']?|pr-node\.cjs["']?\s+pr-heartbeat-gate\.mjs)\s+https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(command);
+}
+
+async function fetchSessionAndPrSchedules(sessionId, currentUrl) {
+  var rows = await prSchedule('schedule_list', {});
+  if (!Array.isArray(rows)) throw new Error('schedule_list');
+  var prRows = [];
+  var otherActivePrSchedules = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    if (!row) continue;
+    if (currentUrl && mentionsPr(row, currentUrl)) {
+      prRows.push(row);
+      continue;
+    }
+    if (sessionId && row.targetSessionId === sessionId && isAnyPrFollowSchedule(row)) {
+      otherActivePrSchedules++;
+    }
+  }
+  return { prRows: prRows, otherActivePrSchedules: otherActivePrSchedules };
 }
 
 function ownedFollowSchedule(row, card) {
@@ -4548,7 +4701,8 @@ async function createCardSchedule(card, settings) {
 
 // Save the intent first. After a lost receipt or a restart, look up the schedule
 // before creating one. All local card operations already share the same queue.
-async function syncCardSchedule(card, settings, mode) {
+async function syncCardSchedule(card, settings, mode, options) {
+  var opts = options || {};
   var action = mode === true ? 'start' : mode === false ? 'stop' : mode;
   // Existing schedules are editable in Automation independently of the card.
   // The host has no conditional delete; a stale read must not erase them.
@@ -4577,7 +4731,8 @@ async function syncCardSchedule(card, settings, mode) {
   try {
     var repair = null;
     if (action === 'start') {
-      var rows = await schedulesForPr(card);
+      if (opts.prefetchedError) throw opts.prefetchedError;
+      var rows = Array.isArray(opts.prefetchedRows) ? opts.prefetchedRows : await schedulesForPr(card);
       var requestedModel = prSettingsForAgent(settings, true).follow_model;
       var usedTaskModelFallback = false;
       var createdId = null;
@@ -5201,6 +5356,14 @@ async function prCardTool(args, callId, fromLegacyStop) {
     if (card.stage !== 'open') {
       card.pending = null;
     }
+    // PR 已结束、转回草稿或目标分支变更时自动撤销单 PR 自动合并授权。
+    if (card.autoMerge && (card.stage !== 'open' || card.pr.draft ||
+        (card.autoMerge.base && card.pr.base && card.autoMerge.base !== card.pr.base))) {
+      delete card.autoMerge;
+      if (hasCardScheduler()) {
+        await syncCardAutoMergePolicy({ op: 'clear-pr', repo: card.repo, number: card.pr.number }).catch(function () {});
+      }
+    }
   } else if (card.stage === 'publishing') {
     // 发布没成功,Agent 不带 pr 再调一次:卡片回到询问。
     card.stage = 'ask';
@@ -5311,6 +5474,9 @@ async function prCardTool(args, callId, fromLegacyStop) {
 
   var todo = [];
   var nativeStart = false;
+  var followHandoff = null;
+  var prefetchedPrRows = null;
+  var prefetchedListError = null;
   var settingsAppliedBefore = card.settingsApplied;
   var publishedHereBefore = card.publishedHere;
   if (card.stage === 'open' && !card.settingsApplied && settings.unreadable) {
@@ -5320,11 +5486,49 @@ async function prCardTool(args, callId, fromLegacyStop) {
   if (card.stage === 'open' && !card.settingsApplied && !settings.unreadable) {
     card.settingsApplied = true;
     card.publishedHere = true;
-    if (settings.autoRename && !card.renamed) todo.push(t('prTodoRename', { title: prTaskTitle(card) }));
-    if (!legacyFollow && settings.autoFollow && a.following !== false && !card.followDeclined && card.pending !== 'stop' && !card.following && !card.scheduleId && !card.pr.draft) {
-      card.pending = 'follow';
-      nativeStart = hasCardScheduler();
-      if (!nativeStart) todo.push(t('prTodoFollow', { url: card.pr.url }));
+    var wantsAutoFollow = !legacyFollow && settings.autoFollow && a.following !== false && !card.followDeclined && card.pending !== 'stop' && !card.following && !card.scheduleId && !card.pr.draft;
+    var decoupleReason = null;
+    var otherActivePrSchedules = 0;
+    if (wantsAutoFollow && a.published === true) {
+      if (settings.independentFollow) {
+        decoupleReason = 'setting';
+      } else if (a.session_context && a.session_context.goal_active === true) {
+        decoupleReason = 'goal_active';
+      } else if (sessionId && hasSchedulerQuery()) {
+        try {
+          var scan = await fetchSessionAndPrSchedules(sessionId, followUrl(card));
+          prefetchedPrRows = scan.prRows;
+          if (scan.prRows.length === 0 && scan.otherActivePrSchedules > 0) {
+            otherActivePrSchedules = scan.otherActivePrSchedules;
+            decoupleReason = 'multi_pr_session';
+          }
+        } catch (err) {
+          prefetchedListError = err;
+        }
+      }
+    }
+    // 命中独立任务解耦（设置开启 / 活跃 Goal / 同会话已挂其它活跃 PR 跟进）时：
+    // 不给来源会话改名，也不直接把调度绑回来源会话，而是交接给隔离 worktree 的独立 PR 任务。
+    if (!decoupleReason && settings.autoRename && !card.renamed) {
+      todo.push(t('prTodoRename', { title: prTaskTitle(card) }));
+    }
+    if (wantsAutoFollow) {
+      if (decoupleReason) {
+        followHandoff = {
+          recommended: true,
+          reason: decoupleReason,
+          pr_url: card.pr.url,
+          repo: card.repo,
+          pr_number: card.pr.number,
+          title: prTaskTitle(card),
+        };
+        if (otherActivePrSchedules > 0) followHandoff.active_session_pr_schedules = otherActivePrSchedules;
+        todo.push(t('prTodoDecoupleFollow', { url: card.pr.url, title: prTaskTitle(card) }));
+      } else {
+        card.pending = 'follow';
+        nativeStart = hasCardScheduler();
+        if (!nativeStart) todo.push(t('prTodoFollow', { url: card.pr.url }));
+      }
     }
   }
 
@@ -5338,7 +5542,8 @@ async function prCardTool(args, callId, fromLegacyStop) {
       notes.push(card.note);
       card.scheduleAction = syncAction;
     } else {
-      var syncResult = await syncCardSchedule(card, settings, syncAction);
+      var syncResult = await syncCardSchedule(card, settings, syncAction,
+        syncAction === 'start' ? { prefetchedRows: prefetchedPrRows, prefetchedError: prefetchedListError } : undefined);
       if (syncResult && syncResult.otherOwner) {
         if (publishedHereBefore === undefined) delete card.publishedHere; else card.publishedHere = publishedHereBefore;
         return prOtherTask(syncResult.otherOwner, callId, sessionId, updating ? card : null, a.to_latest === true, stateOp, status);
@@ -5348,7 +5553,8 @@ async function prCardTool(args, callId, fromLegacyStop) {
       status && !status.err && card.stage === 'open' && card.pr && !card.pr.draft &&
       !prFollowActive(card) && !card.scheduleAction && !card.followDeclined && typeof a.following !== 'boolean') {
     checkedLiveOwner = true;
-    var openLiveOwner = await resolveLiveOtherTaskOwner(card.repo, card.pr.number, sessionId, candidates, card, { settings: settings });
+    var openLiveOwner = await resolveLiveOtherTaskOwner(card.repo, card.pr.number, sessionId, candidates, card,
+      Array.isArray(prefetchedPrRows) ? { settings: settings, rows: prefetchedPrRows } : { settings: settings });
     if (openLiveOwner) {
       if (publishedHereBefore === undefined) delete card.publishedHere; else card.publishedHere = publishedHereBefore;
       return prOtherTask(openLiveOwner, callId, sessionId, updating ? card : null, a.to_latest === true, stateOp, status);
@@ -5397,6 +5603,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
   }
   if (card.legacyHookRepair) result.legacy_hook_repair = card.legacyHookRepair;
   if (activeFollowNotice) result.follow_model_fallback = true;
+  if (followHandoff) result.follow_handoff = followHandoff;
   if (!delivered) { result.card_shown = false; notes.push(t('prCardNotShown')); }
   if (a.claim_follow === true) result.follow_claimed = a.following !== false && card.stage === 'open' &&
     card.pending !== 'stop' && !card.scheduleId && !unverifiedLegacyFollow(card) && !(legacyFollow && hasCardScheduler()) && prFollowActive(card);
@@ -5661,11 +5868,91 @@ async function prCardAction(msg) {
   var nextUpdateAt = 0;
   if (action === 'prui:settings' && prHasSettings(card)) {
     card.settingsOpen = !card.settingsOpen;
-  } else if (action === 'prset:rename' || action === 'prset:follow' || action === 'prset:archive') {
+  } else if (action === 'prset:rename' || action === 'prset:follow' || action === 'prset:archive' || action === 'prset:independent') {
     try {
-      settings = await togglePrSetting(action === 'prset:rename' ? 'autoRename' : action === 'prset:follow' ? 'autoFollow' : 'autoArchive');
+      var settingKey = action === 'prset:rename' ? 'autoRename'
+        : action === 'prset:follow' ? 'autoFollow'
+          : action === 'prset:independent' ? 'independentFollow'
+            : 'autoArchive';
+      settings = await togglePrSetting(settingKey);
     } catch (e) {
       card.note = t('prSettingFailed');
+    }
+  } else if (action === 'prset:repo-auto-merge' && card.repo) {
+    if (!msg.userActionToken) {
+      card.note = t('prAutoMergeFailed');
+    } else {
+      var repoKey = card.repo.toLowerCase();
+      var currentlyOn = isRepoAutoMergeEnabled(settings, card.repo);
+      if (currentlyOn) {
+        var clearRepoRes = await syncCardAutoMergePolicy({ op: 'clear-repo', repo: card.repo });
+        if (!clearRepoRes.ok) {
+          card.note = t('prAutoMergeFailed');
+        } else {
+          try {
+            settings = await writePrSettings(function (next) {
+              if (next.autoMergeRepos) delete next.autoMergeRepos[repoKey];
+            });
+          } catch (e) {
+            card.note = t('prSettingFailed');
+          }
+        }
+      } else {
+        var repoActor = (card.pr && card.pr.mergeActorLogin) || await fetchViewerLogin().catch(function () { return null; });
+        if (!repoActor) {
+          card.note = t('prAutoMergeActorUnknown');
+        } else {
+          var authorizedAt = Date.now();
+          var setRepoRes = await syncCardAutoMergePolicy({
+            op: 'set-repo', repo: card.repo, actor: repoActor, authorizedAt: authorizedAt,
+          });
+          if (!setRepoRes.ok) {
+            card.note = t('prAutoMergeFailed');
+          } else {
+            try {
+              settings = await writePrSettings(function (next) {
+                next.autoMergeRepos = next.autoMergeRepos || {};
+                next.autoMergeRepos[repoKey] = { enabled: true, actor: repoActor, authorizedAt: authorizedAt };
+              });
+            } catch (e) {
+              await syncCardAutoMergePolicy({ op: 'clear-repo', repo: card.repo }).catch(function () {});
+              card.note = t('prSettingFailed');
+            }
+          }
+        }
+      }
+    }
+  } else if ((action === 'pr:auto-merge-on' || action === 'pr:auto-merge-off') && card.pr && card.stage === 'open') {
+    if (!msg.userActionToken) {
+      card.note = t('prAutoMergeFailed');
+    } else if (action === 'pr:auto-merge-off') {
+      var clearPrRes = await syncCardAutoMergePolicy({ op: 'clear-pr', repo: card.repo, number: card.pr.number });
+      if (!clearPrRes.ok) {
+        card.note = t('prAutoMergeFailed');
+      } else {
+        delete card.autoMerge;
+      }
+    } else {
+      await readPrMergeStatus(card);
+      var prActor = (card.pr && card.pr.mergeActorLogin) || await fetchViewerLogin().catch(function () { return null; });
+      if (card.stage !== 'open' || card.pr.draft || !(card.pr.mergeEligible === true || card.pr.merge) || !prActor || !card.pr.base) {
+        card.note = t('prAutoMergeActorUnknown');
+      } else {
+        var prAuthAt = Date.now();
+        var prMethod = card.pr.merge && card.pr.merge.method ? card.pr.merge.method : undefined;
+        var setPrRes = await syncCardAutoMergePolicy({
+          op: 'set-pr', repo: card.repo, number: card.pr.number, actor: prActor, base: card.pr.base,
+          ...(prMethod ? { method: prMethod } : {}), authorizedAt: prAuthAt,
+        });
+        if (!setPrRes.ok) {
+          card.note = t('prAutoMergeFailed');
+        } else {
+          card.autoMerge = {
+            enabled: true, actor: prActor, base: card.pr.base, repo: card.repo.toLowerCase(),
+            ...(prMethod ? { method: prMethod } : {}), authorizedAt: prAuthAt,
+          };
+        }
+      }
     }
   } else if ((action === 'prset:model' || action === 'prset:modelPick') && msg.modelSelection) {
     // 新版宿主在卡内下拉框里已选好(并核对过可用),直接记下。

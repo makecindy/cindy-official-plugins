@@ -80,6 +80,7 @@ import { createHash } from 'node:crypto';
 import { BACKOFF_STEPS_MIN, baseMovedWait, checkOutcome, handledFailure, inspectWait, isSettledBaselineWait, makeWait, setsAside, waitAbsorbsBase, waitDueAt, waitFacts, waitIsDue, waitNotice } from './lib/follow-wait.mjs';
 import { mergeQueueFingerprint } from './lib/merge-queue.mjs';
 import { SETTLE_MAX_MS, TICK_MS, breaksSettle, expectedBots, isEmptyPass, isPendingTerminalBackoffRetry, pacingDue, resolvePrReviewerBots, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
+import { attemptAutoMerge, hasBlockedAutoMergeAttempt, isSnapshotEligibleForAutoMerge, matchAutoMergePolicy, readAutoMergePolicy, shouldBypassProbeForAutoMerge } from './lib/auto-merge.mjs';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1802,7 +1803,8 @@ async function gateMain(argv, ctx) {
       'initialAdditions', 'headSeenAt', 'reviewerBots', 'reviewerBotsVersion', 'lastKnownConflicting',
       'currentFingerprint', 'fingerprintFields', 'lastChangeAt', 'inventoryFailures',
       'consecutiveSnapshotFailures', 'lastSnapshotFailureAt', 'snapshotFailureFingerprint',
-      'snapshotFailureSummary', 'snapshotFailureBackoffUntil', 'snapshotWatchRetryAt'];
+      'snapshotFailureSummary', 'snapshotFailureBackoffUntil', 'snapshotWatchRetryAt',
+      'autoMergeAttempt'];
     // The 1.5.35 cache stored the failure reason only in lastResult.
     if (previous?.lastResult?.reason === 'snapshot-failed') facts.push('lastResult');
     // CI having existed is a PR fact, not an acknowledgement. Prefer the
@@ -1865,9 +1867,14 @@ async function gateMain(argv, ctx) {
   const triggered = args.triggered || (hookTrigger?.kind === 'watch') || newFollow || diagnostic;
   // Neither an idle tick nor an unchanged summary proves that a failed snapshot recovered.
   const recovering = previous?.consecutiveSnapshotFailures > 0;
+  const autoMergePolicy = diagnostic ? null : readAutoMergePolicy(args.stateDir);
+  const autoMergeProbeBypass = shouldBypassProbeForAutoMerge(previous, autoMergePolicy, {
+    repo: args.repo,
+    number: args.number,
+  });
   // 按阶段决定这一轮要不要看:不到时间就直接跳过,不调用 GitHub,也不改状态。
   const scheduledRetryDue = backoffUntil > 0 && !backingOff;
-  if (args.pacing && !scheduledRetryDue) {
+  if (args.pacing && !scheduledRetryDue && !autoMergeProbeBypass) {
     const pace = pacingDue(previous, now, { triggered, minPassSpacingMs: args.minPassSpacingMs });
     if (!pace.due) {
       emit(args, {
@@ -1888,7 +1895,7 @@ async function gateMain(argv, ctx) {
   // rather than a rerun on the old head, so they can use the lightweight probe between 30m full reads.
   // Also skip the probe whenever state already forces a full snapshot (except when a legacy snapshot
   // without embedded `snap.probe` still needs the probe solely to refresh the probe baseline).
-  const skipProbe = args.triggered || newFollow || diagnostic
+  const skipProbe = args.triggered || newFollow || diagnostic || autoMergeProbeBypass
     || (hookTrigger?.kind === 'watch' && !isReconcileWatch)
     || targetedWait || recovering
     || mustFullReadBeforeProbe(previous, now, args.maxSilenceMs)
@@ -1996,6 +2003,78 @@ async function gateMain(argv, ctx) {
   const waitFor = expectedBots({ snap, previous, repoBots, viewer: snap.viewer });
   // 旧版状态没有 headSeenAt:这个提交不知道何时推送的,不压。
   const settle = settleState({ snap, headSeenAt, expected: waitFor, now });
+
+  // 零队列直合(显式授权时才启用,默认关闭):在进目标会话队列前、经完整全绿与实时规则复核后直合远端 PR。
+  let autoMergeAttempt = previous?.autoMergeAttempt && typeof previous.autoMergeAttempt === 'object'
+    ? { ...previous.autoMergeAttempt }
+    : null;
+  if (autoMergeAttempt && snap.latestCommitOid && autoMergeAttempt.sha !== snap.latestCommitOid) {
+    autoMergeAttempt = null;
+  }
+  let autoMergeDetail = null;
+  let autoMergeForcePass = false;
+  if (!diagnostic && autoMergePolicy && isSnapshotEligibleForAutoMerge(snap, settle)) {
+    const policyMatch = matchAutoMergePolicy(autoMergePolicy, {
+      repo: args.repo,
+      number: args.number,
+      viewer: snap.viewer,
+      baseRefName: snap.baseRefName,
+    });
+    if (policyMatch && !hasBlockedAutoMergeAttempt({ autoMergeAttempt }, snap.latestCommitOid)) {
+      const mergeRes = await ctx.runAutoMerge({
+        repo: args.repo,
+        number: args.number,
+        snap,
+        match: policyMatch,
+        now,
+        persistBeforeWrite: (pendingMarker) => {
+          autoMergeAttempt = pendingMarker;
+          persist(file, { ...(previous ?? {}), autoMergeAttempt: pendingMarker });
+        },
+      });
+      if (mergeRes.outcome === 'merged') {
+        autoMergeAttempt = {
+          sha: mergeRes.sha,
+          status: 'merged',
+          method: mergeRes.method,
+          scope: mergeRes.scope,
+          at: now,
+        };
+        snap = {
+          ...snap,
+          state: 'MERGED',
+          merged: true,
+          closed: true,
+          verdict: 'MERGED_CLEANUP_READY',
+          blockers: [],
+        };
+        autoMergeDetail = `auto-merged (${mergeRes.scope} policy, method=${mergeRes.method}, sha=${String(mergeRes.sha).slice(0, 7)})`;
+      } else if (mergeRes.outcome === 'rejected') {
+        autoMergeAttempt = {
+          sha: mergeRes.sha,
+          status: 'rejected',
+          method: mergeRes.method,
+          scope: mergeRes.scope,
+          reason: mergeRes.reason,
+          at: now,
+        };
+        autoMergeDetail = `auto-merge rejected (${mergeRes.reason}); will not retry this head`;
+        autoMergeForcePass = true;
+      } else if (mergeRes.outcome === 'unknown') {
+        autoMergeAttempt = {
+          sha: mergeRes.sha,
+          status: 'unknown',
+          method: mergeRes.method,
+          scope: mergeRes.scope,
+          reason: mergeRes.reason,
+          at: now,
+        };
+        autoMergeDetail = `auto-merge outcome unknown (${mergeRes.reason}); check PR status manually, will not auto-retry this head`;
+        autoMergeForcePass = true;
+      }
+    }
+  }
+
   const decision = decide({
     snap,
     previous,
@@ -2006,6 +2085,14 @@ async function gateMain(argv, ctx) {
     maxSilenceMs: args.maxSilenceMs,
     settle,
   });
+  if (autoMergeDetail) {
+    if (autoMergeForcePass && decision.exitCode === EXIT_SKIP) {
+      decision.exitCode = EXIT_PASS;
+      decision.reason = autoMergeAttempt?.status === 'unknown' ? 'auto-merge-unknown' : 'auto-merge-rejected';
+    }
+    decision.detail = decision.detail ? `${decision.detail}; ${autoMergeDetail}` : autoMergeDetail;
+    decision.report = decision.report ? `${decision.report}\n- ${autoMergeDetail}` : `- ${autoMergeDetail}`;
+  }
   const passed = decision.exitCode === EXIT_PASS;
   if (passed && snap.gate?.requiredChecksUnavailable && snap.verdict === 'NOT_READY'
       && !snap.isDraft && decision.nextPendingWatch?.headSha === snap.latestCommitOid) {
@@ -2079,6 +2166,7 @@ async function gateMain(argv, ctx) {
     // watch 只由 --ack / --defer 或「没有新事件」推进,放行时不推进
     watch: decision.nextWatch,
     ...(previous?.followStartId ? { followStartId: previous.followStartId } : {}),
+    ...(autoMergeAttempt ? { autoMergeAttempt } : {}),
     ...(decision.nextWait ? { wait: decision.nextWait } : {}),
     ...(decision.nextPendingWatch
       ? {
@@ -2240,6 +2328,7 @@ export async function runGate(argv, {
   now = Date.now,
   runSnapshot: snapshotRunner = runSnapshot,
   runProbe: probeRunner = runProbe,
+  runAutoMerge: autoMergeRunner = attemptAutoMerge,
   readTrigger = readHookTrigger,
   out = (text) => process.stdout.write(text),
   err = (text) => process.stderr.write(text),
@@ -2276,6 +2365,7 @@ export async function runGate(argv, {
         return value;
       },
       runProbe: async (...a) => { const value = await probeRunner(...a); if (record) { try { record.probe = value.code === 0 ? JSON.parse(value.stdout) : null; } catch { record.probe = null; } } return value; },
+      runAutoMerge: autoMergeRunner,
       readTrigger: async () => {
         const event = await readTrigger();
         if (event?.kind === 'diagnostic') {
