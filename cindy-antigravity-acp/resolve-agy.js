@@ -493,6 +493,12 @@ function spawnAgy(agyPath, args, options) {
       throw error;
     }
     allowedGeminiDir = geminiDirOf(accountDir, options);
+  } else if (options && options.isolatedGeminiDir) {
+    // Remote-workspace hooks use an empty per-launch Gemini directory so the default agent
+    // cannot load this computer's global MCP servers or plugins. Only this launch owns it.
+    const expected = options.cwd && ctx.p.join(options.cwd, '.gemini');
+    if (!expected || options.isolatedGeminiDir !== expected) throw new Error('Invalid isolated Gemini directory');
+    allowedGeminiDir = expected;
   }
   const allowedLogFile = logFileOf(options);
   for (let index = 0; index < args.length; index += 1) {

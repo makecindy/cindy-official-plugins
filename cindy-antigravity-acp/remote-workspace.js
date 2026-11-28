@@ -43,13 +43,45 @@
  *    agy expands into the file at `path` in rule text, is made inert so it cannot pull a file of this
  *    computer into the conversation.
  *
- * Nothing persistent changes: the definition lives in a private directory of this one launch,
- * removed when the task ends. The user's Antigravity settings, sign-in and agents are untouched.
+ * From agy 1.5.19 on macOS with the default account, the session runs under agy's default agent, held in by
+ * lifecycle hooks. Since agy 1.5.17 a session under a custom agent, its subagents included, uses up
+ * the Gemini quota four times as fast as one under the default agent (google-antigravity/
+ * antigravity-cli#1890: intended, not a regression). Measured with the real CLI on 2026-11-28 and
+ * 2026-11-29: the same task took about a third of the quota under the default agent, although its
+ * built-in prompt is larger. How the hooks hold the session in (checked against agy 1.5.19):
+ *  - A `PreToolUse` hook that answers `deny` stops the tool before it runs, in the session and in
+ *    every subagent of it (whose own tool calls agy still does not report). When several hooks
+ *    answer, `deny` wins over `allow`, so a hook of the user's own cannot let a tool through.
+ *  - A hook that fails (non-zero exit, timeout, output that is not JSON) also stops the tool, but a
+ *    hook that prints nothing lets it run. The hook therefore only prints a file of this launch
+ *    whose content is fixed (`cat`, run in `.agents/`, where agy runs hooks); without the file
+ *    `cat` fails and the tool is stopped. No program of the plugin runs: in Cindy this entry runs
+ *    inside Cindy's own process, which cannot run a script, and the computer may have no Node.
+ *  - The hook's `matcher` is matched against the whole tool name. It is built to match every name
+ *    except the tools of this task's MCP servers (`mcp_<server>_…`) and agy's own tools that touch
+ *    no computer, so a tool agy adds later is stopped as well.
+ *  - Rule text (`AGENTS.md`) would expand `@[label](path)` into a file of this computer, so the
+ *    instructions come from a `SessionStart` hook instead, whose text agy does not expand. It runs
+ *    at the first prompt of a new session (not on resume, where the text is already in the
+ *    conversation) and leaves a marker: model output in a new session without that marker means
+ *    agy did not load the hooks, and the task is stopped before any tool can run.
+ *  - A resumed session loads the hooks of the directory its process starts in. New instructions
+ *    on resume are prepended to its first prompt, since SessionStart does not fire on resume.
+ *  - The default agent uses a private Gemini directory, so the host account's configured MCP
+ *    servers and plugins are not loaded. The macOS keychain still authenticates this session.
+ * Not hidden in either mode: agy names the skills of its home directory (`~/.agents/skills`; for
+ * the default account the user's own) to the model, with their descriptions. `skills.json` cannot
+ * filter them, and another home directory breaks the default account's sign-in (macOS keychain).
+ *
+ * Nothing persistent changes: the definition or hooks live in a private directory of this one
+ * launch, removed when the task ends. The user's Antigravity settings, sign-in and agents are untouched.
  *
  * It fails closed. An agy older than the checked version is refused. agy offers no way to read
  * the effective tool set back before a session, so the relay watches the session instead: the
  * first tool call that is not an MCP call but reads, edits or runs something on this computer
  * ends the task, and so does a subagent that agy started under any agent but the restricted one.
+ * Under hooks agy reports the calls its hook stopped (they end `failed`); those are not passed on,
+ * and only one that agy reports as `completed` ends the task.
  */
 
 const fs = require('node:fs');
@@ -82,6 +114,22 @@ const FULL_TOOLS = Object.freeze([
   ...BASIC_TOOLS, 'schedule', 'invoke_subagent', 'manage_subagents', 'send_message',
 ]);
 const SUBAGENT_TOOL = 'invoke_subagent';
+/** First agy version the hooks were checked against; an older agy runs under the restricted agent. */
+const HOOKS_MIN_VERSION = Object.freeze([1, 5, 19]);
+/** The built-in subagent type that keeps the session's MCP servers (checked against agy 1.5.19). */
+const HOOKS_SUBAGENT_TYPE = 'self';
+const HOOK_NAME = 'cindy-remote-workspace';
+/** Files in the launch directory's `.agents/`, where agy runs the hooks. */
+const HOOK_DENY_FILE = 'cindy-deny.json';
+const HOOK_START_FILE = 'cindy-start.json';
+const HOOK_MARKER_FILE = 'cindy-hooks-loaded';
+/** Seconds agy gives a hook; one that takes longer stops the tool. */
+const HOOK_TIMEOUT_SECONDS = 10;
+const HOOK_DENY_REASON =
+  "This tool of Antigravity's own is turned off: the project of this task is on another computer. "
+  + 'Use the tools of the cindy_exec MCP server (Bash, Read, Write, Edit) instead.';
+/** `session/update` kinds that are the model's own output (a turn is under way). */
+const MODEL_OUTPUT_UPDATES = new Set(['agent_message_chunk', 'agent_thought_chunk', 'tool_call', 'tool_call_update', 'plan']);
 /** Names that can be written into the definition's YAML as they are. */
 const SERVER_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const MAX_SERVERS = 64;
@@ -122,6 +170,10 @@ const STOPPED_MESSAGE =
   'Antigravity 试图使用这台电脑上的工具，任务已停止。这个任务的文件在另一台电脑上，它只能使用那台电脑提供的工具。\n\n'
   + 'Antigravity tried to use a tool on this computer, so the task was stopped. '
   + "This task's files are on another computer; it may only use the tools that computer provides.";
+const HOOKS_NOT_LOADED_MESSAGE =
+  'Antigravity 没有载入 Cindy 为这个任务设置的工具限制，任务已停止。这个任务的文件在另一台电脑上，没有这些限制时它可能使用这台电脑上的工具。\n\n'
+  + 'Antigravity did not load the tool restrictions Cindy set for this task, so the task was stopped. '
+  + "This task's files are on another computer; without these restrictions it could use tools on this computer.";
 
 function isGuestWorkspaceLaunch(argv) {
   return Array.isArray(argv) && argv.slice(2).includes(GUEST_WORKSPACE_ARG);
@@ -149,6 +201,11 @@ function versionSupported(version) {
 /** Whether a task on this agy gets the full tool set, subagents included. */
 function fullToolsSupported(version) {
   return versionAtLeast(version, FULL_TOOLS_MIN_VERSION);
+}
+
+/** Whether the isolated default-agent mode has been checked on this platform. */
+function hooksSupported(version, platform = process.platform) {
+  return platform === 'darwin' && versionAtLeast(version, HOOKS_MIN_VERSION);
 }
 
 /** A private, otherwise empty directory agy runs in for this task; it holds the agent definition. */
@@ -207,7 +264,6 @@ function removeStaleLaunchDirs(root, now = Date.now()) {
  * client's `systemPrompt` text, ends the body.
  */
 function agentDefinition(serverNames, { fullTools = false, instructions = '' } = {}) {
-  const others = serverNames.filter((name) => name !== EXEC_SERVER);
   return [
     '---',
     `name: ${AGENT_NAME}`,
@@ -219,14 +275,26 @@ function agentDefinition(serverNames, { fullTools = false, instructions = '' } =
     'mcpServers:',
     ...serverNames.map((name) => `  - name: ${name}`),
     '---',
+    remoteInstructions(serverNames, { subagentType: fullTools ? AGENT_NAME : null, instructions }),
+  ].join('\n');
+}
+
+/**
+ * What the model is told in this mode: the body of the restricted agent, or the text the
+ * `SessionStart` hook adds. `subagentType` is the subagent type that keeps the MCP servers (none
+ * when the agent cannot start subagents); `instructions` is the client's `systemPrompt` text.
+ */
+function remoteInstructions(serverNames, { subagentType = null, instructions = '' } = {}) {
+  const others = serverNames.filter((name) => name !== EXEC_SERVER);
+  return [
     'You are a coding agent running inside Cindy. The project you are working on is on another computer, not on this one.',
     '',
     `You have no file or shell tools of your own in this task. Everything that reads or changes files, or runs commands, goes through the MCP server \`${EXEC_SERVER}\` (Bash, BashOutput, KillShell, Read, Write, Edit, NotebookEdit). Those tools run on the computer the project is on.`,
     ...(others.length
       ? [`The other MCP servers of this task (${others.map((name) => `\`${name}\``).join(', ')}) are Cindy's own tools on that computer. List a server's tools before you use them.`]
       : []),
-    ...(fullTools
-      ? [`To delegate, start a subagent with ${SUBAGENT_TOOL} and the type \`${AGENT_NAME}\`; it works the same way, through the same MCP servers.`]
+    ...(subagentType
+      ? [`To delegate, start a subagent with ${SUBAGENT_TOOL} and the type \`${subagentType}\`; it works the same way, through the same MCP servers.`]
       : []),
     '',
     '- Use the workspace path given in the conversation for file paths and as the directory of commands. Paths on this computer mean nothing for the project.',
@@ -300,16 +368,87 @@ function writeAgentDefinition(dir, serverNames, options) {
   fs.writeFileSync(path.join(agents, `${AGENT_NAME}.md`), agentDefinition(serverNames, options), 'utf8');
 }
 
+const escapeLiteral = (ch) => (/[.*+?^${}()|[\]\\]/.test(ch) ? `\\${ch}` : ch);
+const escapeInClass = (ch) => (/[\\\]^[-]/.test(ch) ? `\\${ch}` : ch);
+
+/**
+ * A regular expression (RE2, the syntax agy uses) matching every whole string except the exact
+ * `names` and those starting with one of `prefixes`. RE2 has no lookahead, so it walks a trie of
+ * the allowed strings: at each point a string leaves the trie (a character no allowed string has
+ * there, or an end where none ends) it is matched; below a prefix nothing is.
+ */
+function everythingExcept(names, prefixes) {
+  const node = () => ({ children: new Map(), end: false, open: false });
+  const root = node();
+  const add = (word, open) => {
+    let at = root;
+    for (const ch of word) {
+      if (at.open) return;
+      if (!at.children.has(ch)) at.children.set(ch, node());
+      at = at.children.get(ch);
+    }
+    if (open) {
+      at.open = true;
+      at.children.clear();
+    } else {
+      at.end = true;
+    }
+  };
+  for (const prefix of prefixes) add(prefix, true);
+  for (const name of names) add(name, false);
+  const build = (at) => {
+    const keys = [...at.children.keys()];
+    const branches = [keys.length ? `[^${keys.map(escapeInClass).join('')}].*` : '.+'];
+    for (const [ch, child] of at.children) {
+      if (!child.open) branches.push(`${escapeLiteral(ch)}${build(child)}`);
+    }
+    if (!at.end) branches.push('');
+    return `(?:${branches.join('|')})`;
+  };
+  return `(?s)^${build(root)}$`;
+}
+
+/** The tools the hook stops: all but those of the task's MCP servers and agy's harmless own tools. */
+function hookMatcher(serverNames) {
+  return everythingExcept(FULL_TOOLS, serverNames.map((name) => `mcp_${name.replace(/[^A-Za-z0-9_]/g, '_')}_`));
+}
+
+/**
+ * The hooks of a session under the default agent (see the top of this file): `PreToolUse` prints a
+ * fixed `deny` for every tool `hookMatcher` names, `SessionStart` prints the instructions and leaves
+ * the marker. Both only print files written here, from `.agents/`, where agy runs them.
+ */
+function writeRemoteHooks(dir, serverNames, { instructions = '' } = {}) {
+  const agents = path.join(dir, '.agents');
+  fs.mkdirSync(agents, { recursive: true });
+  fs.writeFileSync(path.join(agents, HOOK_DENY_FILE), `${JSON.stringify({ decision: 'deny', reason: HOOK_DENY_REASON })}\n`, 'utf8');
+  const text = remoteInstructions(serverNames, { subagentType: HOOKS_SUBAGENT_TYPE, instructions });
+  fs.writeFileSync(path.join(agents, HOOK_START_FILE), `${JSON.stringify({ injectSteps: [{ systemMessage: { systemMessage: text } }] })}\n`, 'utf8');
+  const hooks = {
+    [HOOK_NAME]: {
+      SessionStart: [{ type: 'command', command: `cat ${HOOK_START_FILE} && : > ${HOOK_MARKER_FILE}`, timeout: HOOK_TIMEOUT_SECONDS }],
+      PreToolUse: [{
+        matcher: hookMatcher(serverNames),
+        hooks: [{ type: 'command', command: `cat ${HOOK_DENY_FILE}`, timeout: HOOK_TIMEOUT_SECONDS }],
+      }],
+    },
+  };
+  fs.writeFileSync(path.join(agents, 'hooks.json'), `${JSON.stringify(hooks, null, 2)}\n`, 'utf8');
+  return path.join(agents, HOOK_MARKER_FILE);
+}
+
 /** The HTTP MCP servers of a session request that the agent can be given, in order, by unique name. */
 function usableServers(params) {
   const list = isObject(params) && Array.isArray(params.mcpServers) ? params.mcpServers : [];
   const servers = [];
   const dropped = [];
+  const normalizedNames = new Set();
   for (const server of list) {
     const name = isObject(server) && typeof server.name === 'string' ? server.name : '';
+    const normalized = name.replace(/[^A-Za-z0-9_]/g, '_');
     const usable = isObject(server) && server.type === 'http' && typeof server.url === 'string'
-      && SERVER_NAME.test(name) && !servers.some((item) => item.name === name) && servers.length < MAX_SERVERS;
-    if (usable) servers.push(server);
+      && SERVER_NAME.test(name) && !normalizedNames.has(normalized) && servers.length < MAX_SERVERS;
+    if (usable) { servers.push(server); normalizedNames.add(normalized); }
     else dropped.push(name || '(unnamed)');
   }
   return { servers, dropped };
@@ -330,14 +469,17 @@ function foreignSubagent(toolCall) {
   return type === AGENT_NAME ? null : `${SUBAGENT_TOOL} ${type || '(no type)'}`;
 }
 
-/** Keep the remote restriction on native file and command tools after normalizing MCP calls. */
-function inspectToolCall(toolCall, seen, serverNames = [], seenSafeTools = null) {
+/**
+ * Keep the remote restriction on native file and command tools after normalizing MCP calls. Under
+ * hooks (`options.hooks`) any subagent type may run: the hooks hold its tools in as well.
+ */
+function inspectToolCall(toolCall, seen, serverNames = [], seenSafeTools = null, options = {}) {
   if (!isObject(toolCall)) return { type: 'other' };
   const mcpCall = normalizeMcpToolCall(toolCall, seen, serverNames, {
     allowLegacyEnvelope: true, toolIdentity: remoteToolIdentity,
   });
   if (mcpCall) return { type: 'mcp', toolCall: mcpCall };
-  const subagent = foreignSubagent(toolCall);
+  const subagent = options.hooks ? null : foreignSubagent(toolCall);
   if (subagent) return { type: 'local', tool: subagent };
   const id = typeof toolCall.toolCallId === 'string' ? toolCall.toolCallId : null;
   const name = typeof toolCall.name === 'string' ? toolCall.name : '';
@@ -428,6 +570,14 @@ function startRemoteWorkspace(agyPath, host) {
   const seenSafeTools = new Set();
   let serverNames = [];
   const steering = createSteeringRelay();
+  /** The session runs under the default agent and the hooks (instead of the restricted agent). */
+  let hooked = false;
+  let resumeInstructions = '';
+  /** Under hooks: the marker the `SessionStart` hook leaves; checked once in a new session. */
+  let hookMarker = null;
+  let promptSent = false;
+  /** Under hooks: calls of agy's own tools that its hook stopped, not passed on to Cindy. */
+  const heldLocalCalls = new Map();
 
   const running = (child) => Boolean(child) && child.exitCode === null && child.signalCode === null;
 
@@ -468,6 +618,23 @@ function startRemoteWorkspace(agyPath, host) {
   const forwardClientLine = (line, parsed) => {
     const message = parsed === undefined ? parseLine(line) : parsed;
     if (message) {
+      if (message.method === 'session/prompt') promptSent = true;
+      if (message.method === 'session/prompt' && resumeInstructions) {
+        const params = isObject(message.params) ? message.params : {};
+        const prompt = Array.isArray(params.prompt) ? params.prompt : [];
+        const instructions = resumeInstructions.replace(/@\[/g, '@\\[');
+        resumeInstructions = '';
+        const amended = { ...message, params: { ...params, prompt: [
+          { type: 'text', text: `Additional instructions for this resumed task:\n${instructions}\n` }, ...prompt,
+        ] } };
+        errorRelay.request(amended);
+        const handled = steering.handleClientMessage(amended);
+        if (handled) {
+          if (handled.toClient) toClient(handled.toClient);
+          if (handled.toAgent) toAgent(handled.toAgent);
+        } else toAgent(amended);
+        return;
+      }
       errorRelay.request(message);
       const handled = steering.handleClientMessage(message);
       if (handled) {
@@ -526,7 +693,7 @@ function startRemoteWorkspace(agyPath, host) {
   };
 
   /** Ends the task with a reason; nothing of agy is left running. */
-  const abandon = (line, sessionId) => {
+  const abandon = (line, sessionId, text = STOPPED_MESSAGE) => {
     if (stopCode !== null || finished) return;
     stopCode = REMOTE_WORKSPACE_EXIT_CODE;
     releaseWarmup();
@@ -534,7 +701,7 @@ function startRemoteWorkspace(agyPath, host) {
       toClient({
         jsonrpc: '2.0',
         method: 'session/update',
-        params: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: STOPPED_MESSAGE } } },
+        params: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } } },
       });
     }
     try {
@@ -564,9 +731,25 @@ function startRemoteWorkspace(agyPath, host) {
   });
 
   const launch = (args, launchOptions) => {
+    const isolate = !host.accountDir && hooksSupported(host.agyVersion);
+    const geminiDir = path.join(dir, '.gemini');
+    if (isolate) {
+      // Keep conversation history available when Cindy resumes in a fresh launch directory.
+      // Configuration and plugins stay in the private Gemini directory.
+      const appData = path.join(geminiDir, 'antigravity-cli');
+      const original = path.join(os.homedir(), '.gemini', 'antigravity-cli');
+      fs.mkdirSync(appData, { recursive: true });
+      for (const name of ['conversations', 'brain']) {
+        const source = path.join(original, name);
+        fs.mkdirSync(source, { recursive: true });
+        const link = path.join(appData, name);
+        if (!fs.existsSync(link)) fs.symlinkSync(source, link, 'dir');
+      }
+    }
     const child = spawnAgy(agyPath, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: dir,
+      ...(isolate ? { isolatedGeminiDir: geminiDir } : {}),
       ...(host.accountDir ? { accountDir: host.accountDir } : {}),
       ...(launchOptions?.logFile ? { logFile: launchOptions.logFile } : {}),
     });
@@ -637,11 +820,20 @@ function startRemoteWorkspace(agyPath, host) {
       process.stderr.write(`[agy-acp] These MCP servers cannot be given to Antigravity and were left out: ${dropped.join(', ')}\n`);
     }
     try {
-      writeAgentDefinition(dir, servers.map((server) => server.name), {
-        fullTools: fullToolsSupported(host.agyVersion),
-        instructions: instructions.text,
-      });
-      agent = launch([...acpArgs, '--agent', AGENT_NAME], sessionLog ? { logFile: sessionLog.file } : undefined);
+      const names = servers.map((server) => server.name);
+      // The empty Gemini directory was verified with the macOS keychain login. Other account
+      // storage and Linux have not been checked; they retain the restricted custom agent.
+      hooked = !host.accountDir && hooksSupported(host.agyVersion);
+      if (hooked) {
+        const marker = writeRemoteHooks(dir, names, { instructions: instructions.text });
+        // Only a new session runs `SessionStart`; a resumed one already has the instructions.
+        hookMarker = request.method === 'session/new' ? marker : null;
+        if (request.method !== 'session/new') resumeInstructions = instructions.text;
+      } else {
+        writeAgentDefinition(dir, names, { fullTools: fullToolsSupported(host.agyVersion), instructions: instructions.text });
+      }
+      const hookArgs = hooked ? [...acpArgs, '--gemini-dir', path.join(dir, '.gemini')] : [...acpArgs, '--agent', AGENT_NAME];
+      agent = launch(hookArgs, sessionLog ? { logFile: sessionLog.file } : undefined);
       // Started only once agy is: a launch that throws leaves no warm-up running. session/new waits for
       // it (see onAgentLine).
       warmup = warmMcpServers(servers, { log: (text) => process.stderr.write(`[agy-acp] ${text}\n`) });
@@ -695,6 +887,8 @@ function startRemoteWorkspace(agyPath, host) {
     seenCalls.clear();
     seenSteps.clear();
     seenSafeTools.clear();
+    heldLocalCalls.clear();
+    hookMarker = null;
     // agy could not open the session: end warmed sessions it never took over at once.
     releaseWarmup();
     clearTimeout(forceTimer);
@@ -771,6 +965,25 @@ function startRemoteWorkspace(agyPath, host) {
     const isPermission = message.method === 'session/request_permission' && message.id !== undefined;
     const update = message.method === 'session/update' && params && isObject(params.update) ? params.update : null;
     const isToolUpdate = Boolean(update) && (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update');
+    const sessionId = params && typeof params.sessionId === 'string' ? params.sessionId : null;
+    if (hookMarker && promptSent && (isPermission || (update && MODEL_OUTPUT_UPDATES.has(update.sessionUpdate)))) {
+      // The first turn of a new session is under way, so `SessionStart` has run: no marker, no hooks.
+      if (!fs.existsSync(hookMarker)) {
+        abandon('[agy-acp] Antigravity did not load the hooks that keep its own tools off in a task whose files are on another computer. The task was stopped.',
+          sessionId, HOOKS_NOT_LOADED_MESSAGE);
+        return;
+      }
+      hookMarker = null;
+    }
+    const callId = isToolUpdate && typeof update.toolCallId === 'string' ? update.toolCallId : null;
+    if (hooked && callId && heldLocalCalls.has(callId)) {
+      if (update.status === 'completed') {
+        abandon(`[agy-acp] Antigravity ran its own tool "${update.name || heldLocalCalls.get(callId)}" in a task whose files are on another computer although its hook should have stopped it. The task was stopped.`, sessionId);
+      } else if (update.status === 'failed') {
+        heldLocalCalls.delete(callId);
+      }
+      return;
+    }
     if (!params || (!isPermission && !isToolUpdate)) {
       if (update) {
         const action = errorRelay.notification(message);
@@ -784,7 +997,16 @@ function startRemoteWorkspace(agyPath, host) {
       toClientLine(line, agent.stdout);
       return;
     }
-    const verdict = inspectToolCall(isPermission ? params.toolCall : update, seenCalls, serverNames, seenSafeTools);
+    const verdict = inspectToolCall(isPermission ? params.toolCall : update, seenCalls, serverNames, seenSafeTools, { hooks: hooked });
+    if (verdict.type === 'local' && hooked && !isPermission && update.status !== 'completed') {
+      // agy reports the call before its hook answers. The hook stops it (the call ends `failed` and the
+      // model is told to use Cindy's tools), so Cindy is not shown it; one that completes ends the task.
+      if (callId && update.status !== 'failed') {
+        if (heldLocalCalls.size >= 2_000) heldLocalCalls.delete(heldLocalCalls.values().next().value);
+        heldLocalCalls.set(callId, verdict.tool);
+      }
+      return;
+    }
     if (verdict.type === 'local') {
       if (isPermission) {
         const options = Array.isArray(params.options) ? params.options : [];
@@ -907,12 +1129,16 @@ module.exports = {
   FULL_TOOLS,
   FULL_TOOLS_MIN_VERSION,
   GUEST_WORKSPACE_ARG,
+  HOOKS_MIN_VERSION,
   MIN_VERSION,
   REMOTE_WORKSPACE_ARG,
   REMOTE_WORKSPACE_EXIT_CODE,
   agentDefinition,
   completeInitializeResult,
+  everythingExcept,
   fullToolsSupported,
+  hookMatcher,
+  hooksSupported,
   inspectToolCall,
   isGuestWorkspaceLaunch,
   isRemoteWorkspaceLaunch,
