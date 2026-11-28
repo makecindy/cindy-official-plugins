@@ -1,0 +1,30 @@
+{
+  "name": "Cloudflare DNS",
+  "description": "查询 Cloudflare 区域和 DNS 记录，预览并确认单条 A、AAAA 或 CNAME 记录的变更。",
+  "whenToUse": "查询 Cloudflare 区域和 DNS 记录，预览并确认单条 A、AAAA 或 CNAME 记录的变更。",
+  "tools": {
+    "list_zones": {
+      "description": "列出区域"
+    },
+    "list_dns_records": {
+      "description": "列出 DNS 记录"
+    },
+    "create_dns_record": {
+      "description": "创建单条记录"
+    },
+    "update_dns_record": {
+      "description": "更新单条记录"
+    },
+    "delete_dns_record": {
+      "description": "删除单条记录"
+    }
+  },
+  "network": {
+    "secrets": {
+      "cloudflare_token": {
+        "label": "Cloudflare API Token",
+        "hint": "令牌限指定区域，查询使用 Zone Read 和 DNS Read，写入使用 DNS Edit。"
+      }
+    }
+  }
+}

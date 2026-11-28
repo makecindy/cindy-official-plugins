@@ -1,0 +1,30 @@
+{
+  "name": "Cloudflare DNS",
+  "description": "Read Cloudflare zones and DNS records. Preview and confirm single A, AAAA and CNAME changes.",
+  "whenToUse": "Read Cloudflare zones and DNS records. Preview and confirm single A, AAAA and CNAME changes.",
+  "tools": {
+    "list_zones": {
+      "description": "List zones"
+    },
+    "list_dns_records": {
+      "description": "List DNS records"
+    },
+    "create_dns_record": {
+      "description": "Create a record"
+    },
+    "update_dns_record": {
+      "description": "Update a record"
+    },
+    "delete_dns_record": {
+      "description": "Delete a record"
+    }
+  },
+  "network": {
+    "secrets": {
+      "cloudflare_token": {
+        "label": "Cloudflare API Token",
+        "hint": "Limit token to selected zones: Zone Read and DNS Read for queries, or DNS Edit for writes."
+      }
+    }
+  }
+}

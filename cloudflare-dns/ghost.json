@@ -1,0 +1,284 @@
+{
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.64",
+  "id": "cloudflare-dns",
+  "name": "Cloudflare DNS",
+  "version": "0.1.0",
+  "description": "Read Cloudflare zones and DNS records. Preview and confirm single A, AAAA and CNAME changes.",
+  "whenToUse": "Read Cloudflare zones and DNS records. Preview and confirm single A, AAAA and CNAME changes.",
+  "command": "cloudflare-dns",
+  "entry": "main.js",
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "confirm": true,
+  "network": {
+    "hosts": [
+      "api.cloudflare.com"
+    ],
+    "secrets": [
+      {
+        "key": "cloudflare_token",
+        "label": "Cloudflare API Token",
+        "hint": "Limit token to selected zones: Zone Read and DNS Read for queries, or DNS Edit for writes.",
+        "inject": {
+          "header": "Authorization",
+          "format": "Bearer {value}",
+          "hosts": [
+            "api.cloudflare.com"
+          ]
+        },
+        "source": "user"
+      }
+    ]
+  },
+  "tools": [
+    {
+      "name": "list_zones",
+      "description": "List zones",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "description": "Filter by DNS name."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "list_dns_records",
+      "description": "List DNS records",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "zone_id": {
+            "type": "string"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "description": "Filter by DNS name."
+          }
+        },
+        "required": [
+          "zone_id"
+        ]
+      }
+    },
+    {
+      "name": "create_dns_record",
+      "description": "Create a record",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "zone_id": {
+            "type": "string"
+          },
+          "record": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "A",
+                  "AAAA",
+                  "CNAME"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "description": "Fully qualified DNS name (ASCII/Punycode)."
+              },
+              "content": {
+                "type": "string"
+              },
+              "ttl": {
+                "type": "integer"
+              },
+              "proxied": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "name",
+              "content",
+              "ttl",
+              "proxied"
+            ],
+            "description": "Complete proposed DNS fields. TTL 1 means automatic."
+          }
+        },
+        "required": [
+          "zone_id",
+          "record"
+        ]
+      }
+    },
+    {
+      "name": "update_dns_record",
+      "description": "Update a record",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "zone_id": {
+            "type": "string"
+          },
+          "before": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "A",
+                  "AAAA",
+                  "CNAME"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "description": "Fully qualified DNS name (ASCII/Punycode)."
+              },
+              "content": {
+                "type": "string"
+              },
+              "ttl": {
+                "type": "integer"
+              },
+              "proxied": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "name",
+              "content",
+              "ttl",
+              "proxied"
+            ],
+            "description": "Copy the existing record from list_dns_records."
+          },
+          "record": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "A",
+                  "AAAA",
+                  "CNAME"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "description": "Fully qualified DNS name (ASCII/Punycode)."
+              },
+              "content": {
+                "type": "string"
+              },
+              "ttl": {
+                "type": "integer"
+              },
+              "proxied": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "name",
+              "content",
+              "ttl",
+              "proxied"
+            ],
+            "description": "Complete proposed DNS fields. TTL 1 means automatic."
+          }
+        },
+        "required": [
+          "zone_id",
+          "before",
+          "record"
+        ]
+      }
+    },
+    {
+      "name": "delete_dns_record",
+      "description": "Delete a record",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "zone_id": {
+            "type": "string"
+          },
+          "before": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "A",
+                  "AAAA",
+                  "CNAME"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "description": "Fully qualified DNS name (ASCII/Punycode)."
+              },
+              "content": {
+                "type": "string"
+              },
+              "ttl": {
+                "type": "integer"
+              },
+              "proxied": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "name",
+              "content",
+              "ttl",
+              "proxied"
+            ],
+            "description": "Copy the existing record from list_dns_records."
+          }
+        },
+        "required": [
+          "zone_id",
+          "before"
+        ]
+      }
+    }
+  ],
+  "settingsHtml": "settings.html",
+  "setup": {
+    "requires": [
+      {
+        "anyOf": [
+          "secret:cloudflare_token"
+        ]
+      }
+    ]
+  }
+}

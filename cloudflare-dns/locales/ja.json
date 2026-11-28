@@ -1,0 +1,30 @@
+{
+  "name": "Cloudflare DNS",
+  "description": "Cloudflare のゾーンと DNS レコードを取得し、A、AAAA、CNAME の変更を1件ずつ確認して適用します。",
+  "whenToUse": "Cloudflare のゾーンと DNS レコードを取得し、A、AAAA、CNAME の変更を1件ずつ確認して適用します。",
+  "tools": {
+    "list_zones": {
+      "description": "ゾーン一覧"
+    },
+    "list_dns_records": {
+      "description": "DNS レコード一覧"
+    },
+    "create_dns_record": {
+      "description": "レコードを作成"
+    },
+    "update_dns_record": {
+      "description": "レコードを更新"
+    },
+    "delete_dns_record": {
+      "description": "レコードを削除"
+    }
+  },
+  "network": {
+    "secrets": {
+      "cloudflare_token": {
+        "label": "Cloudflare API Token",
+        "hint": "対象ゾーンだけに限定し、照会には Zone Read と DNS Read、変更には DNS Edit を使用します。"
+      }
+    }
+  }
+}
