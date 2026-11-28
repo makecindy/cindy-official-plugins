@@ -77,9 +77,11 @@ async function setKeepAliveTab(id) {
   if (id == null) await agentStore.remove?.('agentKeepAliveTab')?.catch?.(() => {});
   else await agentStore.set?.({agentKeepAliveTab:id})?.catch?.(() => {});
 }
-async function removeTabSafely(tab) {
+const isUntouchedKeepAliveTab = tab => tab?.url === 'about:blank' && (!tab.pendingUrl || tab.pendingUrl === 'about:blank');
+async function removeTabSafely(tab, stillSafeToClose = () => true) {
   const allTabs = await chrome.tabs.query({windowType:'normal'}).catch(() => chrome.tabs.query({}));
   const others = (allTabs || []).filter(t => t.id !== tab.id);
+  let placeholderId = null;
   if (others.length === 0) {
     // Closing the last browser tab on macOS drops Chrome to 0 windows and lets
     // DestroyProfileOnBrowserClose unload the Profile, killing the extension and wiping
@@ -87,9 +89,21 @@ async function removeTabSafely(tab) {
     // in the same window so the window and session survive, and retire it on the next open.
     const createOpts = {url:'about:blank',active:false,...(tab.windowId != null ? {windowId:tab.windowId} : {})};
     const placeholder = await chrome.tabs.create(createOpts);
-    if (placeholder?.id != null) await setKeepAliveTab(placeholder.id);
+    if (placeholder?.id != null) { placeholderId = placeholder.id; await setKeepAliveTab(placeholderId); }
+  }
+  // Cleanup may have waited for query/create/storage while the page became active again.
+  // Read the current tab, then check the caller's live record immediately before removal.
+  const current = await chrome.tabs.get(tab.id).catch(() => null);
+  if (!current || !stillSafeToClose(current)) {
+    if (placeholderId != null) {
+      const placeholder = await chrome.tabs.get(placeholderId).catch(() => null);
+      if (isUntouchedKeepAliveTab(placeholder)) await chrome.tabs.remove(placeholderId).catch(() => {});
+      await setKeepAliveTab(null);
+    }
+    return false;
   }
   await chrome.tabs.remove(tab.id);
+  return true;
 }
 async function agentWindow() {
   if (agentWindowId == null) agentWindowId = (await agentStore.get('agentWindow')).agentWindow ?? null;
@@ -124,7 +138,7 @@ async function openInAgentWindow(url) {
   if (placeholderId != null && placeholderId !== tab?.id) {
     const placeholder = await chrome.tabs.get(placeholderId).catch(() => null);
     await setKeepAliveTab(null);
-    if (placeholder && placeholder.windowId === tab?.windowId && (placeholder.url === 'about:blank' || placeholder.pendingUrl === 'about:blank')) {
+    if (placeholder && placeholder.windowId === tab?.windowId && isUntouchedKeepAliveTab(placeholder)) {
       await chrome.tabs.remove(placeholderId).catch(() => {});
     }
   }
@@ -699,7 +713,12 @@ async function closeOwned(url) {
   if (tab) {
     // Keep protected tabs counted. Deleting only the ledger entry made the old three-tab limit illusory.
     if (!rec.created || rec.claimed || tab.active || tab.url !== rec.actualUrl) return false;
-    try {await removeTabSafely(tab);} catch {return false;}
+    try {
+      const removed = await removeTabSafely(tab, current =>
+        !pageJobActive && owned.get(url) === rec && Date.now()-rec.used > 600000 &&
+        rec.created && !rec.claimed && !current.active && current.url === rec.actualUrl);
+      if (!removed) return false;
+    } catch {return false;}
   }
   owned.delete(url); await remember(); return true;
 }

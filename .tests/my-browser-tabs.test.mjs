@@ -22,7 +22,7 @@ function harness(documentReason=()=>'NAVIGATION_UNOBSERVED') {
     Date:class extends Date{static now(){return clock;}},setTimeout(fn,ms){clock+=ms;queueMicrotask(fn);return 0;},clearTimeout(){}};
   // Disable only the network bootstrap; execute the actual production tab manager, not a copied implementation.
   vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,'')+'\nglobalThis.tabTest={ensureTab,owned,cleanup,handle,videoIdentity,setJob:value=>{pageJobActive=value;}};',context);
-  return {cleanup:context.tabTest.cleanup,renew:()=>{for(const rec of context.tabTest.owned.values())rec.used=clock;},setJob:context.tabTest.setJob,advance:ms=>{clock+=ms;},deferGet:()=>{const original=chrome.tabs.get;let release;chrome.tabs.get=async id=>{const tab=await original(id);await new Promise(r=>{release=r;});return tab;};return ()=>release();},list:args=>context.tabTest.handle({action:'tabs',payload:args},P.defaults(),{}),handle:url=>context.tabTest.handle({action:'text',payload:{url}},P.defaults(),{base:'http://fixture',session:'fixture'}),run:(action,payload)=>context.tabTest.handle({action,payload},P.defaults(),{base:'http://fixture',session:'fixture'}),state,tabs,data,creates:()=>creates,videoIdentity:context.tabTest.videoIdentity,read:url=>context.tabTest.ensureTab(url,P.normalizePolicy({read:{block:[]},interact:{allow:[],block:[]}}), 'text'),focus:async id=>{activate({tabId:id});await Promise.resolve();await Promise.resolve();}};
+  return {cleanup:context.tabTest.cleanup,renew:()=>{for(const rec of context.tabTest.owned.values())rec.used=clock;},setJob:context.tabTest.setJob,advance:ms=>{clock+=ms;},deferGet:()=>{const original=chrome.tabs.get;let release;chrome.tabs.get=async id=>{const tab=await original(id);await new Promise(r=>{release=r;});return tab;};return ()=>release();},deferQuery:()=>{const original=chrome.tabs.query;let release;chrome.tabs.query=async args=>{const result=await original(args);await new Promise(r=>{release=r;});return result;};return ()=>release();},list:args=>context.tabTest.handle({action:'tabs',payload:args},P.defaults(),{}),handle:url=>context.tabTest.handle({action:'text',payload:{url}},P.defaults(),{base:'http://fixture',session:'fixture'}),run:(action,payload)=>context.tabTest.handle({action,payload},P.defaults(),{base:'http://fixture',session:'fixture'}),state,tabs,data,creates:()=>creates,videoIdentity:context.tabTest.videoIdentity,read:url=>context.tabTest.ensureTab(url,P.normalizePolicy({read:{block:[]},interact:{allow:[],block:[]}}), 'text'),focus:async id=>{activate({tabId:id});await Promise.resolve();await Promise.resolve();}};
 }
 test('redirected load timeout retains one tab across repeated reads and later readiness',async()=>{
   const h=harness();h.state.redirect=true;h.state.loading=true;
@@ -124,6 +124,18 @@ for (const changed of ['job', 'renewed']) test('idle cleanup rechecks '+changed+
   assert.equal(h.tabs.size, 1, 'a tab used by a new job is not closed by stale cleanup');
 });
 
+for (const changed of ['job', 'renewed', 'claimed']) test('idle cleanup preserves a reused page after the last-tab query: '+changed, async () => {
+  const h = harness(); await h.read('https://example.test/idle'); h.advance(600001);
+  const release = h.deferQuery(), pending = h.cleanup();
+  for (let i=0;i<12;i++) await Promise.resolve();
+  if (changed === 'job') h.setJob(true);
+  else if (changed === 'renewed') h.renew();
+  else { h.tabs.get(1).active = true; await h.focus(1); }
+  release(); await pending;
+  assert.equal(h.tabs.size, 1, 'a reused page remains open and no blank placeholder is left behind');
+  assert.equal(h.tabs.get(1).url, 'https://example.test/idle');
+});
+
 // Regression: closing the last remaining browser tab dropped macOS Chrome to 0 windows,
 // triggering DestroyProfileOnBrowserClose (killing the extension mid-job and wiping session cookies).
 test('closing the last tab keeps a blank placeholder window and retires it on the next open', async () => {
@@ -162,4 +174,14 @@ test('idle cleanup keeps a placeholder tab instead of closing the last browser w
   await h.cleanup();
   assert.equal(h.tabs.size, 1);
   assert.equal([...h.tabs.values()][0].url, 'about:blank');
+});
+
+test('opening a page preserves a keep-alive tab that has begun navigating', async () => {
+  const h = harness();
+  const first = await h.run('open', {url:'https://example.test/first'});
+  await h.run('close', {url:'https://example.test/first', tabId:first.tabId});
+  const placeholder = [...h.tabs.values()][0];
+  placeholder.pendingUrl = 'https://example.test/user';
+  await h.run('open', {url:'https://example.test/next'});
+  assert.equal(h.tabs.get(placeholder.id)?.pendingUrl, 'https://example.test/user');
 });
