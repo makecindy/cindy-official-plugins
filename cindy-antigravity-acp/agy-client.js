@@ -7,16 +7,14 @@
  * agy-acp.js.
  */
 
-const { ACP_ARGS, killTree, resolveAgy, spawnAgy } = require('./resolve-agy.js');
+const { acpArgsFor, killTree, resolveAgy, spawnAgy } = require('./resolve-agy.js');
 
 const REQUEST_TIMEOUT_MS = 45_000;
 const STOP_GRACE_MS = 3_000;
 const MAX_TEXT = 200;
 
 /** ACP's auth_required error (-32000), or an agent message saying sign-in is needed. */
-function isSignInRequired(error) {
-  return Boolean(error) && (error.code === -32000 || /auth|sign.?in|log.?in/i.test(String(error.message || '')));
-}
+const { isSignInRequired } = require('./agy-account-errors.js');
 
 function text(value, max) {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : undefined;
@@ -98,7 +96,7 @@ function connect(child) {
 async function openAgy(options) {
   const agyPath = resolveAgy(options);
   if (!agyPath) return null;
-  const child = spawnAgy(agyPath, ACP_ARGS, options);
+  const child = spawnAgy(agyPath, acpArgsFor(options), options);
   if (options && typeof options.onSpawn === 'function') options.onSpawn(child);
   child.stderr.resume();
   const call = connect(child);

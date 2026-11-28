@@ -14,6 +14,8 @@ identity 是所有业务手册的前置定位能力。它只确认登录态、�
 
 **登录链接交接 — 把 `verification_url` 按两行原样提供给用户:第一行仅写"请完成授权:",第二行仅写 URL(不要 Markdown 链接,不重复);随后立即 `call_tool(name:"auth login-wait", args:{login_handle})` 持续轮询,不要等待用户回复;只有运行环境无法保活轮询进程时,才请用户完成授权后通知你。登录成功后向用户只回复"登录成功"。**
 
+查询厂商名册、核对指定成员的游戏权限、调整成员角色或查询变更历史,转[厂商成员与权限](taptap-suite/references/taptap-member/MANUAL.md)。
+
 身份发现中的页面入口优先使用本次 `app +list` / `overview` 每个游戏返回的 `page_url`;接口缺失时,可用本次已确认的 `developerId`、`appId` 和当前环境 `serverUrl` 推导规范资料页 `https://<current-server-host>/v3/<developerId>/app/<appId>/store/update`。推导入口必须标记为非服务端返回,不得使用 Capability API 域名 `api.tapapis.cn`。
 
 ## 快速决策

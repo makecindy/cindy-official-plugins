@@ -27,7 +27,7 @@ function fixture(page,{steps=1}={}){
   vm.createContext(context);
   vm.runInContext(fs.readFileSync('cindy-simulator/node/control-model.js','utf8'),context);
   vm.runInContext(fs.readFileSync(`cindy-simulator/${page}.js`,'utf8'),context);
-  return {messages,calls,nodes,pages:context.CindySimPages,create:options=>context.CindySimPages.createDevice(options),finish:(value,index=0)=>results[index].finish(value),fail:(error,index)=>results[index].fail(error),intervals,timers,
+  return {messages,calls,nodes,model:context.CindySimModel,pages:context.CindySimPages,create:options=>context.CindySimPages.createDevice(options),finish:(value,index=0)=>results[index].finish(value),fail:(error,index)=>results[index].fail(error),intervals,timers,
     advance:async ms=>{now+=ms;for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.fn();}await flush();},
     rpc:(action,extra={})=>page==='pages'?context.CindySimPages.rpc(action,{sessionId:'task-1',udid:'device-1',...extra}):vm.runInContext(`rpc(${JSON.stringify(action)},${JSON.stringify(extra)})`,context),
     tick:()=>{for(const {fn,ms} of [...intervals.values()])if(ms===500)fn();},
@@ -122,15 +122,16 @@ test('creation families keep Android, iPhone, TV and Vision runtimes separate af
 });
 
 test('creation hands the selected iOS mode to the existing next-boot choice without starting a device',async()=>{
- for(const mode of ['saving','standard','minimal']){
-  const f=fixture('pages',{steps:3});f.start();const pending=f.create({lang:'zh-CN',family:'iphone'});await flush();f.tick();await flush();
+ for(const scope of ['', 'studio'])for(const mode of ['saving','standard','minimal']){
+  const f=fixture('pages',{steps:3});f.start();const pending=f.create({lang:'zh-CN',family:'iphone',scope});await flush();f.tick();await flush();
   f.finish({ok:true,deviceTypes:[{identifier:'t.iPhone',name:'iPhone'}],runtimes:[{identifier:'r.iOS-27',name:'iOS 27',version:'27',supportedDeviceTypes:['t.iPhone']}]});await flush();
   assert.equal(f.nodes.find(n=>n['data-mode']==='saving')['aria-pressed'],'true');
   f.nodes.find(n=>n['data-mode']===mode).listeners.click();
   const submission=f.nodes.find(n=>n.tag==='form').listeners.submit({preventDefault(){}});await flush();f.tick();await flush();
   assert.equal(f.calls[1].method,'create_device');
   f.finish({ok:true,udid:'created'},1);await submission;await pending;
-  const args=f.pages.memoryArgs({udid:'created',runtime:'r.iOS-27'});
+  const args=f.pages.memoryArgs({udid:'created',runtime:'r.iOS-27'},{scope});
+  if(scope)assert.equal(f.pages.memoryArgs({udid:'created',runtime:'r.iOS-27'}).memoryMode,'saving');
   assert.equal(args.memoryMode,mode);assert.equal(f.calls.length,2,'creation never boots implicitly');
   const boot=f.rpc('boot',{udid:'created',...args});await flush();f.tick();await flush();
   assert.equal(f.calls[2].params.memoryMode,mode);f.finish({ok:true},2);await boot;
@@ -144,7 +145,7 @@ test('shared create sheet preserves backend errors and uses platform-correct fal
       runtimes:[{identifier:platform==='android'?'android:36':'ios',platform,version:'36',name:'Test OS'}]});await flush();
     const form=f.nodes.find(n=>n.tag==='form'),error=f.nodes.find(n=>n.className==='sheet-error'),submit=f.nodes.find(n=>n.type==='submit');
     const operation=form.listeners.submit({preventDefault(){}});await flush();f.tick();await flush();
-    f.finish({ok:false,...(detail?{message:'ENOSPC: device metadata could not be written'}:{})},1);await operation;
+    f.finish({ok:false,execution:'not_executed',...(detail?{message:'ENOSPC: device metadata could not be written'}:{})},1);await operation;
     if(detail)assert.equal(error.textContent,'ENOSPC: device metadata could not be written');
     else assert.equal(error.textContent.includes('Xcode'),platform==='ios');
     assert.equal(submit.disabled,false);assert.equal(f.calls.length,2);assert.equal(f.nodes.find(n=>n.tag==='dialog').removed,undefined);
@@ -159,6 +160,58 @@ test('shared create sheet preserves backend errors and uses platform-correct fal
     assert.equal(f.nodes.find(n=>n.className==='sheet-error').textContent,'Android SDK metadata unreadable');
     f.nodes.find(n=>n.tag==='dialog').listeners.cancel({preventDefault(){}});assert.equal(await pending,null);
   }
+});
+
+test('creation uncertainty uses the correct computer notice without replay; known failures retain retry advice',async()=>{
+ const notices={
+  en:{local:"Could not confirm whether the device was created. Check the local device list before taking further action.",remote:"Could not confirm whether the device was created. Check the remote computer's device list before taking further action."},
+  'zh-CN':{local:'无法确认设备是否已创建。请先检查本机设备列表，再决定下一步。',remote:'无法确认设备是否已创建。请先检查远程电脑的设备列表，再决定下一步。'}
+ };
+ for(const lang of ['en','zh-CN'])for(const platform of ['ios','android'])for(const remote of [false,true])
+ for(const outcome of ['unknown','timeout','missing','throw','not_executed']){
+  const f=fixture('pages',{steps:3}),calls=[];
+  const catalog={ok:true,deviceTypes:[{identifier:platform==='android'?'android:phone':'iphone',platform,name:'Test phone',family:'iphone'}],
+   runtimes:[{identifier:platform==='android'?'android:36':'ios',platform,version:'36',name:'Test OS'}]};
+  let finish,fail;
+  const response=new Promise((resolve,reject)=>{finish=resolve;fail=reject;});
+  const call=async action=>{calls.push(action);return action==='catalog'?catalog:calls.length===2?response:{ok:true,udid:'created'};};
+  if(!remote)f.start();
+  const pending=f.create({lang,family:'any',...(remote?{call}:{})});await flush();
+  if(!remote){f.tick();await flush();f.finish(catalog);await flush();}
+  const form=f.nodes.find(n=>n.tag==='form'),error=f.nodes.find(n=>n.className==='sheet-error'),submit=f.nodes.find(n=>n.type==='submit');
+  const operation=form.listeners.submit({preventDefault(){}});await flush();f.tick();await flush();
+  if(outcome==='timeout'){
+   if(remote)fail(Object.assign(Error('No response'),{code:'TIMEOUT'}));
+   else await f.advance(125000); // Exercise the actual page RPC's post-dispatch timeout.
+  }else if(outcome==='throw'){
+   if(remote)fail(Error('connection lost; try again'));
+   else f.fail(Error('connection lost; try again'),1);
+  }else{
+   const result=outcome==='missing'?(remote?undefined:{ok:false}):{ok:false,execution:outcome,message:outcome==='unknown'?'Not created. Try again.':undefined};
+   if(remote)finish(result);else f.finish(result,1);
+  }
+  await operation;
+  if(outcome==='not_executed'){
+   assert.match(error.textContent,/重试|try again/);
+   assert.equal(error.textContent.includes('Xcode'),platform==='ios');
+  }else assert.equal(error.textContent,notices[lang][remote?'remote':'local'],`${lang}/${platform}/${remote}/${outcome}`);
+  assert.equal(submit.disabled,false);
+  assert.equal(f.nodes.find(n=>n.tag==='dialog').removed,undefined);
+  if(outcome==='timeout'&&!remote){f.finish({ok:true,udid:'late-created'},1);await flush();assert.equal(error.textContent,notices[lang].local,'a late reply cannot replace the settled unknown notice');}
+  for(let i=0;i<3;i++){f.tick();await flush();}
+  assert.equal(remote?calls.length:f.calls.length,2,'one catalog and one create; never automatically replay');
+  const success=form.listeners.submit({preventDefault(){}});await flush();f.tick();await flush();
+  if(!remote)f.finish({ok:true,udid:'created'},2);
+  await success;assert.equal((await pending).udid,'created','user can explicitly create after checking the list');
+  assert.equal(remote?calls.length:f.calls.length,3);
+ }
+ for(const remote of [false,true]){
+  const f=fixture('pages');if(!remote)f.start();
+  const pending=f.create({family:'any',call:remote?async()=>{throw Error('Catalog unavailable');}:null});await flush();
+  if(!remote){f.tick();await flush();f.finish({ok:false,execution:'unknown',message:'Catalog unavailable'});await flush();}
+  assert.equal(f.nodes.find(n=>n.className==='sheet-error').textContent,'Catalog unavailable','catalog failure never uses a creation notice');
+  f.nodes.find(n=>n.tag==='dialog').listeners.cancel({preventDefault(){}});await pending;
+ }
 });
 
 test('startup probes never replay slow page or settings operations, on success or failure',async()=>{
@@ -233,4 +286,37 @@ test('compound task actions retain completed evidence across rejected, timed out
   else assert.ok(result[action==='task_create'?'taskBindingError':'taskStateError']);
   assert.deepEqual(f.calls.map(c=>c.method),action==='task_boot'?['boot','task_state']:['create_device','task_bind']);
  }
+});
+
+
+test('memory controls keep same-ID choices and restart requests on their owning computer',async()=>{
+ const f=fixture('pages'),d={udid:'11111111-1111-4111-8111-111111111111',name:'iPhone',runtime:'iOS-27',state:'Booted',memoryMode:{mode:'saving',verified:true}};
+ const requests=[],choices=[];
+ f.model.showMemoryDetails=(_device,_lang,choice)=>choices.push(choice);
+ const studio={scope:'studio',request:async(action,params)=>{requests.push({peer:'studio',action,params});return {ok:true};}};
+ const laptop={scope:'laptop',request:async(action,params)=>{requests.push({peer:'laptop',action,params});return {ok:true};}};
+ for(const [context,mode] of [[{},'minimal'],[studio,'standard'],[laptop,'saving']]){
+  f.pages.memoryBadge(d,'en',false,false,context).listeners.click();
+  choices.at(-1).onChange(mode);
+ }
+ assert.equal(f.pages.memoryArgs(d).memoryMode,'minimal');
+ assert.equal(f.pages.memoryArgs(d,studio).memoryMode,'standard');
+ assert.equal(f.pages.memoryArgs(d,laptop).memoryMode,'saving');
+ // A dialog keeps its original route even if the task selects another side later.
+ await choices[1].onRestart('standard');await choices[2].onRestart('saving');
+ assert.deepEqual(requests.map(r=>[r.peer,r.action,r.params.udid,r.params.memoryMode]),[
+  ['studio','restart_device',d.udid,'standard'],['laptop','restart_device',d.udid,'saving']]);
+ assert.equal(f.messages.length,0,'remote controls never fall back to the local bridge');
+ f.pages.rememberMemoryChoice(d.udid,'minimal',studio);
+ assert.equal(f.pages.memoryArgs(d,studio).memoryMode,'minimal');
+ assert.equal(f.pages.memoryArgs(d,laptop).memoryMode,'saving');
+ f.pages.memoryPicker({...d,state:'Shutdown'},'en',false,laptop);
+ f.nodes.filter(n=>n['data-mode']==='standard').at(-1).listeners.click();
+ assert.equal(f.pages.memoryArgs(d,laptop).memoryMode,'standard');
+ assert.equal(f.pages.memoryArgs(d,studio).memoryMode,'minimal');
+ assert.equal(f.pages.memoryArgs(d).memoryMode,'minimal');
+ const broken={scope:'studio',request:async()=>({ok:false,errorCode:'UNSUPPORTED',execution:'not_executed'})};
+ f.pages.memoryBadge(d,'zh-CN',false,false,broken).listeners.click();
+ await assert.rejects(choices.at(-1).onRestart('standard'),/BOOT_UNCONFIRMED/);
+ assert.equal(f.messages.length,0,'unsupported peers cannot restart locally');
 });

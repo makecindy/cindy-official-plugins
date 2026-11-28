@@ -69,9 +69,10 @@
       }
       row.appendChild(who);
 
+      var fromGlab = cn.source === 'glab-cli';
       var tag = document.createElement('span');
       tag.className = 'tag';
-      tag.textContent = cn.tail ? '尾号 ' + cn.tail : '';
+      tag.textContent = fromGlab ? '本机 glab 已登录 · 自动使用' : (cn.tail ? '尾号 ' + cn.tail : '');
       row.appendChild(tag);
 
       if (cn.isDefault) {
@@ -79,7 +80,7 @@
         badge.className = 'default-badge';
         badge.textContent = '默认';
         row.appendChild(badge);
-      } else {
+      } else if (!fromGlab) {
         var mkDefault = document.createElement('button');
         mkDefault.className = 'mini';
         mkDefault.type = 'button';
@@ -95,12 +96,14 @@
       testBtn.addEventListener('click', function () { void test(cn.id, testBtn); });
       row.appendChild(testBtn);
 
-      var delBtn = document.createElement('button');
-      delBtn.className = 'mini';
-      delBtn.type = 'button';
-      delBtn.textContent = '删除';
-      delBtn.addEventListener('click', function () { void remove(cn.id); });
-      row.appendChild(delBtn);
+      if (!fromGlab) {
+        var delBtn = document.createElement('button');
+        delBtn.className = 'mini';
+        delBtn.type = 'button';
+        delBtn.textContent = '删除';
+        delBtn.addEventListener('click', function () { void remove(cn.id); });
+        row.appendChild(delBtn);
+      }
 
       box.appendChild(row);
     });
@@ -143,7 +146,7 @@
 
   function findByHost(host) {
     for (var i = 0; i < currentConns.length; i++) {
-      if (currentConns[i].host === host) return currentConns[i];
+      if (currentConns[i].host === host && currentConns[i].source !== 'glab-cli') return currentConns[i];
     }
     return null;
   }

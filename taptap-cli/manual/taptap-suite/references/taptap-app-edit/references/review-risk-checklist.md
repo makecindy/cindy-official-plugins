@@ -68,9 +68,7 @@
 | 指定测试明确失败 | 停止，并展示测试对象与结果 |
 | 无接口或无证据 | 标记“无法验证”，不得默认为 0、无风险或已通过 |
 
-生成本地风险清单不替代正式服务端流程。用户明确继续提审时，仍按相同 `release_schedule` 执行，并用本次 `precheck-app-review` 的结果复核：
-
-`prepare-review-snapshot` → `precheck-app-review` → 单独最终确认 → `submit-app-review`
+本地风险清单供资料复核使用。进入正式提审后，用本次预检返回的结果复核这份清单。
 
 服务端返回的 blocker、warning、协议和 stale 始终优先；本地清单不能删减或覆盖服务端结果。
 

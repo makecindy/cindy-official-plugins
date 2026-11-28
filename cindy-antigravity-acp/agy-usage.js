@@ -4,6 +4,7 @@ const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { configFilePath, resolveAgy, spawnAgy, SESSION_SETTINGS, killTree } = require('./resolve-agy.js');
+const { accountDirProblem, hasVerifiedIsolatedSignIn } = require('./agy-account-dir.js');
 
 const NAMED_PERIODS = { hourly: 60, daily: 1440, weekly: 10080 };
 const PERIOD_UNITS = {
@@ -55,22 +56,30 @@ function usageFromReport(report) {
   return windows.length ? { updatedAt: Date.now(), windows } : null;
 }
 
-async function readUsage(options) {
-  const executable = resolveAgy(options);
-  if (!executable) return null;
+function usageEnvironment(options) {
   // The Windows updater can open a terminal of its own even when agy is hidden.
   const env = options?.env ?? process.env;
-  const usageEnv = (options?.platform ?? process.platform) === 'win32'
+  return (options?.platform ?? process.platform) === 'win32'
     ? { ...env, AGY_CLI_DISABLE_AUTO_UPDATE: 'true' }
     : env;
-  const child = spawnAgy(executable, ['--settings', SESSION_SETTINGS, '--output-format', 'json', '--print', '/usage'],
-    { ...options, env: usageEnv, stdio: ['pipe', 'pipe', 'ignore'] });
-  // agy 1.5.x treats /dev/null as a terminal and may start browser OAuth.
-  // An empty pipe signals a noninteractive caller without sending a prompt.
-  child.stdin.on('error', () => {}); // The CLI may already have exited.
-  child.stdin.end();
+}
+
+async function readUsage(options) {
+  const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : undefined;
+  if (accountDir && (accountDirProblem(accountDir, options) || !hasVerifiedIsolatedSignIn(accountDir, options))) return null;
+  const executable = resolveAgy(options);
+  if (!executable) return null;
+  // Keep stdin noninteractive. On Windows this alone does not prevent browser OAuth.
+  const child = spawnAgy(executable, ['--settings', SESSION_SETTINGS, '--output-format', 'json', '--print', '/usage'], {
+    ...options,
+    env: usageEnvironment(options),
+    ...(accountDir ? { accountDir, accountHome: true } : {}),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  try { child.stdin.end(); } catch { /* already closed */ }
   const chunks = [];
   let length = 0;
+  let stderrTail = '';
   const stop = () => killTree(child, 'SIGKILL');
   const timer = setTimeout(stop, 12000);
   process.once('exit', stop);
@@ -82,6 +91,10 @@ async function readUsage(options) {
         length += chunk.length;
         if (length > 128 * 1024) stop();
         else chunks.push(chunk);
+      });
+      child.stderr.on('data', chunk => {
+        if (stderrTail.length < 2048) stderrTail += chunk.toString('utf8');
+        if (/Authentication required/i.test(stderrTail)) stop();
       });
     });
     return code === 0 && length <= 128 * 1024 ? usageFromReport(JSON.parse(Buffer.concat(chunks).toString('utf8'))) : null;
@@ -130,26 +143,19 @@ function setRetry(next) {
   } catch { /* Keep the in-memory cooldown if local storage is unavailable. */ }
 }
 
-let pending;
-function resetUsage() {
-  pending = null;
-  setRetry(null);
+function defaultUsageCoolingDown() {
+  return retry && Date.now() < retry.until;
 }
 
-function pollUsage() {
-  if (pending) return pending;
-  if (retry && Date.now() < retry.until) return Promise.resolve(null);
-  const read = readUsage().catch(() => null).then(result => {
-    if (pending !== read) return null;
-    if (result) setRetry(null);
-    else {
-      const delay = Math.min(MAX_RETRY_MS, retry ? retry.delay * 2 : MIN_RETRY_MS);
-      setRetry({ delay, until: Date.now() + delay });
-    }
-    return result;
-  }).finally(() => { if (pending === read) pending = null; });
-  pending = read;
-  return read;
+function recordDefaultUsage(result) {
+  if (result) setRetry(null);
+  else {
+    const delay = Math.min(MAX_RETRY_MS, retry ? retry.delay * 2 : MIN_RETRY_MS);
+    setRetry({ delay, until: Date.now() + delay });
+  }
 }
 
-module.exports = { readUsage, pollUsage, resetUsage, usageFromReport, windowMinutesOf };
+function resetDefaultUsage() { setRetry(null); }
+
+module.exports = { usageEnvironment, readUsage, usageFromReport, windowMinutesOf,
+  defaultUsageCoolingDown, recordDefaultUsage, resetDefaultUsage };

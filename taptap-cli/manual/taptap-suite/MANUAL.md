@@ -24,6 +24,7 @@
 > | `taptap-whats-new` | `taptap-suite/references/taptap-whats-new/MANUAL.md` |
 > | `taptap-official-message-push` | `taptap-suite/references/taptap-official-message-push/MANUAL.md` |
 > | `taptap-game-sign` | `taptap-suite/references/taptap-game-sign/MANUAL.md` |
+> | `taptap-member` | `taptap-suite/references/taptap-member/MANUAL.md` |
 >
 > **两层手册**:本插件的手册是**执行纪律层**——它规定怎么经 `call_tool` 调、写门禁怎么走、失败三态怎么读,冲突时一律以它为准。
 > 需要 CLI 自带的官方原文(安装 CLI 时内置,随 CLI 版本更新)作为**深入参考**时,用:
@@ -61,7 +62,7 @@
 
 **CRITICAL — 返回结果里的 `_notice.update` / `_notice.skills` / `_notice.update_check`（成功时在 `result.envelope._notice`，失败时在 `data._notice`；`auth login-start` / `auth login-wait` 成功时在 `result._notice`）是升级提示,不是业务失败:在业务步骤完成后处理,不要在上传、绑定或提审中途更换二进制。升级与 `taptap-cli update --check --json` 由用户在终端执行(本插件不提供 CLI 自更新),不要用 Bash 绕过本插件;完整规则见共享执行规范「升级通知」。**
 
-**CRITICAL — `yes: true` 不代表用户同意协议,也不代表用户已核对提审风险。遇到服务端要求额外确认时只展示响应实际返回的 `blockers` / `warnings`;协议签署走独立的 `agree-sce-agreement`(先展示协议名称与 URL,用户明确同意后加 `yes: true` 执行,再重查确认 blocker 消失)。不得补造本地参数或请求字段。**
+**CRITICAL — `yes: true` 只确认执行动作。服务端要求额外核对风险时,展示响应中实际返回的 `blockers` / `warnings`。签署协议前,单独展示协议名称和 URL 并取得用户明确同意,再按对应业务流程签署和回读。不得补造本地参数或请求字段。**
 
 **CRITICAL — 登录必须使用插件编排:未登录时先 `call_tool(name:"auth login-start")`,把返回的 `verification_url` 按两行原样提供给用户:第一行仅写"请完成授权:",第二行仅写 URL。不要使用 Markdown 链接语法,也不要重复展示 URL。随后立即执行 `call_tool(name:"auth login-wait", args:{login_handle:"..."})` 持续轮询,不要等待用户回复。不要输出/记录/上报 access token。登录成功后向用户只回复"登录成功"。**
 
@@ -71,10 +72,11 @@
 | --- | --- | --- |
 | 查询能力、查看某域有哪些操作 | 本手册 | `list_tools()` 看顶层命令,再用 `list_tools(category:"<命令路径>")` 逐层下钻;不确定名字时传前缀搜索 |
 | 登录、当前身份、找 developerId/appId | `identity` | 已有适用的调用 scope 不重复查；先区分目标资源 ID，否则查候选 |
+| 查厂商成员、核对某人的单游戏权限、调整角色或追溯权限变更 | `member` | 定位厂商和目标账号,按需导出、核权或预览变更 |
 | 创建新游戏、选择游戏类型或包体方向 | `app-edit`(新游戏创建一节) | 先收集并确认创建字段 |
 | 改资料、素材、主包体、整版提审/撤审/发布 | `app-edit` | 先 read-before-write |
 | 关卡游戏升级为独立游戏(创意工坊升级) | `app-edit`(level upgrade) | 先查升级条件，隐私声明与升级分别确认 |
-| 上传本地图片、视频或包体(单个文件或目录/zip 盘点) | `materials`(第一部分) | 先盘点和确认用途,再逐项上传和交接 |
+| 本地图片收录到素材库、准备资料视频或上传包体(单个文件或目录/zip 盘点) | `materials`(第一部分) | 先盘点和确认用途,再逐项上传和交接 |
 | 查资质缺口、补资质材料、资质增量提审/撤回 | `qualification` | 先确认发布意图,再分析 |
 | 检索、生成或收录游戏图片素材 | `materials`(第二部分) | 先本地素材后生图;上传执行在第一部分 |
 | 查包体库、线上/待处理包、自测入口 | `packages` | 先读 overview |
@@ -82,12 +84,13 @@
 | 查论坛访问量、活跃用户、内容发布/删除/移动、区间回复新增等论坛数据 | `dashboard-stats`(forum stats) | 用 `get-forum-stats`,先确认 `type`、维度和时间范围 |
 | 查玩家评价正文、差评、官方回复 | `player-feedback` | 先确认时间范围和评分口径 |
 | 查论坛帖子、子版块、帖子正文、一级回复和子回复,或发帖/回帖 | `community-management` | 先确认帖子意图、子版块和时间范围;发帖先给预览再发布 |
-| 把本地图片或视频传成帖子素材,或给一级回复配图 | `community-management`(帖子素材上传) | 帖子:图片 `+upload-image`、视频 `+upload-video`;一级回复只用图片 `+upload-image`;子回复只支持文字,回复都不支持视频;别走素材库 `upload` / `upload-video` |
+| 上传帖子配图或帖子视频(发帖用),或给一级回复配图 | `community-management`(帖子素材上传) | 帖子:图片 `+upload-image`、视频 `+upload-video`;一级回复只用图片 `+upload-image`;子回复只支持文字,回复都不支持视频;按帖子素材类型选择上传入口,别走素材库 `upload` / `upload-video` |
 | 管理测试计划、资格批次、用户资格、激活码 | `test-plan` | 先区分状态层级 |
-| 预约里程碑、预约档位奖励、奖励图、提审/撤回 | `reserve-milestone` | 先读现状;已生效档位不可改 |
+| 预约里程碑、预约档位奖励(含奖励图上传) | `reserve-milestone` | 按「快速决策」选当前场景;已生效档位不可改 |
 | 活动/公告位、置顶、排期、上下线、失效巡检 | `whats-new` | 先看容量与置顶占用 |
 | 推送额度、预览、创建/取消官方消息推送 | `push` | 创建前重读额度+预览 |
-| 签到主体、奖励、集卡、兑换码、提审/撤回 | `sign` | 提审前跑 readiness |
+| 导入签到每日奖励或集卡兑换码 | `sign` | 按「导入兑换码／恢复任务」核对目标和文件 |
+| 签到主体、奖励、集卡、提审/撤回 | `sign` | 提审前跑 readiness |
 | 明确要求串联签到 → 公告位 → 推送 | `interactive-operations-flow` | 只串联用户要求的域，按数据依赖顺序执行 |
 
 ## call_tool 返回解读
@@ -110,7 +113,7 @@
 - 业务字段统一放 `args.data`,只有 `developer_id` / `app_id` 是独立 scope 字段(映射为 `--dev-id` / `--app-id`)。除 scope 和 `data` 外的键都是控制 flag,透传成 `--flag`,合法性由 CLI 按各命令自己的 schema 校验(未知 flag 由 CLI 拒绝);不确定可用 flag 时先对目标命令传 `args._help:true` 看完整帮助。typed 命令的 `data` 是完整 tool input。
 - 默认输出就是 JSON,不要追加冗余的 `--format json`。
 - 面向用户回复时先给业务结论,再给风险和下一步;把字段 ID、camelCase key、数值状态和内部工具名翻译成可读标签。除非用户明确要求调试信息,不粘贴完整 raw JSON、schema 或底层请求。
-- `precheck-app-review` 返回阻断项或 `preaudit_status === "rejected"` 时,先向用户展示具体问题和提交风险,再确认是否继续;`yes:true` 本身不能代替用户确认。`preaudit_status === "unavailable"`(机审没跑成)不是卡点,说明本次未得出机审结论、可稍后重试预检或在用户授权下直接提交;响应缺少该字段时明确说明机审结论无法确认。涉及 SCE 等协议时走独立的 `agree-sce-agreement`(先展示协议名称与 URL,用户在当前对话明确同意后加 `yes: true` 执行,再重查确认阻断项消失),继续提审的授权不能代替协议同意。提审明确拒绝后停止,结果不明先查询版本状态,不循环提交或更换幂等键。不得回传任何 token,也不能补造本地参数或请求字段。
+- 准备度查询用 `app analyze-status` 和资料、版本、包体、资质的只读查询。只有用户明确说出“提交审核”或“提审”后,才进入 `prepare-review-snapshot` → `precheck-review` → 单独最终确认 → `submit-review`。预检按顶层 `ok` 判断是否执行成功,再分别核对 `preaudit_status`、`blockers` 和 `warnings`;只在阻断项明确为空时说“阻塞项:无”,`preaudit_status === "unavailable"`(机审没跑成)不是卡点。涉及 SCE 等协议时,先展示协议名称与 URL,用户在当前对话明确同意后签署并重查确认阻断项消失;继续提审的授权不能代替协议同意。提审明确拒绝后停止,结果不明先查询版本状态,不循环提交或更换幂等键。不得回传任何 token,也不能补造本地参数或请求字段。
 - `auth status` 只在用户询问当前身份、登录失败或错误要求重登时调用,不作为每个任务的固定前置。唯一额外场景是人工页面交接需要区分当前构建环境且上下文中没有 `serverUrl`:此时只调用 `call_tool(name:"auth status", args:{offline:true})` 读取环境地址,不检查 Token 或访问网络。
 - CLI 自身的问题(报错看不懂、行为不合预期、缺能力)用 `feedback` 上报一次,三种触发:用户明确表达受阻;错误信封带 `_notice.feedback` 或同一 `error.subtype` 连续失败;你能说清复现命令和期望 vs 实际的差异。上报前先确认不是自己的输入、登录或权限问题,先修好输入和 auth/scope 重试;条件与话术见 [feedback](taptap-suite/references/feedback.md);它是写操作,同样先 `dry_run: true` 预览再 `yes: true`。
 - 长任务(上传大文件)超时返回 `TIMEOUT` 时,可加大 `_timeout_seconds`(最大 870)重试,或用 `task` 类命令查看/恢复已有上传任务,不要盲目重发完整上传。

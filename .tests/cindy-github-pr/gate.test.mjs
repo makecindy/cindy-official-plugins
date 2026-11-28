@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -16,12 +16,15 @@ import {
   normalizeConflicting,
   parseTarget,
   passAdvisories,
+  canSkipWithProbe,
+  mustFullReadBeforeProbe,
   probeAllowsSkip,
   stateFilePath,
   adoptLegacyStateFile,
   snapshotFailurePlan,
 } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
 import { classifyMergeQueue } from '../../cindy-github/skills/pr/scripts/lib/merge-queue.mjs';
+import { pacingDue } from '../../cindy-github/skills/pr/scripts/lib/follow-pacing.mjs';
 
 const gatePath = fileURLToPath(new URL('../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs', import.meta.url));
 
@@ -57,6 +60,7 @@ function createFixture(t) {
   let probe = null;
   let trigger = null;
   let snapshotRuns = 0;
+  let probeRuns = 0;
 
   // 端到端用例按分钟推进时钟;默认关掉最小放行间隔判据,它有专门用例。
   const gateArgs = (extraArgs) => [
@@ -89,6 +93,7 @@ function createFixture(t) {
     },
     now: () => clock,
     snapshotRuns: () => snapshotRuns,
+    probeRuns: () => probeRuns,
     readState() {
       return JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'));
     },
@@ -120,7 +125,10 @@ function createFixture(t) {
             stderr: env.FAKE_SNAPSHOT_STDERR ?? '',
           };
         },
-        runProbe: async () => (probe ? { code: 0, stdout: JSON.stringify(probe), stderr: '' } : { code: 1, stdout: '', stderr: '' }),
+        runProbe: async () => {
+          probeRuns += 1;
+          return probe ? { code: 0, stdout: JSON.stringify(probe), stderr: '' } : { code: 1, stdout: '', stderr: '' };
+        },
         readTrigger: async () => trigger,
         out: (text) => { stdout += text; },
         err: (text) => { stderr += text; },
@@ -128,14 +136,15 @@ function createFixture(t) {
       return { code, stdout, stderr, json: () => JSON.parse(stdout) };
     },
     /** 真实子进程调用指定路径的脚本:只给软链入口用例用,验证 CLI 入口判据本身。 */
-    runVia(scriptPath, extraArgs = []) {
+    runVia(scriptPath, extraArgs = [], hookPayload) {
       return new Promise((resolve) => {
-        execFile(process.execPath, [scriptPath, ...gateArgs(extraArgs)], {
+        const child = execFile(process.execPath, [scriptPath, ...gateArgs(extraArgs)], {
           encoding: 'utf8',
           env: { ...process.env, FAKE_SNAPSHOT_OUT: outFile },
         }, (err, stdout, stderr) => {
           resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout: stdout ?? '', stderr: stderr ?? '' });
         });
+        if (hookPayload) child.stdin.end(JSON.stringify(hookPayload));
       });
     },
   };
@@ -227,6 +236,53 @@ test('normalizeConflicting:两套字段域都认,未知窗口 carry-forward', ()
 
 // ── 事件:检查 ──────────────────────────────────────────────────────────────
 
+test('PR launcher selects a supported Node from PATH and preserves hook stdin, exit codes and child snapshot runtime', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-node-launcher-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const launcher = path.join(path.dirname(gatePath), 'pr-node.cjs');
+  const stateDir = path.join(dir, 'state');
+  const fakeSnapshot = path.join(dir, 'fake-snapshot.mjs');
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fs.writeFileSync(fakeSnapshot, `if (Number(process.versions.node.split('.')[0]) < 18) process.exit(9);
+    if (process.argv.includes('--probe')) process.exit(1);
+    process.stdout.write(${JSON.stringify(JSON.stringify(red))});`);
+  // CI need not have an ancient Node installed. Simulate its reported version
+  // and executable identity, while selecting and actually running a modern
+  // executable from PATH. The real old binary is exercised by the dev-app test.
+  const simulateOld = `Object.defineProperty(process.versions,'node',{value:'8.12.0'});
+    Object.defineProperty(process,'execPath',{value:${JSON.stringify(path.join(dir, 'obsolete-node'))}});
+    const file=process.argv[1]; process.argv=[process.execPath,file,...process.argv.slice(2)]; require(file);`;
+  const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'path'));
+  const invoke = (extra = [], payload, modernPath = path.dirname(process.execPath)) => spawnSync(process.execPath,
+    ['-e', simulateOld, launcher, 'pr-heartbeat-gate.mjs', PR_URL,
+      '--state-dir', stateDir, '--snapshot', fakeSnapshot, '--no-pacing', ...extra], {
+      encoding: 'utf8', input: payload ? JSON.stringify(payload) : '', timeout: 15000,
+      env: { ...cleanEnv, PATH: modernPath, CINDY_PR_TRACE: '0' },
+    });
+  const payload = { event: 'schedule-pre-run', scheduleId: 'first-schedule', runId: 'first', firedAt: T0 };
+  const first = invoke([], payload);
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, /events=\[checks-failed\]/);
+  const saved = () => JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'));
+  assert.equal(saved().followStartId, 'first-schedule', 'real hook stdin must reach the modern child');
+  assert.equal(invoke(['--resume', 'Inspected the failed fixture check.']).status, 0);
+  const skipped = invoke([], { ...payload, runId: 'second', lastFinishedAt: T0 });
+  assert.equal(skipped.status, 2, skipped.stderr);
+  assert.match(skipped.stdout, /SKIP/);
+  const before = fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8');
+  const unsupported = invoke([], payload, dir);
+  assert.equal(unsupported.status, 1);
+  assert.match(unsupported.stderr, /needs Node\.js 18 or newer/);
+  assert.equal(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'), before);
+  // A modern Node already running the launcher does not need PATH probing.
+  const current = spawnSync(process.execPath, [launcher, 'pr-heartbeat-gate.mjs', '--help'], {
+    encoding: 'utf8', env: { ...cleanEnv, PATH: dir }, timeout: 15000,
+  });
+  assert.equal(current.status, 0, current.stderr);
+  assert.match(current.stderr, /Usage: node pr-heartbeat-gate/);
+});
+
 test('检查失败按名字每个 head 只报一次;换 head 后再失败会再报', () => {
   const red = snap({ checks: [check('build', 'failed', { required: true }), check('lint')] });
   const first = evaluateWatch(seenWatch(snap()), red, T0);
@@ -271,6 +327,248 @@ test('必需检查全部通过报一次;还在跑的其它检查结束时再报�
   assert.deepEqual(r.events, [{ kind: 'checks-passed', count: 2, required: false }], '欠的那一次');
   r = evaluateWatch(r.next, pushed([check('build', 'passed', { required: true }), check('codeql'), check('late', 'pending')]), T0 + 30 * MIN);
   assert.deepEqual(kinds(r), [], '后来冒出的非必需检查不唤起');
+});
+
+test('host test and self-test preview an existing wait and unacknowledged event without writing any follow state', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', checks: [{ name: 'build' }], threads: [] });
+  fx.advance(5);
+  fx.setSnapshot({ ...red, checks: [...red.checks, check('lint', 'failed')] });
+  assert.equal((await fx.run()).code, 0);
+  assert.ok(fx.readState().wait && fx.readState().pendingWatch);
+  const dir = path.dirname(fx.stateFile());
+  const files = () => Object.fromEntries(fs.readdirSync(dir).sort().map(name =>
+    [name, fs.readFileSync(path.join(dir, name), 'utf8')]));
+  const before = files();
+  // The actual Host uses these two pairs of IDs without lastFinishedAt.
+  // A preview which sees new work must still not change the production state.
+  fx.setSnapshot({ ...red, checks: [...red.checks, check('lint', 'failed'), check('package', 'failed')] });
+  for (const id of ['test', 'self-test']) {
+    const result = await fx.runVia(gatePath, [], { event: 'schedule-pre-run',
+      scheduleId: id, scheduleName: 'PR #42', runId: id, firedAt: Date.now() });
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /diagnostic only, follow-up state unchanged/);
+    assert.deepEqual(files(), before, 'PR state, repository state and trace stay byte-identical');
+  }
+  const production = await fx.run();
+  assert.equal(production.code, 0, 'the real schedule can still deliver its pending event');
+  const first = createFixture(t);
+  first.setSnapshot(red);
+  assert.equal((await first.runVia(gatePath, [], { event: 'schedule-pre-run',
+    scheduleId: 'test', runId: 'test', firedAt: Date.now() })).code, 0);
+  assert.equal(fs.existsSync(first.stateFile()), false, 'diagnostics do not create a new follower');
+});
+
+test('a partially failed batch reports its final result once even with no new failure', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing', 'pending_checks'],
+    checks: [check('build', 'failed', { required: true }), check('lint', 'pending'), check('package', 'pending')] });
+  fx.setSnapshot(red);
+  let first = await fx.run();
+  assert.equal(first.code, 0);
+  assert.match(first.stdout, /checks-failed/);
+  assert.doesNotMatch(first.stdout, /schedule_notify_current_run/);
+  assert.match(first.stdout, /stay silent if you fix and push for CI/);
+  assert.equal((await fx.run(['--resume', 'Inspected the initial failure.'])).code, 0);
+  fx.advance(5);
+  fx.setSnapshot({ ...red, checks: [red.checks[0], check('lint'), red.checks[2]] });
+  assert.equal((await fx.run()).code, 2);
+  fx.advance(5);
+  const finished = { ...red, blockers: ['ci_failing'], checks: [red.checks[0], check('lint'), check('package')] };
+  fx.setSnapshot(finished);
+  const final = await fx.run();
+  assert.equal(final.code, 0);
+  assert.match(final.stdout, /checks-finished/);
+  assert.match(final.stdout, /All 3 checks finished.*1 still failed/);
+  assert.doesNotMatch(final.stdout, /schedule_notify_current_run/);
+  assert.match(final.stdout, /stay silent if you fix and push for CI/);
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /retry-unacked/);
+  assert.equal((await fx.run(['--resume', 'Reported the final failure.'])).code, 0);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
+  // A new follower's first snapshot is already final: exactly the failure event.
+  const fresh = createFixture(t);
+  fresh.setSnapshot(finished);
+  assert.match((await fresh.run()).stdout, /events=\[checks-failed\]/);
+  assert.equal((await fresh.run(['--resume', 'Reported the failure.'])).code, 0);
+  fresh.advance(5);
+  assert.equal((await fresh.run()).code, 2);
+});
+
+test('a check failure stuck across backoff cycles still notifies without a contradictory stay-silent hint', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fx.setSnapshot(red);
+  // 3 normal unacked attempts (spaced >= 6 min so each counts as a real run).
+  for (let i = 0; i < 3; i += 1) {
+    if (i > 0) fx.advance(10);
+    const res = await fx.run();
+    assert.equal(res.code, 0);
+    assert.doesNotMatch(res.stdout, /schedule_notify_current_run/);
+  }
+  // Backoff cycles 1 and 2: still below STUCK_NOTIFY_BACKOFF_CYCLES (3).
+  for (let cycle = 1; cycle <= 2; cycle += 1) {
+    fx.advance(35);
+    const res = await fx.run();
+    assert.equal(res.code, 0);
+    assert.match(res.stdout, /retry-backoff-attempt/);
+    assert.doesNotMatch(res.stdout, /schedule_notify_current_run/);
+  }
+  // Backoff cycle 3: crosses stuck threshold, must instruct notification and omit stay-silent.
+  fx.advance(35);
+  const stuck = await fx.run();
+  assert.equal(stuck.code, 0);
+  assert.match(stuck.stdout, /schedule_notify_current_run/);
+  assert.doesNotMatch(stuck.stdout, /stay silent if you fix and push for CI/);
+});
+
+test('a new schedule observes an existing failure even if a stopped follower had acknowledged it', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', reason: 'Previous follower investigated.', checks: [{ name: 'build' }], threads: [] });
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2, 'reusing a schedule preserves its recorded wait');
+  fx.setTrigger({ firstScheduleId: 'new-schedule' });
+  fx.advance(5);
+  assert.match((await fx.run(['--pacing'])).stdout, /events=\[checks-failed\]/);
+  assert.equal(fx.readState().wait, undefined, 'stopped follower wait must not suppress the initial failure');
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /retry-unacked/, 'repeated first hook does not reset pending watch');
+  assert.equal((await fx.run(['--resume', 'Reported the existing failure.'])).code, 0);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
+});
+
+test('a new follower reports green checks even when the old owner was waiting only for approval', async t => {
+  const fx = createFixture(t);
+  const approval = snap({
+    verdict: 'NEEDS_WORK', blockers: ['unresolved_review_threads', 'branch_protection_blocked'],
+    reviewThreads: { totalCount: 1, unresolvedCount: 1, activeUnresolvedCount: 1, truncated: false,
+      nodes: [{ id: 'approval', isResolved: false, isOutdated: false,
+        comments: [comment('A1', 'lead', '2026-10-20T09:00:00Z', 'This needs explicit approval from a designated maintainer.')] }] },
+  });
+  fx.setSnapshot(approval);
+  assert.equal((await fx.run()).code, 0);
+  assert.equal((await fx.run(['--resume', 'Old owner reported the approval blocker.'])).code, 0);
+  const old = fx.readState();
+  assert.equal(old.humanOnlyPending, true);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2, 'same owner remains quiet');
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  fx.advance(5);
+  const first = await fx.run(['--pacing']);
+  assert.equal(first.code, 0, first.stdout);
+  assert.match(first.stdout, /events=\[checks-passed\]/);
+  const next = fx.readState();
+  assert.equal(next.headOid, old.headOid);
+  assert.equal(next.roundCount, old.roundCount);
+  assert.equal(next.lastAckAt, undefined, 'old confirmation must not constitute new owner acknowledgement');
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /retry-unacked/);
+  assert.equal((await fx.run(['--resume', 'New owner reported the approval blocker.'])).code, 0);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2, 'confirmed result is deduplicated again');
+});
+
+test('new follower retains actual CI registration history and the same-head deadline', async t => {
+  for (const mode of ['same-head', 'new-head', 'previously-reminded', 'unacknowledged', 'unavailable', 'registered', 'never-had-checks']) {
+    const fx = createFixture(t);
+    const green = snap();
+    const missing = snap({ latestCommitOid: 'bbb2222', verdict: 'NOT_READY', blockers: ['pending_checks'],
+      checks: [], checksSummary: { total: 0, pending: 0, failed: 0, unavailable: false, truncated: false } });
+    fx.setSnapshot(mode === 'never-had-checks' ? { ...missing, latestCommitOid: green.latestCommitOid } : green);
+    await fx.run();
+    await fx.run(['--resume', 'old owner observed']);
+    fx.advance(5);
+    fx.setSnapshot(missing);
+    assert.equal((await fx.run()).code, 2);
+    const started = fx.readState().watch.checksAwaitedSince;
+    if (mode !== 'never-had-checks') assert.ok(started);
+    if (mode === 'previously-reminded' || mode === 'unacknowledged') {
+      fx.advance(15);
+      assert.match((await fx.run()).stdout, /no-checks/);
+      if (mode === 'previously-reminded') await fx.run(['--resume', 'old owner reported absent checks']);
+    }
+    if (mode === 'new-head') fx.setSnapshot({ ...missing, latestCommitOid: 'ccc3333' });
+    if (mode === 'unavailable') fx.setSnapshot({ ...missing, checksSummary: { unavailable: true } });
+    if (mode === 'registered') fx.setSnapshot({ ...missing, checks: [check('build', 'pending')] });
+    fx.setTrigger({ firstScheduleId: 'new-follower' });
+    fx.advance(15);
+    const first = await fx.run();
+    if (['same-head', 'unacknowledged'].includes(mode)) {
+      assert.equal(first.code, 0, mode + ': ' + first.stdout);
+      assert.match(first.stdout, /no-checks/);
+      await fx.run(['--resume', 'new owner reported absent checks']);
+    } else {
+      assert.equal(first.code, 2, mode + ': ' + first.stdout);
+      if (mode === 'unavailable') {
+        assert.equal(fx.readState().watch.checksAwaitedSince, started);
+        fx.setSnapshot(missing);
+        fx.advance(5);
+        assert.match((await fx.run()).stdout, /no-checks/);
+        await fx.run(['--resume', 'new owner reported absent checks']);
+      } else if (mode === 'registered') {
+        assert.equal(fx.readState().watch.checksAwaitedSince, null);
+      } else if (mode !== 'never-had-checks') {
+        assert.equal(fx.readState().watch.checksAwaitedSince, iso(fx.now()), mode);
+        fx.advance(15);
+        assert.match((await fx.run()).stdout, /no-checks/);
+        await fx.run(['--resume', 'new owner reported absent checks']);
+      }
+    }
+    fx.advance(20);
+    assert.equal((await fx.run()).code, 2, mode + ': no repeated reminder');
+  }
+});
+
+test('first hook reads the actual scheduler stdin and re-observes a stopped follower\'s red check', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'],
+    checks: [check('build', 'failed', { required: true })] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', checks: [{ name: 'build' }], threads: [] });
+  const payload = { event: 'schedule-pre-run', scheduleId: 'new-follow', runId: 'first', firedAt: Date.now() };
+  const first = await fx.runVia(gatePath, [], payload);
+  assert.equal(first.code, 0, first.stderr);
+  assert.match(first.stdout, /events=\[checks-failed\]/);
+  assert.equal((await fx.runVia(gatePath, ['--resume', 'Reported the red result.'])).code, 0);
+  const later = await fx.runVia(gatePath, [], { ...payload, runId: 'second', lastFinishedAt: Date.now() });
+  assert.equal(later.code, 2, later.stderr);
+});
+
+test('a pre-upgrade partially failing watch still reports completion after unavailable data', () => {
+  const red = snap({ checks: [check('build', 'failed', { required: true }), check('lint', 'pending')] });
+  const old = seenWatch(red);
+  delete old.failureCompletionOwed;
+  const unavailable = evaluateWatch(old, snap({ checks: [], checksSummary: { unavailable: true } }), T0 + MIN);
+  assert.deepEqual(kinds(unavailable), []);
+  const done = evaluateWatch(unavailable.next, snap({ checks: [red.checks[0], check('lint')] }), T0 + 2 * MIN);
+  assert.deepEqual(kinds(done), ['checks-finished']);
+});
+
+test('a timed baseline wait still reports a partial batch becoming final without extending its deadline', async (t) => {
+  const fx = createFixture(t);
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing', 'pending_checks'],
+    checks: [check('build', 'failed', { required: true }), check('lint', 'pending')] });
+  fx.setSnapshot(red);
+  await startWait(fx, red, { kind: 'baseline', checks: [{ name: 'build' }], threads: [] });
+  const deadline = fx.readState().wait.until;
+  fx.advance(5);
+  fx.setSnapshot({ ...red, blockers: ['ci_failing'], checks: [red.checks[0], check('lint')] });
+  const result = await fx.run();
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /events=\[checks-finished\]/);
+  assert.equal(fx.readState().wait.until, deadline);
+  // A new commit must not carry this old completion obligation.
+  const nextHead = evaluateWatch(seenWatch(red), snap({ latestCommitOid: 'new-head', checks: [red.checks[0], check('lint')] }), T0 + MIN);
+  assert.deepEqual(kinds(nextHead), ['checks-failed']);
 });
 
 test('读不到检查时保留原状态,不把「没读到」当成「全部通过」或「没有检查」', () => {
@@ -467,12 +765,121 @@ test('decide:空放行(宿主顺延、agent 没跑)照常放行但不消耗重�
   assert.equal(decide({ snap: red, previous: { ...previous, lastPassAt: T0 - 11 * MIN }, now: T0 }).nextPendingCount, 2);
 });
 
-test('decide:merged / closed 每轮放行;截断的快照放行且不推进基线', () => {
+test('decide:merged / closed 前 N 次快速放行后进入递增退避且跨 --ack 保留，重开后清零;截断的快照放行且不推进基线', () => {
+  const at = (m) => T0 + m * MIN;
   const watch = seenWatch(snap());
-  const merged = decide({ snap: snap({ merged: true }), previous: { watch }, now: T0 });
-  assert.equal(merged.reason, 'terminal');
-  const again = decide({ snap: snap({ merged: true }), previous: { watch, pendingWatch: merged.nextPendingWatch, pendingKey: 'terminal', pendingPassCount: 9 }, now: T0 });
-  assert.equal(again.exitCode, 0, '收口不受重试上限约束');
+  const mergedSnap = snap({ merged: true });
+  const d1 = decide({ snap: mergedSnap, previous: { watch }, now: at(0), maxPassAttempts: 2, retryBackoffMs: 30 * MIN });
+  assert.equal(d1.exitCode, 0);
+  assert.equal(d1.reason, 'terminal');
+  assert.equal(d1.nextTerminalPassCount, 1);
+
+  // Host-deferred empty pass (< minPassSpacingMs) does not consume a terminal cleanup attempt.
+  const empty = decide({
+    snap: mergedSnap,
+    previous: { watch, pendingWatch: d1.nextPendingWatch, pendingKey: 'terminal', pendingPassCount: 1, terminalPassCount: 1, lastPassAt: at(0) },
+    now: at(1.5),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(empty.exitCode, 0);
+  assert.equal(empty.reason, 'terminal');
+  assert.equal(empty.nextTerminalPassCount, 1);
+
+  const d2 = decide({
+    snap: mergedSnap,
+    previous: { watch, pendingWatch: d1.nextPendingWatch, pendingKey: 'terminal', pendingPassCount: 1, terminalPassCount: 1, lastPassAt: at(0) },
+    now: at(5),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(d2.exitCode, 0);
+  assert.equal(d2.reason, 'terminal');
+  assert.equal(d2.nextTerminalPassCount, 2);
+
+  // Even after --ack cleared pending*, terminalPassCount survives and enters 30m backoff on next tick.
+  const d3 = decide({
+    snap: mergedSnap,
+    previous: { watch, terminalPassCount: 2, lastPassAt: at(5) },
+    now: at(10),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(d3.exitCode, 2);
+  assert.equal(d3.reason, 'terminal-backoff');
+  assert.equal(d3.nextTerminalPassCount, 2);
+  assert.equal(d3.nextTerminalBackoffUntil, at(35));
+
+  // Once backoff expires, wakes with user-notification guidance and escalates to 2h.
+  const d4 = decide({
+    snap: mergedSnap,
+    previous: { watch, terminalPassCount: 2, terminalBackoffUntil: at(35), lastPassAt: at(5) },
+    now: at(35),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(d4.exitCode, 0);
+  assert.equal(d4.reason, 'terminal-backoff-attempt');
+  assert.match(d4.detail, /schedule_notify_current_run/);
+  assert.equal(d4.nextTerminalPassCount, 3);
+  assert.equal(d4.nextTerminalBackoffUntil, at(35 + 120));
+
+  // Host-deferred retry of an unacknowledged terminal-backoff-attempt keeps notify guidance & backoff deadline.
+  const d4Retry = decide({
+    snap: mergedSnap,
+    previous: {
+      watch,
+      merged: true,
+      pendingWatch: d4.nextPendingWatch,
+      pendingKey: 'terminal',
+      pendingPassCount: d4.nextPendingCount,
+      lastDecisionReason: 'terminal-backoff-attempt',
+      terminalPassCount: d4.nextTerminalPassCount,
+      terminalBackoffUntil: d4.nextTerminalBackoffUntil,
+      lastPassAt: at(35),
+    },
+    now: at(36.5),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(d4Retry.exitCode, 0);
+  assert.equal(d4Retry.reason, 'terminal-backoff-attempt');
+  assert.match(d4Retry.detail, /schedule_notify_current_run/);
+  assert.equal(d4Retry.nextTerminalPassCount, 3);
+  assert.equal(d4Retry.nextTerminalBackoffUntil, at(35 + 120));
+
+  // Once acknowledged (pendingWatch cleared), even a tick within minPassSpacingMs stays in terminal-backoff.
+  const d4AfterAck = decide({
+    snap: mergedSnap,
+    previous: {
+      watch,
+      merged: true,
+      lastDecisionReason: 'terminal-backoff-attempt',
+      terminalPassCount: d4.nextTerminalPassCount,
+      terminalBackoffUntil: d4.nextTerminalBackoffUntil,
+      lastPassAt: at(35),
+    },
+    now: at(36.5),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(d4AfterAck.exitCode, 2);
+  assert.equal(d4AfterAck.reason, 'terminal-backoff');
+  assert.equal(d4AfterAck.nextPendingWatch, null);
+  assert.equal(d4AfterAck.nextTerminalPassCount, 3);
+  assert.equal(d4AfterAck.nextTerminalBackoffUntil, at(35 + 120));
+
+  // Reopening a closed PR clears terminal backoff state.
+  const reopened = decide({
+    snap: snap({ closed: false, merged: false }),
+    previous: { watch, closed: true, terminalPassCount: 3, terminalBackoffUntil: at(35 + 120), lastPassAt: at(35) },
+    now: at(40),
+    maxPassAttempts: 2,
+    retryBackoffMs: 30 * MIN,
+  });
+  assert.equal(reopened.nextTerminalPassCount, undefined);
+  assert.equal(reopened.nextTerminalBackoffUntil, undefined);
+
   const truncated = decide({ snap: snap({ gate: { truncated: true } }), previous: { watch }, now: T0 });
   assert.equal(truncated.reason, 'truncated');
   assert.equal(truncated.nextPendingWatch, watch);
@@ -654,7 +1061,253 @@ test('低成本探测:与上次完整读取一致时不做完整快照;有理由
   assert.equal(probeAllowsSkip(settled, previous.probe, now + 31 * MIN), false, '30 分钟完整读一次');
   assert.equal(probeAllowsSkip(settled, { ...previous.probe, status: 'x' }, now + MIN), false);
   assert.equal(probeAllowsSkip(settled, null, now + MIN), false, '探测失败');
-  assert.equal(probeAllowsSkip({ ...settled, lastPassAt: now - 24 * 60 * MIN }, previous.probe, now + MIN), false, '保底巡检到点');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['ci_failing'], lastPassAt: now - 24 * 60 * MIN }, previous.probe, now + MIN), false, '保底巡检到点');
+  // 当保底巡检在 decide() 中被人工等待/活跃 wait/defer 抑制时，探测一致不应丢弃结果强拉完整快照。
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'READY', lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, 'READY 等合并超过 24 小时仍可走探测');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'BLOCKED_HUMAN', blockers: ['approval_required'], lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, '仅等人工审批超过 24 小时仍可走探测');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['approval_required'], humanOnlyPending: true, lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, 'humanOnlyPending 超过 24 小时仍可走探测');
+  const activeHumanWait = { kind: 'human', headSha: 'aaa1111', reason: 'wait merge', createdAt: now - 48 * 60 * MIN, until: null, checks: [], threads: [] };
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['ci_failing'], wait: activeHumanWait, lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, '未到点的 wait 不应被静默门禁强拉完整快照');
+  assert.equal(probeAllowsSkip({ ...settled, verdict: 'NEEDS_WORK', blockers: ['ci_failing'], nextAllowAt: now + 30 * MIN, lastPassAt: now - 48 * 60 * MIN }, previous.probe, now + MIN), true, '未到点的 defer 不应被静默门禁强拉完整快照');
+  // Base-branch churn briefly flips mergeable to UNKNOWN while GitHub recalculates; keep skipping
+  // when everything else matches, while real transitions (CONFLICTING / UNKNOWN->MERGEABLE) still miss.
+  const knownProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0', base: 'base-1' };
+  const transientUnknown = { ...knownProbe, status: 'OPEN false UNKNOWN aaa1111  SUCCESS:2 ', base: 'base-2' };
+  const conflicted = { ...knownProbe, status: 'OPEN false CONFLICTING aaa1111  SUCCESS:2 ', base: 'base-2' };
+  const settledKnown = { ...settled, probe: knownProbe };
+  assert.equal(probeAllowsSkip(settledKnown, transientUnknown, now + MIN), true, '瞬态 UNKNOWN 不应打穿已知 MERGEABLE 探测');
+  assert.equal(probeAllowsSkip(settledKnown, conflicted, now + MIN), false, 'MERGEABLE → CONFLICTING 必须完整读取');
+  assert.equal(probeAllowsSkip({ ...settledKnown, probe: transientUnknown }, knownProbe, now + MIN), false, '上次未知变为已知必须完整读取');
+  assert.equal(
+    probeAllowsSkip({ ...settledKnown, watch: { ...settledKnown.watch, baseSha: 'base-1' } }, transientUnknown, now + MIN),
+    false,
+    '失败期间 base 前进仍须完整读取',
+  );
+});
+
+test('终态退避端到端: 复用调度 --ack 后不每 5 分钟空转，且退避期内零 API 调用', async (t) => {
+  const fx = createFixture(t);
+  fx.setSnapshot(snap({ merged: true, verdict: 'MERGED_CLEANUP_READY' }));
+  for (let i = 0; i < 3; i += 1) {
+    const r = await fx.run(['--json']);
+    assert.equal(r.code, 0);
+    assert.equal(r.json().reason, 'terminal');
+    assert.equal((await fx.run(['--ack'])).code, 0);
+    fx.advance(5);
+  }
+  // 4th tick enters terminal-backoff (30 min from 3rd pass), skipping without waking agent.
+  const b1 = await fx.run(['--json']);
+  assert.equal(b1.code, 2);
+  assert.equal(b1.json().reason, 'terminal-backoff');
+
+  // With pacing enabled (production default), ticks inside terminalBackoffUntil skip with zero GitHub calls.
+  fx.advance(5);
+  assert.equal(pacingDue(fx.readState(), fx.now()).due, false);
+  assert.equal(pacingDue(fx.readState(), fx.now()).reason, 'terminal-backoff');
+  assert.equal(pacingDue(fx.readState(), fx.now(), { triggered: true }).due, true, '宿主事件触发仍可穿透以检测重开');
+
+  // Even with --no-pacing, decide() stays in terminal-backoff without waking the agent.
+  const b2 = await fx.run(['--json']);
+  assert.equal(b2.code, 2);
+  assert.equal(b2.json().reason, 'terminal-backoff');
+
+  // Once the 30-minute window passes, pacing becomes due and gate emits terminal-backoff-attempt with notify directive, escalating to 2h.
+  fx.advance(25);
+  assert.equal(pacingDue(fx.readState(), fx.now()).due, true);
+  const b3 = await fx.run(['--pacing', '--json']);
+  assert.equal(b3.code, 0);
+  assert.equal(b3.json().reason, 'terminal-backoff-attempt');
+  assert.match(b3.json().detail, /schedule_notify_current_run/);
+  assert.equal(fx.readState().terminalPassCount, 4);
+  const nextDeadline = fx.now() + 120 * MIN;
+  assert.equal(fx.readState().terminalBackoffUntil, nextDeadline);
+
+  // If the host defers that terminal-backoff-attempt (e.g. user-active) and retries ~90s later
+  // with pacing enabled (default minPassSpacingMinutes=5), pacing must let it through so decide()
+  // replays the unexecuted reminder with the notify directive and unchanged deadline.
+  fx.advance(1.5);
+  const retryArgs = ['--pacing', '--min-pass-spacing-minutes', '5', '--json'];
+  assert.equal(pacingDue(fx.readState(), fx.now()).due, true);
+  const b3Retry = await fx.run(retryArgs);
+  assert.equal(b3Retry.code, 0);
+  assert.equal(b3Retry.json().reason, 'terminal-backoff-attempt');
+  assert.match(b3Retry.json().detail, /schedule_notify_current_run/);
+  assert.equal(fx.readState().terminalPassCount, 4);
+  assert.equal(fx.readState().terminalBackoffUntil, nextDeadline);
+
+  // Once the agent actually runs and acknowledges (--ack), even a tick 90s later stays in
+  // terminal-backoff with zero GitHub calls.
+  assert.equal((await fx.run(['--ack'])).code, 0);
+  fx.advance(1.5);
+  const readsBeforeAckSkip = fx.snapshotRuns();
+  const b3PostAck = await fx.run(retryArgs);
+  assert.equal(b3PostAck.code, 2);
+  assert.equal(b3PostAck.json().reason, 'not-due');
+  assert.match(b3PostAck.json().detail, /pace=terminal-backoff/);
+  assert.equal(fx.snapshotRuns(), readsBeforeAckSkip, '已确认后在退避期内不得调用 GitHub');
+});
+
+test('宿主触发完整快照会用 snap.probe 刷新探测基线，下一轮普通巡检直接命中 unchanged', async (t) => {
+  const fx = createFixture(t);
+  const freshProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0', base: 'base-1' };
+  fx.setProbe(freshProbe);
+  fx.setSnapshot({ ...snap(), probe: freshProbe });
+  // Triggered run skips runProbe(), yet persists snap.probe into state.
+  assert.equal((await fx.run(['--triggered'])).code, 0);
+  assert.equal((await fx.run(['--ack'])).code, 0);
+  assert.deepEqual(fx.readState().probe, freshProbe);
+
+  fx.advance(10);
+  const reads = fx.snapshotRuns();
+  const next = await fx.run(['--json']);
+  assert.equal(next.code, 2);
+  assert.equal(next.json().reason, 'unchanged');
+  assert.equal(fx.snapshotRuns(), reads, '命中刷新后的 probe，不再补拉完整快照');
+});
+
+test('快照检查与 GraphQL 探测错位 (probe: null) 时不缓存新探针且下轮按 5 分钟强制完整重读', async (t) => {
+  const fx = createFixture(t);
+  const greenProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0', base: 'base-1' };
+  const failedProbe = { status: 'OPEN false MERGEABLE aaa1111  FAILURE:1,SUCCESS:2 ', remarks: '0  0  0', base: 'base-1' };
+  const greenSnap = snap({ verdict: 'READY' });
+  fx.setProbe(greenProbe);
+  fx.setSnapshot({ ...greenSnap, probe: greenProbe });
+  assert.equal((await fx.run(['--pacing'])).code, 0);
+  assert.equal((await fx.run(['--ack'])).code, 0);
+  // Cool down past 1h so the PR is in waiting pace (30 min).
+  fx.writeState({ lastPassAt: fx.now() - 120 * MIN });
+
+  // A check reruns and fails between gh pr view and GraphQL: probe already sees FAILURE:1,
+  // while snap.checks still carries the older green rollup, so pr-snapshot emits probe: null.
+  fx.advance(30);
+  fx.setProbe(failedProbe);
+  fx.setSnapshot({ ...greenSnap, probe: null });
+  const skewed = await fx.run(['--pacing', '--json']);
+  assert.equal(skewed.code, 2);
+  assert.equal(fx.readState().probe, undefined, '错位快照不得缓存新的或旧的 probe 基线');
+  assert.equal(fx.readState().inFlight, true, '错位快照标记 inFlight，促使下一轮 5 分钟完整重读');
+
+  // 5 minutes later (not 30 minutes!), pacing is due and forces a full snapshot that catches the failure.
+  fx.advance(5);
+  fx.setSnapshot({
+    ...snap({ checks: [check('build', 'passed', { required: true }), check('lint', 'failed', { required: true })], verdict: 'NEEDS_WORK', blockers: ['ci_failing'] }),
+    probe: failedProbe,
+  });
+  const readsBefore = fx.snapshotRuns();
+  const caught = await fx.run(['--pacing', '--json']);
+  assert.equal(caught.code, 0, caught.stdout);
+  assert.equal(fx.snapshotRuns(), readsBefore + 1);
+  assert.match(caught.json().detail, /events=\[checks-failed\]/);
+  assert.deepEqual(fx.readState().probe, failedProbe);
+  assert.equal(fx.readState().inFlight, false);
+
+  // Unavailable checks must also never cache a probe baseline even on legacy snapshots without snap.probe.
+  const fx2 = createFixture(t);
+  fx2.setProbe(failedProbe);
+  fx2.setSnapshot(snap({ checksSummary: { unavailable: true } }));
+  await fx2.run();
+  assert.equal(fx2.readState().probe, undefined, 'checks unavailable 不得持久化 probe 基线');
+});
+
+test('超过 24 小时的人工等待在探测一致时跳过完整快照；首次 gh api 未登录报错仍诊断为 auth', async (t) => {
+  const fx = createFixture(t);
+  const probe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' };
+  fx.setProbe(probe);
+  fx.setSnapshot(snap({ verdict: 'READY' }));
+  await fx.run();
+  const wait = { kind: 'human', headSha: 'aaa1111', reason: 'waiting for maintainer merge', afterMinutes: null, checks: [], threads: [] };
+  assert.equal((await fx.run(['--wait', fx.writeWait(wait)])).code, 0);
+  // 模拟静默超过 48 小时，但最近刚做过一次完整读取（10 分钟前）
+  fx.advance(10);
+  fx.writeState({ lastPassAt: fx.now() - 48 * 60 * MIN });
+  const reads = fx.snapshotRuns();
+  const skipped = await fx.run(['--json']);
+  assert.equal(skipped.code, 2);
+  assert.equal(skipped.json().reason, 'unchanged');
+  assert.equal(fx.snapshotRuns(), reads, '探测匹配时不应强跑完整快照');
+
+  const noCredsPlan = snapshotFailurePlan(
+    { code: 1, stderr: '[gh] fatal on repos/acme/widgets/pulls/42: To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.\n' },
+    null,
+    fx.now(),
+    1,
+  );
+  assert.equal(noCredsPlan.diagnosis.kind, 'auth');
+  const badCredsPlan = snapshotFailurePlan(
+    { code: 1, stderr: '[gh] fatal on repos/acme/widgets/pulls/42: gh: Bad credentials (HTTP 401)\n' },
+    null,
+    fx.now(),
+    1,
+  );
+  assert.equal(badCredsPlan.diagnosis.kind, 'auth');
+});
+
+test('探针收到明确限流时直接进入退避、保留 retryAt，且零次调用完整快照', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-probe-rate-limit-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const fakeSnapshot = path.join(dir, 'fake-snapshot.mjs');
+  fs.writeFileSync(fakeSnapshot, '// placeholder for existsSync check\n', 'utf8');
+
+  let clock = T0;
+  let probeCalls = 0;
+  let snapshotCalls = 0;
+  let probeReply = { code: 0, stdout: JSON.stringify({ status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' }), stderr: '' };
+  const currentSnap = snap({ verdict: 'READY' });
+  const run = async (extra = []) => {
+    let stdout = '';
+    let stderr = '';
+    const code = await runGate([PR_URL, '--state-dir', stateDir, '--snapshot', fakeSnapshot, '--min-pass-spacing-minutes', '0', '--no-pacing', ...extra], {
+      now: () => clock,
+      runProbe: async () => { probeCalls += 1; return probeReply; },
+      runSnapshot: async () => { snapshotCalls += 1; return { code: 0, stdout: JSON.stringify(currentSnap), stderr: '' }; },
+      readTrigger: async () => null,
+      out: (text) => { stdout += text; },
+      err: (text) => { stderr += text; },
+    });
+    return { code, stdout, stderr };
+  };
+
+  // Seed baseline and acknowledge so the next tick uses probe first.
+  assert.equal((await run()).code, 0);
+  assert.equal((await run(['--ack'])).code, 0);
+  const readsBefore = snapshotCalls;
+
+  // Probe receives explicit rate limit with retryAt: must enter backoff directly with 0 full snapshots.
+  clock += 5 * MIN;
+  const resetAt = clock + 45 * MIN;
+  probeReply = {
+    code: 1,
+    stdout: '',
+    stderr: `[gh-rate-limit] retryAt=${resetAt}\n[gh] fatal on graphql: gh: API rate limit already exceeded (HTTP 403)\n`,
+  };
+  const blocked = await run();
+  assert.equal(blocked.code, 1, 'first rate-limit failure notifies once');
+  assert.match(blocked.stderr, /GitHub API rate limit reached/);
+  assert.equal(snapshotCalls, readsBefore, 'probe rate limit must not trigger a full snapshot');
+  const diagMatch = /CINDY_PR_CHECK_DIAGNOSIS (\{[^\n]+\})/.exec(blocked.stdout);
+  assert.ok(diagMatch, blocked.stdout);
+  assert.deepEqual(JSON.parse(diagMatch[1]), { kind: 'rate-limit', failures: 1, retryAt: resetAt + 1000 });
+  const saved = JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'));
+  assert.equal(saved.snapshotFailureBackoffUntil, resetAt + 1000);
+  assert.equal(saved.consecutiveSnapshotFailures, 1);
+
+  // Before retryAt, scheduled ticks skip immediately with 0 probes and 0 snapshots.
+  const probesBeforeBackoff = probeCalls;
+  clock += 10 * MIN;
+  const skipped = await run(['--json']);
+  assert.equal(skipped.code, 2);
+  assert.equal(JSON.parse(skipped.stdout).reason, 'snapshot-failure-backoff');
+  assert.equal(probeCalls, probesBeforeBackoff);
+  assert.equal(snapshotCalls, readsBefore);
+
+  // After retryAt passes, gate recovers via full snapshot and clears failure state.
+  clock = resetAt + 2000;
+  probeReply = { code: 0, stdout: JSON.stringify({ status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' }), stderr: '' };
+  const recovered = await run(['--json']);
+  assert.equal(recovered.code, 2);
+  assert.equal(snapshotCalls, readsBefore + 1);
+  assert.equal(JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8')).consecutiveSnapshotFailures, 0);
 });
 
 test('从未放行过的跟进也能数满静默时长:起点固定在首次检查,不随每轮刷新', async (t) => {
@@ -743,6 +1396,47 @@ test('blocked snapshot reports its underlying cause and scheduled probe', async 
     assert.ok(!result.stderr.split('\n')[0].includes('gh auth refresh'));
     assert.ok(result.stderr.includes(stderr));
   }
+});
+
+test('new follower reports an inherited snapshot outage once without bypassing its retry deadline', async (t) => {
+  const fx = createFixture(t);
+  const fail = { FAKE_SNAPSHOT_EXIT: '1', FAKE_SNAPSHOT_STDERR: 'HTTP 429' };
+  const args = ['--max-snapshot-failures', '1'];
+  assert.equal((await fx.run(args, fail)).code, 1);
+  const deadline = fx.readState().snapshotFailureBackoffUntil;
+  const reads = fx.snapshotRuns();
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  const next = await fx.run(args, fail);
+  assert.equal(next.code, 1);
+  assert.match(next.stderr, /rate limit/i);
+  assert.equal(fx.snapshotRuns(), reads);
+  assert.equal(fx.readState().snapshotFailureBackoffUntil, deadline);
+  assert.equal((await fx.run(args, fail)).code, 2);
+  assert.equal(fx.snapshotRuns(), reads);
+  fx.advance(31);
+  assert.equal((await fx.run(args, fail)).code, 2);
+  assert.equal(fx.snapshotRuns(), reads+1);
+});
+
+test('new follower reads the 1.5.35 failure state and deduplicates it through expiry', async (t) => {
+  const fx = createFixture(t);
+  const fail = { FAKE_SNAPSHOT_EXIT: '1', FAKE_SNAPSHOT_STDERR: 'HTTP 429' };
+  const args = ['--max-snapshot-failures', '1'];
+  assert.equal((await fx.run(args, fail)).code, 1);
+  const old = fx.readState();
+  fx.writeState({ snapshotFailureSummary: undefined });
+  assert.equal(Object.hasOwn(fx.readState(), 'snapshotFailureSummary'), false);
+  const reads = fx.snapshotRuns();
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  const result = await fx.run(args, fail);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /rate limit/i);
+  assert.equal(fx.snapshotRuns(), reads);
+  assert.equal(fx.readState().snapshotFailureBackoffUntil, old.snapshotFailureBackoffUntil);
+  assert.ok(fx.readState().snapshotFailureReports[old.snapshotFailureFingerprint]);
+  fx.advance(31);
+  assert.equal((await fx.run(args, fail)).code, 2);
+  assert.equal(fx.snapshotRuns(), reads + 1);
 });
 
 test('a change to the watched PR retries a network failure without moving the scheduled retry', async (t) => {
@@ -1117,6 +1811,168 @@ test('仓库里常见的 bot reviewer 也要等;没有见过任何 bot 的仓库
   plain.setSnapshot(snap({ latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], verdict: 'NEEDS_WORK' }));
   assert.equal((await plain.run(['--json'])).code, 0, '没有要等的 bot,照常立刻叫醒');
   assert.deepEqual(Object.keys(plain.readRepoState().reviewerBots), []);
+});
+
+test('只提交 APPROVED 的自动合并 bot 不写入仓库评审名单,也不拖住后续 PR 的收齐窗口', async (t) => {
+  const fx = createFixture(t);
+  // 先遇到一条由自动合并 bot 批准过的 PR(例如模型目录自动晋升 PR),同时有普通 CI 和 Greptile 评审。
+  const autoMergeReview = {
+    id: 'R-auto',
+    author: 'cindy-auto-merge-bot',
+    authorIsBot: true,
+    state: 'APPROVED',
+    body: 'Catalog 范围与必需检查已由自动发布门禁核对。',
+    submittedAt: iso(T0 - 5 * MIN),
+    url: 'https://gh/R-auto',
+    commitOid: 'aaa1111',
+  };
+  const first = snap({
+    reviews: [autoMergeReview, botReview('R-grep', 'greptile-apps', 'aaa1111', iso(T0 - 4 * MIN))],
+    reviewerChecks: [
+      { name: 'CI', appSlug: 'github-actions', appId: 15368, headSha: 'aaa1111', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: iso(T0 - 6 * MIN), completedAt: iso(T0 - 5 * MIN) },
+    ],
+  });
+  fx.setSnapshot(first);
+  await fx.run();
+  assert.equal((await fx.run(['--ack'])).code, 0);
+  assert.deepEqual(Object.keys(fx.readRepoState().reviewerBots), ['greptile-apps']);
+  assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
+
+  // 推新提交且 CI 失败:只要 Greptile 答复就立刻放行,不再死等 cindy-auto-merge-bot 满 20 分钟。
+  fx.advance(2);
+  const red = { latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], verdict: 'NEEDS_WORK' };
+  fx.setSnapshot(snap({ ...first, ...red }));
+  let r = await fx.run(['--json']);
+  assert.equal(r.code, 2, r.stdout);
+  assert.equal(r.json().reason, 'settling');
+  assert.match(r.json().detail, /held until greptile-apps answer/);
+
+  fx.advance(3);
+  const greptileNext = botReview('R-grep-2', 'greptile-apps', 'bbb2222', iso(fx.now()));
+  fx.setSnapshot(snap({ ...first, ...red, reviews: [...first.reviews, greptileNext] }));
+  r = await fx.run(['--json']);
+  assert.equal(r.code, 0, r.stdout);
+  assert.match(r.json().detail, /events=\[checks-failed,remarks\]/);
+});
+
+test('升级路径:窗口到期与迁移解耦,整轮无当前证据时跨两次推送仍保留旧评审,待可区分证据到达再迁移 v2', async (t) => {
+  const fx = createFixture(t);
+  const autoMergeReview = {
+    id: 'R-auto',
+    author: 'cindy-auto-merge-bot',
+    authorIsBot: true,
+    state: 'APPROVED',
+    body: 'Catalog 范围与必需检查已由自动发布门禁核对。',
+    submittedAt: iso(T0 - 20 * 24 * 60 * MIN),
+    url: 'https://gh/R-auto',
+    commitOid: 'aaa1111',
+  };
+  const oldGreptileApproved = {
+    id: 'R-grep-ok',
+    author: 'greptile-apps',
+    authorIsBot: true,
+    state: 'APPROVED',
+    body: 'LGTM',
+    submittedAt: iso(T0 - 20 * 24 * 60 * MIN),
+    url: 'https://gh/R-grep-ok',
+    commitOid: 'aaa1111',
+  };
+  const first = snap({
+    reviews: [oldGreptileApproved],
+    reviewerChecks: [
+      { name: 'Greptile Review', appSlug: 'greptile-apps', appId: 99, headSha: 'aaa1111', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: iso(T0 - 20 * 24 * 60 * MIN), completedAt: iso(T0 - 20 * 24 * 60 * MIN) },
+    ],
+  });
+  fx.setSnapshot(first);
+  await fx.run();
+  assert.equal((await fx.run(['--ack'])).code, 0);
+
+  // 模拟旧版留下的单 PR 状态(无 reviewerBotsVersion)且仓库 14 天缓存已过期。
+  fx.writeRepoState({ reviewerBots: {} });
+  fx.writeState({ reviewerBots: ['greptile-apps'], reviewerBotsVersion: undefined });
+
+  // 1) 第一次推送 bbb2222:整轮收齐窗口内 Greptile 都没有注册当前 head 检查。
+  //    窗口内保持 settling;到期后本轮正常结束等待并放行,但不移除未确认的旧评审、不提前迁至 v2。
+  fx.advance(2);
+  const redPush1 = { latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], reviewerChecks: [], verdict: 'NEEDS_WORK' };
+  fx.setSnapshot(snap({ ...first, ...redPush1 }));
+  let r = await fx.run(['--json']);
+  assert.equal(r.code, 2, r.stdout);
+  assert.equal(r.json().reason, 'settling');
+  assert.match(r.json().detail, /held until greptile-apps answer/);
+  assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
+  assert.equal(fx.readState().reviewerBotsVersion, 1);
+
+  fx.advance(20);
+  r = await fx.run(['--json']);
+  assert.equal(r.code, 0, r.stdout);
+  assert.match(r.json().detail, /events=\[checks-failed\]/);
+  assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
+  assert.equal(fx.readState().reviewerBotsVersion, 1);
+  assert.equal((await fx.run(['--resume', 'pushed fix'])).code, 0);
+
+  // 2) 第二次推送 ccc3333:Greptile 尚未登记检查前仍保留在名单中继续等待,不会在意见到达前提前启动跟进。
+  fx.advance(5);
+  const redPush2 = { latestCommitOid: 'ccc3333', checks: [check('lint', 'failed', { required: true })], reviewerChecks: [], verdict: 'NEEDS_WORK' };
+  fx.setSnapshot(snap({ ...first, ...redPush2 }));
+  r = await fx.run(['--json']);
+  assert.equal(r.code, 2, r.stdout);
+  assert.equal(r.json().reason, 'settling');
+  assert.match(r.json().detail, /held until greptile-apps answer/);
+  assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
+  assert.equal(fx.readState().reviewerBotsVersion, 1);
+
+  // 3) Greptile 在 ccc3333 注册自有 App 检查并批准后,凭可区分当前证据立刻迁至 v2 并放行。
+  fx.advance(3);
+  const greptileOnPush2 = {
+    ...first,
+    ...redPush2,
+    reviews: [
+      oldGreptileApproved,
+      { id: 'R-grep-2', author: 'greptile-apps', authorIsBot: true, state: 'APPROVED', body: 'LGTM', submittedAt: iso(fx.now()), url: 'https://gh/R-grep-2', commitOid: 'ccc3333' },
+    ],
+    reviewerChecks: [
+      { name: 'Greptile Review', appSlug: 'greptile-apps', appId: 99, headSha: 'ccc3333', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: iso(fx.now() - MIN), completedAt: iso(fx.now()) },
+    ],
+  };
+  fx.setSnapshot(snap(greptileOnPush2));
+  r = await fx.run(['--json']);
+  assert.equal(r.code, 0, r.stdout);
+  assert.deepEqual(fx.readState().reviewerBots, ['greptile-apps']);
+  assert.equal(fx.readState().reviewerBotsVersion, 2);
+
+  // 4) 可区分的当前证据证明自动审批 bot 无自有 App 检查(当前 head APPROVED):立刻移除并迁至 v2,不再等满 20 分钟。
+  const autoCurrent = createFixture(t);
+  const autoCurrentReview = { ...autoMergeReview, commitOid: 'bbb2222' };
+  const autoCurrentSnap = snap({ reviews: [autoCurrentReview] });
+  autoCurrent.setSnapshot(autoCurrentSnap);
+  await autoCurrent.run();
+  assert.equal((await autoCurrent.run(['--ack'])).code, 0);
+  autoCurrent.writeRepoState({ reviewerBots: {} });
+  autoCurrent.writeState({ reviewerBots: ['cindy-auto-merge-bot'], reviewerBotsVersion: undefined });
+  autoCurrent.advance(2);
+  autoCurrent.setSnapshot(snap({ ...autoCurrentSnap, ...redPush1 }));
+  r = await autoCurrent.run(['--json']);
+  assert.equal(r.code, 0, r.stdout);
+  assert.match(r.json().detail, /events=\[checks-failed\]/);
+  assert.deepEqual(autoCurrent.readState().reviewerBots, []);
+  assert.equal(autoCurrent.readState().reviewerBotsVersion, 2);
+
+  // 5) 快照不完整(如 reviewThreads.truncated)时保守保留旧名单且暂不升至 v2。
+  const incomplete = createFixture(t);
+  incomplete.setSnapshot(autoCurrentSnap);
+  await incomplete.run();
+  assert.equal((await incomplete.run(['--ack'])).code, 0);
+  incomplete.writeRepoState({ reviewerBots: {} });
+  incomplete.writeState({ reviewerBots: ['greptile-apps'], reviewerBotsVersion: undefined });
+  incomplete.advance(2);
+  incomplete.setSnapshot(snap({ ...autoCurrentSnap, ...redPush1, reviewThreads: { totalCount: 1, fetchedCount: 0, unresolvedCount: 0, activeUnresolvedCount: 0, outdatedUnresolvedCount: 0, truncated: true, nodes: [] } }));
+  r = await incomplete.run(['--json']);
+  assert.equal(r.code, 2, r.stdout);
+  assert.equal(r.json().reason, 'settling');
+  assert.match(r.json().detail, /held until greptile-apps answer/);
+  assert.deepEqual(incomplete.readState().reviewerBots, ['greptile-apps']);
+  assert.equal(incomplete.readState().reviewerBotsVersion, 1);
 });
 
 test('按阶段节奏:只等人审时 30 分钟才看一次,不到时间不调用 GitHub;宿主触发立刻看', async (t) => {
@@ -1999,6 +2855,25 @@ test('inventory failure survives resume; new CI failures still wake', async t =>
   assert.equal((await fx.run()).code,0);
 });
 
+test('new follower gets the persistent inventory failure without inheriting the old notice window', async t => {
+  const fx = createFixture(t);
+  fx.setSnapshot(snap({ verdict: 'NEEDS_WORK', blockers: ['required_checks_unavailable'],
+    gate: { requiredChecksUnavailable: true }, checks: [] }));
+  await fx.run();
+  await fx.run(['--resume', 'observed']);
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /required-checks-unavailable/);
+  await fx.run(['--resume', 'noted persistent outage']);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
+  fx.setTrigger({ firstScheduleId: 'new-follower' });
+  fx.advance(5);
+  assert.match((await fx.run()).stdout, /required-checks-unavailable/);
+  await fx.run(['--resume', 'new owner informed']);
+  fx.advance(5);
+  assert.equal((await fx.run()).code, 2);
+});
+
 test('trace records continuous decisions and receipts without comment or resume text', async t => {
   const fx=createFixture(t);
   fx.setSnapshot(snap({comments:[comment('private','human',iso(T0),'private comment should never be recorded')]}));
@@ -2109,4 +2984,607 @@ test('replay refuses to call a trace complete when a recorded round is missing',
   assert.equal((await replay(lines)).complete, true);
   const holed = await replay([lines[0], lines[1], lines[3]]);
   assert.equal(holed.complete, false); assert.equal(holed.gaps, 1);
+});
+
+test('gate requires Node 18+ before skipping and appends CINDY_PR_NODE after CINDY_PRECHECK_OK', async (t) => {
+  const fx = createFixture(t);
+  fx.setSnapshot(snap());
+  const first = await fx.run();
+  assert.equal(first.code, 0, first.stderr);
+  assert.match(first.stdout, /CINDY_PRECHECK_OK\nCINDY_PR_NODE=\d+\n$/);
+  await fx.run(['--ack']);
+
+  // Pacing not-due tick still fails closed on Node < 18 instead of emitting CINDY_PRECHECK_OK
+  let oldOut = '';
+  let oldErr = '';
+  const blocked = await runGate([PR_URL, '--state-dir', path.join(fx.root, 'state'), '--snapshot', path.join(fx.root, 'fake-pr-snapshot.mjs'), '--pacing'], {
+    now: () => fx.now(),
+    readTrigger: async () => null,
+    out: (s) => { oldOut += s; },
+    err: (s) => { oldErr += s; },
+    nodeVersion: '16.20.2',
+  });
+  assert.equal(blocked, 1);
+  assert.match(oldErr, /Node\.js 18\+ is required \(running 16\.20\.2\)/);
+  assert.equal(oldOut, '');
+
+  // Healthy not-due skip on Node 18+ emits both CINDY_PRECHECK_OK and CINDY_PR_NODE
+  let okOut = '';
+  const skipped = await runGate([PR_URL, '--state-dir', path.join(fx.root, 'state'), '--snapshot', path.join(fx.root, 'fake-pr-snapshot.mjs'), '--pacing'], {
+    now: () => fx.now(),
+    readTrigger: async () => null,
+    out: (s) => { okOut += s; },
+    err: () => {},
+    nodeVersion: '22.14.0',
+  });
+  assert.equal(skipped, 2);
+  assert.match(okOut, /CINDY_PRECHECK_OK\nCINDY_PR_NODE=22\n$/);
+});
+
+test('reconcile watch trigger bypasses pacing but runs lightweight probe first; real status watch still reads in full', async (t) => {
+  const fx = createFixture(t);
+  const s = snap();
+  const baseProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0 0', base: 'base-1' };
+  fx.setSnapshot(s);
+  fx.setProbe(baseProbe);
+  assert.equal((await fx.run(['--json'])).code, 0);
+  assert.equal((await fx.run(['--ack', '--json'])).code, 0);
+  // Seed lastProbe so probeAllowsSkip can match.
+  fx.writeState({ probe: baseProbe });
+  const runsAfterAck = fx.snapshotRuns();
+
+  // Within the 30-min waiting pace (5 min later), an ordinary tick would be not-due.
+  // A host `reconcile` watch trigger bypasses pacing, runs --probe, sees unchanged, and skips with 0 full snapshots.
+  fx.advance(5);
+  fx.setTrigger({ kind: 'watch', source: 'pr-status', detail: PR_URL, reason: 'reconcile' });
+  const unchanged = await fx.run(['--pacing', '--json']);
+  assert.equal(unchanged.code, 2);
+  assert.equal(unchanged.json().reason, 'unchanged');
+  assert.equal(fx.snapshotRuns(), runsAfterAck, 'unchanged reconcile trigger must not run a full snapshot');
+
+  // If the probe actually changed (e.g. a new comment arrived during webhook overflow), reconcile runs the full snapshot.
+  fx.advance(5);
+  fx.setProbe({ ...baseProbe, remarks: '1 2026-10-20T10:09:00Z 0  0 0' });
+  fx.setSnapshot(snap({ comments: [comment('C-missed', 'reviewer', iso(fx.now()), 'missed comment')] }));
+  const changed = await fx.run(['--pacing', '--json']);
+  assert.equal(changed.code, 0);
+  assert.equal(fx.snapshotRuns(), runsAfterAck + 1);
+  assert.match(changed.json().report, /missed comment/);
+  assert.equal((await fx.run(['--ack', '--json'])).code, 0);
+  const updatedProbe = { ...baseProbe, remarks: '1 2026-10-20T10:09:00Z 0  0 0' };
+  fx.writeState({ probe: updatedProbe });
+
+  // A non-reconcile watch trigger (explicit pr-status change such as mergeStateStatus -> BEHIND)
+  // still skips the probe and runs a full snapshot even when the probe fingerprint is unchanged.
+  fx.advance(5);
+  fx.setTrigger({ kind: 'watch', source: 'pr-status', detail: PR_URL });
+  const runsBeforeWatch = fx.snapshotRuns();
+  fx.setSnapshot(snap({
+    comments: [comment('C-missed', 'reviewer', iso(fx.now() - 5 * MIN), 'missed comment')],
+    mergeStateStatus: 'BEHIND',
+  }));
+  const explicitWatch = await fx.run(['--pacing', '--json']);
+  assert.equal(explicitWatch.code, 2);
+  assert.equal(fx.snapshotRuns(), runsBeforeWatch + 1, 'real pr-status change must still read full snapshot');
+});
+
+test('real CLI preserves trigger.reason=reconcile, keeps legacy snapshot argv, and passes CINDY_PR_STATE_DIR via env', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-gate-reconcile-cli-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const argvLog = path.join(dir, 'snap-argv.log');
+  const fakeSnap = path.join(dir, 'fake-snap.mjs');
+  const s = snap();
+  const baseProbe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2 ', remarks: '0  0  0 0', base: 'base-1' };
+  // Strict legacy parser mirroring the previous official pr-snapshot.mjs:
+  // rejects any unknown option such as `--state-dir`.
+  fs.writeFileSync(fakeSnap, `
+import fs from 'node:fs';
+const argv = process.argv.slice(2);
+let prArg = null;
+let probe = false;
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === '--repo') { i++; continue; }
+  if (a === '--probe') { probe = true; continue; }
+  if (a === '--strict-exit') continue;
+  if (a === '--expect-head') { i++; continue; }
+  if (!prArg && !a.startsWith('-')) { prArg = a; continue; }
+  throw new Error('Unexpected argument: ' + a);
+}
+fs.appendFileSync(${JSON.stringify(argvLog)}, JSON.stringify({ argv, stateDirEnv: process.env.CINDY_PR_STATE_DIR ?? null }) + '\\n');
+if (probe) {
+  process.stdout.write(${JSON.stringify(JSON.stringify(baseProbe))});
+} else {
+  process.stdout.write(${JSON.stringify(JSON.stringify(s))});
+}
+`, 'utf8');
+
+  const invoke = (extra = [], payload = null, envExtra = {}) => spawnSync(
+    process.execPath,
+    [gatePath, PR_URL, '--state-dir', stateDir, '--snapshot', fakeSnap, '--min-pass-spacing-minutes', '0', ...extra],
+    { encoding: 'utf8', input: payload ? JSON.stringify(payload) : '', env: { ...process.env, CINDY_PR_TRACE: '0', ...envExtra } },
+  );
+
+  // First full snapshot must keep the legacy argv (no --state-dir) and pass CINDY_PR_STATE_DIR via env.
+  const first = invoke(['--no-pacing', '--json']);
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(invoke(['--ack', '--json']).status, 0);
+  const firstCalls = fs.readFileSync(argvLog, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  const fullCall = firstCalls.find(call => !call.argv.includes('--probe'));
+  assert.ok(fullCall, 'expected a full snapshot invocation');
+  assert.deepEqual(fullCall.argv, [String(NUMBER), '--repo', REPO], 'must preserve legacy snapshot CLI argv');
+  assert.equal(fullCall.stateDirEnv, stateDir, 'full snapshot must receive stateDir via CINDY_PR_STATE_DIR');
+
+  // PR_SNAPSHOT_SCRIPT env override also works with the strict legacy parser.
+  fs.writeFileSync(argvLog, '');
+  const viaEnv = spawnSync(
+    process.execPath,
+    [gatePath, PR_URL, '--state-dir', stateDir, '--triggered', '--no-pacing', '--json'],
+    { encoding: 'utf8', env: { ...process.env, CINDY_PR_TRACE: '0', PR_SNAPSHOT_SCRIPT: fakeSnap } },
+  );
+  assert.equal(viaEnv.status, 2, viaEnv.stderr);
+  const envCalls = fs.readFileSync(argvLog, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  assert.deepEqual(envCalls[0].argv, [String(NUMBER), '--repo', REPO]);
+  assert.equal(envCalls[0].stateDirEnv, stateDir);
+
+  // Seed probe to match fakeSnap's probe output, then send host reconcile trigger via stdin.
+  const statePath = stateFilePath(stateDir, REPO, NUMBER);
+  const saved = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  saved.probe = baseProbe;
+  fs.writeFileSync(statePath, JSON.stringify(saved));
+  fs.writeFileSync(argvLog, '');
+
+  const rec = invoke(['--pacing', '--json'], {
+    event: 'schedule-pre-run',
+    scheduleId: 'sched-1',
+    runId: 'run-2',
+    lastFinishedAt: Date.now() - 60_000,
+    firedAt: Date.now(),
+    trigger: { kind: 'watch', source: 'pr-status', detail: PR_URL, reason: 'reconcile' },
+  });
+  assert.equal(rec.status, 2, rec.stderr);
+  assert.equal(JSON.parse(rec.stdout).reason, 'unchanged');
+  const recCalls = fs.readFileSync(argvLog, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  assert.equal(recCalls.length, 1, 'reconcile trigger should only run --probe when unchanged');
+  assert.ok(recCalls[0].argv.includes('--probe'));
+});
+
+test('diagnostic test-run disables snapshot cache writes even with --state-dir and inherited CINDY_PR_STATE_DIR', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim' : false }, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-gate-diag-readonly-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const freshDir = path.join(dir, 'fresh-state');
+  const cfgFile = path.join(dir, 'cfg.json');
+  const prUrl = 'https://github.com/acme/game/pull/54';
+
+  fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+const cfg = JSON.parse(fs.readFileSync(process.env.CFG_FILE, 'utf8'));
+if (args[0] === '--version') process.exit(0);
+if (args[0] === 'pr' && args[1] === 'view') {
+  process.stdout.write(JSON.stringify({
+    headRefOid: cfg.headSha,
+    statusCheckRollup: [{ __typename: 'CheckRun', name: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+  }));
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1] === 'graphql') {
+  process.stdout.write(JSON.stringify({
+    data: {
+      viewer: { login: 'alice' },
+      repository: {
+        pullRequest: {
+          state: 'OPEN', headRefOid: cfg.headSha, mergeStateStatus: 'CLEAN', baseRefName: 'main',
+          baseRef: { target: { oid: 'base-1' }, branchProtectionRule: null },
+          reviewThreads: { nodes: [] }, mergeQueueEntry: null, timelineItems: { nodes: [] },
+        },
+      },
+    },
+  }));
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1] === 'repos/acme/game/pulls/54') {
+  process.stdout.write(
+    'HTTP/2.0 200 OK\\nETag: ' + cfg.pullEtag + '\\n\\n' +
+    JSON.stringify({
+      base: { sha: 'base-1' }, head: { sha: cfg.headSha }, mergeable: true, state: 'open',
+      html_url: 'https://github.com/acme/game/pull/54',
+    }),
+  );
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1].includes('/rules/branches/')) {
+  process.stdout.write('HTTP/2.0 200 OK\\nETag: ' + cfg.rulesEtag + '\\n\\n' + JSON.stringify(cfg.rules));
+  process.exit(0);
+}
+process.stderr.write('Unexpected gh call: ' + args.join(' ') + '\\n');
+process.exit(2);
+`, { mode: 0o755 });
+
+  const baseEnv = { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, CFG_FILE: cfgFile };
+
+  // 1. Prime an existing production stateDir with gate state + snapshot ETag caches.
+  fs.writeFileSync(cfgFile, JSON.stringify({ headSha: 'head-1', pullEtag: 'W/"pull-v1"', rulesEtag: 'W/"rules-v1"', rules: [] }));
+  const primed = spawnSync(
+    process.execPath,
+    [gatePath, prUrl, '--state-dir', stateDir, '--no-pacing', '--json'],
+    { encoding: 'utf8', env: baseEnv },
+  );
+  assert.equal(primed.status, 0, primed.stderr);
+  const filesBefore = fs.readdirSync(stateDir).sort();
+  assert.ok(filesBefore.some(f => f.endsWith('.rest-cache.json')), 'normal run should prime pull REST cache');
+  assert.ok(filesBefore.some(f => f.endsWith('.rules-cache.json')), 'normal run should prime rules cache');
+  const snapshotDirState = (targetDir) => Object.fromEntries(
+    fs.readdirSync(targetDir).sort().map(name => {
+      const full = path.join(targetDir, name);
+      const st = fs.statSync(full);
+      return [name, { content: fs.readFileSync(full, 'utf8'), mtimeMs: st.mtimeMs }];
+    }),
+  );
+  const before = snapshotDirState(stateDir);
+
+  // 2. Change upstream ETags/data and run a diagnostic hook with BOTH --state-dir AND inherited CINDY_PR_STATE_DIR.
+  fs.writeFileSync(cfgFile, JSON.stringify({
+    headSha: 'head-2',
+    pullEtag: 'W/"pull-v2"',
+    rulesEtag: 'W/"rules-v2"',
+    rules: [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'ci' }] } }],
+  }));
+  const diagPayload = JSON.stringify({ event: 'schedule-pre-run', scheduleId: 'test', runId: 'test', firedAt: Date.now() });
+  const diag = spawnSync(
+    process.execPath,
+    [gatePath, prUrl, '--state-dir', stateDir, '--json'],
+    { encoding: 'utf8', input: diagPayload, env: { ...baseEnv, CINDY_PR_STATE_DIR: stateDir } },
+  );
+  assert.equal(diag.status, 0, diag.stderr);
+  assert.match(JSON.parse(diag.stdout).detail, /diagnostic only, follow-up state unchanged/);
+  assert.deepEqual(snapshotDirState(stateDir), before, 'diagnostic run must not create or modify any state or cache file');
+
+  // 3. Diagnostic run with only inherited CINDY_PR_STATE_DIR pointing at a non-existent directory creates nothing.
+  const diagFresh = spawnSync(
+    process.execPath,
+    [gatePath, prUrl, '--json'],
+    { encoding: 'utf8', input: diagPayload, env: { ...baseEnv, CINDY_PR_STATE_DIR: freshDir } },
+  );
+  assert.equal(diagFresh.status, 0, diagFresh.stderr);
+  assert.equal(fs.existsSync(freshDir), false, 'diagnostic run must not create inherited CINDY_PR_STATE_DIR');
+});
+
+test('replay: settled baseline wait paces at 15m, uses probe, absorbs subsequent base commits, and wakes on news or deadline', async (t) => {
+  const fx = createFixture(t);
+  const s = baselineBlocked();
+  const baseProbe = { status: 'OPEN false MERGEABLE aaa1111  FAILURE:1,SUCCESS:1', remarks: '0  0  0 0', base: 'base-0' };
+  fx.setProbe(baseProbe);
+  fx.setSnapshot(s);
+  assert.equal((await fx.run(['--pacing', '--json'])).code, 0);
+  // Step 0 (15m) -> expire -> Step 1 (30m) -> expire -> Step 2 (60m) -> expire -> Step 3 (120m)
+  for (let step = 0; step < 3; step += 1) {
+    const set = (await fx.run(['--wait', fx.writeWait(baselinePlan(s)), '--json'])).json();
+    fx.advance((set.wait.until - fx.now()) / MIN);
+    assert.equal((await fx.run(['--pacing', '--json'])).json().reason, 'wait-expired');
+  }
+  const long = (await fx.run(['--wait', fx.writeWait(baselinePlan(s)), '--json'])).json();
+  assert.equal(long.wait.until - fx.now(), 120 * MIN);
+  // Ensure we have a fresh probe baseline after the wait-expired full read (which skipped probe).
+  fx.writeState({ probe: baseProbe, lastFullReadAt: fx.now() });
+
+  // 5m and 10m ticks are skipped immediately with 0 probes and 0 snapshots.
+  let snaps = fx.snapshotRuns();
+  let probes = fx.probeRuns();
+  for (const step of [5, 5]) {
+    fx.advance(step);
+    const r = await fx.run(['--pacing', '--json']);
+    assert.equal(r.code, 2);
+    assert.equal(r.json().reason, 'not-due');
+    assert.match(r.json().detail, /pace=backoff/);
+  }
+  assert.equal(fx.probeRuns(), probes, 'not-due ticks must not call probe');
+  assert.equal(fx.snapshotRuns(), snaps, 'not-due ticks must not call snapshot');
+
+  // 15m tick: unchanged probe skips full snapshot (1 probe, 0 snapshots).
+  fx.advance(5);
+  let r = await fx.run(['--pacing', '--json']);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().reason, 'unchanged');
+  assert.equal(fx.probeRuns(), probes + 1);
+  assert.equal(fx.snapshotRuns(), snaps);
+
+  // First base commit arrives on the next 15m tick: must pierce probe so baseMovedAt & 60m clamp are recorded.
+  fx.advance(10);
+  assert.equal((await fx.run(['--pacing', '--json'])).json().reason, 'not-due');
+  fx.advance(5);
+  fx.setProbe({ ...baseProbe, base: 'base-1' });
+  fx.setSnapshot({ ...s, baseCommitOid: 'base-1' });
+  snaps = fx.snapshotRuns();
+  probes = fx.probeRuns();
+  r = await fx.run(['--pacing', '--json']);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().reason, 'waiting');
+  assert.equal(fx.snapshotRuns(), snaps + 1, 'first base move reads in full to record baseMovedAt');
+  assert.ok(fx.readState().wait.baseMovedAt, 'baseMovedAt recorded on first base move');
+  const clampedUntil = fx.readState().wait.until;
+  assert.equal(clampedUntil, fx.now() + 60 * MIN, '120m wait pulled within 60m of first base move');
+
+  // Subsequent base commit 15m later is absorbed right at the probe without a full snapshot.
+  fx.advance(15);
+  fx.setProbe({ ...baseProbe, base: 'base-2' });
+  fx.setSnapshot({ ...s, baseCommitOid: 'base-2' });
+  snaps = fx.snapshotRuns();
+  probes = fx.probeRuns();
+  r = await fx.run(['--pacing', '--json']);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().reason, 'unchanged');
+  assert.equal(fx.probeRuns(), probes + 1);
+  assert.equal(fx.snapshotRuns(), snaps, 'subsequent base commit absorbed at probe');
+
+  // New human comment still pierces probe immediately at the next 15m tick and wakes the agent.
+  fx.advance(15);
+  fx.setProbe({ ...baseProbe, base: 'base-2', remarks: '1 2026-10-20T15:00:00Z 0  0 0' });
+  fx.setSnapshot({ ...s, baseCommitOid: 'base-2', comments: [comment('c-new', 'reviewer', iso(fx.now()), 'Please rebase now')] });
+  r = await fx.run(['--pacing', '--json']);
+  assert.equal(r.code, 0);
+  assert.equal(r.json().reason, 'changed');
+  assert.match(r.json().report, /Please rebase now/);
+});
+
+test('replay: skips redundant probe when state already requires a full read', async (t) => {
+  const fx = createFixture(t);
+  const p0 = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0 0', base: 'base-0' };
+  fx.setProbe(p0);
+
+  // 1. inFlight (checks running): skips probe on subsequent ticks while CI runs.
+  const running = snap({ checks: [check('build', 'pending', { required: true })], verdict: 'WAITING_CI' });
+  fx.setSnapshot({ ...running, probe: p0 });
+  await fx.run(['--json']);
+  assert.equal(fx.readState().inFlight, true);
+  assert.equal(fx.readState().snapshotProvidesProbe, true);
+  let probes = fx.probeRuns();
+  let snaps = fx.snapshotRuns();
+  fx.advance(5);
+  assert.equal((await fx.run(['--pacing', '--json'])).code, 2);
+  assert.equal(fx.probeRuns(), probes, 'inFlight must skip redundant probe');
+  assert.equal(fx.snapshotRuns(), snaps + 1);
+
+  // 2. pendingWatch (unacked event): skips probe on retry.
+  const green = snap({ verdict: 'READY', probe: p0 });
+  fx.setSnapshot(green);
+  fx.advance(5);
+  assert.equal((await fx.run(['--pacing', '--json'])).code, 0);
+  assert.ok(fx.readState().pendingWatch);
+  probes = fx.probeRuns();
+  snaps = fx.snapshotRuns();
+  fx.advance(5);
+  assert.equal((await fx.run(['--pacing', '--json'])).json().reason, 'retry-unacked');
+  assert.equal(fx.probeRuns(), probes, 'pendingWatch retry must skip redundant probe');
+  assert.equal(fx.snapshotRuns(), snaps + 1);
+  assert.equal((await fx.run(['--ack'])).code, 0);
+
+  // 3. 30m full reread when snapshot embeds snap.probe: skips probe AND refreshes probe baseline.
+  const p1 = { ...p0, status: 'OPEN false MERGEABLE aaa1111  SUCCESS:3' };
+  fx.setProbe(p1);
+  fx.setSnapshot({ ...green, probe: p1 });
+  probes = fx.probeRuns();
+  snaps = fx.snapshotRuns();
+  fx.advance(31);
+  assert.equal((await fx.run(['--pacing', '--json'])).code, 2);
+  assert.equal(fx.probeRuns(), probes, '30m reread skips probe when snapshotProvidesProbe is true');
+  assert.equal(fx.snapshotRuns(), snaps + 1);
+  assert.deepEqual(fx.readState().probe, p1, 'probe baseline refreshed from snap.probe');
+
+  // Next tick within 30m still uses probe and skips full snapshot.
+  fx.writeState({ lastPassAt: fx.now() - 10 * MIN }); // active window so 5m tick is due
+  probes = fx.probeRuns();
+  snaps = fx.snapshotRuns();
+  fx.advance(5);
+  const skipped = await fx.run(['--pacing', '--json']);
+  assert.equal(skipped.code, 2);
+  assert.equal(skipped.json().reason, 'unchanged');
+  assert.equal(fx.probeRuns(), probes + 1);
+  assert.equal(fx.snapshotRuns(), snaps);
+
+  // 4. Open bot settle window: skips probe.
+  fx.writeState({ settleUntil: fx.now() + 15 * MIN });
+  probes = fx.probeRuns();
+  snaps = fx.snapshotRuns();
+  fx.advance(5);
+  await fx.run(['--pacing', '--json']);
+  assert.equal(fx.probeRuns(), probes, 'settling window must skip redundant probe');
+  assert.equal(fx.snapshotRuns(), snaps + 1);
+
+  // 5. Due wait deadline: skips probe and goes straight to full snapshot.
+  fx.writeState({ settleUntil: undefined, wait: { kind: 'retry', headSha: 'aaa1111', reason: 'recheck', createdAt: fx.now() - 15 * MIN, until: fx.now(), checks: [], threads: [], reviewDecision: green.reviewDecision, blockers: green.blockers, threadStates: [] } });
+  probes = fx.probeRuns();
+  snaps = fx.snapshotRuns();
+  const expired = await fx.run(['--pacing', '--json']);
+  assert.equal(expired.json().reason, 'wait-expired');
+  assert.equal(fx.probeRuns(), probes, 'due wait must skip redundant probe');
+  assert.equal(fx.snapshotRuns(), snaps + 1);
+
+  // 6. Pure unit checks on mustFullReadBeforeProbe / canSkipWithProbe.
+  const quiet = { watch: freshWatch(green, T0), probe: p1, lastFullReadAt: T0, lastPassAt: T0 };
+  assert.equal(mustFullReadBeforeProbe(quiet, T0 + 5 * MIN), false);
+  assert.equal(canSkipWithProbe(quiet, T0 + 5 * MIN), true);
+  assert.equal(mustFullReadBeforeProbe({ ...quiet, merged: true }, T0 + 5 * MIN), true);
+  assert.equal(canSkipWithProbe(quiet, T0 + 31 * MIN), false);
+  assert.equal(mustFullReadBeforeProbe(quiet, T0 + 31 * MIN), false, '30m reread handled separately so legacy snapshots keep refreshing probe');
+});
+
+test('跨 PR 共享限流退避: 首条报警写 .rate-limit.json，后续与并发 PR 零额外调用且不重复 exit 1，重置后恢复', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-shared-rate-limit-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const fakeSnapshot = path.join(dir, 'fake-snapshot.mjs');
+  fs.writeFileSync(fakeSnapshot, '// placeholder\n', 'utf8');
+
+  let clock = T0;
+  let probeCalls = 0;
+  let snapshotCalls = 0;
+  const resetAt = clock + 40 * MIN;
+  let rateLimited = true;
+
+  const invoke = async (prUrl, { trigger = null, snapshotImpl, probeImpl, extra = [] } = {}) => {
+    let stdout = '';
+    let stderr = '';
+    const code = await runGate(
+      [prUrl, '--state-dir', stateDir, '--snapshot', fakeSnapshot, '--min-pass-spacing-minutes', '0', ...extra],
+      {
+        now: () => clock,
+        runProbe: async (...args) => {
+          probeCalls += 1;
+          return probeImpl ? probeImpl(...args) : { code: 1, stdout: '', stderr: '' };
+        },
+        runSnapshot: async (...args) => {
+          snapshotCalls += 1;
+          if (snapshotImpl) return snapshotImpl(...args);
+          if (rateLimited) {
+            return {
+              code: 1,
+              stdout: '',
+              stderr: `[gh-rate-limit] retryAt=${resetAt}\n[gh] fatal on graphql: API rate limit already exceeded\n`,
+            };
+          }
+          return { code: 0, stdout: JSON.stringify(snap({ verdict: 'READY' })), stderr: '' };
+        },
+        readTrigger: async () => trigger,
+        out: (text) => { stdout += text; },
+        err: (text) => { stderr += text; },
+      },
+    );
+    return { code, stdout, stderr };
+  };
+
+  const pr1 = 'https://github.com/acme/widgets/pull/101';
+  const pr2 = 'https://github.com/acme/widgets/pull/102';
+  const pr3 = 'https://github.com/acme/widgets/pull/103';
+  const pr4 = 'https://github.com/acme/widgets/pull/104';
+
+  // 1. Concurrent race: PR #101 and PR #102 both pass the early check before .rate-limit.json exists
+  // and hit GitHub rate limit together. Exactly one must exit 1 (alert) and the other must exit 2 (skip).
+  let releaseBoth;
+  let arrived = 0;
+  const bothReady = new Promise((resolve) => { releaseBoth = resolve; });
+  const barrierSnapshot = async () => {
+    arrived += 1;
+    if (arrived === 2) releaseBoth();
+    await bothReady;
+    return {
+      code: 1,
+      stdout: '',
+      stderr: `[gh-rate-limit] retryAt=${resetAt}\n[gh] fatal on graphql: API rate limit already exceeded\n`,
+    };
+  };
+  const [r1, r2] = await Promise.all([
+    invoke(pr1, { snapshotImpl: barrierSnapshot, extra: ['--triggered'] }),
+    invoke(pr2, { snapshotImpl: barrierSnapshot, extra: ['--triggered'] }),
+  ]);
+  const codes = [r1.code, r2.code].sort((a, b) => a - b);
+  assert.deepEqual(codes, [1, 2], `concurrent rate-limit failures must alert strictly once: r1=${r1.code}, r2=${r2.code}`);
+
+  // 2. Subsequent PR #103 (normal tick) and PR #104 (host pr-status watch trigger) skip with 0 probes & 0 snapshots.
+  const probesBefore = probeCalls;
+  const snapshotsBefore = snapshotCalls;
+  clock += 5 * MIN;
+  const r3 = await invoke(pr3, { extra: ['--json'] });
+  assert.equal(r3.code, 2);
+  assert.equal(JSON.parse(r3.stdout).reason, 'snapshot-failure-backoff');
+  assert.match(JSON.parse(r3.stdout).detail, /shared GitHub rate limit/);
+  const r4 = await invoke(pr4, {
+    trigger: { kind: 'watch', source: 'pr-status', detail: pr4 },
+    extra: ['--json'],
+  });
+  assert.equal(r4.code, 2);
+  assert.equal(JSON.parse(r4.stdout).reason, 'snapshot-failure-backoff');
+  assert.equal(probeCalls, probesBefore, 'shared rate-limit skip must not call runProbe');
+  assert.equal(snapshotCalls, snapshotsBefore, 'shared rate-limit skip must not call runSnapshot');
+  assert.equal(
+    JSON.parse(fs.readFileSync(stateFilePath(stateDir, 'acme/widgets', 103), 'utf8')).consecutiveSnapshotFailures,
+    undefined,
+    'shared rate-limit skip must not poison another PR failure counter',
+  );
+
+  // 3. Diagnostic preview neither gets blocked by nor mutates shared rate limit.
+  const diag = await invoke(pr3, {
+    trigger: { kind: 'diagnostic' },
+    snapshotImpl: async () => ({ code: 0, stdout: JSON.stringify(snap({ verdict: 'READY' })), stderr: '' }),
+    extra: ['--json'],
+  });
+  assert.equal(diag.code, 0);
+  assert.match(JSON.parse(diag.stdout).detail, /diagnostic only/);
+
+  // 4. After resetAt passes, PR #103 recovers with a normal snapshot read.
+  rateLimited = false;
+  clock = resetAt + 2000;
+  const recovered = await invoke(pr3, { extra: ['--json'] });
+  assert.equal(recovered.code, 0);
+  assert.equal(JSON.parse(recovered.stdout).reason, 'changed');
+  assert.ok(snapshotCalls > snapshotsBefore);
+});
+
+test('retry-backoff 退避期内普通巡检零 API 调用，宿主触发仍可即时穿透，到期后恢复重试', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-retry-backoff-zero-api-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, 'state');
+  const fakeSnapshot = path.join(dir, 'fake-snapshot.mjs');
+  fs.writeFileSync(fakeSnapshot, '// placeholder\n', 'utf8');
+
+  let clock = T0;
+  let probeCalls = 0;
+  let snapshotCalls = 0;
+  const probePayload = { status: 'OPEN false MERGEABLE aaa1111  FAILURE:1 ', remarks: '0  0  0', base: 'base-1' };
+  const failingSnap = { ...snap({ checks: [check('build', 'failed', { required: true })] }), probe: probePayload };
+
+  const run = async (extra = [], trigger = null) => {
+    let stdout = '';
+    let stderr = '';
+    const code = await runGate(
+      [PR_URL, '--state-dir', stateDir, '--snapshot', fakeSnapshot, '--min-pass-spacing-minutes', '0', '--max-pass-attempts', '1', '--json', ...extra],
+      {
+        now: () => clock,
+        runProbe: async () => {
+          probeCalls += 1;
+          return { code: 0, stdout: JSON.stringify(probePayload), stderr: '' };
+        },
+        runSnapshot: async () => {
+          snapshotCalls += 1;
+          return { code: 0, stdout: JSON.stringify(failingSnap), stderr: '' };
+        },
+        readTrigger: async () => trigger,
+        out: (text) => { stdout += text; },
+        err: (text) => { stderr += text; },
+      },
+    );
+    return { code, stdout, stderr, json: () => JSON.parse(stdout) };
+  };
+
+  // Pass 1 (initial failure) -> Pass 2 (+5m) enters 30m retry-backoff-attempt.
+  assert.equal((await run()).code, 0);
+  clock += 5 * MIN;
+  const backoffAttempt = await run();
+  assert.equal(backoffAttempt.code, 0);
+  assert.equal(backoffAttempt.json().reason, 'retry-backoff-attempt');
+
+  // Ticks inside the 30-minute retryBackoffUntil window skip at pacing with 0 probes and 0 snapshots.
+  const probesDuringBackoff = probeCalls;
+  const snapshotsDuringBackoff = snapshotCalls;
+  clock += 5 * MIN;
+  const skipped = await run();
+  assert.equal(skipped.code, 2);
+  assert.equal(skipped.json().reason, 'not-due');
+  assert.match(skipped.json().detail, /pace=retry-backoff/);
+  assert.equal(probeCalls, probesDuringBackoff);
+  assert.equal(snapshotCalls, snapshotsDuringBackoff);
+
+  // Host pr-status trigger still inspects immediately without waiting for retryBackoffUntil.
+  const triggered = await run([], { kind: 'watch', source: 'pr-status', detail: PR_URL });
+  assert.equal(triggered.code, 2);
+  assert.equal(triggered.json().reason, 'retry-backoff');
+  assert.equal(snapshotCalls, snapshotsDuringBackoff + 1);
+
+  // Once retryBackoffUntil expires, the scheduled tick runs retry-backoff-attempt again.
+  clock += 25 * MIN;
+  const retried = await run();
+  assert.equal(retried.code, 0);
+  assert.equal(retried.json().reason, 'retry-backoff-attempt');
 });

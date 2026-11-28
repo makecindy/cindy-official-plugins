@@ -659,7 +659,7 @@ test('account commands retain their existing output limit', async () => {
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
-  assert.equal(manifest.version, '2.1.31');
+  assert.equal(manifest.version, '2.1.32');
   assert.equal(manifest.minCindyVersion, '0.1.64');
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_build').description,
@@ -706,7 +706,7 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
   assert.match(consoleTool.description, /不自动构建、提交或安装游戏运行环境/);
   assert.deepEqual(provisioning.ghosts['taptap-maker'], { audience: { emails: [] } });
   assert.equal(vendorPackage.name, '@taptap/maker');
-  assert.equal(vendorPackage.version, '0.0.41');
+  assert.equal(vendorPackage.version, '0.0.42');
   assert.match(makerMcpSource, /TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin'/);
   assert.match(makerChildSource, /TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin'/);
   const statusTool = manifest.tools.find((tool) => tool.name === 'maker_status');
@@ -3354,14 +3354,15 @@ function canvasWorkflowHarness({ preparing = false, runImage, recoverImage } = {
   const queue = { phase: 'paused', failures: { image: 'failed' }, retries: {} };
   const context = createContext({
     structuredClone, setTimeout: fn => { tasks.push(fn); },
-    canvasReferences: () => [nodes[1]],
+    canvasReferences: (_document, id) => id === 'cut' ? [nodes[2]] : [nodes[1]],
+    uiRecognitionSceneError: () => undefined,
     selectedUiRecognition: () => preparing ? undefined : { bbox: { texts: [], elements: [] } },
   });
   new Script(makerBundleFunction('createUi015Workflow')).runInContext(context);
   const workflow = context.createUi015Workflow({
     current: () => document, store: {}, needs: id => preparing && id === 'input',
     runImage: async id => { calls.push('image:' + id); return runImage ? runImage(id) : false; },
-    recoverImage: recoverImage || (async () => 'blocked'),
+    recoverImage: recoverImage || (async () => 'unknown'),
     queue: {
       view: () => queue, remaining: () => 1,
       start: () => { calls.push('start'); return true; },
@@ -3385,7 +3386,7 @@ test('015 准备阶段未知结果暂停；停止后不进入下一张卡或队�
   const waiting = canvasWorkflowHarness({ preparing: true,
     runImage: () => new Promise(resolve => { finish = resolve; }) });
   const pending = waiting.workflow.advance('group');
-  const stop = waiting.workflow.view('group').extra.find(action => action.label === '停止后续');
+  const stop = waiting.workflow.view('group').extra.find(action => action.label === '停止后续步骤');
   assert.ok(stop);
   stop.run();
   finish(true);
@@ -3402,7 +3403,7 @@ test('015 队列恢复期间停止后，迟到回包不再次启动队列', asyn
   assert.equal((await harness.workflow.advance('group')).status, 'started');
   harness.workflow.settled('group', 'paused');
   harness.tasks.shift()();
-  const stop = harness.workflow.view('group').extra.find(action => action.label === '停止后续');
+  const stop = harness.workflow.view('group').extra.find(action => action.label === '停止后续步骤');
   assert.ok(stop);
   stop.run();
   finish('released');
@@ -3418,7 +3419,7 @@ test('015 生成队列遇到未知结果不花费重试次数或再次提交', a
   harness.tasks.shift()();
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(harness.calls, ['start']);
-  assert.equal(harness.workflow.outcome('group').status, 'waiting');
+  assert.match(harness.workflow.outcome('group').message, /结果未知.*暂停/);
   assert.equal(harness.workflow.active, false);
 });
 

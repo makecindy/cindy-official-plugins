@@ -37,7 +37,15 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { completeInitializeResult, isObject, isSessionOpen, normalizeMcpToolCall } = require('./agy-mcp.js');
+const {
+  adaptAgyNativeToolUpdate,
+  clientSupportsElicitationForm,
+  completeInitializeResult,
+  isObject,
+  isSessionOpen,
+  normalizeMcpToolCall,
+} = require('./agy-mcp.js');
+const { createSteeringRelay } = require('./agy-steering.js');
 
 const REMOTE_WORKSPACE_ARG = '--cindy-remote-workspace';
 const GUEST_WORKSPACE_ARG = '--cindy-guest-workspace';
@@ -55,6 +63,8 @@ const LAUNCH_DIR_PREFIX = 'cindy-agy-remote-';
 /** A launch directory this old belongs to a task that ended without cleaning up (a crash, a hard kill). */
 const STALE_LAUNCH_DIR_MS = 24 * 60 * 60 * 1000;
 
+/** Non-local agy tools explicitly allow-listed in `agentDefinition` (never touch host files or shell). */
+const REMOTE_SAFE_NATIVE_TOOLS = new Set(['search_web', 'ask_question', 'update_steps']);
 /** ACP tool kinds that mean "touched this computer" when the call is not an MCP call. */
 const LOCAL_KINDS = new Set(['read', 'edit', 'delete', 'move', 'execute']);
 /** agy's own file and command tools, by the name it reports. */
@@ -141,6 +151,8 @@ function agentDefinition(serverNames) {
     'description: Works on a project that is on another computer, through the tools Cindy provides.',
     'tools:',
     '  - search_web',
+    '  - ask_question',
+    '  - update_steps',
     'mcpServers:',
     ...serverNames.map((name) => `  - name: ${name}`),
     '---',
@@ -185,13 +197,24 @@ function remoteToolIdentity({ server, tool }) {
 }
 
 /** Keep the remote restriction on native file and command tools after normalizing MCP calls. */
-function inspectToolCall(toolCall, seen, serverNames = []) {
+function inspectToolCall(toolCall, seen, serverNames = [], seenSafeTools = null) {
   if (!isObject(toolCall)) return { type: 'other' };
   const mcpCall = normalizeMcpToolCall(toolCall, seen, serverNames, {
     allowLegacyEnvelope: true, toolIdentity: remoteToolIdentity,
   });
   if (mcpCall) return { type: 'mcp', toolCall: mcpCall };
+  const id = typeof toolCall.toolCallId === 'string' ? toolCall.toolCallId : null;
   const name = typeof toolCall.name === 'string' ? toolCall.name : '';
+  if (REMOTE_SAFE_NATIVE_TOOLS.has(name)) {
+    if (id && seenSafeTools) {
+      if (seenSafeTools.size >= 2_000 && !seenSafeTools.has(id)) {
+        seenSafeTools.delete(seenSafeTools.values().next().value);
+      }
+      seenSafeTools.add(id);
+    }
+    return { type: 'other' };
+  }
+  if (!name && id && seenSafeTools && seenSafeTools.has(id)) return { type: 'other' };
   const kind = typeof toolCall.kind === 'string' ? toolCall.kind : '';
   if (LOCAL_TOOL_NAMES.has(name) || LOCAL_KINDS.has(kind)) return { type: 'local', tool: name || kind };
   return { type: 'other' };
@@ -239,7 +262,7 @@ function startRemoteWorkspace(agyPath, host) {
     return;
   }
 
-  /** `handshake` → `ready` (initialize answered) → `opening` (session process starting) → `session`. */
+  /** `handshake` → `ready` → `opening` (child init) → `opening-session` (session open) → `session` (or terminal `failed`). */
   let phase = 'handshake';
   let initRequest = null;
   let probe = null;
@@ -249,12 +272,32 @@ function startRemoteWorkspace(agyPath, host) {
   let finished = false;
   let stopCode = null;
   let forceTimer = null;
+  let agentCloseTimer = null;
   let stdinEnded = false;
   const queued = [];
   const seenCalls = new Map();
+  const seenSteps = new Map();
+  const seenSafeTools = new Set();
   let serverNames = [];
+  const steering = createSteeringRelay();
 
   const running = (child) => Boolean(child) && child.exitCode === null && child.signalCode === null;
+
+  const stopChild = (child) => {
+    if (!child) return;
+    try {
+      child.stdin.end();
+    } catch {
+      // already closed
+    }
+    if (!running(child)) return;
+    if (process.platform === 'win32') {
+      killTree(child);
+      return;
+    }
+    killTree(child, 'SIGTERM');
+    setTimeout(() => killTree(child, 'SIGKILL'), timings.signalGrace).unref();
+  };
 
   /** Writes with back-pressure: the source pauses until the destination has drained. */
   const pipeWrite = (destination, data, source) => {
@@ -274,11 +317,24 @@ function startRemoteWorkspace(agyPath, host) {
   const toAgentLine = (line) => pipeWrite(agent.stdin, Buffer.concat([line, NEWLINE]), process.stdin);
   const toAgent = (message) => pipeWrite(agent.stdin, JSON.stringify(message) + '\n', process.stdin);
   const refuse = (id, code, message) => toClient({ jsonrpc: '2.0', id, error: { code, message } });
+  const forwardClientLine = (line, parsed) => {
+    const message = parsed === undefined ? parseLine(line) : parsed;
+    if (message) {
+      const handled = steering.handleClientMessage(message);
+      if (handled) {
+        if (handled.toClient) toClient(handled.toClient);
+        if (handled.toAgent) toAgent(handled.toAgent);
+        return;
+      }
+    }
+    toAgentLine(line);
+  };
 
   const finish = (code) => {
     if (finished) return;
     finished = true;
     clearTimeout(forceTimer);
+    clearTimeout(agentCloseTimer);
     const done = () => process.exit(code);
     if (process.stdout.writableLength > 0) {
       process.stdout.once('drain', done);
@@ -304,6 +360,10 @@ function startRemoteWorkspace(agyPath, host) {
     if (stopCode !== null) return;
     stopCode = 128 + (os.constants.signals[signal] || os.constants.signals.SIGTERM);
     terminate();
+    if (!running(probe) && !running(agent)) {
+      finish(stopCode);
+      return;
+    }
     setTimeout(() => finish(stopCode), timings.signalGrace + 300).unref();
   };
 
@@ -324,6 +384,10 @@ function startRemoteWorkspace(agyPath, host) {
       // ignore
     }
     terminate();
+    if (!running(probe) && !running(agent)) {
+      finish(stopCode);
+      return;
+    }
     setTimeout(() => finish(stopCode), timings.signalGrace + 300).unref();
   };
 
@@ -365,7 +429,9 @@ function startRemoteWorkspace(agyPath, host) {
       if (!message || message.id !== request.id || message.method !== undefined) return;
       answered = true;
       phase = 'ready';
-      toClient(message.result !== undefined ? { ...message, result: completeInitializeResult(message.result) } : message);
+      toClient(message.result !== undefined
+        ? { ...message, result: steering.completeInitializeResult(completeInitializeResult(message.result)) }
+        : message);
       try {
         current.stdin.end();
       } catch {
@@ -399,6 +465,7 @@ function startRemoteWorkspace(agyPath, host) {
     sessionRequest = { ...request, params: { ...request.params, mcpServers: servers } };
     const current = agent;
     current.on('error', (error) => {
+      if (phase === 'failed') return;
       if (current.pid === undefined) {
         agentExited = true;
         finished = true;
@@ -408,13 +475,17 @@ function startRemoteWorkspace(agyPath, host) {
       process.stderr.write(`[agy-acp] Antigravity process error: ${describe(error)}\n`);
     });
     current.on('exit', (code, signal) => {
+      if (phase === 'failed') return;
       agentExited = true;
       const status = stopCode !== null ? stopCode : exitCodeFor(code, signal);
-      const closeTimer = setTimeout(() => finish(status), timings.flush);
-      current.once('close', () => {
-        clearTimeout(closeTimer);
+      const endIfActive = () => {
+        clearTimeout(agentCloseTimer);
+        agentCloseTimer = null;
+        if (phase === 'failed') return;
         finish(status);
-      });
+      };
+      agentCloseTimer = setTimeout(endIfActive, timings.flush);
+      current.once('close', endIfActive);
     });
     current.stdout.on('data', lineSplitter(onAgentLine));
     // The session process has not seen Cindy's `initialize` yet; its answer stays here.
@@ -422,7 +493,31 @@ function startRemoteWorkspace(agyPath, host) {
     if (stdinEnded) endAgentInput();
   };
 
+  const failOpen = (error) => {
+    const failedId = sessionRequest.id;
+    phase = 'failed';
+    sessionRequest = null;
+    serverNames = [];
+    seenCalls.clear();
+    seenSteps.clear();
+    seenSafeTools.clear();
+    clearTimeout(forceTimer);
+    forceTimer = null;
+    clearTimeout(agentCloseTimer);
+    agentCloseTimer = null;
+    toClient({ jsonrpc: '2.0', id: failedId, error });
+    for (const pending of queued.splice(0)) {
+      const pendingMessage = parseLine(pending);
+      if (pendingMessage && typeof pendingMessage.method === 'string' && pendingMessage.id !== undefined) {
+        refuse(pendingMessage.id, -32600, 'Session failed to open; start a new connection');
+      }
+    }
+    stopChild(agent);
+    if (stdinEnded) finish(0);
+  };
+
   const onAgentLine = (line) => {
+    if (phase === 'failed') return;
     const message = parseLine(line);
     if (!message) {
       toClientLine(line, agent.stdout);
@@ -430,12 +525,33 @@ function startRemoteWorkspace(agyPath, host) {
     }
     if (phase === 'opening' && message.id === initRequest.id && message.method === undefined) {
       if (message.error) {
-        toClient({ jsonrpc: '2.0', id: sessionRequest.id, error: message.error }, agent.stdout);
-      } else {
-        toAgent(sessionRequest);
+        failOpen(message.error);
+        return;
       }
+      if (finished || stopCode !== null || stdinEnded || agentExited) return;
+      toAgent(sessionRequest);
+      phase = 'opening-session';
+      return;
+    }
+    if (phase === 'opening-session' && message.id === sessionRequest.id && message.method === undefined) {
+      if (message.error) {
+        failOpen(message.error);
+        return;
+      }
+      toClientLine(line, agent.stdout);
+      sessionRequest = null;
       phase = 'session';
-      for (const pending of queued.splice(0)) toAgentLine(pending);
+      for (const pending of queued.splice(0)) forwardClientLine(pending);
+      return;
+    }
+    if (message.method === undefined && message.id !== undefined) {
+      const handled = steering.handleAgentResponse(message);
+      if (handled.action === 'drop') return;
+      if (handled.action === 'reply') {
+        toClient(handled.message, agent.stdout);
+        return;
+      }
+      toClientLine(line, agent.stdout);
       return;
     }
     const params = isObject(message.params) ? message.params : null;
@@ -446,7 +562,7 @@ function startRemoteWorkspace(agyPath, host) {
       toClientLine(line, agent.stdout);
       return;
     }
-    const verdict = inspectToolCall(isPermission ? params.toolCall : update, seenCalls, serverNames);
+    const verdict = inspectToolCall(isPermission ? params.toolCall : update, seenCalls, serverNames, seenSafeTools);
     if (verdict.type === 'local') {
       if (isPermission) {
         const options = Array.isArray(params.options) ? params.options : [];
@@ -463,6 +579,17 @@ function startRemoteWorkspace(agyPath, host) {
       toClient({ ...message, params: isPermission ? { ...params, toolCall: verdict.toolCall } : { ...params, update: verdict.toolCall } }, agent.stdout);
       return;
     }
+    if (isToolUpdate) {
+      const adapted = adaptAgyNativeToolUpdate(update, {
+        elicitationForm: clientSupportsElicitationForm(initRequest?.params),
+        seenSteps,
+      });
+      if (adapted?.action === 'drop') return;
+      if (adapted?.action === 'replace') {
+        toClient({ ...message, params: { ...params, update: adapted.update } }, agent.stdout);
+        return;
+      }
+    }
     toClientLine(line, agent.stdout);
   };
 
@@ -476,10 +603,14 @@ function startRemoteWorkspace(agyPath, host) {
       return;
     }
     if (phase === 'session') {
-      toAgentLine(line);
+      forwardClientLine(line, message);
       return;
     }
-    if (phase === 'opening') {
+    if (phase === 'opening' || phase === 'opening-session') {
+      if (message && message.method === undefined && message.id !== undefined) {
+        toAgentLine(line);
+        return;
+      }
       queued.push(line);
       return;
     }
@@ -489,7 +620,7 @@ function startRemoteWorkspace(agyPath, host) {
     } else if (isSessionOpen(message.method) && message.id !== undefined && phase === 'ready') {
       openSession(message);
     } else if (message.id !== undefined) {
-      refuse(message.id, -32600, 'Open a session first');
+      refuse(message.id, -32600, phase === 'failed' ? 'Session failed to open; start a new connection' : 'Open a session first');
     }
   };
 
@@ -507,11 +638,11 @@ function startRemoteWorkspace(agyPath, host) {
   process.stdin.on('data', lineSplitter(onClientLine));
   process.stdin.on('end', () => {
     stdinEnded = true;
-    if (agent) {
+    if (agent && phase !== 'failed') {
       endAgentInput();
       return;
     }
-    // Cindy went away before a session existed.
+    // Cindy went away before a session existed or after opening failed.
     terminate();
     finish(0);
   });

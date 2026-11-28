@@ -84,6 +84,45 @@ export function waitIsDue(wait, now) {
   return at !== null && now >= at;
 }
 
+/** Whether `wait` accounts for every currently failing check on the same head in `watch`. */
+export function waitCoversFailedChecks(wait, watch) {
+  if (!wait || !watch || !wait.headSha || wait.headSha !== watch.headSha) return false;
+  const facts = watch.waitFacts;
+  if (!facts?.complete || facts.headSha !== wait.headSha) return false;
+  const failed = (facts.checks ?? []).filter((c) => c.outcome === 'failed');
+  return failed.every((c) => (wait.checks ?? []).some((old) =>
+    checkKey(old) === checkKey(c) && old.attempt === c.attempt && old.outcome === 'failed'));
+}
+
+/**
+ * A baseline wait whose named checks have already finished failing, with no named review threads
+ * and no unhandled failures/conflicts/queue problems. It waits on a base-branch fix rather than
+ * running CI on the old head, so scheduled polls can slow down to `backoff` (15m) and use the
+ * lightweight probe between 30-minute full reads.
+ */
+export function isSettledBaselineWait(previous) {
+  const wait = previous?.wait;
+  const watch = previous?.watch;
+  if (!wait || wait.kind !== 'baseline' || !watch) return false;
+  if (previous.inFlight || watch.conflicting || (watch.queueProblems ?? []).length > 0) return false;
+  if (watch.failureCompletionOwed || watch.inventoryRecoveryOwed) return false;
+  if ((wait.threads ?? []).length > 0) return false;
+  if ((wait.checks ?? []).some((c) => c.outcome === 'pending' || c.expected)) return false;
+  return waitCoversFailedChecks(wait, watch);
+}
+
+/**
+ * Whether a base-branch commit alone would be absorbed as a no-op under the current wait.
+ * A baseline wait still lets the first base commit through so `baseMovedAt` is recorded and the
+ * review deadline is pulled within an hour; subsequent base commits on that wait are absorbed.
+ */
+export function waitAbsorbsBase(previous) {
+  const wait = previous?.wait;
+  if (!wait || !waitCoversFailedChecks(wait, previous?.watch)) return false;
+  if (wait.kind === 'baseline') return Boolean(wait.baseMovedAt);
+  return true;
+}
+
 /** What recording this wait owes the user: a message on entry and on every model renewal. */
 export function waitNotice(wait, now) {
   if (!wait || wait.toldAt !== now) return null;

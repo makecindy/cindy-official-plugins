@@ -7,7 +7,8 @@
 
 通用规则：
 
-- 状态类失败（`api/failed_precondition`、`api/conflict`、`authorization/permission_denied`）不是参数错误，不要反复改参数重试。
+- 状态类失败（`api/failed_precondition`、`api/conflict`、`authorization/permission_denied`、`compatibility/upgrade_required`）不是参数错误，不要反复改参数重试。
+- `compatibility/upgrade_required`（HTTP 426，exit code 11）是 CLI 版本门：只能先 `taptap-cli update` 再重试原命令，重试登录或原样重发都不会改变结果。
 - 服务端文案是事实来源；本表只补充「下一步做什么」。
 - 需要用户在网页办理时，按 [shared execution](taptap-suite/references/shared-execution.md) 的人工页面交接规范提供入口：URL 单独一行、只展示一次、不加 Markdown 链接。
 - 这些状态的失败不应原样重发；先按表格处理，再重新读取最新状态。
@@ -22,6 +23,7 @@
 | 发布额度不足 | `api/failed_precondition`（422），文案含 `发布额度不足` | 账号滚动窗口内的首次发布额度已用完（服务端口径：滚动 168 小时最多 3 款、滚动 24 小时最多 1 款） | 调整发布计划到窗口释放之后；向用户说明当前不发、不要排队重复提交；需要即时提额时转人工处理 | 原样重提；换 scope/身份重试 |
 | 小游戏隐私配置未开通 | `authorization/permission_denied`（403），文案含 `国内隐私维护资格` | 该游戏未开通「小游戏独立隐私配置」（国内隐私维护）。常见于：App 不是小游戏/未绑定 TapTap 小游戏、类目不支持、H5 游戏未过备案或不在白名单、当前环境不是国内站 | 说明这是平台侧的开通/资格问题，不是登录或 scope 问题；按开发者后台提示处理或转人工，确认是小游戏且已完成备案/开通后再重试 | 轮换 scope/token 试探；把 403 误报成「未登录」；对普通 APK/PC 游戏调用小游戏隐私接口 |
 | 资质材料域不支持 | `api/failed_precondition`（422），`errors[].reason_code=QUALIFICATION_DOMAIN_UNSUPPORTED`，文案含 `材料域` | 该材料属于小游戏等专用材料域，通用资质入口不处理 | 改用对应专用命令：隐私走 `qualification prepare-mini-app-privacy` / `qualification submit-mini-app-privacy`；备案走 `qualification save-h5-game-filing`；详见 [资质手册](taptap-suite/references/taptap-qualification/MANUAL.md) 的材料交接章节 | 让用户重新填写已提交的材料；把「通用入口不支持」当成 CLI 不支持 |
+| CLI 版本过低 | `compatibility/upgrade_required`（HTTP 426，`msg=upgrade_required`），`error.code=426`、`error.current_version`、`error.min_client_version`，文案含 `older than the minimum version` | 当前 CLI 构建低于服务端最低支持版本，能力接口被版本门拒绝；请求本身合法，本地无法绕过 | 在原任务边界执行 `taptap-cli update`（或按安装方式升级）后，用原命令重试；把服务端给出的最低版本一并告知用户 | 重跑 `auth login` 或换 token；重发未升级的原命令；猜最低版本；把 426 当参数错误改 `data` 重试 |
 
 ## 关联
 
