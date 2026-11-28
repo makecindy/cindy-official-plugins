@@ -418,7 +418,7 @@ to obtain a test package from CI; automated tests and CI packaging are the merge
 gates, while manual Cindy client testing is recommended for brand-new plugins or
 major host-capability integrations rather than a hard merge gate.
 
-`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.40`
+`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.42`
 with the plugin. When upgrading, replace the published npm package content
 wholesale and bump the plugin version accordingly. Preserve these reviewed Cindy
 compatibility patches until the official package includes equivalent fixes:

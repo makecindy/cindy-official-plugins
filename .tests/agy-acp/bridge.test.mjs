@@ -21,8 +21,17 @@ import vm from 'node:vm';
 
 const official = new URL(import.meta.url).searchParams.has('official');
 const pluginId = official ? 'cindy-antigravity-acp' : 'agy-acp';
+// The legacy plugin signs in from its own settings page (worker `login`). The official plugin has no
+// sign-in of its own: Cindy's engine accounts call `accountLogin`, here for agy's original login.
+const SIGN_IN = official
+  ? { method: 'accountLogin', params: { harnessId: 'agy', methodId: 'oauth-personal' } }
+  : { method: 'login', params: {} };
+const CANCEL_SIGN_IN = official
+  ? { method: 'accountLoginCancel', params: { harnessId: 'agy' } }
+  : { method: 'cancelLogin', params: {} };
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..', pluginId);
 const isWin = process.platform === 'win32';
+const isMac = process.platform === 'darwin';
 
 const RESULT_JSON =
   '{"protocolVersion":1,"agentCapabilities":{"loadSession":false,"promptCapabilities":{"image":false}},' +
@@ -59,13 +68,31 @@ if (args.length === 1 && args[0] === '--version') {
   process.stdout.write('agy ' + (process.env.FAKE_AGY_VERSION || '0.2.2') + '\\n');
   process.exit(0);
 }
+// Every launch must pass the constant ACP args (including no paid credits and no telemetry). The
+// plugin's own verification, sign-in check, or error relay may add \`--log-file <file>\` at the start.
+if (args[0] === '--log-file' && require('node:path').isAbsolute(args[1]) && require('node:path').basename(args[1]) === 'session.log') args.splice(0, 2);
 // Remote-workspace mode: the session process runs under the restricted agent of its working directory.
 const REMOTE_ARGS = ${JSON.stringify(JSON.stringify([...EXPECTED_ACP_ARGS, '--agent', 'cindy-remote']))};
-if (JSON.stringify(args) === REMOTE_ARGS) {
+// From agy 1.5.19 the session process runs under the default agent, held in by the hooks of its directory.
+const HOOKED = JSON.stringify(args.slice(0, ${EXPECTED_ACP_ARGS.length})) === ${JSON.stringify(JSON.stringify(EXPECTED_ACP_ARGS))}
+  && args[${EXPECTED_ACP_ARGS.length}] === '--gemini-dir' && fs.realpathSync(args[${EXPECTED_ACP_ARGS.length + 1}]) === fs.realpathSync('.gemini')
+  && fs.existsSync('.agents/hooks.json');
+if (JSON.stringify(args) === REMOTE_ARGS || HOOKED) {
+  const read = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null);
   const record = (extra) => fs.writeFileSync(process.env.FAKE_AGY_LAUNCHFILE, JSON.stringify(Object.assign({
     args, cwd: process.cwd(), files: fs.readdirSync(process.cwd()),
-    definition: fs.readFileSync('.agents/agents/cindy-remote.md', 'utf8'),
+    definition: read('.agents/agents/cindy-remote.md'),
+    agentsFiles: fs.readdirSync('.agents').sort(),
+    hooks: read('.agents/hooks.json'), deny: read('.agents/cindy-deny.json'), start: read('.agents/cindy-start.json'),
   }, extra)));
+  // agy runs a hook with \`sh -c\` in the directory of hooks.json and reads its JSON answer from stdout.
+  const runHook = (event) => {
+    const spec = JSON.parse(fs.readFileSync('.agents/hooks.json', 'utf8'))['cindy-remote-workspace'][event];
+    const command = event === 'PreToolUse' ? spec[0].hooks[0].command : spec[0].command;
+    return JSON.parse(require('node:child_process').execFileSync('/bin/sh', ['-c', command], { cwd: '.agents', encoding: 'utf8' }));
+  };
+  let opened = null;
+  let sessionStarted = false;
   record({});
   if (process.env.FAKE_AGY_PIDFILE) fs.writeFileSync(process.env.FAKE_AGY_PIDFILE, String(process.pid));
   const send = (message) => process.stdout.write(JSON.stringify(Object.assign({ jsonrpc: '2.0' }, message)) + '\\n');
@@ -86,18 +113,61 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
       lines = lines.slice(index + 1);
       if (!line.trim()) continue;
       const message = JSON.parse(line);
+      if (message.method === 'session/prompt' && HOOKED && opened && opened.method === 'session/new' && !sessionStarted
+        && process.env.FAKE_AGY_NO_SESSIONSTART !== '1') {
+        // agy runs SessionStart at the first prompt of a new session, before the model is called.
+        sessionStarted = true;
+        record({ method: opened.method, session: opened.params, sessionStart: runHook('SessionStart') });
+      }
+      if (message.method === 'session/prompt' && HOOKED && opened && opened.method === 'session/resume') {
+        record({ method: opened.method, session: opened.params, prompt: message.params.prompt });
+      }
       if (message.method === 'initialize' && process.env.FAKE_AGY_REMOTE_INIT_ERROR === '1') {
         send({ id: message.id, error: { code: -32603, message: 'agy could not start' } });
       } else if (message.method === 'initialize') {
         send({ id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [] } });
       } else if (message.method === 'session/new' || message.method === 'session/resume') {
         record({ method: message.method, session: message.params });
-        if (message.method === 'session/resume') call = DIRECT_CALL;
+        opened = { method: message.method, params: message.params };
+        // Under the default agent (agy 1.5.19) a new session also names Cindy's tools \`mcp_<server>_<tool>\`.
+        if (message.method === 'session/resume' || HOOKED) call = DIRECT_CALL;
         send({ id: message.id, result: { sessionId: 'sess-1', configOptions: [] } });
+      } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'hook-denied') {
+        // A tool of agy's own that its hook stopped: reported in progress, then failed (agy 1.5.19).
+        const denied = runHook('PreToolUse');
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'call-h',
+          name: 'read_file', kind: 'read', title: 'File note.txt', status: 'in_progress' } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'call-h',
+          kind: 'read', status: 'failed', rawOutput: 'tool call denied by pre-tool hook: ' + denied.reason } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Using cindy_exec instead.' } } } });
+        send({ id: message.id, result: { stopReason: 'end_turn', denied: denied.decision } });
+      } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'hook-ran') {
+        // An agy that ran one of its own tools although the hook should have stopped it.
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'call-r',
+          name: 'run_command', kind: 'execute', title: 'Run ls', status: 'in_progress' } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'call-r',
+          status: 'completed', rawOutput: 'a.txt' } } });
       } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'native') {
         // An agy that ignored the agent's tool list: one of its own tools runs, and the turn stays open.
         send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'call-n',
           name: 'write_to_file', kind: 'edit', title: 'note.txt', status: 'in_progress' } } });
+      } else if (message.method === 'session/prompt' && /subagent/.test(process.env.FAKE_AGY_SCRIPT || '')) {
+        // Subagent launches as agy 1.5.18 reports them: a tool call that ends completed (started) or failed (refused).
+        const launch = (id, type, status) => {
+          const call = { toolCallId: id, name: 'invoke_subagent', kind: 'other', title: 'Run invoke_subagent',
+            rawInput: { TypeName: type, Role: 'Helper', Prompt: 'list the files' } };
+          send({ method: 'session/update', params: { sessionId: 'sess-1', update: Object.assign({ sessionUpdate: 'tool_call', status: 'in_progress' }, call) } });
+          send({ method: 'session/update', params: { sessionId: 'sess-1', update: Object.assign({ sessionUpdate: 'tool_call_update', status }, call) } });
+        };
+        if (process.env.FAKE_AGY_SCRIPT === 'foreign-subagent') {
+          // An agy that let a subagent run under another agent (whose own tools would act on this computer).
+          launch('call-s', 'local-helper', 'completed');
+        } else {
+          launch('call-b', 'browser', 'failed');
+          launch('call-s', 'cindy-remote', 'completed');
+          send({ id: message.id, result: { stopReason: 'end_turn' } });
+        }
       } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'cards') {
         // Native UI tools (even if tagged with edit/execute kinds) are adapted when elicitation.form is negotiated,
         // preserved unchanged on older hosts, and failure updates are never dropped.
@@ -155,9 +225,11 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
   process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
   return;
 }
-// Every launch must pass the constant ACP args (including no paid credits and no telemetry).
-if (args[0] === '--log-file' && require('node:path').isAbsolute(args[1]) && require('node:path').basename(args[1]) === 'session.log') args.splice(0, 2);
-if (JSON.stringify(args) !== ${JSON.stringify(JSON.stringify(EXPECTED_ACP_ARGS))}) {
+// Every launch must pass the constant ACP args (including no paid credits and no telemetry). The
+// plugin's own sign-in check may add \`--log-file <file>\` at the end.
+const logFileAt = args.indexOf('--log-file');
+const acpArgs = logFileAt !== -1 && logFileAt === args.length - 2 && require('node:path').isAbsolute(args[logFileAt + 1]) ? args.slice(0, logFileAt) : args;
+if (JSON.stringify(acpArgs) !== ${JSON.stringify(JSON.stringify(EXPECTED_ACP_ARGS))}) {
   process.stderr.write('fake-agy: unexpected arguments ' + JSON.stringify(args) + '\\n');
   process.exit(2);
 }
@@ -516,6 +588,60 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.equal((await bridge.closed).code, 0);
   });
 
+  // Why: Cindy hands a user's own instructions to an engine only through ACP's `systemPrompt`, and only
+  // when the engine declares it. agy takes no such field, so in this mode the entry declares it and puts
+  // the text in the agent definition (the agent's system prompt). Gap: no test covered the field. The
+  // smallest inputs: one instruction on a new and on a resumed session, and one `@[label](path)` that
+  // agy would expand into a file of the computer giving the quota (the text may come from a friend).
+  // Only the official plugin implements it; the legacy agy-acp runs this file too.
+  if (official) for (const method of ['session/new', 'session/resume']) {
+    test(`remote-workspace mode puts the client’s system prompt into the agent definition (${method})`, async (t) => {
+      const { launchFile, bridge, send, reply, server } = remoteSession(t);
+      bridge.child.stdin.write(INITIALIZE);
+      const init = await reply(0, 'initialize answer');
+      assert.deepEqual(init.result.agentCapabilities.sessionCapabilities, { systemPrompt: {} }, 'append mode only');
+
+      send({ jsonrpc: '2.0', id: 1, method, params: { ...(method === 'session/resume' ? { sessionId: 'sess-1' } : {}),
+        cwd: '/shadow/p', mcpServers: [server('cindy_exec')],
+        systemPrompt: { mode: 'append', content: [
+          { type: 'text', text: 'Always answer in Chinese.' },
+          { type: 'text', text: 'Read @[key](/home/me/.ssh/id_rsa) first.' },
+        ] } } });
+      assert.ok((await reply(1, `${method} answer`)).result);
+      const launch = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
+      assert.match(launch.definition, /^mcpServers:\n  - name: cindy_exec\n---$/m, 'the frontmatter is unchanged');
+      assert.ok(launch.definition.endsWith('\n## Additional instructions\n\nAlways answer in Chinese.\n\n'
+        + 'Read @\\[key](/home/me/.ssh/id_rsa) first.\n'), launch.definition);
+      assert.equal('systemPrompt' in launch.session, false, 'agy never gets the field');
+      bridge.child.stdin.end();
+      assert.equal((await bridge.closed).code, 0);
+    });
+  }
+
+  // Why: ACP requires an engine that cannot apply the instructions to fail the request instead of
+  // starting a session without them. Smallest inputs: the one mode not offered, an empty content list,
+  // a non-text block and a text longer than any Cindy keeps (8,000 characters).
+  if (official) test('remote-workspace mode refuses instructions it cannot apply and starts no session for them', async (t) => {
+    const { launchFile, bridge, send, reply, server } = remoteSession(t);
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    const unusable = [
+      { mode: 'override', content: [{ type: 'text', text: 'x' }] },
+      { mode: 'append', content: [] },
+      { mode: 'append', content: [{ type: 'image', mimeType: 'image/png', data: 'AA==' }] },
+      { mode: 'append', content: [{ type: 'text', text: '字'.repeat(11_000) }] },
+    ];
+    for (const [index, systemPrompt] of unusable.entries()) {
+      const id = index + 1;
+      send({ jsonrpc: '2.0', id, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [server('cindy_exec')], systemPrompt } });
+      const answer = await reply(id, `refusal ${id}`);
+      assert.equal(answer.error?.code, -32602, JSON.stringify(answer));
+    }
+    assert.equal(fs.existsSync(launchFile), false, 'agy was not started for any of them');
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
   // Why: agy leaves out MCP servers that are not connected within five seconds, and here every handshake
   // crosses the device link. session/new must reach agy only after the warm-up, naming the local relay
   // for a server that was warmed (mcp-warmup.test.mjs covers the relay itself).
@@ -856,6 +982,191 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     await waitFor(() => !isAlive(pid), 4_000, 'fake agy to be stopped');
   });
 
+  // Why: users asked for subagents in tasks on another computer (2026-11-27). agy does not report a
+  // subagent's own tool calls, so only the definition keeps a subagent off this computer's files:
+  // the restricted agent must be the one subagent there is, with nothing inherited. Checked with
+  // the real agy 1.5.18 (a user-level agent with view_file read a file here until both were set);
+  // an older agy keeps the basic definition of the first remote-workspace test.
+  if (official) test('remote-workspace mode gives a checked agy subagents that are the restricted agent itself', async (t) => {
+    const { launchFile, bridge, messages, send, reply, server } = remoteSession(t, { FAKE_AGY_VERSION: '1.5.18', FAKE_AGY_SCRIPT: 'subagents' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [server('cindy_exec')] } });
+    await reply(1, 'session/new answer');
+    const { definition } = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
+    assert.match(definition, /^inheritCustomizations: false\ntools:\n  - search_web\n  - ask_question\n  - update_steps\n  - schedule\n  - invoke_subagent\n  - manage_subagents\n  - send_message\nagents:\n  - cindy-remote\.md\nmcpServers:\n  - name: cindy_exec\n---$/m);
+    assert.doesNotMatch(definition, /define_subagent|run_workflow|swarm|run_command|view_file/);
+
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'delegate' }] } });
+    // A refused launch and a launch of the restricted agent are both passed on; the task goes on.
+    assert.deepEqual((await reply(2, 'prompt answer')).result, { stopReason: 'end_turn' });
+    const launches = messages().filter((m) => m.method === 'session/update' && m.params.update.name === 'invoke_subagent')
+      .map((m) => [m.params.update.rawInput.TypeName, m.params.update.status]);
+    assert.deepEqual(launches, [['browser', 'in_progress'], ['browser', 'failed'], ['cindy-remote', 'in_progress'], ['cindy-remote', 'completed']]);
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  if (official) test('remote-workspace mode stops the task when agy lets a subagent run under another agent', async (t) => {
+    const { bridge, messages, send, reply, server } = remoteSession(t, { FAKE_AGY_VERSION: '1.5.18', FAKE_AGY_SCRIPT: 'foreign-subagent' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [server('cindy_exec')] } });
+    await reply(1, 'session/new answer');
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'delegate' }] } });
+    const closed = await Promise.race([bridge.closed, new Promise((resolve) => setTimeout(() => resolve(null), 8_000))]);
+    assert.ok(closed, 'the entry ended the task');
+    assert.equal(closed.code, 78);
+    assert.match(bridge.stderr.text(), /its own tool "invoke_subagent local-helper"/);
+    const updates = messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates.map((update) => [update.sessionUpdate, update.status]), [['tool_call', 'in_progress'], ['agent_message_chunk', undefined]]);
+  });
+
+  // Why: since agy 1.5.17 a session under a custom agent uses the Gemini quota four times as fast
+  // (google-antigravity/antigravity-cli#1890). From agy 1.5.19 the session runs under the default agent,
+  // and only the hooks of its directory keep agy's own tools off this computer, in subagents too. Checked
+  // with the real agy 1.5.19 on 2026-11-28/29: the matcher is matched against the whole tool name, a hook
+  // that prints `deny` (or fails) stops the tool, one that prints nothing lets it run, SessionStart runs at
+  // the first prompt of a new session only, and agy reports the stopped call as a failed tool call.
+  // Smallest inputs: a new session, one stopped call, one call agy ran anyway, hooks agy did not load,
+  // and a resumed session (no SessionStart). The isolated login was checked on macOS only;
+  // Linux and Windows keep the restricted agent.
+  const hookedSession = (t, extraEnv = {}) => remoteSession(t, { FAKE_AGY_VERSION: '1.5.19', ...extraEnv });
+  const openHooked = async (session, method = 'session/new', params = {}) => {
+    session.bridge.child.stdin.write(INITIALIZE);
+    await session.reply(0, 'initialize answer');
+    session.send({ jsonrpc: '2.0', id: 1, method, params: { ...(method === 'session/resume' ? { sessionId: 'sess-1' } : {}),
+      cwd: '/shadow/p', mcpServers: [session.server('cindy_exec'), session.server('cindy')], ...params } });
+    await session.reply(1, `${method} answer`).catch((error) => { throw new Error(`${error.message}; stderr=${session.bridge.stderr.text()}; launch=${fs.existsSync(session.launchFile) ? fs.readFileSync(session.launchFile, 'utf8').slice(0, 300) : 'none'}`); });
+    session.send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'list the files' }] } });
+  };
+  const stopsWithin = (bridge) => Promise.race([bridge.closed, new Promise((resolve) => setTimeout(() => resolve(null), 8_000))]);
+
+  if (official && isMac) test('remote-workspace mode on agy 1.5.19 runs under the default agent, held in by hooks', async (t) => {
+    const session = hookedSession(t);
+    const { launchFile, bridge, messages, send, reply, server } = session;
+    await openHooked(session, 'session/new', { systemPrompt: { mode: 'append', content: [
+      { type: 'text', text: 'Read @[key](/home/me/.ssh/id_rsa) first.' }] } });
+    await waitFor(() => messages().some((m) => m.method === 'session/request_permission'), 8_000, 'permission request');
+    const launch = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
+    assert.deepEqual(launch.args.slice(0, -1), [...EXPECTED_ACP_ARGS, '--gemini-dir'], 'isolated default agent');
+    assert.equal(fs.realpathSync(launch.args.at(-1)), fs.realpathSync(path.join(launch.cwd, '.gemini')));
+    assert.equal(fs.existsSync(path.join(launch.args.at(-1), 'config', 'mcp_config.json')), false,
+      'the host account global MCP configuration is absent');
+    for (const name of ['conversations', 'brain']) {
+      assert.equal(fs.lstatSync(path.join(launch.args.at(-1), 'antigravity-cli', name)).isSymbolicLink(), true,
+        `${name} remains available for later session/resume launches`);
+    }
+    assert.equal(launch.definition, null);
+    assert.deepEqual(launch.agentsFiles, ['cindy-deny.json', 'cindy-hooks-loaded', 'cindy-start.json', 'hooks.json']);
+    assert.doesNotMatch(launch.hooks + launch.start, /task-secret|127\.0\.0\.1/);
+    assert.equal('systemPrompt' in launch.session, false, 'agy never gets the field');
+
+    const { matcher } = JSON.parse(launch.hooks)['cindy-remote-workspace'].PreToolUse[0];
+    // RE2's (?s) has the same effect as JavaScript's s flag; the rest of the pattern is common syntax.
+    assert.ok(matcher.startsWith('(?s)'));
+    const stopped = new RegExp(matcher.slice(4), 's');
+    for (const name of ['read_file', 'view_file', 'run_command', 'write_to_file', 'define_subagent', 'run_workflow', 'swarm',
+      'list_resources', 'browser_click', 'call_mcp_tool', 'mcp_other_tool', 'mcp_cindy', 'search_webx', 'some_tool_agy_adds_later']) {
+      assert.ok(stopped.test(name), `${name} is stopped`);
+    }
+    for (const name of ['mcp_cindy_exec_Bash', 'mcp_cindy_ghost_call', 'search_web', 'ask_question', 'update_steps', 'schedule',
+      'invoke_subagent', 'manage_subagents', 'send_message']) {
+      assert.ok(!stopped.test(name), `${name} runs`);
+    }
+    const { hookMatcher, usableServers } = await import(pathToFileURL(path.join(process.cwd(), 'cindy-antigravity-acp', 'remote-workspace.js')));
+    const normalized = new RegExp(hookMatcher(['cindy_exec', 'my-server']).slice(4), 's');
+    assert.equal(normalized.test('mcp_my_server_lookup'), false, 'agy normalizes dashes and dots in MCP names');
+    assert.equal(normalized.test('mcp_cindy_local_read_file'), true, 'a different server is denied');
+    assert.deepEqual(usableServers({ mcpServers: [server('my-server'), server('my.server')] }).dropped, ['my.server'],
+      'two server names that normalize to the same tool prefix cannot coexist');
+    assert.deepEqual(JSON.parse(launch.deny).decision, 'deny');
+    // The instructions arrive through SessionStart, whose text agy does not expand; `@[` stays inert anyway.
+    const text = launch.sessionStart.injectSteps[0].systemMessage.systemMessage;
+    assert.match(text, /goes through the MCP server `cindy_exec`/);
+    assert.match(text, /invoke_subagent and the type `self`/);
+    assert.ok(text.endsWith('## Additional instructions\n\nRead @\\[key](/home/me/.ssh/id_rsa) first.\n'), text);
+
+    const permission = messages().find((m) => m.method === 'session/request_permission');
+    assert.deepEqual({ title: permission.params.toolCall.title, rawInput: permission.params.toolCall.rawInput },
+      { title: 'Bash', rawInput: { command: 'ls' } });
+    send({ jsonrpc: '2.0', id: permission.id, result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
+    assert.deepEqual((await reply(2, 'prompt answer')).result, { stopReason: 'end_turn', answered: 'allow' });
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.ok(!fs.existsSync(launch.cwd), 'the private directory is removed when the task ends');
+    void server;
+  });
+
+  if (official && isMac) test('remote-workspace mode under hooks does not show a call its hook stopped and goes on', async (t) => {
+    const session = hookedSession(t, { FAKE_AGY_SCRIPT: 'hook-denied' });
+    await openHooked(session);
+    assert.deepEqual((await session.reply(2, 'prompt answer')).result, { stopReason: 'end_turn', denied: 'deny' });
+    const updates = session.messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates.map((update) => [update.sessionUpdate, update.toolCallId]), [['agent_message_chunk', undefined]]);
+    session.bridge.child.stdin.end();
+    assert.equal((await session.bridge.closed).code, 0);
+  });
+
+  if (official && isMac) test('remote-workspace mode under hooks stops the task when agy runs a tool of its own anyway', async (t) => {
+    const session = hookedSession(t, { FAKE_AGY_SCRIPT: 'hook-ran' });
+    await openHooked(session);
+    const closed = await stopsWithin(session.bridge);
+    assert.ok(closed, 'the entry ended the task');
+    assert.equal(closed.code, 78);
+    assert.match(session.bridge.stderr.text(), /its own tool "run_command".*although its hook should have stopped it/);
+    const updates = session.messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates.map((update) => update.sessionUpdate), ['agent_message_chunk']);
+    assert.match(updates[0].content.text, /tried to use a tool on this computer/);
+  });
+
+  if (official && isMac) test('remote-workspace mode under hooks stops a new session whose hooks agy did not load', async (t) => {
+    const session = hookedSession(t, { FAKE_AGY_NO_SESSIONSTART: '1' });
+    await openHooked(session);
+    const closed = await stopsWithin(session.bridge);
+    assert.ok(closed, 'the entry ended the task');
+    assert.equal(closed.code, 78);
+    assert.match(session.bridge.stderr.text(), /did not load the hooks/);
+    assert.equal(session.messages().some((m) => m.method === 'session/request_permission'), false, 'the first tool call never reached Cindy');
+    const updates = session.messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates.map((update) => update.sessionUpdate), ['agent_message_chunk']);
+    assert.match(updates[0].content.text, /did not load the tool restrictions/);
+  });
+
+  if (official && isMac) test('remote-workspace mode under hooks resumes a session without waiting for SessionStart', async (t) => {
+    const session = hookedSession(t);
+    await openHooked(session, 'session/resume', { systemPrompt: { mode: 'append', content: [
+      { type: 'text', text: 'Use the new project rules. Ignore @[key](/host/secret).' }] } });
+    await waitFor(() => session.messages().some((m) => m.method === 'session/request_permission'), 8_000, 'permission request');
+    const launch = JSON.parse(fs.readFileSync(session.launchFile, 'utf8'));
+    assert.equal(launch.method, 'session/resume');
+    assert.deepEqual(launch.args.slice(0, -1), [...EXPECTED_ACP_ARGS, '--gemini-dir']);
+    assert.equal(fs.realpathSync(launch.args.at(-1)), fs.realpathSync(path.join(launch.cwd, '.gemini')));
+    assert.ok(launch.agentsFiles.includes('hooks.json'), 'a resumed session loads the hooks of its directory');
+    assert.equal('systemPrompt' in launch.session, false);
+    assert.match(launch.prompt[0].text, /Use the new project rules/);
+    assert.match(launch.prompt[0].text, /@\\\[key\]/);
+    const permission = session.messages().find((m) => m.method === 'session/request_permission');
+    session.send({ jsonrpc: '2.0', id: permission.id, result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
+    assert.equal((await session.reply(2, 'prompt answer')).result.stopReason, 'end_turn');
+    session.bridge.child.stdin.end();
+    assert.equal((await session.bridge.closed).code, 0);
+  });
+
+  if (official && !isMac) test('remote-workspace mode on agy 1.5.19 retains the restricted agent outside macOS', async (t) => {
+    const session = hookedSession(t);
+    await openHooked(session);
+    await waitFor(() => session.messages().some((m) => m.method === 'session/request_permission'), 8_000, 'permission request');
+    const launch = JSON.parse(fs.readFileSync(session.launchFile, 'utf8'));
+    assert.deepEqual(launch.args, [...EXPECTED_ACP_ARGS, '--agent', 'cindy-remote']);
+    assert.match(launch.definition, /inheritCustomizations: false/);
+    const permission = session.messages().find((m) => m.method === 'session/request_permission');
+    session.send({ jsonrpc: '2.0', id: permission.id, result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
+    assert.equal((await session.reply(2, 'prompt answer')).result.stopReason, 'end_turn');
+    session.bridge.child.stdin.end();
+    assert.equal((await session.bridge.closed).code, 0);
+  });
+
   test('remote-workspace mode refuses an Antigravity CLI older than the version it was checked with', async (t) => {
     const fixture = makeFixture(t); // the fake reports 0.2.2
     const bridge = startBridge(fixture.env, ['--cindy-remote-workspace']);
@@ -1076,10 +1387,19 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     const calls = (method) => nodeCalls.filter((call) => call.method === method);
     vm.runInContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context, { filename: 'main.js' });
 
-    // Start-up: agy is installed but refuses a session: unavailable with the sign-in hint.
-    await waitFor(() => puts.some((body) => body.harnesses[0].reason === 'not-signed-in'), 3_000, 'sign-in hint');
-    assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: false, reason: 'not-signed-in', version: '1.5.12',
-      message: 'Antigravity is not signed in. Open the Antigravity plugin settings and select Sign in with Google.' }] });
+    if (official) {
+      // Start-up: agy is installed; default login is signed out, but the engine stays available with
+      // Google sign-in methods so Cindy can sign in or add isolated accounts in the pool.
+      await waitFor(() => calls('listModels').length === 1 && puts.length >= 1, 3_000, 'initial publish and probe');
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: true, reportsUsage: true,
+        accounts: { methods: [{ id: 'oauth-personal', label: 'Google account', kind: 'browser' }] }, version: '1.5.12' }] });
+    } else {
+      // Start-up: agy is installed but refuses a session: unavailable with the sign-in hint.
+      await waitFor(() => puts.some((body) => body.harnesses[0].reason === 'not-signed-in'), 3_000, 'sign-in hint');
+      assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: false, reason: 'not-signed-in', version: '1.5.12',
+        message: 'Antigravity is not signed in. Open the Antigravity plugin settings and select Sign in with Google.' }] });
+    }
 
     // Signed in, then "Check again": listed right away (no one-minute wait) and published with the modes.
     signedIn = true;
@@ -1088,7 +1408,8 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     page.onmessage = (event) => received.push(event.data);
     page.postMessage({ type: 'detect-request', reqId: 'r1' });
     await waitFor(() => puts.some((body) => body.harnesses[0].modes), 3_000, 'models and modes published');
-    assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: true, reportsUsage: true, ...(official ? { accounts: { methods: [] } } : {}), version: '1.5.12',
+    assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: true, reportsUsage: true,
+      ...(official ? { accounts: { methods: [{ id: 'oauth-personal', label: 'Google account', kind: 'browser' }] } } : {}), version: '1.5.12',
       models: [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high' }],
       modes: ['default', 'acceptEdits', 'auto', 'plan'], defaultMode: 'default' }] });
     assert.equal(calls('listModels').length, 2);
@@ -1099,7 +1420,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
   });
 
   // 2026-11-19 实测 agy 1.5.12:ACP 的 authenticate(oauth-personal)由 agy 打开浏览器登录；logout 一调用就登出。
-  test('the worker signs agy in and out over ACP and reports only the sign-in and the tier', async (t) => {
+  if (!official) test('the worker signs agy in and out over ACP and reports only the sign-in and the tier', async (t) => {
     const fixture = makeFixture(t);
     const state = path.join(fixture.dir, 'agy-state');
     fixture.env.FAKE_AGY_STATE = state;
@@ -1118,16 +1439,37 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     await worker.close();
   });
 
+  // Accounts are managed in Cindy's Model Providers: the worker signs agy in for Cindy's engine accounts
+  // and offers the settings page no sign-in, status or sign-out of its own.
+  if (official) test('the worker signs agy in only for Cindy’s engine accounts and has no sign-out', async (t) => {
+    const fixture = makeFixture(t);
+    const state = path.join(fixture.dir, 'agy-state');
+    fixture.env.FAKE_AGY_STATE = state;
+    const worker = startWorker(fixture.env);
+    t.after(() => worker.close());
+    let id = 0;
+    const call = (method, params) => worker.call({ jsonrpc: '2.0', id: ++id, method, params });
+    assert.deepEqual((await call('accountStatus', { harnessId: 'agy' })).result, { state: 'signed-out' });
+    assert.deepEqual((await call(SIGN_IN.method, SIGN_IN.params)).result, { ok: true });
+    assert.deepEqual((await call('accountStatus', { harnessId: 'agy' })).result, { state: 'signed-in', plan: 'Google AI Pro' });
+    for (const method of ['account', 'login', 'cancelLogin', 'logout']) {
+      assert.equal((await call(method, {})).error.code, -32601, `${method} is not a worker method`);
+    }
+    const sent = fs.readFileSync(state + '.log', 'utf8').trim().split('\n');
+    assert.deepEqual(sent.filter((method) => method.startsWith('authenticate') || method === 'logout'), ['authenticate:oauth-personal']);
+    assert.equal(fs.readFileSync(state, 'utf8'), 'signed-in');
+  });
+
   test('cancelling a sign-in stops agy and reports it as cancelled', async (t) => {
     const fixture = makeFixture(t, { extraEnv: { FAKE_AGY_LOGIN: 'hang' } });
     const state = path.join(fixture.dir, 'agy-state');
     fixture.env.FAKE_AGY_STATE = state;
     const worker = startWorker(fixture.env);
-    const login = worker.call({ jsonrpc: '2.0', id: 1, method: 'login' });
+    const login = worker.call({ jsonrpc: '2.0', id: 1, ...SIGN_IN });
     await waitFor(() => fs.existsSync(state + '.log') && fs.readFileSync(state + '.log', 'utf8').includes('authenticate'),
       5_000, 'sign-in sent to agy');
     const agyPid = readPid(fixture.pidFile);
-    assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 2, method: 'cancelLogin' })).result, { ok: true, cancelled: true });
+    assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 2, ...CANCEL_SIGN_IN })).result, official ? { ok: true } : { ok: true, cancelled: true });
     assert.deepEqual((await login).result, { ok: false, error: 'cancelled' });
     await waitFor(() => !isAlive(agyPid), 5_000, 'agy stopped');
     await worker.close();
@@ -1145,9 +1487,9 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     const sent = (method) => fs.readFileSync(state + '.log', 'utf8').trim().split('\n').filter((line) => line === method).length;
 
     assert.deepEqual(await accountStatus(), { state: 'signed-out' });
-    assert.equal((await call('login', {})).ok, true);
-    // Signed in before any model listing: there is no session to read the tier from, so no plan.
-    assert.deepEqual(await accountStatus(), { state: 'signed-in' });
+    assert.equal((await call(SIGN_IN.method, SIGN_IN.params)).ok, true);
+    // Right after sign-in, the worker already remembers the tier from authenticate even before listing models.
+    assert.deepEqual(await accountStatus(), { state: 'signed-in', plan: 'Google AI Pro' });
     assert.equal((await call('listModels', {})).sessionId, 'fake-session');
     const opened = sent('session/new');
     const resumed = sent('session/resume');
@@ -1155,11 +1497,12 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.equal(sent('session/new'), opened, 'accountStatus opened no session');
     assert.equal(sent('session/resume'), resumed + 1, 'accountStatus resumed the model-list session');
 
-    // Cindy can never add an Antigravity account: an account directory or another engine has no status.
+    // A missing account directory or another engine has no status.
     assert.equal(await accountStatus({ harnessId: 'agy', accountDir: path.join(fixture.dir, 'account-1') }), null);
     assert.equal(await accountStatus({ harnessId: 'other' }), null);
 
-    assert.deepEqual(await call('logout', {}), { ok: true });
+    // Signed out elsewhere (agy in a terminal): the next read says so.
+    fs.rmSync(state);
     assert.deepEqual(await accountStatus(), { state: 'signed-out' });
   });
 
@@ -1245,7 +1588,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.ok(!sent().includes('session/resume'), 'the new path never resumes the old probe');
   });
 
-  if (official) test('a late account read is discarded after signing out', async (t) => {
+  if (official) test('a late account read is discarded after a sign-in', async (t) => {
     const fixture = makeFixture(t);
     const state = path.join(fixture.dir, 'agy-state');
     const resumeGate = path.join(fixture.dir, 'finish-account-read');
@@ -1258,10 +1601,11 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.equal((await worker.call({ jsonrpc: '2.0', id: 1, method: 'listModels', params: {} })).result.sessionId, 'fake-session');
     const pending = worker.call({ jsonrpc: '2.0', id: 2, method: 'accountStatus', params: args });
     await waitFor(() => fs.readFileSync(state + '.log', 'utf8').includes('session/resume'), 5_000, 'account request has read old sign-in');
-    assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 3, method: 'logout', params: {} })).result, { ok: true });
+    assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 3, ...SIGN_IN })).result, { ok: true });
     fs.writeFileSync(resumeGate, '');
     assert.equal((await pending).result, null);
-    assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 4, method: 'accountStatus', params: args })).result, { state: 'signed-out' });
+    assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 4, method: 'accountStatus', params: args })).result,
+      { state: 'signed-in', plan: 'Google AI Pro' });
   });
 
   if (official) test('accountStatus answers null instead of guessing when agy is missing or the check fails', async (t) => {
@@ -1279,12 +1623,10 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     const worker = startWorker(crashing.env);
     t.after(() => worker.close());
     assert.equal((await worker.call(request)).result, null);
-    // The settings page still sees the failure itself.
-    assert.equal((await worker.call({ jsonrpc: '2.0', id: 2, method: 'account', params: {} })).result.error, 'status-failed');
   });
 
   // 登录前就开始读取模型时，它晚于登录返回的「未登录」不能把引擎改回未登录。
-  test('main.js signs in and out for the settings page and keeps Cindy’s engine status in step', async () => {
+  if (!official) test('main.js signs in and out for the settings page and keeps Cindy’s engine status in step', async () => {
     class Channel {
       static all = [];
       constructor(name) {
@@ -1352,7 +1694,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     finishFirstListing();
     await waitFor(() => puts.length && puts.at(-1).models, 3_000, 'models read again after the sign-in');
     assert.ok(puts.every((entry) => entry.available), 'the late listing never marks the engine signed out');
-    assert.deepEqual(puts.at(-1), { id: 'agy', available: true, reportsUsage: true, ...(official ? { accounts: { methods: [] } } : {}), version: '1.5.12', models: [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon' }] });
+    assert.deepEqual(puts.at(-1), { id: 'agy', available: true, reportsUsage: true, version: '1.5.12', models: [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon' }] });
 
     page.postMessage({ type: 'account-request', reqId: 'a2', op: 'logout' });
     await waitFor(() => result('a2'), 3_000, 'sign-out result');
@@ -1385,6 +1727,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
         }
       }
     }
+    const openProviders = { offered: true, refuse: false, posts: [] };
     const elements = new Map();
     const element = (id) => {
       if (!elements.has(id)) {
@@ -1400,8 +1743,17 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     const context = vm.createContext({
       BroadcastChannel: Channel, crypto: globalThis.crypto, setTimeout, clearTimeout, setInterval, clearInterval,
       document: { getElementById: element, documentElement: {}, visibilityState: 'visible', addEventListener() {} },
-      fetch: async (url) => ({ ok: true,
-        json: async () => (url === '/app-context' ? { context: { uiLocale: 'zh-CN' } } : { state: 'on' }) }),
+      fetch: async (url, init) => {
+        // Cindy's "show this engine in Model Providers": POST only, so a GET answers 405 where it exists.
+        if (url === '/harnesses/open-settings') {
+          if (!openProviders.offered) return { ok: false, status: 404 };
+          if (!init || init.method !== 'POST') return { ok: false, status: 405 };
+          openProviders.posts.push(init.body);
+          return openProviders.refuse ? { ok: false, status: 403 } : { ok: true, status: 200 };
+        }
+        return { ok: true, status: 200,
+          json: async () => (url === '/app-context' ? { context: { uiLocale: 'zh-CN' } } : { state: 'on' }) };
+      },
     });
     // Stands in for main.js: agy is installed and signed in.
     const main = new Channel(pluginId);
@@ -1410,12 +1762,13 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     let version = '1.5.11';
     let maintenanceState = { type: 'cli-state' };
     let finishUpdate;
+    let signInRequired = false;
     const account = { signedIn: true, tier: 'Google AI Pro', canSignIn: true, canSignOut: true, busy: null };
     main.onmessage = ({ data }) => {
       if (data.type === 'detect-request') {
         main.postMessage({ type: 'detect-ack', reqId: data.reqId });
-        main.postMessage({ type: 'detect-result', reqId: data.reqId, snapshot: { ok: true, account,
-          result: { available: true, version }, signInRequired: false, publish: { status: 'published' }, checkedAt: 1 } });
+        main.postMessage({ type: 'detect-result', reqId: data.reqId, snapshot: { ok: true, ...(official ? {} : { account }),
+          result: { available: true, version }, signInRequired, publish: { status: 'published' }, checkedAt: 1 } });
       }
       if (data.type === 'cli-state-request') main.postMessage(maintenanceState);
       if (data.type === 'cli-maintenance') {
@@ -1444,19 +1797,49 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     const openSettings = () => vm.runInContext(fs.readFileSync(path.join(root, 'settings.js'), 'utf8'), context, { filename: 'settings.js' });
     openSettings();
 
-    await waitFor(() => element('account-status').textContent === '已登录 · Google AI Pro', 3_000, 'signed-in status');
-    assert.equal(element('badge').textContent, '可以使用');
-    assert.equal(element('account-logout').hidden, false);
-    assert.equal(element('account-login').hidden, true);
-    // After each detection the page also asks once whether agy is signed in.
-    await waitFor(() => requests.length > 0, 3_000, 'sign-in check after detection');
-    assert.deepEqual(requests, ['status']);
-    element('account-logout').click();
-    assert.equal(element('account-confirm').hidden, false);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    assert.deepEqual(requests, ['status'], 'choosing Sign out only asks for confirmation');
-    element('account-confirm-yes').click();
-    await waitFor(() => requests.includes('logout'), 3_000, 'sign-out request after confirming');
+    if (official) {
+      // Accounts are managed in Cindy's Model Providers: the page points there and asks main.js nothing about them.
+      await waitFor(() => element('badge').textContent === '可以使用', 3_000, 'detection shown');
+      assert.equal(element('accounts-guide').hidden, false);
+      assert.equal(element('accounts-guide-title').textContent, '账号');
+      assert.match(element('accounts-guide-text').textContent, /设置 → 模型供应商 → Antigravity/);
+      assert.equal(element('accounts-guide-text').attributes['data-tone'], 'neutral');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.deepEqual(requests, [], 'the page sends no account request');
+      for (const id of ['account', 'account-login', 'account-logout', 'account-confirm-yes', 'harness-usage']) {
+        assert.equal(elements.has(id), false, `the page has no ${id}`);
+      }
+      // The button opens Antigravity in Cindy's Model Providers where Cindy offers that, naming this plugin's own engine.
+      await waitFor(() => element('accounts-open').hidden === false, 3_000, 'manage button offered');
+      assert.equal(element('accounts-open').textContent, '在模型供应商里管理');
+      assert.equal(element('accounts-open-note').hidden, true);
+      element('accounts-open').click();
+      await waitFor(() => openProviders.posts.length === 1, 3_000, 'open request sent');
+      assert.deepEqual(JSON.parse(openProviders.posts[0]), { id: 'agy' });
+      assert.equal(element('accounts-open-note').hidden, true);
+      // Cindy did not open it (for example the click was already used): the text path stays as the way there.
+      openProviders.refuse = true;
+      element('accounts-open').click();
+      await waitFor(() => element('accounts-open-note').hidden === false, 3_000, 'fallback note');
+      assert.match(element('accounts-open-note').textContent, /没能直接打开/);
+      openProviders.refuse = false;
+      element('accounts-open').click();
+      await waitFor(() => element('accounts-open-note').hidden === true, 3_000, 'note cleared after it opened');
+    } else {
+      await waitFor(() => element('account-status').textContent === '已登录 · Google AI Pro', 3_000, 'signed-in status');
+      assert.equal(element('badge').textContent, '可以使用');
+      assert.equal(element('account-logout').hidden, false);
+      assert.equal(element('account-login').hidden, true);
+      // After each detection the page also asks once whether agy is signed in.
+      await waitFor(() => requests.length > 0, 3_000, 'sign-in check after detection');
+      assert.deepEqual(requests, ['status']);
+      element('account-logout').click();
+      assert.equal(element('account-confirm').hidden, false);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.deepEqual(requests, ['status'], 'choosing Sign out only asks for confirmation');
+      element('account-confirm-yes').click();
+      await waitFor(() => requests.includes('logout'), 3_000, 'sign-out request after confirming');
+    }
 
     await waitFor(() => element('cli-action').textContent === '更新到 1.5.12', 3_000, 'automatic update check');
     assert.deepEqual(maintenance.map(item => item.action), ['check']);
@@ -1479,6 +1862,26 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.equal(element('cli-action').hidden, true);
     assert.deepEqual(maintenance.map(item => item.action), ['check', 'check', 'update']);
     assert.equal(maintenance[2].version, '1.5.12');
+
+    if (official) {
+      // No signed-in account could list the models: the badge says so and the guide asks to add one in Cindy.
+      signInRequired = true;
+      element('recheck').click();
+      await waitFor(() => element('badge').textContent === '未登录', 3_000, 'not signed in');
+      assert.equal(element('badge').attributes['data-tone'], 'warning');
+      assert.match(element('accounts-guide-text').textContent, /还没有已登录的账号.*模型供应商/);
+      assert.equal(element('accounts-guide-text').attributes['data-tone'], 'warning');
+
+      // An older Cindy, a phone or a remote view has no such path: no button, only the text.
+      openProviders.offered = false;
+      Channel.all = [main];
+      elements.clear();
+      openSettings();
+      await waitFor(() => element('accounts-guide').hidden === false, 3_000, 'guide on an older Cindy');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(element('accounts-open').hidden, true);
+      assert.match(element('accounts-guide-text').textContent, /设置 → 模型供应商 → Antigravity/);
+    }
   });
 
   test('listModels reads the model option agy offers, flattening its groups', async () => {
@@ -1498,6 +1901,83 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
       { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', description: 'Anthropic via Antigravity', group: 'Models' },
     ]);
     assert.deepEqual(modelsFromConfigOptions(undefined), []);
+  });
+
+  if (official) test('listModels places built-in Orchestrator modes after direct models while preserving relative order', async () => {
+    const { modelsFromConfigOptions } = await import(pathToFileURL(path.join(root, 'agy-models.js')).href);
+    assert.deepEqual(modelsFromConfigOptions([
+      { id: 'model', category: 'model', type: 'select', currentValue: 'gemini-4-neon', options: [
+        { value: 'gemini-4-neon', name: 'Gemini 4 Neon' },
+        { value: 'gemini-4-hydrogen', name: 'Gemini 4 Hydrogen' },
+        { value: 'gemini-pro-orchestrator-neon', name: 'Orchestrator (Neon)' },
+        { value: 'gemini-pro-orchestrator', name: 'Orchestrator (Carbon)' },
+        { value: 'gemini-pro-orchestrator-argon', name: 'Orchestrator (Argon)' },
+        { value: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
+        { value: 'claude-opus-5-5', name: 'Claude Opus 5.5' },
+      ] },
+    ]).map((model) => model.id), [
+      'gemini-4-neon',
+      'gemini-4-hydrogen',
+      'gemini-3.8-flash',
+      'claude-opus-5-5',
+      'gemini-pro-orchestrator-neon',
+      'gemini-pro-orchestrator',
+      'gemini-pro-orchestrator-argon',
+    ]);
+  });
+
+  if (official) test('main.js deprioritizes cached Orchestrator models, adds localized hints, and preserves upstream descriptions', async () => {
+    const puts = [];
+    const hostListeners = [];
+    let savedKv = null;
+    const cachedModels = [
+      { id: 'gemini-4-neon', name: 'Gemini 4 Neon', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high' },
+      { id: 'gemini-pro-orchestrator-neon', name: 'Orchestrator (Neon)' },
+      { id: 'gemini-pro-orchestrator', name: 'Orchestrator (Carbon)', description: 'Upstream planner note' },
+      { id: 'gemini-4-hydrogen', name: 'Gemini 4 Hydrogen', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high' },
+    ];
+    const context = vm.createContext({
+      setTimeout,
+      clearTimeout,
+      cindy: {
+        request: async () => ({ ok: true, context: { locale: 'en', uiLocale: 'en' } }),
+        node: {
+          request: async (request) => {
+            if (request.method === 'detect') return { ok: true, result: { available: true, version: '1.5.18' } };
+            return { ok: true, result: { supported: true, models: cachedModels } };
+          },
+        },
+        onHostMessage: (listener) => {
+          hostListeners.push(listener);
+          return () => {};
+        },
+      },
+      fetch: async (url, init) => {
+        if (url === '/kv' && !init) return { ok: true, json: async () => ({ models: cachedModels, modelsListedAt: Date.now() }) };
+        if (url === '/kv') savedKv = JSON.parse(init.body);
+        if (url === '/harnesses') puts.push(JSON.parse(init.body));
+        return { ok: true, status: 204 };
+      },
+    });
+    vm.runInContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context, { filename: 'main.js' });
+    await waitFor(() => puts.length >= 1, 3_000, 'initial publish from cached models');
+    const enModels = puts[0].harnesses[0].models;
+    assert.deepEqual(enModels.map((model) => model.id), [
+      'gemini-4-neon',
+      'gemini-4-hydrogen',
+      'gemini-pro-orchestrator-neon',
+      'gemini-pro-orchestrator',
+    ]);
+    assert.equal(enModels[0].description, undefined);
+    assert.match(enModels[2].description, /Built-in orchestrator/i);
+    assert.equal(enModels[3].description, 'Upstream planner note');
+    // Locale switch republishes localized hint dynamically without re-listing or mutating cached /kv.
+    hostListeners[0]({ type: 'host-context-changed', ok: true, context: { locale: 'zh-CN', uiLocale: 'zh-CN' } });
+    await waitFor(() => puts.length >= 2, 3_000, 'republish on locale switch');
+    const zhModels = puts[1].harnesses[0].models;
+    assert.match(zhModels[2].description, /内置编排模式/);
+    assert.equal(zhModels[3].description, 'Upstream planner note');
+    assert.equal(savedKv, null);
   });
 
   // 测试的是与 DSH 插件同一套档位规则(DSH 的 off 在 Cindy 中没有对应档)；agy 1.5.12 是 low / medium / high / xhigh。
@@ -1600,10 +2080,14 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     const badTypeAfterSave = await worker.call({ jsonrpc: '2.0', id: 8, method: 'setCustomPath', params: {} });
     assert.deepEqual(badTypeAfterSave.result, { ok: false, error: 'not-absolute' });
 
-    const acctBefore = await worker.call({ jsonrpc: '2.0', id: 9, method: 'account', params: {} });
-    assert.equal(acctBefore.result.supported, true);
-    assert.equal(acctBefore.result.signedIn, false);
-    const loginRes = await worker.call({ jsonrpc: '2.0', id: 10, method: 'login', params: {} });
+    if (official) {
+      assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 9, method: 'accountStatus', params: { harnessId: 'agy' } })).result, { state: 'signed-out' });
+    } else {
+      const acctBefore = await worker.call({ jsonrpc: '2.0', id: 9, method: 'account', params: {} });
+      assert.equal(acctBefore.result.supported, true);
+      assert.equal(acctBefore.result.signedIn, false);
+    }
+    const loginRes = await worker.call({ jsonrpc: '2.0', id: 10, ...SIGN_IN });
     assert.equal(loginRes.result.ok, true);
     const modelsRes = await worker.call({ jsonrpc: '2.0', id: 11, method: 'listModels', params: {} });
     assert.equal(modelsRes.result.supported, true);
@@ -1765,7 +2249,8 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     resolveDetectA({ ok: true, result: { available: true, path: '/bin/agy-a', version: '1.0.0' } });
     resolveListA({ ok: true, result: { supported: true, models: [{ id: 'model-a', name: 'Model A' }], sessionId: 'sess-a' } });
     await waitFor(() => puts.some((entry) => entry.version === '2.0.0' && entry.models?.[0]?.id === 'model-b'), 3_000, 'published B models');
-    await waitFor(() => received.some((m) => m.type === 'harness-usage' && m.usage?.windows?.[0]?.label === 'B · 5h'), 3_000, 'refreshed usage for B');
+    // Only the legacy settings page shows usage; the official plugin leaves it to Cindy's Model Providers.
+    if (!official) await waitFor(() => received.some((m) => m.type === 'harness-usage' && m.usage?.windows?.[0]?.label === 'B · 5h'), 3_000, 'refreshed usage for B');
 
     const latest = puts.at(-1);
     assert.equal(latest.version, '2.0.0');
@@ -1954,7 +2439,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     t.after(() => worker.close());
 
     // Start a hanging login on the default binary, then fire overlapping saves A (slow) and B (fast).
-    const loginPending = worker.call({ jsonrpc: '2.0', id: 1, method: 'login', params: {} });
+    const loginPending = worker.call({ jsonrpc: '2.0', id: 1, ...SIGN_IN });
     await waitFor(() => fs.existsSync(stateFile + '.log') && fs.readFileSync(stateFile + '.log', 'utf8').includes('authenticate:oauth-personal'), 5_000, 'login started');
 
     const saveA = worker.call({ jsonrpc: '2.0', id: 2, method: 'setCustomPath', params: { path: binA, locale: 'en' } });
@@ -1971,7 +2456,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.ok(samePath(finalDetect.result.customPath, binB));
 
     // A new login on B must succeed right away (never stuck as 'busy').
-    const loginB = await worker.call({ jsonrpc: '2.0', id: 5, method: 'login', params: {} });
+    const loginB = await worker.call({ jsonrpc: '2.0', id: 5, ...SIGN_IN });
     assert.equal(loginB.result.ok, true);
   });
 
@@ -2000,7 +2485,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     t.after(() => worker.close());
 
     // Start login on default binary which hangs before replying to initialize.
-    const loginPending = worker.call({ jsonrpc: '2.0', id: 1, method: 'login', params: {} });
+    const loginPending = worker.call({ jsonrpc: '2.0', id: 1, ...SIGN_IN });
     await waitFor(() => fs.existsSync(stateFile + '.log') && fs.readFileSync(stateFile + '.log', 'utf8').includes('initialize'), 5_000, 'login initialize sent');
     const hungPid = readPid(fixture.pidFile);
     assert.ok(hungPid, 'hung agy process started');
@@ -2014,7 +2499,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.equal(saveResult.result.detection.version, '2.2.2');
     await waitFor(() => !isAlive(hungPid), 3_000, 'hung initialize agy killed');
 
-    const loginB = await worker.call({ jsonrpc: '2.0', id: 3, method: 'login', params: {} });
+    const loginB = await worker.call({ jsonrpc: '2.0', id: 3, ...SIGN_IN });
     assert.equal(loginB.result.ok, true);
   });
 
@@ -2087,8 +2572,11 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     page.onmessage = (event) => received.push(event.data);
 
     // Start login on initial binary, then fire overlapping saves A (slow) and B (fast).
-    page.postMessage({ type: 'account-request', reqId: 'login-a', op: 'login' });
-    await waitFor(() => typeof resolveLoginA === 'function', 3_000, 'login A started');
+    // (Only the legacy settings page signs in; the official worker cancels a sign-in Cindy started itself.)
+    if (!official) {
+      page.postMessage({ type: 'account-request', reqId: 'login-a', op: 'login' });
+      await waitFor(() => typeof resolveLoginA === 'function', 3_000, 'login A started');
+    }
 
     page.postMessage({ type: 'custom-path-request', reqId: 'save-a', path: '/opt/agy-a' });
     page.postMessage({ type: 'custom-path-request', reqId: 'save-b', path: '/opt/agy-b' });
@@ -2098,18 +2586,20 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
 
     // Final published version must be B (2.0.0), and old login must have been cancelled.
     assert.equal(puts.at(-1).version, '2.0.0');
-    assert.ok(cancels.length >= 1, 'cancelLogin was called on path switch');
+    if (!official) {
+      assert.ok(cancels.length >= 1, 'cancelLogin was called on path switch');
 
-    // Late resolution of A's login must not taint B or block a new login on B.
-    resolveLoginA({ ok: true, result: { ok: true, tier: { name: 'Old Tier' } } });
-    await waitFor(() => received.some((m) => m.type === 'account-result' && m.reqId === 'login-a'), 3_000, 'stale login settled');
-    assert.equal(received.find((m) => m.type === 'account-result' && m.reqId === 'login-a').error, 'cancelled');
+      // Late resolution of A's login must not taint B or block a new login on B.
+      resolveLoginA({ ok: true, result: { ok: true, tier: { name: 'Old Tier' } } });
+      await waitFor(() => received.some((m) => m.type === 'account-result' && m.reqId === 'login-a'), 3_000, 'stale login settled');
+      assert.equal(received.find((m) => m.type === 'account-result' && m.reqId === 'login-a').error, 'cancelled');
 
-    page.postMessage({ type: 'account-request', reqId: 'login-b', op: 'login' });
-    await waitFor(() => received.some((m) => m.type === 'account-result' && m.reqId === 'login-b'), 3_000, 'login B succeeded');
-    const loginBResult = received.find((m) => m.type === 'account-result' && m.reqId === 'login-b');
-    assert.equal(loginBResult.error, undefined);
-    assert.equal(loginBResult.account.tier, 'New Tier');
+      page.postMessage({ type: 'account-request', reqId: 'login-b', op: 'login' });
+      await waitFor(() => received.some((m) => m.type === 'account-result' && m.reqId === 'login-b'), 3_000, 'login B succeeded');
+      const loginBResult = received.find((m) => m.type === 'account-result' && m.reqId === 'login-b');
+      assert.equal(loginBResult.error, undefined);
+      assert.equal(loginBResult.account.tier, 'New Tier');
+    }
 
     // Path changes are rejected with 'busy' while a CLI update is active.
     page.postMessage({ type: 'cli-maintenance', reqId: 'upd-1', action: 'update', version: '2.1.0' });
@@ -2146,12 +2636,14 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     t.after(() => worker.close());
 
     const save = worker.call({ jsonrpc: '2.0', id: 1, method: 'setCustomPath', params: { path: slowBin, locale: 'en' } });
-    const logout = await worker.call({ jsonrpc: '2.0', id: 2, method: 'logout', params: {} });
-    const login = await worker.call({ jsonrpc: '2.0', id: 3, method: 'login', params: {} });
-    assert.deepEqual(logout.result, { ok: false, error: 'busy' });
+    // The official plugin has no sign-out; its sign-in is the one Cindy's engine accounts ask for.
+    const logout = official ? null : await worker.call({ jsonrpc: '2.0', id: 2, method: 'logout', params: {} });
+    const login = await worker.call({ jsonrpc: '2.0', id: 3, ...SIGN_IN });
+    if (logout) assert.deepEqual(logout.result, { ok: false, error: 'busy' });
     assert.deepEqual(login.result, { ok: false, error: 'busy' });
     assert.equal((await save).result.ok, true);
     assert.equal(fs.readFileSync(stateFile, 'utf8'), 'signed-in', 'neither request reached an agy');
+    if (official) return;
 
     // Once the save is over, the same request signs out on the new binary.
     const after = await worker.call({ jsonrpc: '2.0', id: 4, method: 'logout', params: {} });
@@ -2159,7 +2651,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.equal(fs.readFileSync(stateFile, 'utf8'), 'signed-out');
   });
 
-  test('main.js refuses sign-in and sign-out during a custom path save, and a sign-out asked for the replaced path', async () => {
+  if (!official) test('main.js refuses sign-in and sign-out during a custom path save, and a sign-out asked for the replaced path', async () => {
     class Channel {
       static all = [];
       constructor(name) { this.name = name; this.onmessage = null; Channel.all.push(this); }
@@ -2260,7 +2752,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     t.after(() => worker.close());
 
     // The default binary never answers `initialize` and ignores SIGTERM.
-    const loginPending = worker.call({ jsonrpc: '2.0', id: 1, method: 'login', params: {} });
+    const loginPending = worker.call({ jsonrpc: '2.0', id: 1, ...SIGN_IN });
     await waitFor(() => fs.existsSync(stateFile + '.log') && fs.readFileSync(stateFile + '.log', 'utf8').includes('initialize'), 5_000, 'login initialize sent');
     const hungPid = readPid(fixture.pidFile);
     assert.ok(hungPid, 'hung agy process started');
@@ -2461,7 +2953,7 @@ process.stdin.on('end', () => process.exit(0));
     assert.equal((await bridge.closed).code, 0);
   });
 
-  test('settings.js tags sign-in and sign-out with the state the user acted on, and drops a refusal note once it no longer applies', async () => {
+  if (!official) test('settings.js tags sign-in and sign-out with the state the user acted on, and drops a refusal note once it no longer applies', async () => {
     class Channel {
       static all = [];
       constructor(name) { this.name = name; this.onmessage = null; this.listeners = []; Channel.all.push(this); }
@@ -2576,7 +3068,7 @@ process.stdin.on('end', () => process.exit(0));
     await waitFor(() => element('account-note').textContent === '', 3_000, 'busy note gone after the other window’s save failed');
   });
 
-  test('main.js never reuses a generation across restarts, so a restarted main.js refuses a sign-out asked for the previous one', async () => {
+  if (!official) test('main.js never reuses a generation across restarts, so a restarted main.js refuses a sign-out asked for the previous one', async () => {
     const boot = async () => {
       class Channel {
         static all = [];
@@ -2640,11 +3132,75 @@ process.stdin.on('end', () => process.exit(0));
 test('usage polling returns quota and skips CLI self-update on Windows', async (t) => {
   const fixture = makeFixture(t, { extraEnv: { AGY_CLI_DISABLE_AUTO_UPDATE: 'false' } });
   const launchFile = path.join(fixture.dir, 'usage-launch.txt');
-  const worker = startWorker({ ...fixture.env, FAKE_AGY_LAUNCHFILE: launchFile });
+  const state = path.join(fixture.dir, 'state');
+  fs.writeFileSync(state, 'signed-in');
+  const worker = startWorker({ ...fixture.env, FAKE_AGY_LAUNCHFILE: launchFile, FAKE_AGY_STATE: state });
   t.after(() => worker.close());
   const { result } = await worker.call({ jsonrpc: '2.0', id: 1, method: 'usage' });
   assert.deepEqual(result.windows, [{ label: 'Test · weekly', remainingPercent: 50, ...(official ? { windowMinutes: 10080 } : {}) }]);
   assert.equal(fs.readFileSync(launchFile, 'utf8'), isWin ? 'true' : 'false');
+});
+
+if (official) test('quota failures back off across worker restarts and a successful probe resets the delay', async t => {
+  const { dir, env } = makeFixture(t);
+  const clock = path.join(dir, 'clock');
+  const launches = path.join(dir, 'launches');
+  const outcome = path.join(dir, 'outcome');
+  const preload = path.join(dir, 'worker-clock.cjs');
+  fs.writeFileSync(preload, `
+    Date.now = () => Number(require('node:fs').readFileSync(process.env.TEST_CLOCK, 'utf8'));
+  `);
+  // A real child records each launch. Like agy it requires non-terminal input
+  // for a silent read. In timeout mode it stays alive until the worker kills it.
+  const script = path.join(dir, 'fake-agy.js');
+  fs.writeFileSync(script, `
+    const io = require('node:fs');
+    if (process.argv.includes('/usage')) {
+      io.appendFileSync(process.env.TEST_LAUNCHES, Date.now() + '\\n');
+      if (io.fstatSync(0).isCharacterDevice() || io.readFileSync(0).length) process.exit(2);
+      const outcome = io.readFileSync(process.env.TEST_OUTCOME, 'utf8');
+      if (outcome === 'exit') process.exit(3);
+      if (outcome === 'timeout') { setInterval(() => {}, 1000); return; }
+    }
+    ${FAKE_AGY_SOURCE}
+  `);
+  let now = 1_800_000_000_000;
+  const state = path.join(dir, 'state');
+  fs.writeFileSync(state, 'signed-in');
+  const workerEnv = { ...env, FAKE_AGY_STATE: state, TEST_CLOCK: clock, TEST_LAUNCHES: launches, TEST_OUTCOME: outcome,
+    NODE_OPTIONS: '--require "' + preload.split(path.sep).join('/') + '"' };
+  fs.writeFileSync(clock, String(now));
+  let worker = startWorker(workerEnv);
+  t.after(() => worker.close());
+  let id = 0;
+  const poll = () => worker.call({ jsonrpc: '2.0', id: ++id, method: 'usage' }).then(reply => reply.result);
+  const advance = ms => { now += ms; fs.writeFileSync(clock, String(now)); };
+  const started = [];
+  for (const [index, minutes] of [1, 2, 4, 8, 15, 15].entries()) {
+    fs.writeFileSync(outcome, index === 0 ? 'timeout' : 'exit');
+    started.push(now);
+    assert.deepEqual(await Promise.all([poll(), poll()]), [null, null]);
+    if (index === 0) {
+      await worker.close();
+      worker = startWorker(workerEnv);
+    }
+    for (let elapsed = 30_000; elapsed < minutes * 60_000; elapsed += 30_000) {
+      advance(30_000);
+      assert.equal(await poll(), null);
+    }
+    advance(30_000);
+  }
+  fs.writeFileSync(outcome, 'success');
+  started.push(now);
+  assert.equal((await poll()).windows[0].remainingPercent, 50);
+  fs.writeFileSync(outcome, 'exit');
+  started.push(now);
+  assert.equal(await poll(), null);
+  advance(60_000);
+  fs.writeFileSync(outcome, 'success');
+  started.push(now);
+  assert.equal((await poll()).windows[0].remainingPercent, 50);
+  assert.deepEqual(fs.readFileSync(launches, 'utf8').trim().split('\n').map(Number), started);
 });
 
 test('native /usage preserves exhausted groups and ignores model turns and disabled buckets', async () => {

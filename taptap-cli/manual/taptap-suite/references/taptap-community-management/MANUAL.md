@@ -1,6 +1,6 @@
 # TapTap CLI 插件:社区论坛管理(community-management)
 
-community-management 负责读取当前或指定 App 的论坛内容、上传帖子素材、发帖与回帖;置顶、加精、沉底、删除等处置不由 CLI 执行。开始前先读 [shared execution](taptap-suite/references/shared-execution.md)(身份、JSON 输出外壳、错误处理)。命令行示例按 [taptap-suite](taptap-suite/MANUAL.md) 的映射表转成 call_tool 调用。
+community-management 负责读取当前或指定 App 的论坛内容、上传帖子素材、发帖与回帖;置顶、加精、沉底、删除等处置不由 CLI 执行。开始前先读 [shared execution](taptap-suite/references/shared-execution.md)(身份、JSON 输出外壳、错误处理),同一会话已读且内容未变化时直接沿用。命令行示例按 [taptap-suite](taptap-suite/MANUAL.md) 的映射表转成 call_tool 调用。
 
 **CRITICAL — 分页别贪全:只有 `list-community-moments` / `list-community-moment-replies` / `list-community-moment-child-replies` 支持分页(`page_size` 1–100,默认 20),`page × page_size` 必须 ≤ 10000,越界会直接失败;`get-community-moment` / `list-community-group-labels` 不分页。由于数据量和性能原因,不推荐用 `page_all` 取全量——逐页串行请求,页数越多越慢,翻得越深成本越高。需要更多数据时优先用 `group_label_id`、`moment_intent`、`order` 缩小范围或排序。**
 

@@ -65,25 +65,44 @@ export function plan(status, version) {
   return {publish: true, reason: 'A newer extension version is ready'};
 }
 
+// Public diagnostics are selected locally. Store messages and warning reasons
+// may contain publisher data, including strings that resemble reason codes.
+function publishFailureSummary(error) {
+  const hasWarnings = Array.isArray(error?.details) &&
+    error.details.some(detail => Array.isArray(detail?.warnings) && detail.warnings.length > 0);
+  if (hasWarnings) return 'STORE_WARNING: Inspect submission warnings in the developer dashboard';
+  switch (error?.status) {
+    case 'INVALID_ARGUMENT': return 'INVALID_ARGUMENT: Check the submission fields';
+    case 'FAILED_PRECONDITION': return 'FAILED_PRECONDITION: Check the item state before submitting';
+    case 'OUT_OF_RANGE': return 'OUT_OF_RANGE: Check the submitted values';
+    default: return 'UNKNOWN: Inspect the developer dashboard for details';
+  }
+}
+
 export function createClient({publisher, item, token, fetcher = fetch, sleep = ms => new Promise(resolve => setTimeout(resolve, ms))}) {
   if (!/^[a-zA-Z0-9-]+$/.test(publisher) || !/^[a-p]{32}$/.test(item) || !token) throw new Error('Missing/invalid Chrome Web Store configuration');
   const name = `publishers/${publisher}/items/${item}`;
   const origin = 'https://chromewebstore.googleapis.com';
   async function request(path, method = 'GET', body, contentType = 'application/json') {
-    let response;
+    let failureDetail = 'transport or response validation failure';
     try {
-      response = await fetcher(`${origin}/${path}`, {
+      const response = await fetcher(`${origin}/${path}`, {
         method, redirect: 'error', signal: AbortSignal.timeout(120_000),
         headers: {Authorization: `Bearer ${token}`, 'Content-Type': contentType}, body,
       });
+      if (!response.ok) {
+        failureDetail = `HTTP ${response.status}`;
+        if (path.endsWith(':publish') && response.status === 400) {
+          const data = await response.json().catch(() => null);
+          failureDetail += ' ' + publishFailureSummary(data?.error);
+        }
+        throw new Error('Request failed');
+      }
       const data = await response.json();
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       if (data.name !== name || data.itemId !== item) throw new Error('Store response identity mismatch');
       return data;
-    } catch (error) {
-      // Do not echo remote bodies or credentials, and never blindly retry writes.
-      const detail = /^HTTP \d+$/.test(error.message) ? error.message : 'transport or response validation failure';
-      throw new Error(`${method} ${path.split(':').at(-1)}: ${detail}. ${method === 'GET' ? 'Read failed; earlier writes, if any, may have completed. Inspect the dashboard before retrying.' : 'Outcome may be unknown; inspect the dashboard before retrying.'}`);
+    } catch {
+      throw new Error(`${method} ${path.split(':').at(-1)}: ${failureDetail}. ${method === 'GET' ? 'Read failed; earlier writes, if any, may have completed. Inspect the dashboard before retrying.' : 'Outcome may be unknown; inspect the dashboard before retrying.'}`);
     }
   }
   const status = () => request(`v2/${name}:fetchStatus`);
@@ -97,7 +116,7 @@ export function createClient({publisher, item, token, fetcher = fetch, sleep = m
       await sleep(10_000);
       uploadState = (await status()).lastAsyncUploadState;
     }
-    if (uploadState !== 'SUCCEEDED') throw new Error(`Upload did not finish successfully (${uploadState}); review was not requested`);
+    if (uploadState !== 'SUCCEEDED') throw new Error('Upload did not finish successfully; review was not requested');
     const result = await request(`v2/${name}:publish`, 'POST', JSON.stringify({
       publishType: 'DEFAULT_PUBLISH', skipReview: false, blockOnWarnings: true,
     }));

@@ -22,7 +22,7 @@ call_tool(name:"schema", args:{_positional:["qualification","save-qualification-
 | ICP 备案 | `icp-filing` |
 | 隐私合规 | `privacy-compliance` |
 | 防沉迷 | `anti-addiction` |
-| AI 内容声明 | `ai-declaration` |
+| AI 接入声明 | `ai-declaration` |
 | 软件著作权 | `software-copyright` |
 | IP 授权书 | `authorization-letters` |
 | 安全评估 | `security-assessment` |
@@ -67,7 +67,7 @@ APK ICP 需要完整主体字段，单独 icp_number + icp_file 不代表可提�
 
 AI 接入声明的最小输入（不提供 AIGC 服务、无证明文件时）：`qualification_type=ai-declaration`、`aigc_qualification.provide_aigc_service=false`、`aigc_qualification.package_types=["<包体>"]`；不需要 `proof_file`/`proof_files`。如用户已明确「游戏不含 AI 生成内容」这一事实，可同时用 `app_features.has_ai_content=false` 一并保存（未确认时不要默认填 false）。
 
-AI 内容声明：
+游戏接入生成式 AI 服务时，提供游戏内带有“AI 生成内容”标识的 JPG 或 PNG 截图。以下示例为 APK 添加一张证明截图。
 
 ```json
 {
@@ -75,7 +75,7 @@ AI 内容声明：
     "qualification_type": "ai-declaration",
     "aigc_qualification": {
       "provide_aigc_service": true,
-      "proof_file": { "type": "pdf", "url": "<https-url>" },
+      "proof_file": { "type": "img", "url": "<https-url>" },
       "package_types": ["apk"]
     }
   }
@@ -150,7 +150,7 @@ IP 授权书：
 
 按 schema 构造材料输入。隐私托管模式 `use_general_privacy_policy:true` 的链接由服务端生成；环境配置不可用时，说明错误并引导用户前往对应环境的开发者后台。小游戏常规隐私配置在开发者后台办理。
 
-AI 的 `proof_files` 会替换完整证明列表，每项格式为 `{ "package_type":"apk", "file":{"type":"pdf","url":"<https-url>"} }`。不同包体可以使用不同文件。删除某个包体的证明时，提交其余包体的完整列表；传 `[]` 表示全部清空，省略该字段表示保留。
+AI 的 `proof_files` 会替换完整证明列表，每项格式为 `{ "package_type":"apk", "file":{"type":"img","url":"<https-url>"} }`。不同包体可以使用不同截图。删除某个包体的证明时，提交其余包体的完整列表；传 `[]` 表示全部清空，省略该字段表示保留。
 
 AI 接入声明（`ai-declaration`）**即使不传任何证明文件，也必须在 `aigc_qualification.package_types` 声明适用包体**（如 `["apk"]`）。只传 `provide_aigc_service` 时服务端可能返回成功，但读回仍是 `pending_upload`、`has_saved_material=false`——保存后必须回读 `has_saved_material` / `status` 确认已落库；没有落库就补 `package_types` 重试。
 

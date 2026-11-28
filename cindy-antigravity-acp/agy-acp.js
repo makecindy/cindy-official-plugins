@@ -22,8 +22,14 @@
 const os = require('node:os');
 const { createVerification } = require('./agy-verification.js');
 const { attachSteering } = require('./agy-steering.js');
-const { accountErrorRelay } = require('./agy-account-errors.js');
-const { ACP_ARGS, detectAgy, readCustomAgyConfig, resolveAgy, spawnAgy, killTree } = require('./resolve-agy.js');
+const {
+  ACCOUNT_DIR_EXIT_CODE,
+  accountDirProblem,
+  ensureAccountSubdirs,
+  parseAccountDirArg,
+} = require('./agy-account-dir.js');
+const { accountErrorRelay, isolationViolationLine } = require('./agy-account-errors.js');
+const { acpArgsFor, detectAgy, readCustomAgyConfig, resolveAgy, spawnAgy, killTree } = require('./resolve-agy.js');
 const remoteWorkspace = require('./remote-workspace.js');
 
 /** agy normally exits right after stdin closes; force it if it lingers. */
@@ -59,11 +65,15 @@ function exitCodeFor(code, signal) {
   return 1;
 }
 
-function run(agyPath) {
-  const verification = createVerification(agyPath);
+function run(agyPath, options) {
+  const verification = createVerification(agyPath, options && options.accountDir ? { accountDir: options.accountDir } : undefined);
   let child;
   try {
-    child = spawnAgy(agyPath, ACP_ARGS, { logFile: verification?.taskLog, stdio: ['pipe', 'pipe', 'pipe'] });
+    child = spawnAgy(agyPath, acpArgsFor(options), {
+      ...options,
+      ...(verification ? { logFile: verification.taskLog } : {}),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
   } catch (error) {
     verification?.dispose();
     exitAfterStderr(`[agy-acp] Could not start Antigravity at ${agyPath} (${describe(error)}).`, NOT_FOUND_EXIT_CODE);
@@ -139,7 +149,18 @@ function run(agyPath) {
     process.stdout,
     child,
     () => stop('SIGTERM'),
-    accountErrorRelay(),
+    accountErrorRelay(Date.now, {
+      ...(verification ? { taskLog: verification.taskLog } : {}),
+      ...(options && options.accountDir ? {
+        accountDir: options.accountDir,
+        onIsolationViolation: (violation) => {
+          try {
+            process.stderr.write(isolationViolationLine(violation));
+          } catch { /* ignore */ }
+          setImmediate(() => stop('SIGTERM'));
+        },
+      } : {}),
+    }),
     verification,
   );
   child.stdin.on('error', () => {
@@ -195,7 +216,7 @@ function missingAgyMessage() {
  * The project is on another computer: only an agy that is known to honour the restricted agent
  * may run the task. Any doubt ends here, before agy sees a single message.
  */
-async function runRemoteWorkspace() {
+async function runRemoteWorkspace(options) {
   const found = await detectAgy();
   if (!found.path) {
     exitAfterStderr(missingAgyMessage(), NOT_FOUND_EXIT_CODE);
@@ -212,8 +233,17 @@ async function runRemoteWorkspace() {
     );
     return;
   }
+  let acpArgs;
+  try {
+    acpArgs = acpArgsFor(options);
+  } catch (error) {
+    exitAfterStderr(`[agy-acp] Cannot use the requested Antigravity account directory (${describe(error)}).`, ACCOUNT_DIR_EXIT_CODE);
+    return;
+  }
   remoteWorkspace.startRemoteWorkspace(found.path, {
-    acpArgs: ACP_ARGS,
+    acpArgs,
+    ...(options && options.accountDir ? { accountDir: options.accountDir } : {}),
+    agyVersion: found.version,
     guest: remoteWorkspace.isGuestWorkspaceLaunch(process.argv),
     spawnAgy,
     killTree,
@@ -225,10 +255,34 @@ async function runRemoteWorkspace() {
   });
 }
 
-if (remoteWorkspace.isRemoteWorkspaceLaunch(process.argv)) {
-  runRemoteWorkspace();
-} else {
-  const agyPath = resolveAgy();
-  if (agyPath) run(agyPath);
-  else exitAfterStderr(missingAgyMessage(), NOT_FOUND_EXIT_CODE);
+function resolveAccountLaunchOptions() {
+  const parsed = parseAccountDirArg(process.argv);
+  if (!parsed.present) return {};
+  if (parsed.error) {
+    exitAfterStderr(`[agy-acp] Invalid account directory argument: ${parsed.error}.`, ACCOUNT_DIR_EXIT_CODE);
+    return null;
+  }
+  const problem = accountDirProblem(parsed.accountDir);
+  if (problem) {
+    exitAfterStderr(`[agy-acp] Account directory is unavailable (${problem}); refusing to fall back to the default login.`, ACCOUNT_DIR_EXIT_CODE);
+    return null;
+  }
+  try {
+    ensureAccountSubdirs(parsed.accountDir);
+  } catch (error) {
+    exitAfterStderr(`[agy-acp] Could not prepare account directory (${describe(error)}); refusing to fall back to the default login.`, ACCOUNT_DIR_EXIT_CODE);
+    return null;
+  }
+  return { accountDir: parsed.accountDir };
+}
+
+const accountOptions = resolveAccountLaunchOptions();
+if (accountOptions !== null) {
+  if (remoteWorkspace.isRemoteWorkspaceLaunch(process.argv)) {
+    runRemoteWorkspace(accountOptions);
+  } else {
+    const agyPath = resolveAgy();
+    if (agyPath) run(agyPath, accountOptions);
+    else exitAfterStderr(missingAgyMessage(), NOT_FOUND_EXIT_CODE);
+  }
 }

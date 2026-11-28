@@ -1,10 +1,8 @@
 # 上传帖子配图
 
-本文件是 `taptap-community-management` 的「上传帖子配图」场景细节。场景路由、CRITICAL 规则和输出边界以 [community-management 手册](taptap-suite/references/taptap-community-management/MANUAL.md) 为准。
-
 ## 这条路径是什么
 
-`community-management +upload-image <image>` 把一张本地图片上传到社区的图片存储,只返回**图片地址与宽高**。它不创建素材库记录,也不发布帖子——拿到 `url` / `width` / `height` 之后,按 [publish post](taptap-suite/references/taptap-community-management/references/publish-post.md) 填进正文图片节点或组图。
+`community-management +upload-image <image>` 把一张本地图片上传成帖子素材。仅上传时拿到 `url` / `width` / `height` 即可交付。任务还包含撰写或发布帖子时,再按 [发帖流程](taptap-suite/references/taptap-community-management/references/publish-post.md) 将回执用于正文图片节点或组图。
 
 ```text
 # 先预览(只输出预览,不发写请求)
@@ -18,7 +16,7 @@ call_tool(name:"community-management +upload-image", args:{
   yes:true})
 ```
 
-`_positional` 里的本地路径必须是**相对会话工作目录**的路径:CLI 以会话工作目录为基准校验,绝对路径与 `../` 越界会被拒绝。写调用缺 `dry_run` / `yes` 会被插件拒绝(`CONFIRM_REQUIRED`),不要用别的方式绕过。
+`dry_run: true` 在本地生成预览。用户确认后,以相同文件、scope 和幂等意图将 `dry_run` 换成 `yes` 发起上传。真实上传缺少 `yes` 时返回 `confirmation_required`(exit 10)。`_positional` 里的本地路径必须是**相对会话工作目录**的路径:CLI 以会话工作目录为基准校验,绝对路径与 `../` 越界会被拒绝。
 
 社区图片另有一个原始命令 `upload-community-moment-image`(参数走 `data:{image:"<本地路径>"}`)。两者产出的图片地址同源,但 `+upload-image` 会校验宽高必须存在、并把结果整理成 `url`/`width`/`height`/`info`,优先用它;不要为了"看到所有字段"改调原始命令。
 

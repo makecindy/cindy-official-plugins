@@ -4,6 +4,8 @@ Read this when taking over an existing PR or addressing failing checks, merge co
 
 To take over an existing PR, use the link or number given, or the current branch's PR (`gh pr view --json url --jq .url`). Derive `owner/repo` from the URL or `origin`; never assume it. Confirm the PR is open; if its head is a fork you cannot push to, say so and stop. Work on its head branch: if the current directory is a clean checkout of it, use it; otherwise create a task worktree as in `references/publish.md` §1 and run `gh pr checkout <number>` inside it.
 
+**Branch-race guard (dedicated / decoupled PR tasks):** before checking out, editing, or pushing the PR head branch in a separate task worktree, inspect `git worktree list --porcelain`. If another active worktree (such as the originating development session) currently holds that exact `refs/heads/<head>` branch checked out — especially with uncommitted modifications or an active turn — do **not** force-checkout the same branch or race pushes against it. Stay read-only, report the branch-ownership conflict and current PR findings to the originating conversation / user, and only edit or push once the originating worktree has moved off that branch or the user explicitly confirms handoff.
+
 1. Get facts, do not reconstruct them from memory or flat `gh` output:
    `node "<skill-dir>/scripts/pr-node.cjs" pr-snapshot.mjs <PR_URL>`. Use its `verdict` and `blockers[]`. If the snapshot fails or is truncated, never claim the PR is clean.
 2. Review threads are read per thread, active **and** outdated. For each outdated unresolved thread, check the current HEAD: still a problem → fix it; already fixed or superseded → reply pointing at the commit, then resolve.

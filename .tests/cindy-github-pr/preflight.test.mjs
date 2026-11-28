@@ -179,11 +179,10 @@ test('prints the post-publish pr_card handoff reminder in text output while keep
   const textOut = execFileSync('node', [script, work], { encoding: 'utf8' });
   assert.match(textOut, /After publishing or pushing/);
   const groupIdx = textOut.indexOf('Group chat or unrelated source task');
-  const optOutIdx = textOut.indexOf('Publish-only or follow-up explicitly stopped');
   const callIdx = textOut.indexOf('Owning PR task: call cindy-github `pr_card`');
-  assert.ok(groupIdx > 0 && optOutIdx > groupIdx && callIdx > optOutIdx,
-    'ownership check and following: false guard must appear before the first pr_card(published: true) instruction');
-  assert.match(textOut, /following: false/);
+  assert.ok(groupIdx > 0 && callIdx > groupIdx,
+    'ownership check must appear before the first pr_card(published: true) instruction');
+  assert.match(textOut, /never pass `following: false` to suppress saved `auto_follow`/);
   assert.match(textOut, /show the Cindy task card for X and IM/);
   assert.match(textOut, /pr_follow_settings.*only if the card call returned no preferences/);
   assert.match(textOut, /pr_card.*published: true/);
@@ -199,10 +198,10 @@ test('pr SKILL.md stays concise and every referenced scenario doc exists', () =>
     assert.ok(skillText.includes(heading), `SKILL.md must preserve ${heading}`);
   }
   const groupIdx = skillText.indexOf('Group chat or unrelated source task');
-  const optOutIdx = skillText.indexOf('Publish-only or follow-up explicitly stopped');
+  const noSuppressIdx = skillText.indexOf('Do not suppress auto-follow at publish time');
   const callIdx = skillText.indexOf('3. Call `ghost_call` `cindy-github` / `pr_card`');
-  assert.ok(groupIdx > 0 && optOutIdx > groupIdx && callIdx > optOutIdx,
-    'SKILL.md checklist must place ownership and following: false guards before the first publish pr_card call');
+  assert.ok(groupIdx > 0 && noSuppressIdx > groupIdx && callIdx > noSuppressIdx,
+    'SKILL.md checklist must place ownership and no-suppress-auto-follow rules before the first publish pr_card call');
   const refs = [...new Set([...skillText.matchAll(/references\/([a-z0-9-]+\.md)/g)].map((m) => m[1]))];
   assert.ok(refs.length >= 5, 'SKILL.md should route scenarios to references/');
   for (const ref of refs) {

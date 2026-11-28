@@ -5,6 +5,7 @@ const { createHash } = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnAgy, killTree, SESSION_SETTINGS } = require('./resolve-agy.js');
+const { hasVerifiedIsolatedSignIn } = require('./agy-account-dir.js');
 const { usageEnvironment, usageFromReport } = require('./agy-usage.js');
 
 // The challenge belongs to this account. Only inspect an isolated, fresh /usage invocation.
@@ -76,12 +77,18 @@ function createVerification(agyPath, options) {
     },
     async check(account) {
       if (closed || !account) return { status: 'unknown' };
+      const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : undefined;
+      if (accountDir && !hasVerifiedIsolatedSignIn(accountDir, options)) return { status: 'unknown' };
       const cwd = fs.mkdtempSync(path.join(dir, 'probe-'));
       let child, timer;
       try {
         child = spawnAgy(agyPath, ['--settings', SESSION_SETTINGS, '--log-file', 'verification.log',
           '--output-format', 'json', '--print', '/usage'], {
-          ...options, cwd, env: usageEnvironment(options), stdio: ['ignore', 'pipe', 'ignore'],
+          ...options,
+          cwd,
+          env: usageEnvironment(options),
+          ...(accountDir ? { accountDir, accountHome: true } : {}),
+          stdio: ['ignore', 'pipe', 'ignore'],
         });
         children.add(child);
         const stop = () => killTree(child, 'SIGKILL');

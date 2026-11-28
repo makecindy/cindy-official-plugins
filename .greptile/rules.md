@@ -22,11 +22,11 @@
 
 | 级别 | 变更范围 | 放行规则 |
 | --- | --- | --- |
-| **L1 常规迭代（快车道）** | 已有插件的 bugfix、性能优化、小功能增强、UI/文案/多语言/图标、测试、可追溯的依赖维护，且未扩大边界 | **维护者或 `.github/plugin-owners.json` 登记的插件 Owner**：必需 CI 全绿 + Greptile `APPROVED` + Codex 无未解决 P0/P1 → **直接自动可合**，不做额外人工复审、不卡实机验收。<br>**未登记的外部贡献者**：同样走双机器人审查，合并前由维护者或插件 Owner 过目确认（不无人值守自动合并） |
-| **L2 边界变更** | 新增官方插件（必改 `provisioning.json`）、`provisioning.json` 扩大到 `all`、新增/扩大权限/凭证/自主域名/子进程边界、变更第三方 OAuth scope 或依赖未就绪的宿主授权 | **必需 CI 全绿 + 无未解决的已确认 P0/P1 + 维护者确认边界并 Approve**（`provisioning.json` 已列入 Greptile `excludePaths`，新插件与受众变更不会自动批准；不重做代码挑刺）。涉及未获平台批准或宿主未发布的 OAuth 授权时标「等平台批准」暂缓合并 |
+| **L1 常规迭代（快车道）** | 已有插件的 bugfix、性能优化、小功能增强、UI/文案/多语言/图标、测试、可追溯的依赖维护，且未扩大边界 | **维护者或 `.github/plugin-owners.json` 登记的插件 Owner**：必需 CI 全绿 + 审批门禁满足 + Codex 无未解决 P0/P1 → **直接自动可合**，不做额外人工复审、不卡实机验收。<br>**未登记的外部贡献者**：同样走双机器人审查，合并前须由维护者或插件 Owner 人工过目并 Approve（不无人值守自动合并） |
+| **L2 边界变更** | 新增官方插件（必改 `provisioning.json`）、`provisioning.json` 受众变更、已有插件新增/扩大权限/凭证/自主域名/事件/子进程边界、变更第三方 OAuth scope 或依赖尚未合入宿主 `main` 的能力 | **新插件首发或改 `provisioning.json`**：必经维护者人工把关并 Approve（`provisioning.json` 在 Greptile `excludePaths` 中，不会自动批准）。<br>**登记维护者（`maintainers`）改已有插件的 L2 边界**：维护者提交 Ready PR 即视为已确认边界；必需 CI 全绿 + 审批门禁满足 + 无未解决已确认 P0/P1 → **直接自动可合**（不另拉其他维护者写文书确认）。<br>**非维护者改已有插件 L2**：必需 CI 全绿 + 无未解决已确认 P0/P1 + 登记维护者 Approve。<br>涉及未获平台批准的第三方 OAuth，或所需宿主能力尚未合入 `makecindy/cindy` `main` 时，暂缓合并直至就绪；宿主 PR 已合入 `main` 且插件通过 `minCindyVersion` 隔离老端或具备旧端安全降级时，无需等待客户端正式版发版（服务端市场按 `minCindyVersion` 自动分发） |
 | **L3 仓库基座** | `.github/workflows/**`、`.greptile/**`、`AGENTS.md`、`.github/plugin-owners.json`、削弱 `.tests/` 门禁、重命名或删除已发布插件 | **必需 CI 全绿 + 无未解决的已确认 P0/P1 + 维护者明确 Approve**（Greptile 对 L3 路径不自动 approve，由维护者 Approve 直接满足审批门禁） |
 
-> **合并授权纪律**：reviewer 身份本身不授予 merge/close 权限；已获维护者授权的合并程序在满足对应级别条件后可直接合并，不绕过 GitHub ruleset。
+> **审批门禁等价与合并授权纪律**：当必需 CI 全绿（含 `Greptile Review` 为 `SUCCESS`，忽略被取消的非必需检查）且无未解决已确认 P0/P1 时，**Greptile `APPROVED` 或任意登记维护者对当前 head 的 `APPROVED` 二选一即满足审批门禁**——已有维护者 Approve 时不再强求 Greptile 补交 `APPROVED` 审阅，也不挑剔 Approve 正文措辞。reviewer 身份本身不授予 merge/close 权限；已获维护者授权的合并程序在满足对应级别条件后可直接合并，不绕过 GitHub ruleset。
 
 ## 2. 双机器人分工与 AI 审查防熔断
 
@@ -61,12 +61,13 @@
 - `ghost.json.author` 须为真实作者，不得冒充官方团队。
 - **功能查重**：同一服务商的不同产品（Gmail/Drive/Calendar）与同一协议的不同服务商（163/iCloud/QQ/Yahoo）属合理共存；明显重复的通用能力（如又一个通用网页搜索）列出重叠插件并要求说明差异化定位。
 
-## 5. 第三方 OAuth 授权（仅涉及时适用）
+## 5. 第三方 OAuth 授权与宿主能力依赖（仅涉及时适用）
 
-仅当 PR 新增/变更插件 `oauth.scopes`，或依赖有变化/尚未就绪的 Cindy 宿主 OAuth 授权时：
-- PR 说明写清涉及的 scope、平台审核状态及（若用到宿主授权）宿主是否已发布。
-- 未获平台批准或宿主未发布时，在 summary 单列「等平台批准」并暂停自动批准（不标代码 P1，不让 review check 失败）。
-- 未涉及此类授权的 PR 完全跳过本节，不提要求。
+仅当 PR 新增/变更插件 `oauth.scopes`，或依赖尚未合入 `makecindy/cindy` `main` / 未获第三方平台批准的宿主 OAuth 授权时：
+- PR 说明写清涉及的 scope、第三方平台审核状态及（若用到新宿主能力）宿主 PR 是否已合入 `main`。
+- 未获第三方平台批准，或所需宿主能力尚未合入 `main` 时，在 summary 单列「等平台批准」或「等宿主合入 main」并暂停自动批准（不标代码 P1，不让 review check 失败）。
+- **宿主 PR 已合入 `main` 且插件通过 `minCindyVersion` 隔离老端或旧端可安全降级时，无需等待客户端正式版发布**（服务端市场按 `minCindyVersion` 自动过滤分发）。
+- 未涉及此类授权与未合入宿主能力的 PR 完全跳过本节，不提要求。
 
 ## 6. 回复语言与摘要格式
 

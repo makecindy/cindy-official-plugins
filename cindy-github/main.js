@@ -80,11 +80,6 @@ function ensureLocale() {
 
 var MESSAGES = {
   'zh-CN': {
-    watchUnavailable: "GitHub 关注配置或状态暂不可用。",
-    watchInvalid: "请选择关注操作和有效的 GitHub 仓库、对象类型和编号。",
-    watchRebind: "此对象的账号或身份已变化。请先移除旧关注，再明确添加。",
-    watchLimit: "本机最多关注 5 个对象。",
-    watchChanged: "GitHub 关注状态有变化（{targets}）。打开关注列表查看。",
     status401: 'GitHub 授权未配置或已失效，请到「插件」→「GitHub」详情页重新连接账号，或更换备用 Token',
     status403RateLimit: 'GitHub 接口限流(HTTP 403 rate limit),请稍后重试',
     status403: '此操作没有权限(HTTP 403)，请检查仓库访问权及授权范围；账号的其他功能可能仍可使用：{detail}',
@@ -195,6 +190,18 @@ var MESSAGES = {
     prAutoFollowHint: '后台修 CI 和 review 意见，需要你时再通知',
     prAutoArchive: '合并后自动归档',
     prAutoArchiveHint: '你看过已合并的卡片、离开这个任务后归档；有未提交的改动时保留',
+    prIndependentFollow: '在独立任务中跟进 PR',
+    prIndependentFollowHint: '发布后自动为 PR 新建隔离工作区的独立任务跟进，避免与开发会话互相排队阻塞',
+    prRepoAutoMerge: '本仓库全绿自动合并（{repo}）',
+    prRepoAutoMergeHint: '仅限当前仓库与当前 GitHub 账号，绝不跨仓库继承；CI、评审与分支规则全部通过后自动合并',
+    prAutoMergeOn: '全绿后自动合并',
+    prAutoMergeOff: '取消自动合并',
+    prAutoMergeActive: '已设全绿自动合并',
+    prAutoMergeRepoActive: '本仓库已开启全绿自动合并',
+    prAutoMergeFailed: '未能保存自动合并策略，请稍后再试',
+    prAutoMergeActorUnknown: '无法确认当前 GitHub 账号或合并权限，未开启自动合并',
+    prAutoMergeNeedsFollow: '请先开启并确认 PR 后台跟进，再开启全绿自动合并',
+    prTodoDecoupleFollow: '为 {url} 新建独立跟进任务（避免与当前任务串行阻塞）：用 cindy_helper 的 send_to_session（use_worktree: true，标题「{title}」）交接给独立任务建立并核实后台跟进（按 pr 技能第 4 节），完成后再刷新当前任务卡片使其显示只读状态与跳转入口',
     prArchiveTask: '归档任务',
     prTurnOn: '开启「{name}」',
     prFollowModel: '自动跟进用的模型',
@@ -255,11 +262,6 @@ var MESSAGES = {
     prClickStop: '用户在 PR 卡片上点了「停止」跟进。删除 {url} 的跟进定时任务，再用 card_id 调用 pr_card，following=false。',
   },
   en: {
-    watchUnavailable: "GitHub watches or status are temporarily unavailable.",
-    watchInvalid: "Choose an operation and a valid GitHub repository, target type and ID.",
-    watchRebind: "The account or object identity changed. Remove the old watch before adding it again.",
-    watchLimit: "This device can watch up to five targets.",
-    watchChanged: "GitHub watch changes ({targets}). Open the watch list for details.",
     status401: 'GitHub authorization is missing or expired. Open Plugins > GitHub details to reconnect your account, or replace the fallback token.',
     status403RateLimit: 'GitHub API rate limit hit (HTTP 403 rate limit). Try again later.',
     status403: 'No permission for this operation (HTTP 403). Check repository access and authorization scopes; other features of the account may still work: {detail}',
@@ -370,6 +372,18 @@ var MESSAGES = {
     prAutoFollowHint: 'Fix CI and review feedback in the background and notify you only when needed',
     prAutoArchive: 'Archive after merge',
     prAutoArchiveHint: 'Archive the task after you have seen it merged and moved on; kept while anything is uncommitted',
+    prIndependentFollow: 'Follow PRs in an independent task',
+    prIndependentFollowHint: 'Hand off PR follow-up to a dedicated task with an isolated worktree so long dev sessions do not block it',
+    prRepoAutoMerge: 'Auto-merge green PRs in {repo}',
+    prRepoAutoMergeHint: 'Scoped strictly to this repository and your GitHub account, never inherited across repos; merges once CI, reviews and rules pass',
+    prAutoMergeOn: 'Auto-merge when green',
+    prAutoMergeOff: 'Cancel auto-merge',
+    prAutoMergeActive: 'Auto-merge when green is on',
+    prAutoMergeRepoActive: 'Repo auto-merge when green is on',
+    prAutoMergeFailed: 'Could not save the auto-merge policy. Try again later.',
+    prAutoMergeActorUnknown: 'Could not verify your GitHub account or merge eligibility; auto-merge was not enabled.',
+    prAutoMergeNeedsFollow: 'Start and verify PR background follow-up before enabling auto-merge.',
+    prTodoDecoupleFollow: 'Hand off follow-up for {url} to a dedicated PR task (to avoid serial queue blocking): call cindy_helper send_to_session (use_worktree: true, title "{title}") to set up and verify background follow-up per section 4 of the pr Skill, then refresh this source card so it displays the read-only status and task link',
     prArchiveTask: 'Archive task',
     prTurnOn: 'Turn on "{name}"',
     prFollowModel: 'Model for auto-follow',
@@ -430,11 +444,6 @@ var MESSAGES = {
     prClickStop: 'The user clicked "Stop" following on the PR card. Delete the follow-up schedule for {url}, then call pr_card with card_id and following=false.',
   },
   ja: {
-    watchUnavailable: "GitHub の監視設定または状態を取得できません。",
-    watchInvalid: "操作と有効な GitHub リポジトリ、対象の種類と番号を指定してください。",
-    watchRebind: "アカウントまたは対象が変わりました。以前の監視を削除してから再追加してください。",
-    watchLimit: "この端末では最大 5 件まで監視できます。",
-    watchChanged: "GitHub の監視対象に変更があります（{targets}）。一覧で確認できます。",
     status401: 'GitHub の認証が未設定か期限切れです。「プラグイン」→「GitHub」の詳細ページでアカウントを再接続するか、予備トークンを差し替えてください。',
     status403RateLimit: 'GitHub API のレート制限に達しました(HTTP 403 rate limit)。しばらくしてから再試行してください。',
     status403: 'この操作の権限がありません(HTTP 403)。リポジトリへのアクセス権と認可スコープを確認してください。アカウントのほかの機能は引き続き使える場合があります: {detail}',
@@ -545,6 +554,18 @@ var MESSAGES = {
     prAutoFollowHint: 'バックグラウンドで CI とレビュー指摘を直し、必要なときだけ通知します',
     prAutoArchive: 'マージ後に自動でアーカイブ',
     prAutoArchiveHint: 'マージ済みのカードを見てこのタスクを離れたらアーカイブします。未コミットの変更があるときは残します',
+    prIndependentFollow: '独立タスクで PR をフォロー',
+    prIndependentFollowHint: '作成後に隔離 worktree 付きの専用タスクへ引き継ぎ、開発セッションのキュー詰まりを防ぎます',
+    prRepoAutoMerge: 'このリポジトリで全通過後に自動マージ（{repo}）',
+    prRepoAutoMergeHint: 'このリポジトリと現在の GitHub アカウントのみ有効（他リポジトリへ引き継ぎません）。CI・レビュー・ルール通過後にマージします',
+    prAutoMergeOn: '全通過後に自動マージ',
+    prAutoMergeOff: '自動マージを解除',
+    prAutoMergeActive: '全通過後の自動マージ有効',
+    prAutoMergeRepoActive: 'リポジトリ自動マージ有効',
+    prAutoMergeFailed: '自動マージ設定を保存できませんでした。しばらくしてから再試行してください',
+    prAutoMergeActorUnknown: 'GitHub アカウントまたはマージ権限を確認できないため、自動マージを有効にしませんでした',
+    prAutoMergeNeedsFollow: '先に PR のバックグラウンドフォローを開始・確認してから自動マージを有効にしてください',
+    prTodoDecoupleFollow: '{url} のフォローを専用タスクへ引き継ぐ（現在のセッションとの直列詰まりを防ぐため）：cindy_helper の send_to_session（use_worktree: true、タイトル「{title}」）で pr スキル第 4 節に沿ってフォローを作成・確認し、完了後にこの元カードを更新して読み取り専用リンクを表示する',
     prArchiveTask: 'タスクをアーカイブ',
     prTurnOn: '「{name}」をオン',
     prFollowModel: '自動フォローに使うモデル',
@@ -605,11 +626,6 @@ var MESSAGES = {
     prClickStop: 'ユーザーが PR カードの「フォロー停止」を押しました。{url} のフォロー用スケジュールを削除し、card_id と following=false を付けて pr_card を呼んでください。',
   },
   ko: {
-    watchUnavailable: "GitHub 구독 설정 또는 상태를 가져올 수 없습니다.",
-    watchInvalid: "작업과 유효한 GitHub 저장소, 대상 유형 및 번호를 지정하세요.",
-    watchRebind: "계정이나 대상이 변경되었습니다. 기존 구독을 삭제한 후 다시 추가하세요.",
-    watchLimit: "이 기기에서 최대 5개 대상을 구독할 수 있습니다.",
-    watchChanged: "GitHub 구독 상태가 변경되었습니다({targets}). 구독 목록에서 확인하세요.",
     status401: 'GitHub 인증이 설정되지 않았거나 만료되었습니다. ‘플러그인’ > ‘GitHub’ 상세 페이지에서 계정을 다시 연결하거나 예비 토큰을 교체하세요.',
     status403RateLimit: 'GitHub API 요청 한도에 도달했습니다(HTTP 403 rate limit). 잠시 후 다시 시도하세요.',
     status403: '이 작업에 대한 권한이 없습니다(HTTP 403). 저장소 접근 권한과 인증 범위를 확인하세요. 계정의 다른 기능은 계속 사용할 수 있을 수 있습니다: {detail}',
@@ -720,6 +736,18 @@ var MESSAGES = {
     prAutoFollowHint: '백그라운드에서 CI와 리뷰 의견을 고치고 필요할 때만 알립니다',
     prAutoArchive: '병합 후 자동 보관',
     prAutoArchiveHint: '병합된 카드를 보고 이 작업을 떠나면 보관합니다. 커밋하지 않은 변경이 있으면 남겨 둡니다',
+    prIndependentFollow: '독립 작업에서 PR 팔로우',
+    prIndependentFollowHint: '게시 후 격리된 worktree를 가진 전용 작업으로 넘겨 긴 개발 세션의 대기열 차단을 방지합니다',
+    prRepoAutoMerge: '이 저장소 전체 통과 시 자동 병합({repo})',
+    prRepoAutoMergeHint: '현재 저장소와 현재 GitHub 계정에만 적용되며 다른 저장소로 상속되지 않습니다. CI·리뷰·규칙 통과 후 자동 병합합니다',
+    prAutoMergeOn: '통과 시 자동 병합',
+    prAutoMergeOff: '자동 병합 해제',
+    prAutoMergeActive: '통과 시 자동 병합 켜짐',
+    prAutoMergeRepoActive: '저장소 자동 병합 켜짐',
+    prAutoMergeFailed: '자동 병합 정책을 저장하지 못했습니다. 잠시 후 다시 시도하세요',
+    prAutoMergeActorUnknown: '현재 GitHub 계정이나 병합 권한을 확인할 수 없어 자동 병합을 켜지 않았습니다',
+    prAutoMergeNeedsFollow: 'PR 백그라운드 추적을 시작하고 확인한 후 자동 병합을 켜세요',
+    prTodoDecoupleFollow: '{url} 팔로우를 전용 PR 작업으로 인계하세요(현재 작업의 직렬 대기열 차단 방지): cindy_helper send_to_session(use_worktree: true, 제목 "{title}")으로 pr 스킬 4절에 따라 팔로우를 설정·확인한 뒤 이 원본 카드를 새로 고쳐 읽기 전용 상태와 작업 링크를 표시하세요',
     prArchiveTask: '작업 보관',
     prTurnOn: '"{name}" 켜기',
     prFollowModel: '자동 팔로우에 쓸 모델',
@@ -2828,6 +2856,21 @@ function prFollowActive(card) {
   return unverifiedLegacyFollow(card) || card.following === true || !!card.scheduleId || card.pending === 'follow' || card.pending === 'resume' || card.pending === 'stop';
 }
 
+function prAutoMergeHasFollow(card) {
+  return card.following === true && !!card.scheduleId && !boundFollowUnverified(card) && !card.pending;
+}
+
+async function verifiedAutoMergeFollow(card) {
+  if (!prAutoMergeHasFollow(card)) return false;
+  try {
+    var row = await prSchedule('schedule_get', { id: card.scheduleId });
+    if (!row || row.status !== 'active' || !ownedFollowSchedule(row, card)) return false;
+    return !!exactFollowHook(row, card, await cardFollowSkillEnv());
+  } catch (_) {
+    return false;
+  }
+}
+
 function prCardProtected(card) {
   return prFollowActive(card) || card.stage === 'publishing' || !!card.pending || !!card.scheduleAction || card.readyUncertain === true;
 }
@@ -3112,18 +3155,54 @@ function prFollowModelFrom(value) {
   };
 }
 
+function prAutoMergeReposFrom(raw) {
+  var out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  var keys = Object.keys(raw);
+  for (var i = 0; i < keys.length; i++) {
+    var k = String(keys[i] || '').trim().toLowerCase();
+    var v = raw[keys[i]];
+    if (!PR_REPO_RE.test(k) || !v || typeof v !== 'object' || v.enabled !== true) continue;
+    var actor = typeof v.actor === 'string' ? v.actor.trim().toLowerCase() : '';
+    if (!actor || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(actor)) continue;
+    out[k] = { enabled: true, actor: actor, authorizedAt: Number(v.authorizedAt) || 0 };
+  }
+  return out;
+}
+
+function isRepoAutoMergeEnabled(settings, repo) {
+  if (!settings || !settings.autoMergeRepos || !repo) return false;
+  var entry = settings.autoMergeRepos[String(repo).toLowerCase()];
+  return Boolean(entry && entry.enabled === true && entry.actor);
+}
+
+function isCardAutoMergeEnabled(card) {
+  return Boolean(
+    card && card.autoMerge && card.autoMerge.enabled === true && !card.autoMerge.revokePending &&
+    card.pr && card.stage === 'open' && !card.pr.draft &&
+    typeof card.autoMerge.actor === 'string' && card.autoMerge.actor &&
+    card.autoMerge.base === card.pr.base
+  );
+}
+
 function prSettingsFrom(kv) {
   var s = kv && kv.prCard && typeof kv.prCard === 'object' ? kv.prCard : {};
   // lastFollowModel:切回「跟随当前任务」时记住上次指定的模型,再切回「指定模型」直接用它。
   return {
-    autoRename: s.autoRename === true, autoFollow: s.autoFollow === true, autoArchive: s.autoArchive === true,
-    followModel: prFollowModelFrom(s.followModel), lastFollowModel: prFollowModelFrom(s.lastFollowModel),
+    autoRename: s.autoRename === true,
+    autoFollow: s.autoFollow === true,
+    autoArchive: s.autoArchive === true,
+    independentFollow: s.independentFollow === true,
+    autoMergeRepos: prAutoMergeReposFrom(s.autoMergeRepos),
+    followModel: prFollowModelFrom(s.followModel),
+    lastFollowModel: prFollowModelFrom(s.lastFollowModel),
   };
 }
 
 /** 交给 Agent 的设置:跟进模型按定时任务参数的写法给出,没选就不带(沿用当前任务)。 */
 function prSettingsForAgent(settings, autoFollow) {
   var out = { auto_rename: settings.autoRename, auto_follow: autoFollow };
+  if (settings.independentFollow) out.independent_follow = true;
   var m = settings.followModel;
   if (m) {
     out.follow_model = {
@@ -3150,11 +3229,34 @@ async function writePrSettings(change) {
   change(next);
   kv.prCard = { autoRename: next.autoRename, autoFollow: next.autoFollow };
   if (next.autoArchive) kv.prCard.autoArchive = true;
+  if (next.independentFollow) kv.prCard.independentFollow = true;
+  if (next.autoMergeRepos && Object.keys(next.autoMergeRepos).length > 0) {
+    kv.prCard.autoMergeRepos = prAutoMergeReposFrom(next.autoMergeRepos);
+  }
   if (next.followModel) kv.prCard.followModel = next.followModel;
   if (next.lastFollowModel) kv.prCard.lastFollowModel = next.lastFollowModel;
   var r = await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
   if (!r || r.ok === false) throw new Error('kv write failed');
   return next;
+}
+
+async function syncCardAutoMergePolicy(params) {
+  if (!cindy.node || typeof cindy.node.request !== 'function') {
+    return { ok: false, error: 'node unavailable' };
+  }
+  try {
+    var response = await cindy.node.request({ method: 'syncAutoMergePolicy', params: params });
+    if (response && response.ok === true) return { ok: true };
+    return { ok: false, error: (response && response.error && response.error.message) || 'sync failed' };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+
+async function fetchViewerLogin(callId) {
+  var res = await gql('query{viewer{login}}', {}, callId);
+  var login = res && !res.err && res.data && res.data.viewer && res.data.viewer.login;
+  return typeof login === 'string' && /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/.test(login.trim()) ? login.trim().toLowerCase() : null;
 }
 async function setPrAutoFollow(enabled) {
   if (typeof enabled !== 'boolean') return fail(t('required', { fields: 'auto_follow (boolean)' }));
@@ -3220,7 +3322,7 @@ var PR_THREADS_QUERY =
 var PR_THREAD_PAGES_MAX = 20;
 
 var PR_MERGE_QUERY =
-  'query($owner:String!,$name:String!,$number:Int!){viewer{id} repository(owner:$owner,name:$name){' +
+  'query($owner:String!,$name:String!,$number:Int!){viewer{id login} repository(owner:$owner,name:$name){' +
   'id viewerPermission viewerDefaultMergeMethod mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed ' +
   'pullRequest(number:$number){id state isDraft mergeable mergeStateStatus headRefOid mergeQueue{id} ' +
   'baseRef{name branchProtectionRule{restrictsPushes lockBranch requiresLinearHistory} ' +
@@ -3282,6 +3384,7 @@ async function fetchPrMergeInfo(variables, snapshot, callId) {
       pr.mergeable === 'MERGEABLE' && pr.mergeStateStatus === 'CLEAN' && pr.headRefOid === snapshot.headRefOid;
   return {
     eligible: true,
+    actorLogin: typeof viewer.login === 'string' && viewer.login.trim() ? viewer.login.trim().toLowerCase() : null,
     target: clean ? {
       id: repository.id + ':' + pr.id, actor: viewer.id, base: pr.baseRef.name, sha: pr.headRefOid, method: method.toLowerCase(),
     } : null,
@@ -3326,6 +3429,7 @@ async function fetchPrStatus(repo, number, callId) {
       review: pr.reviewDecision || null,
       merge: mergeInfo.target,
       mergeEligible: mergeInfo.eligible,
+      ...(mergeInfo.actorLogin ? { mergeActorLogin: mergeInfo.actorLogin } : {}),
     },
   };
 }
@@ -3711,7 +3815,11 @@ function prModelRow(settings) {
 function prSettingsPanel(settings, card) {
   var controls = prSettingRow('prset:rename', t('prAutoRename'), t('prAutoRenameHint'), settings.autoRename) +
     prSettingRow('prset:follow', t('prAutoFollow'), t('prAutoFollowHint'), settings.autoFollow) +
+    prSettingRow('prset:independent', t('prIndependentFollow'), t('prIndependentFollowHint'), settings.independentFollow) +
     prSettingRow('prset:archive', t('prAutoArchive'), t('prAutoArchiveHint'), settings.autoArchive) +
+    (card && card.repo && hasCardScheduler()
+      ? prSettingRow('prset:repo-auto-merge', t('prRepoAutoMerge', { repo: card.repo }), t('prRepoAutoMergeHint'), isRepoAutoMergeEnabled(settings, card.repo))
+      : '') +
     prModelRow(settings);
   if (!card || !manualFollowStop(card)) {
     return '<div style="padding:8px 8px 10px;border-top:1px solid var(--border-default)">' +
@@ -3945,9 +4053,29 @@ function renderPrCard(card, settings) {
           actions = prPillButton('pr:merge-cancel:' + confirmation.revision, t('prMergeCancel')) +
             prCtaButton('pr:merge-confirm:' + confirmation.revision, t('prMergeConfirm'));
         } else {
+          if (isRepoAutoMergeEnabled(settings, card.repo)) {
+            left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(settings.autoFollow && prAutoMergeHasFollow(card) ? t('prAutoMergeRepoActive') : t('prAutoMergeNeedsFollow')) + '</div>';
+          } else if (isCardAutoMergeEnabled(card)) {
+            left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(prAutoMergeHasFollow(card) ? t('prAutoMergeActive') : t('prAutoMergeNeedsFollow')) + '</div>';
+            actions += prQuietButton('pr:auto-merge-off', t('prAutoMergeOff'));
+          } else if (hasCardScheduler() && prAutoMergeHasFollow(card)) {
+            actions += prQuietButton('pr:auto-merge-on', t('prAutoMergeOn'));
+          } else if (hasCardScheduler()) {
+            left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(t('prAutoMergeNeedsFollow')) + '</div>';
+          }
           actions += prMergeButton(card, true);
         }
       } else if (prMayMergeWhenClean(card)) {
+        if (isRepoAutoMergeEnabled(settings, card.repo)) {
+          left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(settings.autoFollow && prAutoMergeHasFollow(card) ? t('prAutoMergeRepoActive') : t('prAutoMergeNeedsFollow')) + '</div>';
+        } else if (isCardAutoMergeEnabled(card)) {
+          left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(prAutoMergeHasFollow(card) ? t('prAutoMergeActive') : t('prAutoMergeNeedsFollow')) + '</div>';
+          actions += prQuietButton('pr:auto-merge-off', t('prAutoMergeOff'));
+        } else if (hasCardScheduler() && prAutoMergeHasFollow(card)) {
+          actions += prQuietButton('pr:auto-merge-on', t('prAutoMergeOn'));
+        } else if (hasCardScheduler()) {
+          left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(t('prAutoMergeNeedsFollow')) + '</div>';
+        }
         actions += prMergeButton(card, false);
       }
       if (manualFollowStop(card) && !card.pending && !unverifiedLegacyFollow(card)) {
@@ -4113,6 +4241,34 @@ function isFollowScheduleForUrl(row, url) {
   var command = String(row.preRunHook.command).replace(/\\/g, '/').toLowerCase();
   return /(?:^|\s)node\s+["']?[^\r\n]+\/scripts\/(?:pr-heartbeat-gate\.mjs["']?|pr-node\.cjs["']?\s+pr-heartbeat-gate\.mjs)\s+/.test(command) &&
     command.split(/\s+/).pop().replace(/^["']|["']$/g, '') === url && mentionsPr(row, url);
+}
+
+/** 是否为任意一条 GitHub PR 自动跟进调度（用于检测同一会话已挂其它活跃 PR 跟进）。 */
+function isAnyPrFollowSchedule(row) {
+  if (!row || row.status !== 'active' || !row.recurring) return false;
+  if (row.prTrigger && typeof row.prTrigger.url === 'string' && /\/pull\/\d+/.test(row.prTrigger.url)) return true;
+  if (!row.preRunHook || typeof row.preRunHook.command !== 'string') return false;
+  var command = String(row.preRunHook.command).replace(/\\/g, '/').toLowerCase();
+  return /(?:^|\s)node\s+["']?[^\r\n]+\/scripts\/(?:pr-heartbeat-gate\.mjs["']?|pr-node\.cjs["']?\s+pr-heartbeat-gate\.mjs)\s+https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(command);
+}
+
+async function fetchSessionAndPrSchedules(sessionId, currentUrl) {
+  var rows = await prSchedule('schedule_list', {});
+  if (!Array.isArray(rows)) throw new Error('schedule_list');
+  var prRows = [];
+  var otherActivePrSchedules = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    if (!row) continue;
+    if (currentUrl && mentionsPr(row, currentUrl)) {
+      prRows.push(row);
+      continue;
+    }
+    if (sessionId && row.targetSessionId === sessionId && isAnyPrFollowSchedule(row)) {
+      otherActivePrSchedules++;
+    }
+  }
+  return { prRows: prRows, otherActivePrSchedules: otherActivePrSchedules };
 }
 
 function ownedFollowSchedule(row, card) {
@@ -4568,7 +4724,8 @@ async function createCardSchedule(card, settings) {
 
 // Save the intent first. After a lost receipt or a restart, look up the schedule
 // before creating one. All local card operations already share the same queue.
-async function syncCardSchedule(card, settings, mode) {
+async function syncCardSchedule(card, settings, mode, options) {
+  var opts = options || {};
   var action = mode === true ? 'start' : mode === false ? 'stop' : mode;
   // Existing schedules are editable in Automation independently of the card.
   // The host has no conditional delete; a stale read must not erase them.
@@ -4597,7 +4754,8 @@ async function syncCardSchedule(card, settings, mode) {
   try {
     var repair = null;
     if (action === 'start') {
-      var rows = await schedulesForPr(card);
+      if (opts.prefetchedError) throw opts.prefetchedError;
+      var rows = Array.isArray(opts.prefetchedRows) ? opts.prefetchedRows : await schedulesForPr(card);
       var requestedModel = prSettingsForAgent(settings, true).follow_model;
       var usedTaskModelFallback = false;
       var createdId = null;
@@ -5200,6 +5358,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
     (legacyPendingStop || (!card.pending && (card.following === true || unverifiedLegacyFollow(card))));
   var retryScheduleError = updating && !legacyFollow && !card.scheduleId && !card.scheduleAction &&
     !card.pending && (Boolean(card.scheduleError) || (a.following === true && card.managedFollow));
+  var wasDraft = Boolean(card.pr && card.pr.draft);
   var number = ref ? ref.number : card.pr ? card.pr.number : null;
   if (number) {
     var status;
@@ -5220,6 +5379,18 @@ async function prCardTool(args, callId, fromLegacyStop) {
     card.queued = false;
     if (card.stage !== 'open') {
       card.pending = null;
+    }
+    // PR 已结束、转回草稿或目标分支变更时自动撤销单 PR 自动合并授权。
+    if (card.autoMerge && (card.autoMerge.revokePending || card.stage !== 'open' || card.pr.draft ||
+        (card.autoMerge.base && card.pr.base && card.autoMerge.base !== card.pr.base))) {
+      card.autoMerge.revokePending = true;
+      if (hasCardScheduler()) {
+        var clearInvalidPrRes = await syncCardAutoMergePolicy({ op: 'clear-pr', repo: card.repo, number: card.pr.number });
+        if (clearInvalidPrRes.ok) delete card.autoMerge;
+        else card.note = t('prAutoMergeFailed');
+      } else {
+        card.note = t('prAutoMergeFailed');
+      }
     }
   } else if (card.stage === 'publishing') {
     // 发布没成功,Agent 不带 pr 再调一次:卡片回到询问。
@@ -5273,6 +5444,8 @@ async function prCardTool(args, callId, fromLegacyStop) {
     } catch (err) { return fail(t('prScheduleFailed', { detail: String(err.message || err) })); }
   }
   var deferFollowing = hasCardScheduler() && status && (legacyFollow || retryScheduleError);
+  var wasPendingStop = card.pending === 'stop';
+  var hadFollowedBefore = Boolean(card.followedEver || card.following);
   if (typeof a.following === 'boolean') {
     if (!a.following) {
       if (unverifiedLegacyFollow(card) || !deferFollowing) {
@@ -5296,7 +5469,8 @@ async function prCardTool(args, callId, fromLegacyStop) {
       }
     }
     card.scheduleAction = null;
-    card.followDeclined = !a.following;
+    if (a.following) card.followDeclined = false;
+    else if (wasPendingStop || hadFollowedBefore) card.followDeclined = true;
     if (card.pending === 'follow' || card.pending === 'resume' || card.pending === 'stop') card.pending = null;
   }
   card.legacyHookRepair = null;
@@ -5319,8 +5493,9 @@ async function prCardTool(args, callId, fromLegacyStop) {
 
   // A claim is permission to create a schedule, not a report that one already exists.
   // Keep stop reservations until deletion is confirmed; contradictory requests never reacquire.
+  var prFresh = Boolean(status && !status.err);
   var pendingBefore = card.pending;
-  if (!legacyFollow && a.claim_follow === true && a.following !== false && card.stage === 'open' && card.pending !== 'stop' && !card.following && !card.scheduleId && !card.scheduleError) {
+  if (!legacyFollow && prFresh && a.claim_follow === true && a.following !== false && card.stage === 'open' && card.pending !== 'stop' && !card.following && !card.scheduleId && !card.scheduleError) {
     card.pending = 'follow';
     clearLegacyScheduleNotice(card);
     card.note = deriveCardNote(card, showManualStop ? t('prManualStop', { id: card.scheduleId }) : null);
@@ -5331,19 +5506,79 @@ async function prCardTool(args, callId, fromLegacyStop) {
 
   var todo = [];
   var nativeStart = false;
+  var followHandoff = null;
+  var prefetchedPrRows = null;
+  var prefetchedListError = null;
   var settingsAppliedBefore = card.settingsApplied;
   var publishedHereBefore = card.publishedHere;
-  if (card.stage === 'open' && !card.settingsApplied && settings.unreadable) {
+  var readyFollowPendingBefore = Boolean(card.readyFollowPending);
+  var readyAfterPublish = updating && prFresh && wasDraft &&
+    Boolean(card.pr && !card.pr.draft) && card.publishedHere === true && !card.followedEver;
+  if (card.stage !== 'open' || (card.pr && card.pr.draft) || wasPendingStop || card.followedEver || card.followDeclined) {
+    card.readyFollowPending = false;
+  } else if (readyAfterPublish && settings.unreadable) {
+    card.readyFollowPending = true;
+  }
+  var needPublishSettings = card.stage === 'open' && !card.settingsApplied;
+  var needReadyFollow = card.stage === 'open' && !card.followDeclined && !needPublishSettings &&
+    (readyAfterPublish || card.readyFollowPending === true) && !card.followedEver;
+  if ((needPublishSettings || needReadyFollow) && prFresh && settings.unreadable) {
     // Unreadable settings are not "all off": keep the one-time to-do list for the next call.
     notes.push(t('prSettingsLater'));
   }
-  if (card.stage === 'open' && !card.settingsApplied && !settings.unreadable) {
+  if (needPublishSettings && prFresh && !settings.unreadable) {
     card.settingsApplied = true;
     card.publishedHere = true;
-    if (settings.autoRename && !card.renamed) todo.push(t('prTodoRename', { title: prTaskTitle(card) }));
-    if (!legacyFollow && settings.autoFollow && a.following !== false && !card.followDeclined && card.pending !== 'stop' && !card.following && !card.scheduleId && !card.pr.draft) {
+    var wantsAutoFollow = !legacyFollow && settings.autoFollow && !card.followDeclined && !wasPendingStop && card.pending !== 'stop' && !card.following && !card.followedEver && !card.scheduleId && !card.pr.draft;
+    var decoupleReason = null;
+    var otherActivePrSchedules = 0;
+    if (wantsAutoFollow && a.published === true) {
+      if (settings.independentFollow) {
+        decoupleReason = 'setting';
+      } else if (a.session_context && a.session_context.goal_active === true) {
+        decoupleReason = 'goal_active';
+      } else if (sessionId && hasSchedulerQuery()) {
+        try {
+          var scan = await fetchSessionAndPrSchedules(sessionId, followUrl(card));
+          prefetchedPrRows = scan.prRows;
+          if (scan.prRows.length === 0 && scan.otherActivePrSchedules > 0) {
+            otherActivePrSchedules = scan.otherActivePrSchedules;
+            decoupleReason = 'multi_pr_session';
+          }
+        } catch (err) {
+          prefetchedListError = err;
+        }
+      }
+    }
+    // 命中独立任务解耦（设置开启 / 活跃 Goal / 同会话已挂其它活跃 PR 跟进）时：
+    // 不给来源会话改名，也不直接把调度绑回来源会话，而是交接给隔离 worktree 的独立 PR 任务。
+    if (!decoupleReason && settings.autoRename && !card.renamed) {
+      todo.push(t('prTodoRename', { title: prTaskTitle(card) }));
+    }
+    if (wantsAutoFollow) {
+      if (decoupleReason) {
+        followHandoff = {
+          recommended: true,
+          reason: decoupleReason,
+          pr_url: card.pr.url,
+          repo: card.repo,
+          pr_number: card.pr.number,
+          title: prTaskTitle(card),
+        };
+        if (otherActivePrSchedules > 0) followHandoff.active_session_pr_schedules = otherActivePrSchedules;
+        todo.push(t('prTodoDecoupleFollow', { url: card.pr.url, title: prTaskTitle(card) }));
+      } else {
+        card.pending = 'follow';
+        nativeStart = hasCardScheduler();
+        if (!nativeStart) todo.push(t('prTodoFollow', { url: card.pr.url }));
+      }
+    }
+  } else if (needReadyFollow && prFresh && !settings.unreadable) {
+    card.readyFollowPending = false;
+    if (!legacyFollow && settings.autoFollow && !card.followDeclined && !wasPendingStop && card.pending !== 'stop' &&
+        !card.following && !card.followedEver && !card.scheduleId && !card.pr.draft) {
       card.pending = 'follow';
-      nativeStart = hasCardScheduler();
+      nativeStart = Boolean(card.publishedHere) && hasCardScheduler();
       if (!nativeStart) todo.push(t('prTodoFollow', { url: card.pr.url }));
     }
   }
@@ -5358,7 +5593,8 @@ async function prCardTool(args, callId, fromLegacyStop) {
       notes.push(card.note);
       card.scheduleAction = syncAction;
     } else {
-      var syncResult = await syncCardSchedule(card, settings, syncAction);
+      var syncResult = await syncCardSchedule(card, settings, syncAction,
+        syncAction === 'start' ? { prefetchedRows: prefetchedPrRows, prefetchedError: prefetchedListError } : undefined);
       if (syncResult && syncResult.otherOwner) {
         if (publishedHereBefore === undefined) delete card.publishedHere; else card.publishedHere = publishedHereBefore;
         return prOtherTask(syncResult.otherOwner, callId, sessionId, updating ? card : null, a.to_latest === true, stateOp, status);
@@ -5368,7 +5604,8 @@ async function prCardTool(args, callId, fromLegacyStop) {
       status && !status.err && card.stage === 'open' && card.pr && !card.pr.draft &&
       !prFollowActive(card) && !card.scheduleAction && !card.followDeclined && typeof a.following !== 'boolean') {
     checkedLiveOwner = true;
-    var openLiveOwner = await resolveLiveOtherTaskOwner(card.repo, card.pr.number, sessionId, candidates, card, { settings: settings });
+    var openLiveOwner = await resolveLiveOtherTaskOwner(card.repo, card.pr.number, sessionId, candidates, card,
+      Array.isArray(prefetchedPrRows) ? { settings: settings, rows: prefetchedPrRows } : { settings: settings });
     if (openLiveOwner) {
       if (publishedHereBefore === undefined) delete card.publishedHere; else card.publishedHere = publishedHereBefore;
       return prOtherTask(openLiveOwner, callId, sessionId, updating ? card : null, a.to_latest === true, stateOp, status);
@@ -5397,7 +5634,10 @@ async function prCardTool(args, callId, fromLegacyStop) {
     // No permission to follow was handed out either, so a reservation added by this call must not keep other tasks out.
     var released = card.pending !== pendingBefore;
     if (released) card.pending = pendingBefore;
-    if (card.settingsApplied !== settingsAppliedBefore || released) {
+    var nextReadyPending = needReadyFollow ? true : readyFollowPendingBefore;
+    var readyRestored = Boolean(card.readyFollowPending) !== nextReadyPending;
+    if (readyRestored) card.readyFollowPending = nextReadyPending;
+    if (card.settingsApplied !== settingsAppliedBefore || released || readyRestored) {
       card.settingsApplied = settingsAppliedBefore;
       await savePrCardRetry(card);
     }
@@ -5417,8 +5657,9 @@ async function prCardTool(args, callId, fromLegacyStop) {
   }
   if (card.legacyHookRepair) result.legacy_hook_repair = card.legacyHookRepair;
   if (activeFollowNotice) result.follow_model_fallback = true;
+  if (followHandoff) result.follow_handoff = followHandoff;
   if (!delivered) { result.card_shown = false; notes.push(t('prCardNotShown')); }
-  if (a.claim_follow === true) result.follow_claimed = a.following !== false && card.stage === 'open' &&
+  if (a.claim_follow === true) result.follow_claimed = prFresh && a.following !== false && card.stage === 'open' &&
     card.pending !== 'stop' && !card.scheduleId && !unverifiedLegacyFollow(card) && !(legacyFollow && hasCardScheduler()) && prFollowActive(card);
   if (card.pr) {
     result.pr = { number: card.pr.number, title: card.pr.title, url: card.pr.url, state: card.pr.state, draft: card.pr.draft };
@@ -5563,10 +5804,14 @@ async function markPrReadyInner(card, settings, msg, progress) {
     card.note = uncertain
       ? t('prReadyUnknown')
       : t('prReadyFailed', { detail: String(err || fresh.err || '').slice(0, 160) });
-  } else if (settings.autoFollow && !card.followDeclined && card.stage === 'open' && card.publishedHere && hasCardScheduler()) {
+  } else if (card.stage === 'open' && !card.followDeclined && !card.followedEver && (settings.unreadable || (settings.autoFollow && !fresh.pr))) {
+    // Mutation only confirmed leaving draft; defer follow-up until fresh PR status confirms it is still open and non-draft.
+    card.readyFollowPending = true;
+    card.note = !fresh.pr ? t('prFetchFailed', { detail: fresh.err || '' }) : t('prSettingsLater');
+  } else if (settings.autoFollow && card.stage === 'open' && !card.followDeclined && !card.followedEver && card.publishedHere && hasCardScheduler()) {
     var readySync = await syncCardSchedule(card, settings, true);
     if (readySync && readySync.otherOwner) otherOwner = readySync.otherOwner;
-  } else if (settings.autoFollow && !card.followDeclined && card.stage === 'open') {
+  } else if (settings.autoFollow && card.stage === 'open' && !card.followDeclined && !card.followedEver) {
     // Record "following is starting" before handing it to the agent, as the first step does for "ready":
     // if that cannot be saved, nothing is sent, so a later click can never send it a second time.
     card.pending = 'follow';
@@ -5681,11 +5926,95 @@ async function prCardAction(msg) {
   var nextUpdateAt = 0;
   if (action === 'prui:settings' && prHasSettings(card)) {
     card.settingsOpen = !card.settingsOpen;
-  } else if (action === 'prset:rename' || action === 'prset:follow' || action === 'prset:archive') {
+  } else if (action === 'prset:rename' || action === 'prset:follow' || action === 'prset:archive' || action === 'prset:independent') {
     try {
-      settings = await togglePrSetting(action === 'prset:rename' ? 'autoRename' : action === 'prset:follow' ? 'autoFollow' : 'autoArchive');
+      var settingKey = action === 'prset:rename' ? 'autoRename'
+        : action === 'prset:follow' ? 'autoFollow'
+          : action === 'prset:independent' ? 'independentFollow'
+            : 'autoArchive';
+      settings = await togglePrSetting(settingKey);
     } catch (e) {
       card.note = t('prSettingFailed');
+    }
+  } else if (action === 'prset:repo-auto-merge' && card.repo) {
+    if (!msg.userActionToken) {
+      card.note = t('prAutoMergeFailed');
+    } else {
+      var repoKey = card.repo.toLowerCase();
+      var currentlyOn = isRepoAutoMergeEnabled(settings, card.repo);
+      if (currentlyOn) {
+        var clearRepoRes = await syncCardAutoMergePolicy({ op: 'clear-repo', repo: card.repo });
+        if (!clearRepoRes.ok) {
+          card.note = t('prAutoMergeFailed');
+        } else {
+          try {
+            settings = await writePrSettings(function (next) {
+              if (next.autoMergeRepos) delete next.autoMergeRepos[repoKey];
+            });
+          } catch (e) {
+            card.note = t('prSettingFailed');
+          }
+        }
+      } else if (!settings.autoFollow || !(await verifiedAutoMergeFollow(card))) {
+        card.note = t('prAutoMergeNeedsFollow');
+      } else {
+        var repoActor = (card.pr && card.pr.mergeActorLogin) || await fetchViewerLogin().catch(function () { return null; });
+        if (!repoActor) {
+          card.note = t('prAutoMergeActorUnknown');
+        } else {
+          var authorizedAt = Date.now();
+          var setRepoRes = await syncCardAutoMergePolicy({
+            op: 'set-repo', repo: card.repo, actor: repoActor, authorizedAt: authorizedAt,
+          });
+          if (!setRepoRes.ok) {
+            card.note = t('prAutoMergeFailed');
+          } else {
+            try {
+              settings = await writePrSettings(function (next) {
+                next.autoMergeRepos = next.autoMergeRepos || {};
+                next.autoMergeRepos[repoKey] = { enabled: true, actor: repoActor, authorizedAt: authorizedAt };
+              });
+            } catch (e) {
+              await syncCardAutoMergePolicy({ op: 'clear-repo', repo: card.repo }).catch(function () {});
+              card.note = t('prSettingFailed');
+            }
+          }
+        }
+      }
+    }
+  } else if ((action === 'pr:auto-merge-on' || action === 'pr:auto-merge-off') && card.pr && card.stage === 'open') {
+    if (!msg.userActionToken) {
+      card.note = t('prAutoMergeFailed');
+    } else if (action === 'pr:auto-merge-off') {
+      var clearPrRes = await syncCardAutoMergePolicy({ op: 'clear-pr', repo: card.repo, number: card.pr.number });
+      if (!clearPrRes.ok) {
+        card.note = t('prAutoMergeFailed');
+      } else {
+        delete card.autoMerge;
+      }
+    } else if (!(await verifiedAutoMergeFollow(card))) {
+      card.note = t('prAutoMergeNeedsFollow');
+    } else {
+      await readPrMergeStatus(card);
+      var prActor = (card.pr && card.pr.mergeActorLogin) || await fetchViewerLogin().catch(function () { return null; });
+      if (card.stage !== 'open' || card.pr.draft || !(card.pr.mergeEligible === true || card.pr.merge) || !prActor || !card.pr.base) {
+        card.note = t('prAutoMergeActorUnknown');
+      } else {
+        var prAuthAt = Date.now();
+        var prMethod = card.pr.merge && card.pr.merge.method ? card.pr.merge.method : undefined;
+        var setPrRes = await syncCardAutoMergePolicy({
+          op: 'set-pr', repo: card.repo, number: card.pr.number, actor: prActor, base: card.pr.base,
+          ...(prMethod ? { method: prMethod } : {}), authorizedAt: prAuthAt,
+        });
+        if (!setPrRes.ok) {
+          card.note = t('prAutoMergeFailed');
+        } else {
+          card.autoMerge = {
+            enabled: true, actor: prActor, base: card.pr.base, repo: card.repo.toLowerCase(),
+            ...(prMethod ? { method: prMethod } : {}), authorizedAt: prAuthAt,
+          };
+        }
+      }
     }
   } else if ((action === 'prset:model' || action === 'prset:modelPick') && msg.modelSelection) {
     // 新版宿主在卡内下拉框里已选好(并核对过可用),直接记下。
@@ -5912,321 +6241,6 @@ bc.onmessage = function (ev) {
   })();
 };
 
-/* ── Explicit, local GitHub status watches ─────────────────────────── */
-var WATCH_INTERVAL = 5 * 60 * 1000;
-var WATCH_LIMIT = 5;
-var watchTimerAt;
-var watchTimerToken;
-var watchTimerSoonerAt;
-var WATCH_PATH = { pr: 'pulls', issue: 'issues', run: 'actions/runs' };
-var WATCH_RUN_STATES = ['queued', 'requested', 'waiting', 'pending', 'in_progress', 'completed'];
-var WATCH_CONCLUSIONS = ['success', 'failure', 'cancelled', 'neutral', 'skipped', 'timed_out',
-  'action_required', 'stale', 'startup_failure'];
-
-function watchTarget(args) {
-  if (!Object.hasOwn(WATCH_PATH, args.kind) || typeof args.repo !== 'string' ||
-      !/^[a-z\d-]{1,39}\/[a-z\d_.-]{1,100}$/i.test(args.repo) ||
-      /\/\.{1,2}$/.test(args.repo) || !Number.isSafeInteger(args.id) || args.id < 1) return null;
-  return { kind: args.kind, repo: args.repo.toLowerCase(), id: args.id };
-}
-
-function sameWatch(a, b) {
-  return a.kind === b.kind && a.repo === b.repo && a.id === b.id;
-}
-
-// Instance marker for each add: a removed-and-re-added target must not receive
-// an in-flight round's observations for the previous instance.
-var watchCreated = 0;
-
-function nextWatchCreated() {
-  watchCreated = Math.max(Date.now(), watchCreated + 1);
-  return watchCreated;
-}
-
-function sameWatchIdentity(row, observed) {
-  return sameWatch(row, observed) && row.account === observed.account &&
-    row.objectId === observed.objectId && row.created === observed.created;
-}
-
-function readWatches(kv) {
-  var watches = kv.githubStatusWatches;
-  if (watches === undefined) return [];
-  if (!Array.isArray(watches) || watches.length > WATCH_LIMIT || watches.some(function (watch) {
-    return !watch || !watchTarget(watch) || !Number.isSafeInteger(watch.account) || watch.account < 1 ||
-      !Number.isSafeInteger(watch.objectId) || watch.objectId < 1 ||
-      typeof watch.snapshot !== 'string' || !/^[a-z0-9_:]{1,120}$/.test(watch.snapshot);
-  })) throw new Error(t('watchUnavailable'));
-  return watches;
-}
-
-async function saveWatches(kv, watches) {
-  kv.githubStatusWatches = watches;
-  var r = await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
-  if (!r || !r.ok) throw new Error(t('watchUnavailable'));
-}
-
-async function watchRead(path, callId) {
-  var result = await api({ url: API + path, callId: callId });
-  if (result.err) {
-    var error = new Error(result.err);
-    error.rateLimited = result.status === 429 || result.rateLimited;
-    error.status = result.status;
-    throw error;
-  }
-  return result.data;
-}
-
-// Keep the failure class so the list can tell the user what to fix.
-// Matrix: 401 auth, 403 permission, 404/410 target gone or inaccessible, everything
-// transient (rate limit, 5xx, network, 422) unavailable; one cleanup path clears any
-// of them on the watch's next successful read.
-function watchProblemOf(error) {
-  if (error && error.rateLimited) return 'unavailable';
-  if (error && error.status === 401) return 'auth_required';
-  if (error && error.status === 403) return 'forbidden';
-  if (error && (error.status === 404 || error.status === 410)) return 'gone';
-  return 'unavailable';
-}
-
-async function watchAccount(callId) {
-  var user = await watchRead('/user', callId);
-  if (!Number.isSafeInteger(user?.id) || user.id < 1) throw new Error(t('watchUnavailable'));
-  return user.id;
-}
-
-async function watchSnapshot(target, callId) {
-  var repoPath = target.repo.split('/').map(encodeURIComponent).join('/');
-  var data = await watchRead('/repos/' + repoPath + '/' + WATCH_PATH[target.kind] + '/' + target.id, callId);
-  var snapshot;
-  if (target.kind === 'run') {
-    if (data?.id === target.id && WATCH_RUN_STATES.includes(data.status) &&
-        Number.isSafeInteger(data.run_attempt) && data.run_attempt > 0) {
-      var conclusion = WATCH_CONCLUSIONS.includes(data.conclusion) ? data.conclusion : 'unknown';
-      snapshot = data.status + ':' + (data.status === 'completed' ? conclusion : 'none') + ':' + data.run_attempt;
-    }
-  } else if (data?.number === target.id && ['open', 'closed'].includes(data.state) &&
-      Number.isSafeInteger(data.comments) && data.comments >= 0 &&
-      !(target.kind === 'issue' && data.pull_request)) {
-    var state = target.kind === 'pr' && data.merged === true ? 'merged' : data.state;
-    var draft = target.kind === 'pr' && data.draft === true ? 'draft' : 'ready';
-    snapshot = state + ':' + draft + ':' + data.comments;
-  }
-  if (!snapshot || !Number.isSafeInteger(data.id) || data.id < 1) throw new Error(t('watchUnavailable'));
-  return { snapshot: snapshot, objectId: data.id };
-}
-
-function armWatchTimer(delay, replaceLater) {
-  var at = Date.now() + delay;
-  if (watchTimerToken !== undefined) {
-    if (watchTimerAt !== undefined) {
-      // Keep an earlier deadline; only a successful add supersedes a later backoff.
-      if (watchTimerAt <= at) return;
-      if (!replaceLater) return;
-    } else {
-      // A round is in flight: remember the earliest add deadline for its finally.
-      if (!replaceLater) return;
-      if (watchTimerSoonerAt === undefined || at < watchTimerSoonerAt) watchTimerSoonerAt = at;
-      return;
-    }
-  }
-  var token = {};
-  watchTimerToken = token;
-  watchTimerAt = at;
-  setTimeout(async function () {
-    if (watchTimerToken !== token) return;
-    watchTimerAt = undefined;
-    var next = WATCH_INTERVAL;
-    try {
-      next = await pollWatches();
-    } catch (_) {
-      // Failed store, credential or transport reads must never replace the baseline.
-      next = WATCH_INTERVAL * 3;
-    } finally {
-      var soonerAt = watchTimerSoonerAt;
-      watchTimerSoonerAt = undefined;
-      if (watchTimerToken === token) {
-        watchTimerToken = undefined;
-        watchTimerAt = undefined;
-        var delay;
-        if (next) delay = next;
-        if (soonerAt !== undefined) {
-          var remaining = Math.max(0, soonerAt - Date.now());
-          if (delay === undefined || remaining < delay) delay = remaining;
-        }
-        // An empty round stops itself, but never drops a concurrent add's request.
-        if (delay !== undefined) armWatchTimer(delay);
-      }
-    }
-  }, delay);
-}
-
-async function markWatchProblems(problem, eligible) {
-  await enqueuePr(async function () {
-    var kv = await readKv(true);
-    var current = readWatches(kv);
-    var changed = false;
-    for (var row of current) {
-      if (eligible && !eligible(row)) continue;
-      // The newest failed read always wins; older states re-form on the next read.
-      if (row.problem === problem) continue;
-      row.problem = problem;
-      changed = true;
-    }
-    if (changed) await saveWatches(kv, current);
-  });
-}
-
-async function pollWatches() {
-  var watches = readWatches(await readKv(true));
-  if (!watches.length) return 0;
-  // Rows created after this snapshot keep their fresh baseline and are never marked here.
-  var existedAtStart = function (row) {
-    return watches.some(function (item) { return sameWatchIdentity(row, item); });
-  };
-  var account;
-  try {
-    account = await watchAccount();
-  } catch (error) {
-    // No target was read this round: surface the stall instead of claiming healthy polling.
-    await markWatchProblems(watchProblemOf(error), existedAtStart);
-    return WATCH_INTERVAL * 3;
-  }
-  var updates = [];
-  var failures = [];
-  var rateLimited = false;
-  for (var watch of watches) {
-    if (watch.account !== account) {
-      // Keep the saved target but stop reading it under the new account until it matches again.
-      if (watch.problem !== 'account_changed') failures.push({ watch: watch, problem: 'account_changed' });
-      continue;
-    }
-    try {
-      var result = await watchSnapshot(watch);
-      if (result.objectId !== watch.objectId) {
-        if (watch.problem !== 'target_changed') failures.push({ watch: watch, problem: 'target_changed' });
-      } else if (result.snapshot !== watch.snapshot || watch.problem) {
-        updates.push({ watch: watch, snapshot: result.snapshot });
-      }
-    } catch (error) {
-      var problem = watchProblemOf(error);
-      if (watch.problem !== problem) failures.push({ watch: watch, problem: problem });
-      if (error.rateLimited) {
-        rateLimited = true;
-        // Targets after this one are not read this round; keep their existing states,
-        // but never leave a healthy-looking row behind a rate-limit break.
-        for (var rest = watches.indexOf(watch) + 1; rest < watches.length; rest++) {
-          var skipped = watches[rest];
-          if (skipped.problem) continue;
-          failures.push({ watch: skipped, problem: skipped.account === account ? 'unavailable' : 'account_changed' });
-        }
-        break;
-      }
-    }
-  }
-  var hasPendingNotice = watches.some(function (watch) {
-    return watch.account === account && watch.noticePending === true;
-  });
-  var hasWork = updates.length > 0 || failures.length > 0 || hasPendingNotice;
-  if (!hasWork && !rateLimited) return WATCH_INTERVAL;
-  var confirmProblem = null;
-  if (hasWork) {
-    if (!rateLimited) {
-      var confirmed;
-      try {
-        confirmed = await watchAccount();
-      } catch (error) {
-        // Persist this round's observations, then the failed check's class, before backing off.
-        confirmProblem = watchProblemOf(error);
-      }
-      if (confirmed !== undefined && confirmed !== account) {
-        // The login switched mid-round: pause the old account's watches instead of
-        // leaving list to claim healthy polling through the backoff.
-        await markWatchProblems('account_changed', function (row) { return row.account !== confirmed; });
-        return WATCH_INTERVAL * 3;
-      }
-    }
-    await applyWatchRound(account, updates, failures);
-    if (confirmProblem) await markWatchProblems(confirmProblem, existedAtStart);
-  }
-  return rateLimited || confirmProblem ? WATCH_INTERVAL * 3 : WATCH_INTERVAL;
-}
-
-async function applyWatchRound(account, updates, failures) {
-  await enqueuePr(async function () {
-    var kv = await readKv(true);
-    var current = readWatches(kv);
-    // Merge only rows whose identity still matches the observation: a concurrent
-    // add/remove of any target must not discard work for the rows that survived,
-    // and a re-added target must not receive the previous instance's results.
-    for (var row of current) {
-      var update = updates.find(function (item) { return sameWatchIdentity(row, item.watch); });
-      var failure = failures.find(function (item) { return sameWatchIdentity(row, item.watch); });
-      if (update) {
-        if (row.snapshot !== update.snapshot) row.noticePending = true;
-        row.snapshot = update.snapshot;
-        delete row.problem;
-      } else if (failure) {
-        row.problem = failure.problem;
-      }
-    }
-    if (updates.length || failures.length) await saveWatches(kv, current);
-    var pending = current.filter(function (row) {
-      return row.account === account && row.noticePending === true;
-    });
-    if (!pending.length) return;
-    var first = pending[0];
-    var targets = pending.length === 1 ? first.repo + ' ' + first.kind + ' #' + first.id : String(pending.length);
-    await ensureLocale();
-    // Keep the change durable until Host confirms delivery. If the receipt or
-    // the subsequent KV write is lost, the next round may show it again.
-    var receipt = await cindy.send({ type: 'notify', text: t('watchChanged', { targets: targets }).slice(0, 200) });
-    if (!receipt || receipt.ok !== true) return;
-    for (var delivered of pending) delete delivered.noticePending;
-    await saveWatches(kv, current);
-  });
-}
-
-async function watchTool(args, callId) {
-  var action = args.action;
-  if (action === 'list') {
-    var watches = readWatches(await readKv(true));
-    if (watches.length) armWatchTimer(WATCH_INTERVAL);
-    return { ok: true, result: { mode: 'polling', interval_seconds: WATCH_INTERVAL / 1000, watches: watches.map(function (watch) {
-      return Object.assign(watchTarget(watch), { status: watch.snapshot, problem: watch.problem || null });
-    }) } };
-  }
-  var target = watchTarget(args);
-  if (!target || !['add', 'remove'].includes(action)) return fail(t('watchInvalid'));
-  // Enter the queue before the baseline reads so add/remove run in call arrival
-  // order; a later remove must overwrite an add still reading its baseline.
-  return enqueuePr(async function () {
-    var account;
-    var baseline;
-    if (action === 'add') {
-      account = await watchAccount(callId);
-      baseline = await watchSnapshot(target, callId);
-      if (await watchAccount(callId) !== account) return fail(t('watchUnavailable'));
-    }
-    var kv = await readKv(true);
-    var watches = readWatches(kv);
-    var index = watches.findIndex(function (item) { return sameWatch(item, target); });
-    if (action === 'remove') {
-      if (index >= 0) watches.splice(index, 1);
-    } else {
-      if (index >= 0 && watches[index].account === account && watches[index].objectId === baseline.objectId) {
-        armWatchTimer(WATCH_INTERVAL, true);
-        return { ok: true, result: { mode: 'polling', target: target } };
-      }
-      if (index >= 0) return fail(t('watchRebind'));
-      if (watches.length >= WATCH_LIMIT) return fail(t('watchLimit'));
-      watches.push(Object.assign({}, target, baseline, { account: account, created: nextWatchCreated() }));
-    }
-    await saveWatches(kv, watches);
-    if (watches.length) armWatchTimer(WATCH_INTERVAL, action === 'add');
-    return { ok: true, result: { mode: 'polling', target: target } };
-  });
-}
-
 /* ── 派单 ──────────────────────────────────────────────────────────── */
 
 cindy.onHostMessage(async function (msg) {
@@ -6251,8 +6265,6 @@ cindy.onHostMessage(async function (msg) {
       r = listTools(msg.args || {});
     } else if (msg.tool === 'call_tool') {
       r = await callTool(msg.args || {}, msg.callId);
-    } else if (msg.tool === 'status_watch') {
-      r = await watchTool(msg.args || {}, msg.callId);
     } else if (msg.tool === 'set_pr_follow_settings') {
       r = await setPrAutoFollow((msg.args || {}).auto_follow);
     } else if (msg.tool === 'pr_follow_settings') {
@@ -6303,10 +6315,3 @@ void enqueuePr(async function () {
     }
   }
 }).catch(function () {});
-
-// On wake, restore only explicit watches. Empty installations make no GitHub requests.
-void readKv(true).then(function (kv) {
-  if (readWatches(kv).length) armWatchTimer(WATCH_INTERVAL);
-}).catch(function () {
-  armWatchTimer(WATCH_INTERVAL * 3);
-});

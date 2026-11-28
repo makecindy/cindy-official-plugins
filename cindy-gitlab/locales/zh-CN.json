@@ -1,7 +1,7 @@
 {
   "name": "GitLab",
-  "description": "内置的 GitLab 服务插件，支持 gitlab.com、自建与多实例。添加实例地址和具备 api scope 的 Personal Access Token 后，可读写 issue、MR、code review、仓库、CI、release、搜索等 107 个操作，并通过两段式目录调用。每个 Token 由宿主加密保管，只注入对应实例的请求。",
-  "whenToUse": "用于 gitlab.com、公司或自建 GitLab 实例；github.com 链接请使用 GitHub。可查询或修改 issue 与 MR，提交、回复和发布 code review，合并或 rebase MR，查看仓库、分支、commit、文件、CI pipeline 与 job 日志，管理 release、tag 与分支，搜索实例内容，或下载仓库归档。请先在插件详情页添加实例和 Token。 准备发布或展示 MR 时使用 mr_card。",
+  "description": "内置的 GitLab 服务插件，支持 gitlab.com、自建与多实例。自动复用本机 glab 已登录的实例，也可添加实例地址和具备 api scope 的 Personal Access Token（插件内添加的账号优先），支持读写 issue、MR、code review、仓库、CI、release、搜索等 107 个操作。每个 Token 由宿主加密保管，只注入对应实例的请求。",
+  "whenToUse": "用于 gitlab.com、公司或自建 GitLab 实例；github.com 链接请使用 GitHub。可查询或修改 issue 与 MR，提交、回复和发布 code review，合并或 rebase MR，查看仓库、分支、commit、文件、CI pipeline 与 job 日志，管理 release、tag 与分支，搜索实例内容，或下载仓库归档。自动复用本机 glab 登录，也可在插件详情页添加实例和 Token。 准备发布或展示 MR 时使用 mr_card。",
   "tools": {
     "list_tools": {
       "description": "列出本插件 107 个 GitLab 操作，覆盖 issues、merge_requests、project_path、commits、events、search、projects、users、pipelines、jobs、discussions、approvals、draft_notes、reactions、groups、environments、wiki、snippets、releases、meta。不传 category 时返回类目名称、数量和说明；传 category 时返回该类目下所有操作的名称、说明与参数。"
@@ -10,7 +10,7 @@
       "description": "执行 list_tools 返回的具体 GitLab 操作，args 按其参数 schema 传入。项目级操作必须显式传 project_path，例如 group/subgroup/project；在 Git 仓库中可从 git remote get-url origin 推导。配置多个实例时通过 instance 指定连接 ID 或实例地址，省略则使用默认连接。响应默认剥除头像和 _links 字段；传 raw=true 获取原始 JSON。结果超过 50KB 时自动写入会话工作目录并只返回文件路径，out_file 可指定路径。下载仓库归档时必须在 ghost_call 顶层提供 save_dir；upload_project_file 需要把用户媒体放在顶层 attachments。"
     },
     "mr_card": {
-      "description": "在 Cindy 对话中展示 MR 卡片。发布前传 project_path、head、base，可附 commits 和 files。当前任务成功发布后传 published=true 和 mr，有原卡片时带上 card_id。开启发完自动跟进且 MR 为非草稿时，卡片在支持的宿主上直接启动跟进；用户明确只要求发布时传 following=false。仅查看已有 MR 时省略 published。若返回 follow_state，跟进由卡片管理，请勿另建任务。active 为运行中，paused 为已暂停，stopped 为已停止，failed 为启动失败，unverified 为状态待核实。旧宿主仅在未返回 follow_state 时按 todo 交接；另建任务前以 claim_follow=true 申请并确认 follow_claimed=true。existing_task 表示已有其他任务负责，卡片中的入口仅用于导航。renamed 和 following 只报告已核实完成的操作。后台轮次用 card_id 刷新，提醒时可用 to_latest。"
+      "description": "在 Cindy 对话中展示 MR 卡片。发布前传 project_path、head、base，可附 commits 和 files。当前任务成功发布后传 published=true 和 mr，有原卡片时带上 card_id。开启发完自动跟进且 MR 为非草稿时，发完出卡（含该卡片草稿转正式）由卡片直接启动跟进，following=false 不会关闭自动跟进。仅查看已有 MR 时省略 published。若返回 follow_state，跟进由卡片管理，请勿另建任务。active 为运行中，paused 为已暂停，stopped 为已停止，failed 为启动失败，unverified 为状态待核实。旧宿主仅在未返回 follow_state 时按 todo 交接；另建任务前以 claim_follow=true 申请并确认 follow_claimed=true。existing_task 表示已有其他任务负责，卡片中的入口仅用于导航。renamed 和 following 只报告已核实完成的操作。后台轮次用 card_id 刷新，提醒时可用 to_latest。"
     },
     "mr_follow_settings": {
       "description": "只读获取与 MR 卡片共用的自动改名、自动跟进和跟进模型偏好。不显示卡片、不创建任务、不启动跟进；返回 settings，不代表跟进已经开启。IM 发 MR 后也用此入口读取偏好，再按 mr 流程创建并核验跟进。读取失败时设置未知，不当作关闭。"

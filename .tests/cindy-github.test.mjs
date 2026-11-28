@@ -14,6 +14,7 @@ import './cindy-github-pr/preflight.test.mjs';
 import './cindy-github-pr/pacing.test.mjs';
 import './cindy-github-pr/trace.test.mjs';
 import './cindy-github-pr/snapshot.test.mjs';
+import './cindy-github-pr/auto-merge.test.mjs';
 
 const githubSource = readFileSync(
   new URL('../cindy-github/main.js', import.meta.url),
@@ -102,7 +103,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.53');
+  assert.equal(manifest.version, '1.5.55');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -2442,13 +2443,27 @@ test('a rejected handoff releases the reservation but an unknown handoff retains
 });
 
 test('a stop report cannot reapply deferred post-publication auto-follow settings', async () => {
-  const runtime = createPrRuntime({ github: prGraphql(), kv: { prCard: { autoFollow: true } } });
+  const options = { github: prGraphql(), kv: { prCard: { autoFollow: true } }, kvFails: true };
+  const runtime = createPrRuntime(options);
   const ask = await runtime.tool({ repo: 'octo/repo', head: 'feature' });
-  const stopped = await runtime.tool({ card_id: ask.callId, pr: 42, following: false, claim_follow: true });
+  await runtime.tool({ card_id: ask.callId, pr: 42 });
+  await runtime.tool({ card_id: ask.callId, following: true });
+  options.kvFails = false;
+  const stopped = await runtime.tool({ card_id: ask.callId, following: false, claim_follow: true });
   assert.equal(stopped.reply.result.follow_claimed, false);
   assert.equal(stopped.reply.result.todo, undefined);
   const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
   assert.equal(other.reply.result.follow_claimed, true);
+});
+
+test('publishing from an ask card still applies auto-follow even when following: false is passed', async () => {
+  const runtime = createPrRuntime({ github: prGraphql(), kv: { prCard: { autoFollow: true } } });
+  const ask = await runtime.tool({ repo: 'octo/repo', head: 'feature' });
+  const opened = await runtime.tool({ card_id: ask.callId, pr: 42, following: false });
+  assert.equal(opened.reply.result.todo.length, 1);
+  assert.match(opened.reply.result.todo[0], /https:\/\/github\.com\/octo\/repo\/pull\/42/);
+  const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(other.reply.result.disposition, 'existing_task');
 });
 
 test('a task with its own legacy duplicate follow record can still stop it while another task is active', async () => {
@@ -4091,16 +4106,354 @@ test('viewing an existing red PR does not start following; explicitly clicking h
   assert.equal(other.reply.result.disposition, 'existing_task');
 });
 
-test('publication without an ask card is distinct from viewing a PR or declining follow-up', async () => {
+test('publication applies auto-follow even if following: false is passed, while viewing stays read-only', async () => {
   for (const [args, enabled, expected] of [
-    [{}, true, 0], [{ published: true }, false, 0], [{ published: true, following: false }, true, 0],
+    [{}, true, 0], [{ published: true }, false, 0], [{ published: true, following: false }, true, 1],
     [{ published: true }, true, 1],
   ]) {
     const { hostApi, rows } = followScheduler();
     const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: enabled } } });
-    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, ...args });
-    assert.equal(visibleText(rt.lastCard(opened.callId).html)[0], '#42 Built-in PR skill');
-    assert.equal(rows.size, expected);
+    const res = await rt.tool({ repo: 'octo/repo', pr: 42, ...args });
+    assert.equal(visibleText(rt.lastCard(res.callId).html)[0], '#42 Built-in PR skill');
+    assert.equal(rows.size, expected, JSON.stringify({ args, enabled }));
+    if (expected === 1) assert.equal(res.reply.result.follow_state, 'active');
+  }
+
+  // Ask-card publication + autoRename + following: false still starts native follow-up and keeps it protected.
+  {
+    const { hostApi, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoRename: true, autoFollow: true } } });
+    const ask = await rt.tool({ repo: 'octo/repo', head: 'topic' });
+    const opened = await rt.tool({ card_id: ask.callId, pr: 42, following: false });
+    assert.equal(opened.reply.result.follow_state, 'active');
+    assert.equal(opened.reply.result.todo.length, 1);
+    assert.equal(rows.size, 1);
+    const falseStop = await rt.tool({ card_id: ask.callId, renamed: true, following: false });
+    assert.equal(falseStop.reply.ok, false);
+    const renamed = await rt.tool({ card_id: ask.callId, renamed: true });
+    assert.equal(renamed.reply.ok, true);
+    assert.equal(renamed.reply.result.follow_state, 'active');
+    assert.equal(rows.size, 1);
+  }
+
+  // Settings unreadable during initial publish with following: false still auto-follows once readable.
+  {
+    const { hostApi, rows } = followScheduler();
+    const opts = { github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } }, kvFails: true };
+    const rt = createPrRuntime(opts);
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, following: false });
+    assert.equal(rows.size, 0);
+    assert.match(opened.reply.result.note, /设置暂时读不到/);
+    opts.kvFails = false;
+    const recovered = await rt.tool({ card_id: opened.callId });
+    assert.equal(recovered.reply.result.follow_state, 'active');
+    assert.equal(rows.size, 1);
+  }
+});
+
+test('a draft published here starts auto-follow when refreshed as ready, while a viewed draft stays manual', async () => {
+  // Native host: draft published here -> refreshed as ready -> auto-follow starts; viewed draft stays manual.
+  for (const published of [true, false]) {
+    const { hostApi, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql({ draft: true }), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, ...(published ? { published: true } : {}) });
+    assert.equal(opened.reply.result.stage, 'draft');
+    assert.equal(rows.size, 0);
+
+    rt.setGithub(prGraphql({ draft: false }));
+    const ready = await rt.tool({ card_id: opened.callId, following: false });
+    assert.equal(ready.reply.result.stage, 'open');
+    assert.equal(rows.size, published ? 1 : 0, `published=${published}`);
+    if (published) {
+      assert.equal(ready.reply.result.follow_state, 'active');
+      // After user stops follow-up, refreshing the non-draft card does not restart it.
+      await rt.click(opened.callId, 'pr:stop');
+      assert.equal(rows.size, 0);
+      const afterStop = await rt.tool({ card_id: opened.callId });
+      assert.equal(afterStop.reply.result.follow_state, 'stopped');
+      assert.equal(rows.size, 0);
+    }
+  }
+
+  // Legacy host: draft published here turning ready while settings unreadable or card refused retries cleanly.
+  {
+    const opts = { github: prGraphql({ draft: true }), kv: { prCard: { autoFollow: true } } };
+    const rt = createPrRuntime(opts);
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.todo, undefined);
+
+    rt.setGithub(prGraphql({ draft: false }));
+    opts.kvFails = true;
+    const unreadable = await rt.tool({ card_id: opened.callId });
+    assert.equal(unreadable.reply.result.todo, undefined);
+    assert.match(unreadable.reply.result.note, /设置暂时读不到/);
+
+    opts.kvFails = false;
+    opts.refuseCards = true;
+    const refused = await rt.tool({ card_id: opened.callId });
+    assert.equal(refused.reply.ok, false);
+
+    opts.refuseCards = false;
+    const retried = await rt.tool({ card_id: opened.callId });
+    assert.equal(retried.reply.ok, true);
+    assert.equal(retried.reply.result.todo.length, 1);
+    assert.match(retried.reply.result.todo[0], /https:\/\/github\.com\/octo\/repo\/pull\/42/);
+  }
+});
+
+test('a stopped follow-up stays stopped across draft and ready transitions (refresh and pr:ready)', async () => {
+  // Native host: publish -> active (1) -> stop (0) -> draft (0) -> ready refresh (0) -> draft -> pr:ready button (0).
+  {
+    let draft = false;
+    const github = (request) => {
+      const { query } = JSON.parse(request.body);
+      if (query.startsWith('mutation')) { draft = false; return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }); }
+      if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+      return prGraphql({ draft })(request);
+    };
+    const { hostApi, rows } = followScheduler();
+    const rt = createPrRuntime({ github, hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_state, 'active');
+    assert.equal(rows.size, 1);
+
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(rows.size, 0);
+
+    draft = true;
+    const backToDraft = await rt.tool({ card_id: opened.callId });
+    assert.equal(backToDraft.reply.result.stage, 'draft');
+    assert.equal(rows.size, 0);
+
+    draft = false;
+    const readyRefresh = await rt.tool({ card_id: opened.callId });
+    assert.equal(readyRefresh.reply.result.stage, 'open');
+    assert.equal(readyRefresh.reply.result.follow_state, 'stopped');
+    assert.equal(rows.size, 0);
+
+    draft = true;
+    await rt.tool({ card_id: opened.callId });
+    await rt.click(opened.callId, 'pr:ready');
+    assert.equal(draft, false);
+    assert.equal(rows.size, 0);
+    assert.equal(rt.agentRuns.length, 0);
+    const afterCardReady = await rt.tool({ card_id: opened.callId });
+    assert.equal(afterCardReady.reply.result.follow_state, 'stopped');
+    assert.equal(rows.size, 0);
+  }
+
+  // Native host: draft published here -> ready auto-follows (1) -> stop (0) -> draft -> ready stays stopped (0).
+  {
+    const { hostApi, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql({ draft: true }), hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(rows.size, 0);
+    rt.setGithub(prGraphql({ draft: false }));
+    const ready = await rt.tool({ card_id: opened.callId });
+    assert.equal(ready.reply.result.follow_state, 'active');
+    assert.equal(rows.size, 1);
+    await rt.click(opened.callId, 'pr:stop');
+    assert.equal(rows.size, 0);
+    rt.setGithub(prGraphql({ draft: true }));
+    await rt.tool({ card_id: opened.callId });
+    rt.setGithub(prGraphql({ draft: false }));
+    const readyAgain = await rt.tool({ card_id: opened.callId });
+    assert.equal(readyAgain.reply.result.follow_state, 'stopped');
+    assert.equal(rows.size, 0);
+  }
+
+  // Legacy host: publish -> following -> stop -> draft -> ready refresh and pr:ready stay stopped.
+  {
+    let draft = false;
+    const github = (request) => {
+      const { query } = JSON.parse(request.body);
+      if (query.startsWith('mutation')) { draft = false; return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }); }
+      if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+      return prGraphql({ draft })(request);
+    };
+    const rt = createPrRuntime({ github, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.todo.length, 1);
+    await rt.tool({ card_id: opened.callId, following: true });
+    await rt.tool({ card_id: opened.callId, following: false });
+
+    draft = true;
+    await rt.tool({ card_id: opened.callId });
+    draft = false;
+    const readyRefresh = await rt.tool({ card_id: opened.callId });
+    assert.equal(readyRefresh.reply.result.todo, undefined);
+    const other = await rt.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+    assert.equal(other.reply.result.follow_claimed, true);
+    await rt.tool({ card_id: other.callId, following: false, session_context: { session_id: 's2' } });
+
+    draft = true;
+    await rt.tool({ card_id: opened.callId });
+    await rt.click(opened.callId, 'pr:ready');
+    assert.equal(draft, false);
+    assert.equal(rt.agentRuns.length, 0);
+  }
+});
+
+test('deferred publish and draft-ready follow-up wait for a fresh PR status read before emitting todo, claiming, or scheduling', async () => {
+  const github503 = () => jsonResponse({ message: 'GitHub unavailable' }, 503);
+
+  // Legacy host: draft -> ready while settings unreadable -> settings recover but GitHub fails -> must not emit todo or grant claim_follow.
+  for (const recoveredPr of [{ draft: false }, { draft: true }, { state: 'CLOSED' }]) {
+    const opts = { github: prGraphql({ draft: true }), kv: { prCard: { autoFollow: true } } };
+    const rt = createPrRuntime(opts);
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+
+    rt.setGithub(prGraphql({ draft: false }));
+    opts.kvFails = true;
+    const unreadable = await rt.tool({ card_id: opened.callId });
+    assert.equal(unreadable.reply.result.todo, undefined);
+    assert.match(unreadable.reply.result.note, /设置暂时读不到/);
+
+    opts.kvFails = false;
+    rt.setGithub(github503);
+    const fetchFailed = await rt.tool({ card_id: opened.callId });
+    assert.equal(fetchFailed.reply.ok, true);
+    assert.equal(fetchFailed.reply.result.todo, undefined);
+    assert.match(fetchFailed.reply.result.note, /读取 PR 信息失败/);
+
+    const failedClaim = await rt.tool({ card_id: opened.callId, claim_follow: true });
+    assert.equal(failedClaim.reply.result.follow_claimed, false);
+    assert.equal(failedClaim.reply.result.todo, undefined);
+
+    rt.setGithub(prGraphql(recoveredPr));
+    const recovered = await rt.tool({ card_id: opened.callId });
+    if (recoveredPr.draft === false && !recoveredPr.state) {
+      assert.equal(recovered.reply.result.todo.length, 1);
+      assert.match(recovered.reply.result.todo[0], /https:\/\/github\.com\/octo\/repo\/pull\/42/);
+      const okClaim = await rt.tool({ card_id: opened.callId, claim_follow: true });
+      assert.equal(okClaim.reply.result.follow_claimed, true);
+    } else {
+      assert.equal(recovered.reply.result.todo, undefined);
+      assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).readyFollowPending, false);
+    }
+  }
+
+  // Native host: draft -> ready while settings unreadable -> settings recover while GitHub fails -> waits until PR status succeeds.
+  for (const recoveredPr of [{ draft: false }, { merged: true }]) {
+    const { hostApi, rows } = followScheduler();
+    const opts = { github: prGraphql({ draft: true }), hostApi, kv: { prCard: { autoFollow: true } } };
+    const rt = createPrRuntime(opts);
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+
+    rt.setGithub(prGraphql({ draft: false }));
+    opts.kvFails = true;
+    await rt.tool({ card_id: opened.callId });
+
+    opts.kvFails = false;
+    rt.setGithub(github503);
+    const fetchFailed = await rt.tool({ card_id: opened.callId });
+    assert.equal(rows.size, 0);
+    assert.equal(fetchFailed.reply.result.follow_state, undefined);
+    assert.match(fetchFailed.reply.result.note, /读取 PR 信息失败/);
+
+    rt.setGithub(prGraphql(recoveredPr));
+    const recovered = await rt.tool({ card_id: opened.callId });
+    if (recoveredPr.merged) {
+      assert.equal(rows.size, 0);
+      assert.equal(recovered.reply.result.stage, 'merged');
+    } else {
+      assert.equal(rows.size, 1);
+      assert.equal(recovered.reply.result.follow_state, 'active');
+    }
+  }
+
+  // Symmetric publish settings recovery: publish while settings unreadable -> GitHub fails when settings recover -> defers cleanly.
+  {
+    const opts = { github: prGraphql(), kv: { prCard: { autoFollow: true } }, kvFails: true };
+    const rt = createPrRuntime(opts);
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.todo, undefined);
+
+    opts.kvFails = false;
+    rt.setGithub(github503);
+    const fetchFailed = await rt.tool({ card_id: opened.callId });
+    assert.equal(fetchFailed.reply.result.todo, undefined);
+    assert.match(fetchFailed.reply.result.note, /读取 PR 信息失败/);
+    assert.equal((await rt.tool({ card_id: opened.callId, claim_follow: true })).reply.result.follow_claimed, false);
+
+    rt.setGithub(prGraphql());
+    const recovered = await rt.tool({ card_id: opened.callId });
+    assert.equal(recovered.reply.result.todo.length, 1);
+    assert.equal((await rt.tool({ card_id: opened.callId, claim_follow: true })).reply.result.follow_claimed, true);
+  }
+
+  // pr:ready button: mutation confirms isDraft=false, but post-mutation PR status read fails -> defer until a fresh open non-draft read.
+  const readyThenFail = () => {
+    let failReads = false;
+    return {
+      setFail: (v) => { failReads = v; },
+      github: (request) => {
+        const { query } = JSON.parse(request.body);
+        if (query.startsWith('mutation')) {
+          failReads = true;
+          return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } });
+        }
+        if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+        if (failReads) return github503();
+        return prGraphql({ draft: true })(request);
+      },
+    };
+  };
+
+  for (const recoveredPr of [{ draft: false }, { merged: true }]) {
+    const { hostApi, rows } = followScheduler();
+    const gh = readyThenFail();
+    const rt = createPrRuntime({ github: gh.github, hostApi, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    await rt.click(opened.callId, 'pr:ready');
+    assert.equal(rows.size, 0);
+    assert.equal(rt.agentRuns.length, 0);
+    assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).readyFollowPending, true);
+    assert.ok(visibleText(rt.lastCard(opened.callId).html).join('\n').includes('读取 PR 信息失败'));
+
+    const stillFailing = await rt.tool({ card_id: opened.callId });
+    assert.equal(rows.size, 0);
+    assert.equal(stillFailing.reply.result.follow_state, undefined);
+
+    rt.setGithub(prGraphql(recoveredPr));
+    const recovered = await rt.tool({ card_id: opened.callId });
+    if (recoveredPr.merged) {
+      assert.equal(rows.size, 0);
+      assert.equal(recovered.reply.result.stage, 'merged');
+      assert.equal(JSON.parse(rt.files.get(`pr-cards/${opened.callId}.json`)).readyFollowPending, false);
+    } else {
+      assert.equal(rows.size, 1);
+      assert.equal(recovered.reply.result.follow_state, 'active');
+    }
+  }
+
+  // Legacy host pr:ready re-read failure defers handoff/claim until GitHub confirms open & non-draft.
+  {
+    const gh = readyThenFail();
+    const rt = createPrRuntime({ github: gh.github, kv: { prCard: { autoFollow: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    await rt.click(opened.callId, 'pr:ready');
+    assert.equal(rt.agentRuns.length, 0);
+    assert.equal((await rt.tool({ card_id: opened.callId, claim_follow: true })).reply.result.follow_claimed, false);
+    rt.setGithub(prGraphql({ draft: false }));
+    const recovered = await rt.tool({ card_id: opened.callId });
+    assert.equal(recovered.reply.result.todo.length, 1);
+    assert.equal((await rt.tool({ card_id: opened.callId, claim_follow: true })).reply.result.follow_claimed, true);
+  }
+
+  // Viewed draft (not published here) on native host: pr:ready re-read failure defers to todo handoff on recovery, not direct local scheduling.
+  {
+    const { hostApi, rows } = followScheduler();
+    const gh = readyThenFail();
+    const rt = createPrRuntime({ github: gh.github, hostApi, kv: { prCard: { autoFollow: true } } });
+    const viewed = await rt.tool({ repo: 'octo/repo', pr: 42 });
+    await rt.click(viewed.callId, 'pr:ready');
+    assert.equal(rows.size, 0);
+    assert.equal(rt.agentRuns.length, 0);
+    rt.setGithub(prGraphql({ draft: false }));
+    const recovered = await rt.tool({ card_id: viewed.callId });
+    assert.equal(rows.size, 0);
+    assert.equal(recovered.reply.result.todo.length, 1);
   }
 });
 
@@ -4114,18 +4467,18 @@ test('a dispatcher keeps its ask card when publication follow-up belongs in a de
   assert.equal(rows.size, 0);
 });
 
-test('first publish pr_card respects following: false and binds schedule to the dedicated task after source settings check', async () => {
-  // Scenario 1: publish-only / explicitly stopped — first publish call passes following: false
+test('first publish pr_card does not let following: false suppress auto-follow and binds schedule to the dedicated task after source settings check', async () => {
+  // Scenario 1: even if the agent passes following: false on first publish, saved auto_follow still starts follow-up
   {
     const { hostApi, rows, calls } = followScheduler();
     const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
     const first = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, following: false });
-    assert.equal(first.reply.result.follow_state, undefined);
-    assert.equal(rows.size, 0);
-    assert.equal(calls.includes('schedule_create'), false);
+    assert.equal(first.reply.result.follow_state, 'active');
+    assert.equal(rows.size, 1);
+    assert.equal(calls.filter((c) => c === 'schedule_create').length, 1);
     const refresh = await rt.tool({ card_id: first.callId });
-    assert.equal(refresh.reply.result.follow_state, undefined);
-    assert.equal(rows.size, 0);
+    assert.equal(refresh.reply.result.follow_state, 'active');
+    assert.equal(rows.size, 1);
   }
 
   // Scenario 2: group chat / unrelated source task reads pr_follow_settings first,
@@ -4157,7 +4510,7 @@ test('first publish pr_card respects following: false and binds schedule to the 
   }
 });
 
-test('ordinary refresh preserves publish-time following: false after settings become readable again', async () => {
+test('ordinary refresh starts auto-follow after settings recover even if initial publish passed following: false', async () => {
   for (const withScheduler of [true, false]) {
     const scheduler = withScheduler ? followScheduler() : null;
     const options = {
@@ -4176,11 +4529,17 @@ test('ordinary refresh preserves publish-time following: false after settings be
     options.kvFails = false;
     const refreshed = await rt.tool({ card_id: first.callId });
     assert.equal(refreshed.reply.ok, true);
-    assert.equal(refreshed.reply.result.follow_state, undefined);
-    assert.deepEqual(refreshed.reply.result.todo, [fill(zhCopy.prTodoRename, { title: '#42 Built-in PR skill' })]);
     if (scheduler) {
-      assert.equal(scheduler.rows.size, 0);
-      assert.equal(scheduler.calls.includes('schedule_create'), false);
+      assert.equal(refreshed.reply.result.follow_state, 'active');
+      assert.deepEqual(refreshed.reply.result.todo, [fill(zhCopy.prTodoRename, { title: '#42 Built-in PR skill' })]);
+      assert.equal(scheduler.rows.size, 1);
+      assert.equal(scheduler.calls.filter((c) => c === 'schedule_create').length, 1);
+    } else {
+      assert.equal(refreshed.reply.result.follow_state, undefined);
+      assert.deepEqual(refreshed.reply.result.todo, [
+        fill(zhCopy.prTodoRename, { title: '#42 Built-in PR skill' }),
+        fill(zhCopy.prTodoFollow, { url: 'https://github.com/octo/repo/pull/42' }),
+      ]);
     }
   }
 });
@@ -5148,478 +5507,6 @@ test('cards without a trusted creation baseline stay manualStop fail-closed, whi
   }
 });
 
-function statusWatchFixture(initial = {}, options = {}) {
-  let failRead = options.failBoot;
-  let accountStatus = null;
-  let accountStatusFrom = 1;
-  let accountLimited = null;
-  let accountSwitchAt = null;
-  let accountSwitchTo = null;
-  let userHoldAt = null;
-  let userHoldGate = null;
-  let userCalls = 0;
-  let limitedPath = null;
-  let deniedPath = null;
-  let missingPath = null;
-  let holdKey = null;
-  let holdGate = null;
-  let kvGate = null;
-  let heldKvGate = null;
-  let putGate = null;
-  let heldPutGate = null;
-  let kv = structuredClone(initial);
-  let account = 17;
-  let rateLimited = false;
-  const timers = [];
-  const paths = [];
-  const response = {
-    '/pulls/1': { id: 21, number: 1, state: 'open', comments: 0, body: 'untrusted text' },
-    '/issues/2': { id: 22, number: 2, state: 'open', comments: 1 },
-    '/actions/runs/3': { id: 3, status: 'queued', run_attempt: 1 },
-  };
-  const runtime = createRuntime({
-    setTimeout(fn, delay) {
-      if (delay >= 60_000) timers.push({ fn, delay });
-      return timers.length;
-    },
-    async localFetch(url, init) {
-      assert.equal(url, '/kv');
-      if (init?.method === 'PUT') {
-        if (putGate) { heldPutGate = putGate; putGate = null; await heldPutGate.promise; }
-        kv = JSON.parse(init.body);
-      } else if (failRead) {
-        failRead = false;
-        throw new Error('temporary storage failure');
-      } else if (kvGate) {
-        heldKvGate = kvGate; kvGate = null;
-        await heldKvGate.promise;
-        return { ok: true, json: async () => structuredClone(heldKvGate.snapshot) };
-      }
-      return { ok: true, json: async () => structuredClone(kv) };
-    },
-    send: options.send,
-    async github(request) {
-      const url = new URL(request.url);
-      assert.equal(url.origin, 'https://api.github.com');
-      assert.equal(request.method, 'GET');
-      paths.push(url.pathname);
-      if (url.pathname === '/user') {
-        userCalls++;
-        if (userHoldGate && userCalls === userHoldAt) await userHoldGate.promise;
-        if (accountStatus && userCalls >= accountStatusFrom) return jsonResponse({ message: 'credentials rejected' }, accountStatus);
-        if (accountLimited !== null && userCalls >= accountLimited) return jsonResponse({ message: 'API rate limit exceeded' }, 403);
-        if (accountSwitchAt !== null && userCalls >= accountSwitchAt) return jsonResponse({ id: accountSwitchTo });
-        return jsonResponse({ id: account });
-      }
-      const key = url.pathname.replace('/repos/example/widget', '');
-      if (key === holdKey) await holdGate.promise;
-      if (rateLimited || key === limitedPath) return jsonResponse({ message: 'API rate limit exceeded' }, 403);
-      if (key === deniedPath) return jsonResponse({ message: 'Resource not accessible by integration' }, 403);
-      if (key === missingPath) return jsonResponse({ message: 'Not Found' }, 404);
-      const object = response[key];
-      return object ? jsonResponse(object) : jsonResponse({ message: 'forbidden' }, 403);
-    },
-  });
-  const tool = (action, kind, id) => runtime.tool('status_watch', { action, kind, id, repo: 'Example/Widget' });
-  const makeGate = (snapshot) => {
-    let release;
-    const gate = { promise: new Promise(resolve => { release = resolve; }), release };
-    if (snapshot !== undefined) gate.snapshot = snapshot;
-    return gate;
-  };
-  return { ...runtime, tool, timers, paths, response, saved: () => kv,
-    useAccount: id => { account = id; },
-    failAccount: (value = 401, from = 1) => { accountStatus = value === false ? null : value; accountStatusFrom = from; },
-    switchAccountAt: (n, id) => { accountSwitchAt = n; accountSwitchTo = id; },
-    holdUserAt: n => { userHoldAt = n; userHoldGate = makeGate(); },
-    releaseUser: () => { assert.ok(userHoldGate, 'no held user read'); const gate = userHoldGate; userHoldAt = null; userHoldGate = null; gate.release(); },
-    limitPath: p => { limitedPath = p; }, denyPath: p => { deniedPath = p; },
-    missingPath: p => { missingPath = p; },
-    limitAccountFrom: n => { accountLimited = n; }, limitRequests: () => { rateLimited = true; },
-    holdPath: p => { holdKey = p; holdGate = makeGate(); },
-    releasePath: () => { const gate = holdGate; holdKey = null; holdGate = null; gate.release(); },
-    holdKv: () => { kvGate = makeGate(structuredClone(kv)); },
-    releaseKv: () => { assert.ok(heldKvGate, 'no held KV read'); heldKvGate.release(); },
-    holdPut: () => { putGate = makeGate(); },
-    releasePut: () => { assert.ok(heldPutGate, 'no held KV write'); heldPutGate.release(); } };
-}
-
-test('status watches are opt-in, track three exact states and write before notifying', async () => {
-  const f = statusWatchFixture({ prCard: { autoFollow: true } });
-  await flushAsync();
-  assert.deepEqual(f.paths, []);
-  assert.equal(f.timers.length, 0);
-  for (const [kind, id] of [['pr', 1], ['issue', 2], ['run', 3]]) {
-    assert.equal((await f.tool('add', kind, id)).ok, true);
-  }
-  assert.equal(f.timers.length, 1);
-  assert.equal(f.timers[0].delay, 300_000);
-  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
-  assert.equal(f.saved().prCard.autoFollow, true);
-  assert.doesNotMatch(JSON.stringify(f.saved()), /untrusted text/);
-  f.response['/pulls/1'].merged = true;
-  f.response['/pulls/1'].state = 'closed';
-  f.response['/issues/2'].comments++;
-  Object.assign(f.response['/actions/runs/3'], { status: 'completed', conclusion: 'success' });
-  await f.timers.shift().fn();
-  assert.deepEqual(f.saved().githubStatusWatches.map(x => x.snapshot),
-    ['merged:ready:0', 'open:ready:2', 'completed:success:1']);
-  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
-  await f.timers.shift().fn();
-  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
-  for (const [kind, id] of [['pr', 1], ['issue', 2], ['run', 3]]) {
-    assert.equal((await f.tool('remove', kind, id)).ok, true);
-  }
-  const before = f.paths.length;
-  await f.timers.shift().fn();
-  assert.equal(f.paths.length, before);
-  assert.equal(f.timers.length, 0);
-});
-
-test('status watches resume locally, skip changed GitHub accounts, report permission failures and back off', async () => {
-  const a = statusWatchFixture();
-  assert.equal((await a.tool('add', 'issue', 2)).ok, true);
-  assert.equal((await a.tool('add', 'run', 99)).ok, false);
-  assert.equal(a.saved().githubStatusWatches.length, 1);
-  const f = statusWatchFixture(a.saved());
-  await flushAsync();
-  assert.equal(f.timers.length, 1);
-  f.useAccount(88);
-  await f.timers.shift().fn();
-  assert.deepEqual(f.paths, ['/user', '/user']);
-  assert.equal(f.saved().githubStatusWatches[0].problem, 'account_changed');
-  assert.equal((await f.tool('list', 'issue', 2)).result.watches[0].problem, 'account_changed');
-  assert.equal(f.timers[0].delay, 300_000);
-  await f.timers.shift().fn();
-  assert.deepEqual(f.paths, ['/user', '/user', '/user']);
-  assert.equal(f.saved().githubStatusWatches[0].problem, 'account_changed');
-  f.useAccount(17);
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
-  delete f.response['/issues/2'];
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].problem, 'forbidden');
-  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:1');
-  f.limitRequests();
-  await f.timers.shift().fn();
-  assert.equal(f.timers[0].delay, 900_000);
-  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
-});
-
-test('an account probe failure marks healthy watches unavailable until reads recover', async () => {
-  const a = statusWatchFixture();
-  assert.equal((await a.tool('add', 'issue', 2)).ok, true);
-  const f = statusWatchFixture(a.saved());
-  await flushAsync();
-  assert.equal(f.timers.length, 1);
-  f.failAccount(503);
-  await f.timers.shift().fn();
-  assert.deepEqual(f.paths, ['/user']);
-  assert.equal(f.saved().githubStatusWatches[0].problem, 'unavailable');
-  assert.equal(f.timers[0].delay, 900_000);
-  assert.equal((await f.tool('list', 'issue', 2)).result.watches[0].problem, 'unavailable');
-  f.failAccount(false);
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
-  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
-});
-
-test('a rate-limited round persists changes already read before backing off', async () => {
-  const f = statusWatchFixture();
-  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
-  assert.equal((await f.tool('add', 'pr', 1)).ok, true);
-  f.response['/issues/2'].comments = 5;
-  f.limitPath('/pulls/1');
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:5');
-  assert.equal(f.saved().githubStatusWatches[0].noticePending, undefined);
-  assert.equal(f.saved().githubStatusWatches[1].problem, 'unavailable');
-  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
-  assert.equal(f.timers[0].delay, 900_000);
-});
-
-test('a successful add supersedes a later backoff timer', async () => {
-  const a = statusWatchFixture();
-  assert.equal((await a.tool('add', 'issue', 2)).ok, true);
-  const f = statusWatchFixture(a.saved(), { failBoot: true });
-  await flushAsync();
-  assert.equal(f.timers.length, 1);
-  assert.equal(f.timers[0].delay, 900_000);
-  assert.equal((await f.tool('add', 'pr', 1)).ok, true);
-  assert.equal(f.timers.length, 2);
-  const stale = f.timers.shift();
-  assert.equal(stale.delay, 900_000);
-  const before = f.paths.length;
-  await stale.fn();
-  assert.equal(f.paths.length, before);
-  assert.equal(f.timers[0].delay, 300_000);
-  const beforePoll = f.paths.length;
-  await f.timers.shift().fn();
-  assert.equal(f.paths.length, beforePoll + 3);
-});
-
-test('a rate-limited confirmation probe persists changes and backs off', async () => {
-  const f = statusWatchFixture();
-  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
-  f.response['/issues/2'].comments = 5;
-  f.limitAccountFrom(4);
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:5');
-  assert.equal(f.saved().githubStatusWatches[0].noticePending, undefined);
-  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
-  assert.equal(f.timers[0].delay, 900_000);
-});
-
-test('an add during an in-flight round keeps the five-minute deadline', async () => {
-  const f = statusWatchFixture();
-  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
-  f.holdPath('/issues/2');
-  f.limitPath('/issues/2');
-  const poll = f.timers.shift().fn();
-  await flushAsync();
-  assert.equal((await f.tool('add', 'pr', 1)).ok, true);
-  assert.equal(f.timers.length, 0);
-  await new Promise(resolve => setTimeout(resolve, 50));
-  f.releasePath();
-  await poll;
-  assert.equal(f.timers.length, 1);
-  // The armed delay is the remaining time to the add's absolute deadline.
-  assert.ok(f.timers[0].delay < 300_000 && f.timers[0].delay > 290_000, `delay ${f.timers[0].delay}`);
-});
-
-test('an unauthorized account probe surfaces an actionable problem', async () => {
-  const a = statusWatchFixture();
-  assert.equal((await a.tool('add', 'issue', 2)).ok, true);
-  const f = statusWatchFixture(a.saved());
-  await flushAsync();
-  assert.equal(f.timers.length, 1);
-  f.failAccount(401);
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].problem, 'auth_required');
-  assert.equal((await f.tool('list', 'issue', 2)).result.watches[0].problem, 'auth_required');
-  f.failAccount(false);
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
-  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
-});
-
-test('read failures map to the documented problem classes and clear on recovery', async () => {
-  const cases = [[401, 'auth_required'], [403, 'forbidden'], [404, 'gone'], [410, 'gone'],
-    [429, 'unavailable'], [503, 'unavailable']];
-  for (const [status, expected] of cases) {
-    const a = statusWatchFixture();
-    assert.equal((await a.tool('add', 'issue', 2)).ok, true);
-    const f = statusWatchFixture(a.saved());
-    await flushAsync();
-    f.failAccount(status);
-    await f.timers.shift().fn();
-    assert.equal(f.saved().githubStatusWatches[0].problem, expected, `probe ${status}`);
-    f.failAccount(false);
-    await f.timers.shift().fn();
-    assert.equal(f.saved().githubStatusWatches[0].problem, undefined, `recovery ${status}`);
-  }
-});
-
-test('targets after a rate-limit break cannot claim healthy polling', async () => {
-  const f = statusWatchFixture({ githubStatusWatches: [
-    { kind: 'pr', repo: 'example/widget', id: 1, account: 17, objectId: 21, snapshot: 'open:ready:0' },
-    { kind: 'issue', repo: 'example/widget', id: 2, account: 17, objectId: 22, snapshot: 'open:ready:1' },
-    { kind: 'run', repo: 'example/widget', id: 3, account: 17, objectId: 3, snapshot: 'queued:none:1', problem: 'gone' },
-  ] });
-  await flushAsync();
-  f.limitPath('/pulls/1');
-  await f.timers.shift().fn();
-  const [pr, issue, run] = f.saved().githubStatusWatches;
-  assert.equal(pr.problem, 'unavailable');
-  assert.equal(issue.problem, 'unavailable');
-  assert.equal(run.problem, 'gone');
-  assert.equal(f.timers[0].delay, 900_000);
-});
-
-test('a concurrent modification does not discard an observed change', async () => {
-  const f = statusWatchFixture();
-  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
-  assert.equal((await f.tool('add', 'pr', 1)).ok, true);
-  f.response['/issues/2'].comments = 5;
-  f.holdUserAt(6);
-  const round = f.timers.shift().fn();
-  await flushAsync();
-  assert.equal((await f.tool('remove', 'run', 99)).ok, true);
-  f.releaseUser();
-  await round;
-  assert.equal(f.saved().githubStatusWatches.find(w => w.kind === 'issue').snapshot, 'open:ready:5');
-  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
-});
-
-test('a concurrent modification during the reads does not abort the round', async () => {
-  const f = statusWatchFixture();
-  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
-  assert.equal((await f.tool('add', 'pr', 1)).ok, true);
-  f.response['/issues/2'].comments = 5;
-  f.holdPath('/issues/2');
-  const round = f.timers.shift().fn();
-  await flushAsync();
-  assert.equal((await f.tool('remove', 'run', 99)).ok, true);
-  f.releasePath();
-  await round;
-  assert.equal(f.saved().githubStatusWatches.find(w => w.kind === 'issue').snapshot, 'open:ready:5');
-  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
-});
-
-test('a watch re-added during a round keeps its fresh baseline', async () => {
-  const f = statusWatchFixture();
-  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
-  f.response['/issues/2'].comments = 5;
-  f.holdUserAt(4);
-  const round = f.timers.shift().fn();
-  await flushAsync();
-  f.response['/issues/2'].comments = 7;
-  assert.equal((await f.tool('remove', 'issue', 2)).ok, true);
-  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
-  f.releaseUser();
-  await round;
-  const row = f.saved().githubStatusWatches[0];
-  assert.equal(row.snapshot, 'open:ready:7');
-  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
-});
-
-test('a watch re-added during a failed probe is not marked stale', async () => {
-  const f = statusWatchFixture();
-  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
-  f.holdUserAt(3);
-  const round = f.timers.shift().fn();
-  await flushAsync();
-  assert.equal((await f.tool('remove', 'issue', 2)).ok, true);
-  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
-  f.failAccount(503);
-  f.releaseUser();
-  await round;
-  const row = f.saved().githubStatusWatches[0];
-  assert.equal(row.problem, undefined);
-  assert.equal(row.snapshot, 'open:ready:1');
-});
-
-test('a later remove wins over an add still reading its baseline', async () => {
-  const f = statusWatchFixture();
-  f.holdPath('/issues/2');
-  const adding = f.tool('add', 'issue', 2);
-  await flushAsync();
-  const removing = f.tool('remove', 'issue', 2);
-  await flushAsync();
-  f.releasePath();
-  assert.equal((await removing).ok, true);
-  assert.equal((await adding).ok, true);
-  assert.equal(f.saved().githubStatusWatches.length, 0);
-});
-
-test('an account switch at the final check persists account_changed', async () => {
-  const f = statusWatchFixture();
-  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
-  f.response['/issues/2'].comments = 5;
-  f.switchAccountAt(4, 88);
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].problem, 'account_changed');
-  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:1');
-  assert.equal(f.timers[0].delay, 900_000);
-});
-
-test('a failed final account check persists the failure class', async () => {
-  const f = statusWatchFixture();
-  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
-  f.response['/issues/2'].comments = 5;
-  f.failAccount(401, 4);
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:5');
-  assert.equal(f.saved().githubStatusWatches[0].problem, 'auth_required');
-  assert.equal(f.sent.filter(m => m.type === 'notify').length, 1);
-  assert.equal(f.timers[0].delay, 900_000);
-});
-
-test('a newer failure class replaces an older one on the same watch', async () => {
-  const a = statusWatchFixture();
-  assert.equal((await a.tool('add', 'issue', 2)).ok, true);
-  const f = statusWatchFixture(a.saved());
-  await flushAsync();
-  f.missingPath('/issues/2');
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].problem, 'gone');
-  f.missingPath(null);
-  f.failAccount(401);
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].problem, 'auth_required');
-  f.failAccount(false);
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
-  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
-});
-
-test('a deleted or inaccessible target is reported as gone', async () => {
-  const f = statusWatchFixture();
-  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
-  f.missingPath('/issues/2');
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].problem, 'gone');
-  assert.equal((await f.tool('list', 'issue', 2)).result.watches[0].problem, 'gone');
-  f.missingPath(null);
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
-});
-
-test('a permission failure on a watched target is reported as forbidden', async () => {
-  const f = statusWatchFixture();
-  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
-  f.denyPath('/issues/2');
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].problem, 'forbidden');
-  assert.equal((await f.tool('list', 'issue', 2)).result.watches[0].problem, 'forbidden');
-  f.denyPath(null);
-  await f.timers.shift().fn();
-  assert.equal(f.saved().githubStatusWatches[0].problem, undefined);
-});
-
-test('an add racing an empty round still schedules its check', async () => {
-  const f = statusWatchFixture();
-  assert.equal((await f.tool('add', 'issue', 2)).ok, true);
-  assert.equal((await f.tool('remove', 'issue', 2)).ok, true);
-  assert.equal(f.timers.length, 1);
-  f.holdKv();
-  const round = f.timers.shift().fn();
-  await flushAsync();
-  f.holdPut();
-  const adding = f.tool('add', 'pr', 1);
-  await flushAsync();
-  assert.equal(f.timers.length, 0);
-  // Step the empty read to its decision so the round still returns "no watches",
-  // then release the add so its deadline is recorded before the round's finally.
-  f.releaseKv();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-  f.releasePut();
-  await adding;
-  await round;
-  assert.equal(f.timers.length, 1);
-  // The empty round must not drop the add's request; the delay is bounded by its deadline.
-  assert.ok(f.timers[0].delay <= 300_000 && f.timers[0].delay > 0, `delay ${f.timers[0].delay}`);
-});
-
-test('status watches cap stored targets and reject a replaced object without advancing its state', async () => {
-  const f = statusWatchFixture();
-  for (let id = 10; id < 16; id++) {
-    f.response['/issues/' + id] = { id: 100 + id, number: id, state: 'open', comments: 0 };
-    assert.equal((await f.tool('add', 'issue', id)).ok, id < 15);
-  }
-  assert.equal(f.saved().githubStatusWatches.length, 5);
-  f.response['/issues/10'] = { id: 200, number: 10, state: 'closed', comments: 1 };
-  const before = f.paths.length;
-  await f.timers.shift().fn();
-  assert.ok(f.paths.length - before <= 7);
-  assert.equal(f.saved().githubStatusWatches[0].snapshot, 'open:ready:0');
-  assert.equal(f.saved().githubStatusWatches[0].problem, 'target_changed');
-  assert.equal((await f.tool('add', 'issue', 10)).ok, false);
-  assert.equal(f.sent.filter(m => m.type === 'notify').length, 0);
-});
-
 test('the Cindy Node bootstrap starts the PR follow worker when loading it via require', () => {
   const entry = fileURLToPath(new URL('../cindy-github/node/follow.cjs', import.meta.url));
   const request = { id: 1, method: 'unsupported', jsonrpc: '2.0' };
@@ -6103,54 +5990,50 @@ test('ID-less pre-upgrade Stop preserves manual-stop guidance when the PR is alr
   }
 });
 
-test('saved status watches recover after the startup KV read fails', async () => {
-  const first = statusWatchFixture();
-  assert.equal((await first.tool('add', 'issue', 2)).ok, true);
-  const restored = statusWatchFixture(first.saved(), { failBoot: true });
-  await flushAsync();
-  assert.equal(restored.timers[0].delay, 900_000);
-  await restored.timers.shift().fn();
-  assert.deepEqual(restored.paths, ['/user', '/repos/example/widget/issues/2']);
-  assert.equal(restored.timers[0].delay, 300_000);
-});
-
-test('a refused status notification stays pending across restart until acknowledged', async () => {
-  const first = statusWatchFixture({}, { send: message => ({ ok: message.type !== 'notify' }) });
-  assert.equal((await first.tool('add', 'issue', 2)).ok, true);
-  first.response['/issues/2'].state = 'closed';
-  await first.timers.shift().fn();
-  assert.equal(first.saved().githubStatusWatches[0].snapshot, 'closed:ready:1');
-  assert.equal(first.saved().githubStatusWatches[0].noticePending, true);
-
-  const restored = statusWatchFixture(first.saved());
-  restored.response['/issues/2'].state = 'closed';
-  await flushAsync();
-  await restored.timers.shift().fn();
-  assert.equal(restored.sent.filter(message => message.type === 'notify').length, 1);
-  assert.equal(restored.saved().githubStatusWatches[0].noticePending, undefined);
-  await restored.timers.shift().fn();
-  assert.equal(restored.sent.filter(message => message.type === 'notify').length, 1);
-});
-
-test('status_watch descriptions define the status format and every problem value in four locales', () => {
-  const states = ['open', 'closed', 'merged', 'draft', 'ready', 'queued', 'in_progress', 'completed', 'none',
-    'success', 'failure', 'cancelled', 'neutral', 'skipped', 'timed_out', 'action_required', 'stale',
-    'startup_failure', 'unknown', 'account_changed', 'target_changed', 'unavailable', 'auth_required',
-    'forbidden', 'gone'];
-  const manifestDescription = manifest.tools.find((tool) => tool.name === 'status_watch').description;
-  assert.ok(manifestDescription.includes('account_changed'), 'ghost.json status_watch description omits account_changed');
+test('status_watch is removed and legacy githubStatusWatches KV stays inert', async () => {
+  assert.equal(manifest.tools.some((tool) => tool.name === 'status_watch'), false);
   for (const locale of hostLocales) {
     const resource = JSON.parse(
       readFileSync(new URL(`../cindy-github/locales/${locale}.json`, import.meta.url), 'utf8'),
     );
-    const text = resource.tools.status_watch.description;
-    for (const token of states) {
-      assert.ok(text.includes(token), `${locale} status_watch description omits ${token}`);
-    }
-    assert.match(text, /comment|댓글|コメント|评论/, `${locale} status_watch description omits the comment segment`);
-    assert.match(text, /attempt|시도|回数|第几次/, `${locale} status_watch description omits the attempt segment`);
-    assert.match(text, /remove/, `${locale} status_watch description omits the recovery action`);
+    assert.equal(Object.hasOwn(resource.tools || {}, 'status_watch'), false, `${locale} still declares status_watch`);
   }
+  const timers = [];
+  const githubRequests = [];
+  const runtime = createRuntime({
+    setTimeout(fn, delay) {
+      if (delay >= 60_000) timers.push({ fn, delay });
+      return timers.length;
+    },
+    async localFetch(url) {
+      assert.equal(url, '/kv');
+      return {
+        ok: true,
+        json: async () => ({
+          prCard: { autoFollow: true },
+          githubStatusWatches: [
+            { kind: 'pr', repo: 'example/widget', id: 1, snapshot: 'open:ready:0', objectId: 21, account: 17, created: 1 },
+          ],
+        }),
+      };
+    },
+    async github(request) {
+      githubRequests.push(request.url);
+      return jsonResponse({});
+    },
+  });
+  await flushAsync();
+  assert.deepEqual(githubRequests, []);
+  assert.deepEqual(timers, []);
+  assert.equal(runtime.sent.filter((m) => m.type === 'notify').length, 0);
+
+  const removed = await runtime.tool('status_watch', { action: 'list' });
+  assert.equal(removed.ok, false);
+  assert.match(removed.message, /未知工具:status_watch/);
+
+  const settings = await runtime.tool('pr_follow_settings', {});
+  assert.equal(settings.ok, true);
+  assert.equal(settings.result.settings.auto_follow, true);
 });
 
 /* ── Unconfirmed follow claims ── */
@@ -6507,9 +6390,9 @@ test('source task heals a stale pre-upgrade peer card and switches to read-only 
     const { hostApi, calls, rows } = followScheduler({ skillDir, platform: 'darwin' });
     const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
 
-    // Source task opened the PR with following: false (later stuck on prOwnershipUnknown),
+    // Source task displayed a dispatcher card (later stuck on prOwnershipUnknown),
     // while the dedicated task's card was left with a pre-upgrade single-quote hook error.
-    const orig = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, following: false, session_context: { session_id: 's-orig' } });
+    const orig = await rt.tool({ repo: 'octo/repo', pr: 42, published: false, session_context: { session_id: 's-orig' } });
     const follow = await rt.tool({ repo: 'octo/repo', pr: 42, following: true, session_context: { session_id: 's-follow' } });
 
     const origKey = `pr-cards/${orig.callId}.json`;
@@ -6684,4 +6567,184 @@ test('start adopts a same-session paused schedule and fails closed when a foreig
     assert.match(opened.reply.result.note, /无法确认 PR 卡片所属任务/, label);
     assert.equal(calls.includes('schedule_create'), false, label);
   }
+});
+
+test('A1 decoupling hands off to an independent worktree PR task only for setting, goal_active, or multi_pr_session', async () => {
+  // 1) Ordinary single-PR session keeps default in-session native follow-up (no follow_handoff).
+  {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true, autoRename: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_handoff, undefined);
+    assert.equal(opened.reply.result.follow_state, 'active');
+    assert.equal(rows.size, 1);
+    assert.equal(calls.filter((c) => c === 'schedule_create').length, 1);
+    // Single schedule_list before creation (plus post-create verification list) — no duplicate pre-check.
+    assert.equal(calls.filter((c) => c === 'schedule_list').length, 2);
+  }
+
+  // 2) Setting "independentFollow" ON (toggled via prset:independent) decouples & skips source rename and schedule_create.
+  {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true, autoRename: true } } });
+    const ask = await rt.tool({ repo: 'octo/repo', head: 'feat/decouple' });
+    await rt.click(ask.callId, 'prui:settings');
+    await rt.click(ask.callId, 'prset:independent');
+    assert.equal(rt.kv.prCard.independentFollow, true);
+    const opened = await rt.tool({ card_id: ask.callId, pr: 42, published: true });
+    assert.deepEqual(opened.reply.result.follow_handoff, {
+      recommended: true,
+      reason: 'setting',
+      pr_url: 'https://github.com/octo/repo/pull/42',
+      repo: 'octo/repo',
+      pr_number: 42,
+      title: '#42 Built-in PR skill',
+    });
+    assert.equal(opened.reply.result.settings.independent_follow, true);
+    assert.equal(opened.reply.result.todo.length, 1);
+    assert.match(opened.reply.result.todo[0], /独立跟进任务.*use_worktree: true/);
+    assert.equal(calls.includes('schedule_create'), false);
+    assert.equal(rows.size, 0);
+  }
+
+  // 3) Host-injected session_context.goal_active=true automatically decouples without changing default user settings.
+  {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true, autoRename: true } } });
+    const opened = await rt.tool({
+      repo: 'octo/repo', pr: 42, published: true,
+      session_context: { session_id: 's1', goal_active: true },
+    });
+    assert.equal(opened.reply.result.follow_handoff.recommended, true);
+    assert.equal(opened.reply.result.follow_handoff.reason, 'goal_active');
+    assert.equal(opened.reply.result.todo.length, 1);
+    assert.match(opened.reply.result.todo[0], /独立跟进任务.*use_worktree: true/);
+    assert.equal(calls.includes('schedule_create'), false);
+    assert.equal(rows.size, 0);
+  }
+
+  // 4) Same session already holding another active PR schedule decouples with reason='multi_pr_session'
+  // even if the agent mistakenly passed following: false at publish time.
+  {
+    const { hostApi, calls, rows } = followScheduler();
+    rows.set('sch-other', taskSchedule('sch-other', 's1', {
+      command: 'node "/approved skills/agent-skills/skills/_root__cindy-github--pr/scripts/pr-node.cjs" pr-heartbeat-gate.mjs https://github.com/octo/repo/pull/10',
+      timeoutMs: 180000,
+    }));
+    rows.get('sch-other').prTrigger = { url: 'https://github.com/octo/repo/pull/10', change: 'any' };
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true, autoRename: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, following: false });
+    assert.equal(opened.reply.result.follow_handoff.recommended, true);
+    assert.equal(opened.reply.result.follow_handoff.reason, 'multi_pr_session');
+    assert.equal(opened.reply.result.follow_handoff.active_session_pr_schedules, 1);
+    assert.equal(calls.filter((c) => c === 'schedule_list').length, 1);
+    assert.equal(calls.includes('schedule_create'), false);
+  }
+});
+
+test('Scheme B auto-merge requires explicit human clicks, isolates per-repo scope, rolls back on sync failure, and invalidates on PR changes', async () => {
+  const syncCalls = [];
+  let failSync = false;
+  const { hostApi, rows } = followScheduler();
+  const baseNodeRequest = hostApi.node.request;
+  hostApi.node.request = async (req) => {
+    if (req.method === 'syncAutoMergePolicy') {
+      syncCalls.push(req.params);
+      if (failSync) return { ok: false, error: 'disk full' };
+      return { ok: true, result: { ok: true } };
+    }
+    return baseNodeRequest(req);
+  };
+
+  const rt = mergeablePrRuntime({ hostApi, kv: { prCard: { autoFollow: true } } });
+  rt.viewer.login = 'octocat';
+  // Start with a viewed (unfollowed) card; clicking pr:follow below starts verified follow-up.
+  const cardId = (await rt.tool({ repo: 'octo/repo', pr: 42 })).reply.result.card_id;
+  // Mark publishedHere so clicking pr:follow starts a native schedule directly on this card.
+  const viewedSaved = savedCard(rt, cardId);
+  viewedSaved.publishedHere = true;
+  rt.files.set(`pr-cards/${cardId}.json`, JSON.stringify(viewedSaved));
+
+  // 1) Without verified follow-up, the card must not claim auto-merge is available.
+  assert.doesNotMatch(rt.lastCard(cardId).html, /data-ghost-action="pr:auto-merge-on"/);
+  assert.ok(visibleText(rt.lastCard(cardId).html).some((line) => line.includes(zhCopy.prAutoMergeNeedsFollow)));
+  await rt.click(cardId, 'pr:auto-merge-on');
+  assert.equal(syncCalls.length, 0);
+  assert.equal(savedCard(rt, cardId).autoMerge, undefined);
+  await rt.click(cardId, 'prui:settings');
+  await rt.click(cardId, 'prset:repo-auto-merge');
+  assert.equal(syncCalls.length, 0);
+  assert.ok(visibleText(rt.lastCard(cardId).html).some((line) => line.includes(zhCopy.prAutoMergeNeedsFollow)));
+  await rt.click(cardId, 'pr:follow');
+  assert.equal(rows.size, 1);
+  assert.match(rt.lastCard(cardId).html, /data-ghost-action="pr:auto-merge-on"/);
+
+  // 2) Missing userActionToken is rejected with zero sync calls.
+  await rt.click(cardId, 'pr:auto-merge-on', { userActionToken: undefined });
+  assert.equal(syncCalls.length, 0);
+  assert.equal(savedCard(rt, cardId).autoMerge, undefined);
+
+  // 3) Explicit human click enables per-PR auto-merge and syncs policy.
+  await rt.click(cardId, 'pr:auto-merge-on');
+  assert.equal(syncCalls.length, 1);
+  assert.equal(syncCalls[0].op, 'set-pr');
+  assert.equal(syncCalls[0].repo, 'octo/repo');
+  assert.equal(syncCalls[0].number, 42);
+  assert.equal(syncCalls[0].actor, 'octocat');
+  assert.equal(syncCalls[0].base, 'main');
+  assert.match(rt.lastCard(cardId).html, /data-ghost-action="pr:auto-merge-off"/);
+  assert.ok(visibleText(rt.lastCard(cardId).html).some((line) => line.includes(zhCopy.prAutoMergeActive)));
+
+  // A stopped schedule invalidates a stale card click without persisting policy.
+  rows.get('sch-1').status = 'paused';
+  await rt.click(cardId, 'pr:auto-merge-on');
+  assert.equal(syncCalls.length, 1);
+  rows.get('sch-1').status = 'active';
+
+  // 4) Failed policy clear keeps a pending revocation; later refresh retries even if base returns.
+  rt.pr.baseRef.name = rt.pr.baseRefName = 'release';
+  failSync = true;
+  await rt.tool({ card_id: cardId });
+  assert.equal(savedCard(rt, cardId).autoMerge.revokePending, true);
+  assert.doesNotMatch(rt.lastCard(cardId).html, /data-ghost-action="pr:auto-merge-off"/);
+  rt.pr.baseRef.name = rt.pr.baseRefName = 'main';
+  failSync = false;
+  await rt.tool({ card_id: cardId });
+  assert.equal(savedCard(rt, cardId).autoMerge, undefined);
+  assert.equal(syncCalls.at(-1).op, 'clear-pr');
+
+  // 5) Per-repo toggle requires userActionToken, rolls back on sync failure, and applies strictly to this exact repo.
+  if (!savedCard(rt, cardId).settingsOpen) await rt.click(cardId, 'prui:settings');
+  assert.match(rt.lastCard(cardId).html, /data-ghost-action="prset:repo-auto-merge" data-ghost-toggle="off"/);
+  const syncCountBeforeNoToken = syncCalls.length;
+  await rt.click(cardId, 'prset:repo-auto-merge', { userActionToken: undefined });
+  assert.equal(syncCalls.length, syncCountBeforeNoToken);
+  assert.match(rt.lastCard(cardId).html, /data-ghost-action="prset:repo-auto-merge" data-ghost-toggle="off"/);
+
+  failSync = true;
+  await rt.click(cardId, 'prset:repo-auto-merge');
+  assert.match(rt.lastCard(cardId).html, /data-ghost-action="prset:repo-auto-merge" data-ghost-toggle="off"/);
+  assert.ok(visibleText(rt.lastCard(cardId).html).some((line) => line.includes(zhCopy.prAutoMergeFailed)));
+
+  failSync = false;
+  await rt.click(cardId, 'prset:repo-auto-merge');
+  assert.equal(syncCalls.at(-1).op, 'set-repo');
+  assert.equal(syncCalls.at(-1).repo, 'octo/repo');
+  assert.equal(syncCalls.at(-1).actor, 'octocat');
+  assert.match(rt.lastCard(cardId).html, /data-ghost-action="prset:repo-auto-merge" data-ghost-toggle="on"/);
+  assert.ok(visibleText(rt.lastCard(cardId).html).some((line) => line.includes(zhCopy.prAutoMergeRepoActive)));
+
+  // Another repo sharing a KV with octo/repo enabled MUST NOT inherit octo/repo's auto-merge setting!
+  const otherRt = createPrRuntime({
+    github: prGraphql({ owner: 'other', repo: 'proj', number: 9 }),
+    hostApi,
+    kv: { prCard: { autoMergeRepos: { 'octo/repo': { enabled: true, actor: 'octocat', authorizedAt: 1 } } } },
+  });
+  const otherCard = await otherRt.tool({ repo: 'other/proj', pr: 9 });
+  assert.equal(visibleText(otherRt.lastCard(otherCard.callId).html).some((line) => line.includes(zhCopy.prAutoMergeRepoActive)), false);
+
+  // Toggling off reads persisted enabled state from KV and clears the repo policy.
+  await rt.click(cardId, 'prset:repo-auto-merge');
+  assert.equal(syncCalls.at(-1).op, 'clear-repo');
+  assert.match(rt.lastCard(cardId).html, /data-ghost-action="prset:repo-auto-merge" data-ghost-toggle="off"/);
 });

@@ -51,24 +51,45 @@ Every AI reviewer (including **Codex** and **Greptile**) MUST follow these rules
 
 ## Tiered merge policy & Owner Fast-Lane / 分级合并与快车道
 
+- **Approval gate equivalence / 审批门禁等价规则**: whenever required CI is green
+  (including `Greptile Review` `SUCCESS`, ignoring cancelled optional checks)
+  and no confirmed P0/P1 remains unresolved, either **`Greptile APPROVED`** or
+  an **`APPROVED` review on the current head from any registered maintainer**
+  (`.github/plugin-owners.json` `maintainers`) satisfies the approval gate. Do
+  not wait for an extra Greptile `APPROVED` review when a maintainer has already
+  approved the current head, and do not police the approval comment wording.
 - **L1 Routine maintenance (Fast-Lane)**: bugfixes, perf, small enhancements,
   copy/locales/icons, tests, and traceable dependency maintenance on existing
   plugins without widening boundaries.
   - **Maintainers & listed plugin owners** (`.github/plugin-owners.json`):
-    **Required CI green + Greptile `APPROVED` + no unresolved Codex P0/P1 →
+    **Required CI green + approval gate satisfied + no unresolved Codex P0/P1 →
     auto-merge directly.** No manual re-review and no device-verification wait.
   - **Unlisted external contributors**: automated review runs as usual, then a
-    maintainer or plugin owner gives a quick human check before merging (no
-    unattended auto-merge).
-- **L2 Boundary changes**: new plugin submission (touches `provisioning.json`),
-  widening `provisioning.json` to `all`, new/widened permissions, credentials,
-  autonomous hosts, or subprocesses, or changed third-party OAuth scopes / newly
-  added dependency on an unready host OAuth grant (even without editing
-  `ghost.json`). **Required CI green + no unresolved confirmed P0/P1 +
-  maintainer boundary confirmation & `Approve`** (`provisioning.json` is in
-  Greptile `excludePaths`, so new plugins and audience changes never
-  auto-approve; wait for platform approval when an OAuth/host grant is not
-  ready).
+    maintainer or plugin owner gives a quick human check and `Approve` before
+    merging (no unattended auto-merge).
+- **L2 Boundary changes**:
+  - **New plugin launch or `provisioning.json` changes** (new plugin or widening
+    `audience`): always require human maintainer review & `Approve`
+    (`provisioning.json` is in Greptile `excludePaths`, so these never
+    auto-approve).
+  - **Existing-plugin L2 adjustments** (new/widened permissions, credentials,
+    autonomous hosts, events, or subprocesses):
+    - **Registered maintainers** (`maintainers` in `.github/plugin-owners.json`):
+      opening a Ready PR already constitutes maintainer boundary confirmation.
+      **Required CI green + approval gate satisfied + no unresolved confirmed
+      P0/P1 → auto-merge directly** (unless waiting on an unmerged Cindy host PR
+      or an unapproved third-party OAuth grant).
+    - **Non-maintainers** (plugin owners or external contributors): **Required
+      CI green + no unresolved confirmed P0/P1 + registered maintainer
+      `Approve`** on the current head.
+  - **Unready third-party OAuth / unmerged host capabilities** (even without
+    editing `ghost.json`): hold when a required third-party OAuth scope is not
+    yet approved by the provider, or when the required Cindy host capability has
+    not yet merged to `makecindy/cindy` `main`. Once the host PR is merged to
+    `main`, plugins that isolate older clients via `minCindyVersion` (the plugin
+    platform filters releases by `minCindyVersion` and falls back for older
+    clients) or degrade safely on older hosts do **not** need to wait for a
+    stable Cindy client release.
 - **L3 Repository governance & publish trust**: `.github/workflows/**`,
   `.greptile/**`, `AGENTS.md`, `.github/plugin-owners.json`, weakening `.tests/`
   gates, or renaming/deleting a published plugin. **Required CI green + no

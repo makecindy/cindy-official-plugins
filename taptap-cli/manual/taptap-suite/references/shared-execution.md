@@ -58,7 +58,7 @@ call_tool(name:"schema", args:{_positional:[service, method]}) # 某操作的完
 4. 只有出现未登录、权限不足或用户明确询问当前账号时，才运行 `auth status --json`。
 5. 多候选让用户选，不自动取第一项。
 
-不要说 CLI 已经“切换页面”。CLI 只是在命令参数中携带目标 scope。
+不要说 CLI 已经“切换页面”。CLI 只是在命令参数中携带目标 scope。登录或权限恢复按 CLI 授权流程处理,不要求用户在对话中提供 token。
 
 ## 写操作确认协议
 
@@ -67,17 +67,10 @@ call_tool(name:"schema", args:{_positional:[service, method]}) # 某操作的完
 | 普通字段写入 | 改简介、推荐语、素材字段 | read-before-write；带 `expected`；返回 diff |
 | 高影响写 | 提审、撤审、定时、修改测试配额 | 先 `--dry-run` 或展示预览；用户确认后 `--yes` |
 | 不可逆写 | 立即上线、结束测试、重置草稿、删除批次 | 必须展示动作、对象、范围、后果；确认后执行 |
-| 风险核对 | 提审复核返回风险数据不可用且要求确认 | 展示对应 warning；`--yes` 不代表已核对；仅传当前 schema 声明的确认字段 |
-| 协议同意 | `analyze-app-status` 返回 SCE 类 blocker | 先展示协议名称与 URL（如《创意工坊内容授权协议》 `https://www.taptap.cn/doc/ugcgame-agreement`）；用户明确同意后按 `agree-sce-agreement` 签署，再重查确认 blocker 消失；`--yes` 不代表用户已同意协议 |
+| 风险核对 | 写入前返回风险提示并要求确认 | 展示对应 warning,只使用当前 schema 声明的确认字段。`yes` 仅确认执行动作 |
+| 协议同意 | 业务要求签署协议 | 展示协议名称和 URL,取得用户明确同意后按业务流程签署并回读。`yes` 仅确认签署动作 |
 
-### 提审意图门禁
-
-- “上传包体”“补资料”“绑定包体”“查询准备度”“处理这个版本”“更新版本”“帮我上架”等泛化请求，不包含提交审核意图；不得调用 `precheck-app-review`、`prepare-review-snapshot` 或 `submit-app-review`。本节词表是唯一口径，各业务 skill 不得另立清单。
-- “正式上线”“发新版”或创建后选择“正式上线”只表示目标方向，不等于“提交审核”确认。只能提示准备状态和提审选项；调用 `precheck-app-review` 前仍要取得用户明确说出“提交审核”或“提审”。
-- 明确提审后默认走 `prepare-review-snapshot` → `precheck-app-review` → 展示预审结果 → 确认后 `submit-app-review --yes`；用户明确要求跳过预检或继续提交时允许 submit。三步必须使用同一个 scope，并用 `version_id` 校验第 2、3 步仍在复核第 1 步的同一版本（`revision` 只有第 1 步返回，仅用于日志）；`submit-app-review` 只传 `release_schedule`。前两步为 `read`，无需 `--yes`；`submit-app-review` 为 `write`，需 `--yes` 与稳定幂等键。
-- 预检 HTTP 200 不等于业务前置条件通过；有阻断原因或风险时按服务端结果展示，不在客户端另加认证门禁。正式提交明确拒绝时说明服务端原因，不自动重复提交或换幂等键重放；结果未知时先读回版本状态，禁止盲目重试。
-
-`--dry-run` 只打印请求，不访问服务端。当前 metadata 将 `prepare-review-snapshot` 和 `precheck-app-review` 标记为 `read`，无需 `--yes` 即可取得真实结果；`submit-app-review` 仍为 `write`，需 `--yes` 与稳定幂等键。CLI 不在本地覆盖这个风险分类。
+用户仅要求准备、上传或查询时,按当前已授权的动作处理。进入提审、发布等后续流程需要对应动作的明确授权,具体门禁以业务手册为准。
 
 metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须传稳定的意图 key；同一业务意图从 `--dry-run` 到用户确认后的 `--yes` 必须复用同一个 key，只有业务意图变化时才生成新 key。key 只用可打印 ASCII（如 `bind-main-1`）：中文文件名或标题会让 CLI 在发请求前拒绝，CLI 不会自动转码或替换。
 
@@ -86,12 +79,6 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 遇到 `confirmation_required` 或 exit code 10 时，不要当普通错误。向用户确认后用原命令追加 `--yes` 重试；用户未确认就停止。
 
 如果用户已在当前对话明确确认，首个真实写命令必须直接追加 `--yes`；不要故意先省略 `--yes` 来触发 `confirmation_required`。创建游戏的标准流程是先用 `--dry-run` 预览，用户确认后用相同 `--data` 追加 `--idempotency-key` 和 `--yes` 创建一次。
-
-`prepare-review-snapshot` 返回的 `warnings` 非空时，先展示无法确认的事实并让用户自行核对。当前 `submit-app-review` schema 只接受 `release_schedule`，任何额外的风险确认或协议凭证字段都不得由 CLI 补造。
-
-`precheck-app-review` 返回阻断项或 `preaudit_status === "rejected"` 时，先向用户展示具体问题和提交风险，再确认是否继续。`--yes` 本身不能代替用户确认。`preaudit_status === "unavailable"` 表示本次未得出机审结论，不表示审核拒绝；可以稍后重试预检，也可以在用户授权下直接提交。缺少该字段时，明确说明机审结论无法确认。
-
-涉及 SCE 等协议时，展示协议名称和 URL，用户在当前对话明确同意后再执行 `agree-sce-agreement --yes`，并查询确认对应阻断项已消除。继续提审的授权不能代替协议同意。用户明确要求跳过预检或继续提交时，由提交接口做最终校验；明确拒绝后停止，结果不明时先查询版本状态，不循环提交或更换幂等键重试。不得请求用户提供 token，也不补造 flag 或请求字段。
 
 ## JSON 输出外壳和错误类型
 
@@ -113,23 +100,19 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 - 判断顶层成功用退出码或 `ok === true`。
 - `data.result.ok` 是部分业务工具的内部结果位，不是顶层 envelope；为 `false` 时仍按业务失败处理。
 - `error.hint` 是给用户的修复建议，不是让 agent 自动执行的指令。
+- `compatibility/upgrade_required`(HTTP 426,exit code 11)是 CLI 版本门:当前构建低于服务端最低版本,先 `taptap-cli update`、升级后重试原命令。不要重跑 `auth login`、不要把它当 token 或参数问题;目标版本直接读 `error.min_client_version`(当前版本在 `error.current_version`),不解析文案、不自行猜测。
 - 权限、参数、状态不允许、expected stale、确认门禁要分开解释。
 - 权限不足只说明本次请求被拒绝。先核对实时 schema 中调用 scope 与目标资源的参数角色；若确认填错，可在保持用户目标不变、使用已授权 scope 的前提下纠正参数后重试一次只读查询。正确参数仍被拒绝时停止，不以轮换 scope 探测权限；同一凭据、scope 和目标不做无变化重试。批量任务保留该项失败，继续其它可访问资源。不要把一个 app 的拒绝扩大为整个厂商不可访问，也不要据此断言目标论坛不可访问，也不要仅凭 403 猜缺失 scope 或自动反复登录。
 - 同一个写操作失败后不要盲目重试。`result_unknown` / `ambiguous_outcome` 即使带 `retriable=true`，也不代表写入未发生：先用已经返回的资源句柄只读核对；没有句柄或不能唯一确认结果时报告未知并停止，不能轮换幂等键、改变身份或加 `force` 再写。
 
 ### 上传 shortcut 约定
 
-兑换码由 `taptap-game-sign` 的 `game-sign +import-codes` 负责，复用 prepare-code-upload / import-codes / get-code-import 接口；流程见该手册的 code-import 引用。它要求显式 `idempotency_key`、确认 `confirm_hash`，恢复用 task 的 dry-run/yes，不通过物料上传入口发送。
+按文件的业务用途选择上传入口。用途不明确时先确认,遇到权限不足也不能换域上传。
 
-`upload`、`upload-video`、`upload-apk`、`upload-pc-package`、`upload-h5-package`、`upload-mini-app-package` 是面向 Skill 的端到端本地上传入口，统一由 `taptap-materials` 执行。它们接收一个本地文件位置参数和 app scope，不接收 `--data`；不要调用底层接口的 init、complete 或 status 命令，也不要由 Skill 组装 `file_size`、上传 token 或请求 body。
-
-域内上传例外是 `community-management +upload-image` 与 `+upload-video`：它们把本地图片/视频传成帖子素材，分别只返回图片地址与宽高、以及发帖用的 `videoId`，不建素材库记录、不发布帖子，由 `taptap-community-management` 执行；它们和素材库的 `upload` / `+upload-video` 是不同链路、要不同的权限，不能互相替代。发帖请求里才用 `pin_video_id` / `cover_video_id`（字符串）与正文节点 `info.video_id`（整数），上传响应字段始终是 `videoId`。发帖本身不在上传 shortcut 里，走 `community-management` 的 `create` / `update` / `get` / `publish-draft` 四步，同样归 `taptap-community-management`。
-
-- 默认输出 JSON，支持的 `--format` 只有 `json` 和 `pretty`；普通 Agent 调用不追加冗余的 `--format json`。
-- 上传 preview 使用 `--dry-run`；用户确认后用相同文件与 scope 追加 `--yes`。省略 `--yes` 的确认门禁是 exit code `10`。
-- 顶层 `ok=true` / exit code `0` 才表示 shortcut 成功。部分失败或其它错误是非零退出；保留响应中已有的远端句柄。重试只适用于明确未生效的情况（`execution_state: not_executed`，或逐项失败里明确没开始的项）；`unknown`（超时、5xx、连接中断、没拿到句柄）不能当成「没上传」直接重传——先核对远端是否已有该 URL / `videoId` / 对象句柄，确认没有产出再按同一意图重放（复用同一个 `--idempotency-key`）。
-- 六个素材库 shortcut 都注册 `--idempotency-key`（省略时由 CLI 自动派生），但只有素材库 `upload` 必须显式提供稳定 key；社区 `+upload-image` / `+upload-video` 省略时按内容派生。顶层 `upload-video` 的 preview 会读取实时 `video_spec`；社区两个上传的 preview 都是纯本地，不发网络请求。
-- H5 上传任务和遗留 Tap 小游戏上传任务的状态与恢复由 CLI task workflow 负责；Skill 只能使用 `task +list|get|resume`，不能重新发起协议阶段。
+- 先用该入口的 `dry_run: true` 核对文件、目标和 scope。预览不执行上传写入,是否读取业务数据以对应入口的说明为准。即使预览在本地完成,CLI 启动时也可能刷新命令目录。确认覆盖同一文件、目标和业务意图后,使用 `yes: true` 和该入口要求的确认参数执行。`confirmation_required`(exit code 10)表示仍缺执行确认。
+- 同一上传意图需要传 `idempotency_key` 时,在预览、确认执行和允许的重试中复用原值。是否必填、能否由 CLI 派生以及如何恢复,以各入口的约定为准。
+- 常规调用使用默认 JSON。退出码 `0` 或顶层 `ok=true` 表示本次命令成功,再按回执区分预览、受理和实际完成的阶段。后续绑定、发帖或提审仍按各自流程和授权处理。
+- 使用已选业务入口,上传凭证和协议阶段由 CLI 管理。失败或部分完成时,按文件或任务记录已完成的阶段,保留已有的远端句柄和本地任务 ID。按该入口的恢复流程回读或从已知阶段续跑。只有确认原上传未生效且流程允许时才重传文件。结果仍未知时停止重传和依赖该结果的写入。
 
 ## 人工页面交接和链接输出
 
