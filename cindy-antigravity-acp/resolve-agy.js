@@ -88,6 +88,7 @@ const WINDOWS_EXTENSIONS = ['.exe', '.cmd', '.bat'];
 const MAX_NVM_VERSIONS = 16;
 const MAX_CONFIG_BYTES = 16 * 1024;
 const MAX_CUSTOM_PATH_LENGTH = 1024;
+const MAX_HTTP_PROXY_LENGTH = 256;
 const CONFIG_DIR_NAME = 'cindy-antigravity-acp';
 const CONFIG_FILE_NAME = 'config.json';
 
@@ -358,12 +359,11 @@ function validateCustomPath(raw, options) {
 }
 
 /**
- * Reads the custom path configuration state:
- * - `{ kind: 'none' }` when no config file exists (auto-discovery active)
- * - `{ kind: 'configured', path }` when a valid custom path is saved
- * - `{ kind: 'invalid' }` when config.json exists but is unreadable, corrupt, oversized, or invalid
+ * The config file as read: `{ kind: 'none' }` without a file, `{ kind: 'invalid' }` when it is
+ * unreadable, corrupt or oversized, else `{ kind: 'ok', data }` with the optional fields
+ * `customPath` and `httpProxy`.
  */
-function readCustomAgyConfig(options) {
+function readConfigFile(options) {
   const file = configFilePath(options);
   if (!file) return { kind: 'none' };
   let stat;
@@ -379,8 +379,57 @@ function readCustomAgyConfig(options) {
   } catch {
     return { kind: 'invalid' };
   }
-  if (!data || typeof data !== 'object' || typeof data.customPath !== 'string') return { kind: 'invalid' };
-  const norm = normalizeCustomPath(data.customPath, options);
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return { kind: 'invalid' };
+  return { kind: 'ok', data };
+}
+
+/**
+ * Atomically sets `field` in the config file, or removes it when `value` is null; the file is
+ * deleted once no field is left. A corrupt file is only replaced by a new custom path or cleared
+ * with it, so saving another setting never silently drops a path the user can still repair.
+ */
+function writeConfigField(field, value, options) {
+  const file = configFilePath(options);
+  if (!file) return { ok: false, error: 'write-failed' };
+  const current = readConfigFile(options);
+  if (current.kind === 'invalid' && field !== 'customPath') return { ok: false, error: 'config-invalid' };
+  const data = current.kind === 'ok' ? { ...current.data } : {};
+  if (value === null) delete data[field];
+  else data[field] = value;
+  if (Object.keys(data).length === 0) {
+    try {
+      fs.rmSync(file, { force: true });
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'write-failed' };
+    }
+  }
+  const ctx = context(options);
+  const dir = ctx.p.dirname(file);
+  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
+    fs.renameSync(tmp, file);
+    return { ok: true };
+  } catch {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* ignore cleanup error */ }
+    return { ok: false, error: 'write-failed' };
+  }
+}
+
+/**
+ * Reads the custom path configuration state:
+ * - `{ kind: 'none' }` when no custom path is saved (auto-discovery active)
+ * - `{ kind: 'configured', path }` when a valid custom path is saved
+ * - `{ kind: 'invalid' }` when config.json exists but is unreadable, corrupt, oversized, or its path is invalid
+ */
+function readCustomAgyConfig(options) {
+  const cfg = readConfigFile(options);
+  if (cfg.kind !== 'ok') return cfg;
+  if (cfg.data.customPath === undefined) return { kind: 'none' };
+  if (typeof cfg.data.customPath !== 'string') return { kind: 'invalid' };
+  const norm = normalizeCustomPath(cfg.data.customPath, options);
   if (!norm.ok || !norm.path) return { kind: 'invalid' };
   return { kind: 'configured', path: norm.path };
 }
@@ -395,28 +444,53 @@ function readCustomAgyPath(options) {
 function writeCustomAgyPath(raw, options) {
   const checked = validateCustomPath(raw, options);
   if (!checked.ok) return checked;
-  const file = configFilePath(options);
-  if (!file) return { ok: false, error: 'write-failed' };
-  if (checked.path === null) {
-    try {
-      fs.rmSync(file, { force: true });
-    } catch {
-      return { ok: false, error: 'write-failed' };
-    }
-    return { ok: true, customPath: null };
-  }
-  const ctx = context(options);
-  const dir = ctx.p.dirname(file);
-  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+  const saved = writeConfigField('customPath', checked.path, options);
+  return saved.ok ? { ok: true, customPath: checked.path } : saved;
+}
+
+/**
+ * A proxy address as `http(s)://host[:port]`: '' for blank input (no proxy), null when it is
+ * anything else. Credentials are refused because the config file is plain text.
+ */
+function normalizeHttpProxy(raw) {
+  if (typeof raw !== 'string') return null;
+  const value = raw.trim();
+  if (!value) return '';
+  if (value.length > MAX_HTTP_PROXY_LENGTH || !/^https?:\/\/[^\s/@?#\\]+\/?$/i.test(value)) return null;
   try {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(tmp, JSON.stringify({ customPath: checked.path }, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
-    fs.renameSync(tmp, file);
-    return { ok: true, customPath: checked.path };
+    return new URL(value).origin;
   } catch {
-    try { fs.rmSync(tmp, { force: true }); } catch { /* ignore cleanup error */ }
-    return { ok: false, error: 'write-failed' };
+    return null;
   }
+}
+
+/** The saved HTTP proxy for agy, or null when none is saved (agy then keeps the inherited environment). */
+function readHttpProxy(options) {
+  const cfg = readConfigFile(options);
+  return (cfg.kind === 'ok' && normalizeHttpProxy(cfg.data.httpProxy)) || null;
+}
+
+/** Validates and saves (or clears when blank) the HTTP proxy every newly started agy uses. */
+function writeHttpProxy(raw, options) {
+  const proxy = normalizeHttpProxy(raw);
+  if (proxy === null) return { ok: false, error: 'invalid-proxy' };
+  const saved = writeConfigField('httpProxy', proxy || null, options);
+  return saved.ok ? { ok: true, httpProxy: proxy || null } : saved;
+}
+
+/** Sends agy's HTTP(S) traffic through `proxy` while loopback (sign-in callback, local MCP) stays direct. */
+function applyHttpProxy(ctx, env, proxy) {
+  // Keep every inherited bypass host: on macOS / Linux the two spellings can hold different lists.
+  const inherited = [envGet(env, 'NO_PROXY', ctx.win), envGet(env, 'no_proxy', ctx.win)].filter(Boolean).join(',');
+  const bypass = new Set(inherited.split(',').map((entry) => entry.trim()).filter(Boolean));
+  for (const host of ['localhost', '127.0.0.1', '::1']) bypass.add(host);
+  const vars = { HTTP_PROXY: proxy, HTTPS_PROXY: proxy, NO_PROXY: [...bypass].join(',') };
+  // Replace inherited values in any letter case (Windows names are case-insensitive).
+  for (const key of Object.keys(env)) {
+    if (Object.hasOwn(vars, key.toUpperCase())) delete env[key];
+  }
+  Object.assign(env, vars);
+  if (!ctx.win) Object.assign(env, { http_proxy: proxy, https_proxy: proxy, no_proxy: vars.NO_PROXY });
 }
 
 /**
@@ -466,6 +540,8 @@ function childEnv(agyPath, options) {
     parts.push(...fallbacks.filter(isDirectory));
   }
   out.PATH = uniqueAbsolute(ctx, parts).join(ctx.win ? ';' : ':');
+  const proxy = readHttpProxy(options);
+  if (proxy) applyHttpProxy(ctx, out, proxy);
   return out;
 }
 
@@ -656,11 +732,17 @@ function unavailable(reason, locale) {
 
 /**
  * Detection result for the logic page:
- * { available, path?, customPath?, customPathConfigured?, version?,
+ * { available, path?, customPath?, customPathConfigured?, httpProxy?, version?,
  *   reason?: 'not-installed' | 'custom-path-unavailable' | 'not-runnable',
  *   message?, messages?: { 'zh-CN', en }, detail? }
  */
 async function detectAgy(options) {
+  const result = await detectExecutable(options);
+  const httpProxy = readHttpProxy(options);
+  return httpProxy ? { ...result, httpProxy } : result;
+}
+
+async function detectExecutable(options) {
   const ctx = context(options);
   const locale = options && options.locale;
   const cfg = readCustomAgyConfig(options);
@@ -718,9 +800,11 @@ module.exports = {
   pickLocale,
   readCustomAgyConfig,
   readCustomAgyPath,
+  readHttpProxy,
   resolveAgy,
   runVersion,
   spawnAgy,
   validateCustomPath,
   writeCustomAgyPath,
+  writeHttpProxy,
 };

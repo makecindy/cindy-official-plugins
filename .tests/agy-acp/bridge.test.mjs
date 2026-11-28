@@ -192,6 +192,10 @@ if (process.env.FAKE_AGY_ARGSFILE) fs.writeFileSync(process.env.FAKE_AGY_ARGSFIL
 if (process.env.FAKE_AGY_PIDFILE) fs.writeFileSync(process.env.FAKE_AGY_PIDFILE, String(process.pid));
 process.stderr.write('fake-agy: ready\\n');
 if (process.env.FAKE_AGY_CRASH === '1') process.exit(3);
+if (process.env.FAKE_AGY_PROXY_FILE) {
+  fs.writeFileSync(process.env.FAKE_AGY_PROXY_FILE,
+    JSON.stringify([process.env.HTTP_PROXY, process.env.HTTPS_PROXY, process.env.NO_PROXY]));
+}
 const STATE = process.env.FAKE_AGY_STATE;
 if (STATE) {
   // Sign-in mode: an agent that offers Google sign-in and logout (like agy 1.5.12), keeps its sign-in
@@ -389,6 +393,240 @@ function startBridge(env, args = []) {
 }
 
 describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
+  if (official) test('a saved HTTP proxy shares config.json with the custom path and reaches every agy started afterwards', async (t) => {
+    const fixture = makeFixture(t, { extraEnv: { HTTP_PROXY: 'http://inherited:8000', NO_PROXY: 'example.test' } });
+    const { configFilePath } = await import(pathToFileURL(path.join(root, 'resolve-agy.js')).href);
+    const cfgFile = configFilePath({ env: fixture.env });
+    const readConfig = () => JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
+    const worker = startWorker(fixture.env);
+    t.after(() => worker.close());
+    let id = 0;
+    const call = async (method, params) => (await worker.call({ jsonrpc: '2.0', id: ++id, method, params })).result;
+    const proxy = 'http://127.0.0.1:7897';
+
+    assert.equal((await call('setCustomPath', { path: fixture.agyPath })).ok, true);
+    assert.deepEqual(await call('setHttpProxy', { proxy: ` ${proxy}/ ` }), { ok: true, httpProxy: proxy });
+    assert.ok(samePath(readConfig().customPath, fixture.agyPath));
+    assert.equal(readConfig().httpProxy, proxy);
+    for (const refused of ['http://user:secret@localhost:8080', 'socks5://127.0.0.1:7897', '127.0.0.1:7897', 'http://host/path']) {
+      assert.deepEqual(await call('setHttpProxy', { proxy: refused }), { ok: false, error: 'invalid-proxy' }, refused);
+    }
+    const detected = await call('detect', {});
+    assert.equal(detected.httpProxy, proxy);
+    assert.ok(samePath(detected.customPath, fixture.agyPath));
+
+    const seenFile = path.join(fixture.dir, 'seen-proxy.json');
+    async function proxySeenByAgy() {
+      const bridge = startBridge({ ...fixture.env, FAKE_AGY_PROXY_FILE: seenFile });
+      await waitFor(() => fs.existsSync(seenFile), 8_000, 'agy proxy environment');
+      bridge.child.stdin.end();
+      assert.equal((await bridge.closed).code, 0);
+      const seen = JSON.parse(fs.readFileSync(seenFile, 'utf8'));
+      fs.unlinkSync(seenFile);
+      return seen;
+    }
+    assert.deepEqual(await proxySeenByAgy(), [proxy, proxy, 'example.test,localhost,127.0.0.1,::1']);
+
+    // Clearing the proxy keeps the custom path; agy is back on the inherited environment.
+    assert.deepEqual(await call('setHttpProxy', { proxy: '' }), { ok: true, httpProxy: null });
+    assert.deepEqual(Object.keys(readConfig()), ['customPath']);
+    assert.equal((await call('detect', {})).httpProxy, undefined);
+    assert.deepEqual(await proxySeenByAgy(), ['http://inherited:8000', null, 'example.test']);
+
+    // A proxy alone is not a custom path; clearing the last setting removes the file.
+    assert.equal((await call('setHttpProxy', { proxy })).ok, true);
+    assert.equal((await call('setCustomPath', { path: '' })).ok, true);
+    assert.deepEqual(readConfig(), { httpProxy: proxy });
+    const auto = await call('detect', {});
+    assert.equal(auto.available, true);
+    assert.equal(auto.customPathConfigured, undefined);
+    assert.equal((await call('setHttpProxy', { proxy: '' })).ok, true);
+    assert.equal(fs.existsSync(cfgFile), false);
+
+    // A corrupt file is left for the custom path setting to repair.
+    fs.mkdirSync(path.dirname(cfgFile), { recursive: true });
+    fs.writeFileSync(cfgFile, '{ broken');
+    assert.deepEqual(await call('setHttpProxy', { proxy }), { ok: false, error: 'config-invalid' });
+    assert.equal(fs.readFileSync(cfgFile, 'utf8'), '{ broken');
+  });
+
+  if (official) test('the saved HTTP proxy keeps every inherited bypass host and loopback direct', async () => {
+    const { childEnv, configFilePath } = await import(pathToFileURL(path.join(root, 'resolve-agy.js')).href);
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-proxy-env-'));
+    try {
+      const options = { platform: 'linux', env: {
+        HOME: home, PATH: '/usr/bin', NO_PROXY: 'example.test,localhost', no_proxy: 'internal.test', https_proxy: 'http://old:1' } };
+      const file = configFilePath(options);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ httpProxy: 'http://127.0.0.1:7897' }));
+      const env = childEnv('/usr/bin/agy', options);
+      const bypass = 'example.test,localhost,internal.test,127.0.0.1,::1';
+      assert.deepEqual([env.HTTP_PROXY, env.HTTPS_PROXY, env.http_proxy, env.https_proxy], Array(4).fill('http://127.0.0.1:7897'));
+      assert.equal(env.NO_PROXY, bypass);
+      assert.equal(env.no_proxy, bypass);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  if (official) test('main.js saves the HTTP proxy for the settings page and keeps the proxy out of Cindy', async () => {
+    class Channel {
+      static all = [];
+      constructor(name) { this.name = name; this.onmessage = null; Channel.all.push(this); }
+      postMessage(data) {
+        const copy = JSON.parse(JSON.stringify(data));
+        for (const other of Channel.all) {
+          if (other !== this && other.name === this.name && other.onmessage) setTimeout(() => other.onmessage({ data: copy }), 0);
+        }
+      }
+    }
+    const puts = [];
+    const saved = [];
+    const context = vm.createContext({
+      BroadcastChannel: Channel, setTimeout, clearTimeout,
+      cindy: {
+        request: async () => ({ ok: true, context: { locale: 'en', uiLocale: 'en' } }),
+        node: {
+          request: async (request) => {
+            if (request.method === 'detect') return { ok: true, result: { available: true, path: '/bin/agy', version: '1.0.0' } };
+            if (request.method === 'listModels') return { ok: true, result: { supported: true, models: [{ id: 'm', name: 'M' }] } };
+            if (request.method === 'setHttpProxy') {
+              saved.push(request.params.proxy);
+              if (request.params.proxy === 'bad') return { ok: true, result: { ok: false, error: 'invalid-proxy' } };
+              return { ok: true, result: { ok: true, httpProxy: request.params.proxy || null } };
+            }
+            return { ok: false };
+          },
+        },
+        onHostMessage: () => () => {},
+      },
+      fetch: async (url, init) => {
+        if (url === '/kv' && !init) return { ok: true, json: async () => ({}) };
+        if (url === '/harnesses') puts.push(JSON.parse(init.body).harnesses[0]);
+        return { ok: true, status: 204 };
+      },
+    });
+    vm.runInContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context, { filename: 'main.js' });
+    await waitFor(() => puts.length > 0, 3_000, 'initial publish');
+    const page = new Channel(pluginId);
+    const received = [];
+    page.onmessage = (event) => received.push(event.data);
+    const result = (reqId) => received.find((m) => m.type === 'http-proxy-result' && m.reqId === reqId);
+
+    page.postMessage({ type: 'http-proxy-request', reqId: 'bad-1', proxy: 'bad' });
+    await waitFor(() => result('bad-1'), 3_000, 'refused proxy');
+    assert.deepEqual(result('bad-1'), { type: 'http-proxy-result', reqId: 'bad-1', ok: false, error: 'invalid-proxy' });
+
+    page.postMessage({ type: 'http-proxy-request', reqId: 'save-1', proxy: 'http://127.0.0.1:7897' });
+    // A resend of the same request is acknowledged again but saved once.
+    page.postMessage({ type: 'http-proxy-request', reqId: 'save-1', proxy: 'http://127.0.0.1:7897' });
+    await waitFor(() => result('save-1'), 3_000, 'saved proxy');
+    assert.ok(received.some((m) => m.type === 'http-proxy-ack' && m.reqId === 'save-1'));
+    assert.equal(result('save-1').ok, true);
+    assert.equal(result('save-1').snapshot.result.httpProxy, 'http://127.0.0.1:7897');
+    assert.equal(result('save-1').snapshot.result.version, '1.0.0');
+    assert.deepEqual(saved, ['bad', 'http://127.0.0.1:7897']);
+
+    page.postMessage({ type: 'http-proxy-request', reqId: 'clear-1', proxy: '' });
+    await waitFor(() => result('clear-1'), 3_000, 'cleared proxy');
+    assert.equal(result('clear-1').snapshot.result.httpProxy, undefined);
+    assert.ok(puts.every((entry) => !JSON.stringify(entry).includes('7897')), 'the proxy is not published to Cindy');
+  });
+
+  if (official) test('settings.js saves and clears the HTTP proxy like the custom path, and follows a save from another window', async () => {
+    class Channel {
+      static all = [];
+      constructor(name) { this.name = name; this.onmessage = null; this.listeners = []; Channel.all.push(this); }
+      addEventListener(type, listener) { if (type === 'message') this.listeners.push(listener); }
+      postMessage(data) {
+        const copy = JSON.parse(JSON.stringify(data));
+        for (const other of Channel.all) {
+          if (other === this || other.name !== this.name) continue;
+          setTimeout(() => {
+            other.onmessage?.({ data: copy });
+            for (const listener of other.listeners) listener({ data: copy });
+          }, 0);
+        }
+      }
+    }
+    const elements = new Map();
+    const element = (id) => {
+      if (!elements.has(id)) {
+        const listeners = {};
+        elements.set(id, { id, value: '', placeholder: '', textContent: '', hidden: false, disabled: false, attributes: {}, dataset: {}, listeners,
+          setAttribute(name, value) { this.attributes[name] = value; },
+          addEventListener(type, listener) { listeners[type] = listener; },
+          focus() {},
+          click() { listeners.click(); } });
+      }
+      return elements.get(id);
+    };
+    const context = vm.createContext({
+      BroadcastChannel: Channel, crypto: globalThis.crypto, setTimeout, clearTimeout, setInterval, clearInterval,
+      document: { getElementById: element, documentElement: {}, visibilityState: 'visible', addEventListener() {} },
+      fetch: async (url) => ({ ok: true, json: async () => (url === '/app-context' ? { context: { uiLocale: 'en' } } : { state: 'on' }) }),
+    });
+    const main = new Channel(pluginId);
+    const account = { signedIn: true, canSignIn: true, canSignOut: true, busy: null };
+    const snapshotWith = (httpProxy) => ({ ok: true, account, signInRequired: false, publish: { status: 'published' }, checkedAt: 1,
+      result: { available: true, version: '1.5.9', path: '/usr/local/bin/agy', ...(httpProxy ? { httpProxy } : {}) } });
+    const requests = [];
+    main.onmessage = ({ data }) => {
+      if (data.type === 'detect-request') {
+        main.postMessage({ type: 'detect-ack', reqId: data.reqId });
+        main.postMessage({ type: 'detect-result', reqId: data.reqId, snapshot: snapshotWith('http://127.0.0.1:7897') });
+      }
+      if (data.type === 'cli-state-request') main.postMessage({ type: 'cli-state' });
+      if (data.type === 'account-request') {
+        main.postMessage({ type: 'account-ack', reqId: data.reqId });
+        main.postMessage({ type: 'account-result', reqId: data.reqId, op: data.op, account });
+      }
+      if (data.type === 'http-proxy-request') {
+        requests.push(data.proxy);
+        main.postMessage({ type: 'http-proxy-ack', reqId: data.reqId });
+        main.postMessage(data.proxy === 'socks5://x'
+          ? { type: 'http-proxy-result', reqId: data.reqId, ok: false, error: 'invalid-proxy' }
+          : { type: 'http-proxy-result', reqId: data.reqId, ok: true, snapshot: snapshotWith(data.proxy.trim()) });
+      }
+    };
+    context.window = context;
+    vm.runInContext(fs.readFileSync(path.join(root, 'cli-settings.js'), 'utf8'), context, { filename: 'cli-settings.js' });
+    vm.runInContext(fs.readFileSync(path.join(root, 'settings.js'), 'utf8'), context, { filename: 'settings.js' });
+    const input = element('http-proxy-input');
+    const type = (value) => { input.value = value; input.listeners.input(); };
+
+    // The saved proxy is shown; saving is offered only once it changes.
+    await waitFor(() => input.value === 'http://127.0.0.1:7897', 3_000, 'saved proxy shown');
+    assert.equal(element('label-http-proxy').textContent, 'HTTP proxy');
+    assert.equal(element('http-proxy-save').disabled, true);
+    assert.equal(element('http-proxy-reset').hidden, false);
+    assert.equal(element('http-proxy-note').hidden, true);
+
+    type('socks5://x');
+    assert.equal(element('http-proxy-save').disabled, false);
+    element('http-proxy-save').click();
+    await waitFor(() => element('http-proxy-note').textContent.includes('http://'), 3_000, 'refused address');
+    assert.equal(element('http-proxy-note').attributes['data-tone'], 'error');
+    assert.equal(input.value, 'socks5://x', 'the refused address stays for editing');
+
+    type('http://127.0.0.1:7890');
+    assert.equal(element('http-proxy-note').hidden, true, 'editing clears the error');
+    input.listeners.keydown({ key: 'Enter', isComposing: false });
+    await waitFor(() => element('http-proxy-note').textContent.startsWith('Saved.'), 3_000, 'saved note');
+    assert.equal(element('http-proxy-save').disabled, true);
+
+    element('http-proxy-reset').click();
+    await waitFor(() => element('http-proxy-note').textContent === 'Proxy cleared.', 3_000, 'cleared note');
+    assert.equal(input.value, '');
+    assert.equal(element('http-proxy-reset').hidden, true);
+    assert.deepEqual(requests, ['socks5://x', 'http://127.0.0.1:7890', '']);
+
+    // Another settings window saved a proxy: this one shows it too.
+    main.postMessage({ type: 'http-proxy-result', reqId: 'other-window', ok: true, snapshot: snapshotWith('http://10.0.0.2:3128') });
+    await waitFor(() => input.value === 'http://10.0.0.2:3128', 3_000, 'proxy saved in another window');
+    assert.equal(element('http-proxy-reset').hidden, false);
+  });
+
   test('detect finds agy on PATH and reports its version', async (t) => {
     const fixture = makeFixture(t);
     const worker = startWorker(fixture.env);

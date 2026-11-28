@@ -5,12 +5,15 @@
  * stdout carries protocol messages only.
  *
  * Methods:
- *   detect({ locale? }) -> { available, path?, customPath?, customPathConfigured?, version?, reason?, message?, messages?, detail? }
+ *   detect({ locale? }) -> { available, path?, customPath?, customPathConfigured?, httpProxy?, version?, reason?, message?, messages?, detail? }
  *     Finds the local agy executable and checks that `agy --version` runs. `message`
  *     is in the requested locale ('zh-CN' or English); `messages` carries both.
  *   setCustomPath({ path, locale? }) -> { ok: true, customPath, detection } | { ok: false, error, detail? }
  *     Validates and probes a user-supplied absolute path to agy before saving it, or clears it
  *     when `path` is an empty string, then returns a fresh detection result.
+ *   setHttpProxy({ proxy }) -> { ok: true, httpProxy } | { ok: false, error: 'invalid-proxy' | 'config-invalid' | 'write-failed' }
+ *     Saves the `http(s)://host:port` proxy every newly started agy uses, or clears it for a blank
+ *     `proxy` (httpProxy is then null). Running agy processes keep the proxy they started with.
  *   listModels({ sessionId? })
  *     -> { supported: true, models: [{ id, name, description?, group?, efforts?, defaultEffort? }],
  *          modes?, defaultMode?, sessionId? }
@@ -44,7 +47,7 @@
 const readline = require('node:readline');
 const maintain = require('./cli-installer.cjs');
 const { accountDirProblem, hasVerifiedIsolatedSignIn } = require('./agy-account-dir.js');
-const { detectAgy, readCustomAgyConfig, runVersion, validateCustomPath, writeCustomAgyPath } = require('./resolve-agy.js');
+const { detectAgy, readCustomAgyConfig, runVersion, validateCustomPath, writeCustomAgyPath, writeHttpProxy } = require('./resolve-agy.js');
 const { listModels, readModelSession, rememberModelSession } = require('./agy-models.js');
 const account = require('./agy-account.js');
 
@@ -199,6 +202,12 @@ const handlers = {
   async detect(params) {
     const locale = params && typeof params.locale === 'string' ? params.locale : undefined;
     return detectAgy({ locale });
+  },
+  setHttpProxy(params) {
+    const saved = writeHttpProxy(params && params.proxy);
+    // The next usage read starts agy with the new proxy.
+    if (saved.ok) usageReads.clear();
+    return saved;
   },
   setCustomPath(params) {
     if (!params || typeof params.path !== 'string') return { ok: false, error: 'not-absolute' };
