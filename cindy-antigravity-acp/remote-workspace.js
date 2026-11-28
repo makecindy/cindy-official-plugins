@@ -43,7 +43,7 @@
  *    agy expands into the file at `path` in rule text, is made inert so it cannot pull a file of this
  *    computer into the conversation.
  *
- * From agy 1.5.19 (macOS and Linux) the session runs under agy's default agent instead, held in by
+ * From agy 1.5.19 on macOS with the default account, the session runs under agy's default agent, held in by
  * lifecycle hooks. Since agy 1.5.17 a session under a custom agent, its subagents included, uses up
  * the Gemini quota four times as fast as one under the default agent (google-antigravity/
  * antigravity-cli#1890: intended, not a regression). Measured with the real CLI on 2026-11-28 and
@@ -65,7 +65,10 @@
  *    at the first prompt of a new session (not on resume, where the text is already in the
  *    conversation) and leaves a marker: model output in a new session without that marker means
  *    agy did not load the hooks, and the task is stopped before any tool can run.
- *  - A resumed session loads the hooks of the directory its process starts in.
+ *  - A resumed session loads the hooks of the directory its process starts in. New instructions
+ *    on resume are prepended to its first prompt, since SessionStart does not fire on resume.
+ *  - The default agent uses a private Gemini directory, so the host account's configured MCP
+ *    servers and plugins are not loaded. The macOS keychain still authenticates this session.
  * Not hidden in either mode: agy names the skills of its home directory (`~/.agents/skills`; for
  * the default account the user's own) to the model, with their descriptions. `skills.json` cannot
  * filter them, and another home directory breaks the default account's sign-in (macOS keychain).
@@ -200,9 +203,9 @@ function fullToolsSupported(version) {
   return versionAtLeast(version, FULL_TOOLS_MIN_VERSION);
 }
 
-/** Whether a task on this agy runs under the default agent and hooks (Windows was not checked). */
+/** Whether the isolated default-agent mode has been checked on this platform. */
 function hooksSupported(version, platform = process.platform) {
-  return platform !== 'win32' && versionAtLeast(version, HOOKS_MIN_VERSION);
+  return platform === 'darwin' && versionAtLeast(version, HOOKS_MIN_VERSION);
 }
 
 /** A private, otherwise empty directory agy runs in for this task; it holds the agent definition. */
@@ -407,7 +410,7 @@ function everythingExcept(names, prefixes) {
 
 /** The tools the hook stops: all but those of the task's MCP servers and agy's harmless own tools. */
 function hookMatcher(serverNames) {
-  return everythingExcept(FULL_TOOLS, serverNames.map((name) => `mcp_${name}_`));
+  return everythingExcept(FULL_TOOLS, serverNames.map((name) => `mcp_${name.replace(/[^A-Za-z0-9_]/g, '_')}_`));
 }
 
 /**
@@ -439,11 +442,13 @@ function usableServers(params) {
   const list = isObject(params) && Array.isArray(params.mcpServers) ? params.mcpServers : [];
   const servers = [];
   const dropped = [];
+  const normalizedNames = new Set();
   for (const server of list) {
     const name = isObject(server) && typeof server.name === 'string' ? server.name : '';
+    const normalized = name.replace(/[^A-Za-z0-9_]/g, '_');
     const usable = isObject(server) && server.type === 'http' && typeof server.url === 'string'
-      && SERVER_NAME.test(name) && !servers.some((item) => item.name === name) && servers.length < MAX_SERVERS;
-    if (usable) servers.push(server);
+      && SERVER_NAME.test(name) && !normalizedNames.has(normalized) && servers.length < MAX_SERVERS;
+    if (usable) { servers.push(server); normalizedNames.add(normalized); }
     else dropped.push(name || '(unnamed)');
   }
   return { servers, dropped };
@@ -567,6 +572,7 @@ function startRemoteWorkspace(agyPath, host) {
   const steering = createSteeringRelay();
   /** The session runs under the default agent and the hooks (instead of the restricted agent). */
   let hooked = false;
+  let resumeInstructions = '';
   /** Under hooks: the marker the `SessionStart` hook leaves; checked once in a new session. */
   let hookMarker = null;
   let promptSent = false;
@@ -613,6 +619,22 @@ function startRemoteWorkspace(agyPath, host) {
     const message = parsed === undefined ? parseLine(line) : parsed;
     if (message) {
       if (message.method === 'session/prompt') promptSent = true;
+      if (message.method === 'session/prompt' && resumeInstructions) {
+        const params = isObject(message.params) ? message.params : {};
+        const prompt = Array.isArray(params.prompt) ? params.prompt : [];
+        const instructions = resumeInstructions.replace(/@\[/g, '@\\[');
+        resumeInstructions = '';
+        const amended = { ...message, params: { ...params, prompt: [
+          { type: 'text', text: `Additional instructions for this resumed task:\n${instructions}\n` }, ...prompt,
+        ] } };
+        errorRelay.request(amended);
+        const handled = steering.handleClientMessage(amended);
+        if (handled) {
+          if (handled.toClient) toClient(handled.toClient);
+          if (handled.toAgent) toAgent(handled.toAgent);
+        } else toAgent(amended);
+        return;
+      }
       errorRelay.request(message);
       const handled = steering.handleClientMessage(message);
       if (handled) {
@@ -709,9 +731,25 @@ function startRemoteWorkspace(agyPath, host) {
   });
 
   const launch = (args, launchOptions) => {
+    const isolate = !host.accountDir && hooksSupported(host.agyVersion);
+    const geminiDir = path.join(dir, '.gemini');
+    if (isolate) {
+      // Keep conversation history available when Cindy resumes in a fresh launch directory.
+      // Configuration and plugins stay in the private Gemini directory.
+      const appData = path.join(geminiDir, 'antigravity-cli');
+      const original = path.join(os.homedir(), '.gemini', 'antigravity-cli');
+      fs.mkdirSync(appData, { recursive: true });
+      for (const name of ['conversations', 'brain']) {
+        const source = path.join(original, name);
+        fs.mkdirSync(source, { recursive: true });
+        const link = path.join(appData, name);
+        if (!fs.existsSync(link)) fs.symlinkSync(source, link, 'dir');
+      }
+    }
     const child = spawnAgy(agyPath, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: dir,
+      ...(isolate ? { isolatedGeminiDir: geminiDir } : {}),
       ...(host.accountDir ? { accountDir: host.accountDir } : {}),
       ...(launchOptions?.logFile ? { logFile: launchOptions.logFile } : {}),
     });
@@ -783,15 +821,19 @@ function startRemoteWorkspace(agyPath, host) {
     }
     try {
       const names = servers.map((server) => server.name);
-      hooked = hooksSupported(host.agyVersion);
+      // The empty Gemini directory was verified with the macOS keychain login. Other account
+      // storage and Linux have not been checked; they retain the restricted custom agent.
+      hooked = !host.accountDir && hooksSupported(host.agyVersion);
       if (hooked) {
         const marker = writeRemoteHooks(dir, names, { instructions: instructions.text });
         // Only a new session runs `SessionStart`; a resumed one already has the instructions.
         hookMarker = request.method === 'session/new' ? marker : null;
+        if (request.method !== 'session/new') resumeInstructions = instructions.text;
       } else {
         writeAgentDefinition(dir, names, { fullTools: fullToolsSupported(host.agyVersion), instructions: instructions.text });
       }
-      agent = launch(hooked ? acpArgs : [...acpArgs, '--agent', AGENT_NAME], sessionLog ? { logFile: sessionLog.file } : undefined);
+      const hookArgs = hooked ? [...acpArgs, '--gemini-dir', path.join(dir, '.gemini')] : [...acpArgs, '--agent', AGENT_NAME];
+      agent = launch(hookArgs, sessionLog ? { logFile: sessionLog.file } : undefined);
       // Started only once agy is: a launch that throws leaves no warm-up running. session/new waits for
       // it (see onAgentLine).
       warmup = warmMcpServers(servers, { log: (text) => process.stderr.write(`[agy-acp] ${text}\n`) });

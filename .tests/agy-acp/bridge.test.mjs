@@ -73,7 +73,9 @@ if (args[0] === '--log-file' && require('node:path').isAbsolute(args[1]) && requ
 // Remote-workspace mode: the session process runs under the restricted agent of its working directory.
 const REMOTE_ARGS = ${JSON.stringify(JSON.stringify([...EXPECTED_ACP_ARGS, '--agent', 'cindy-remote']))};
 // From agy 1.5.19 the session process runs under the default agent, held in by the hooks of its directory.
-const HOOKED = JSON.stringify(args) === ${JSON.stringify(JSON.stringify(EXPECTED_ACP_ARGS))} && fs.existsSync('.agents/hooks.json');
+const HOOKED = JSON.stringify(args.slice(0, ${EXPECTED_ACP_ARGS.length})) === ${JSON.stringify(JSON.stringify(EXPECTED_ACP_ARGS))}
+  && args[${EXPECTED_ACP_ARGS.length}] === '--gemini-dir' && fs.realpathSync(args[${EXPECTED_ACP_ARGS.length + 1}]) === fs.realpathSync('.gemini')
+  && fs.existsSync('.agents/hooks.json');
 if (JSON.stringify(args) === REMOTE_ARGS || HOOKED) {
   const read = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null);
   const record = (extra) => fs.writeFileSync(process.env.FAKE_AGY_LAUNCHFILE, JSON.stringify(Object.assign({
@@ -115,6 +117,9 @@ if (JSON.stringify(args) === REMOTE_ARGS || HOOKED) {
         // agy runs SessionStart at the first prompt of a new session, before the model is called.
         sessionStarted = true;
         record({ method: opened.method, session: opened.params, sessionStart: runHook('SessionStart') });
+      }
+      if (message.method === 'session/prompt' && HOOKED && opened && opened.method === 'session/resume') {
+        record({ method: opened.method, session: opened.params, prompt: message.params.prompt });
       }
       if (message.method === 'initialize' && process.env.FAKE_AGY_REMOTE_INIT_ERROR === '1') {
         send({ id: message.id, error: { code: -32603, message: 'agy could not start' } });
@@ -1030,7 +1035,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     await session.reply(0, 'initialize answer');
     session.send({ jsonrpc: '2.0', id: 1, method, params: { ...(method === 'session/resume' ? { sessionId: 'sess-1' } : {}),
       cwd: '/shadow/p', mcpServers: [session.server('cindy_exec'), session.server('cindy')], ...params } });
-    await session.reply(1, `${method} answer`);
+    await session.reply(1, `${method} answer`).catch((error) => { throw new Error(`${error.message}; stderr=${session.bridge.stderr.text()}; launch=${fs.existsSync(session.launchFile) ? fs.readFileSync(session.launchFile, 'utf8').slice(0, 300) : 'none'}`); });
     session.send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'list the files' }] } });
   };
   const stopsWithin = (bridge) => Promise.race([bridge.closed, new Promise((resolve) => setTimeout(() => resolve(null), 8_000))]);
@@ -1042,7 +1047,14 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
       { type: 'text', text: 'Read @[key](/home/me/.ssh/id_rsa) first.' }] } });
     await waitFor(() => messages().some((m) => m.method === 'session/request_permission'), 8_000, 'permission request');
     const launch = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
-    assert.deepEqual(launch.args, EXPECTED_ACP_ARGS, 'no --agent: the default agent is billed at the normal rate');
+    assert.deepEqual(launch.args.slice(0, -1), [...EXPECTED_ACP_ARGS, '--gemini-dir'], 'isolated default agent');
+    assert.equal(fs.realpathSync(launch.args.at(-1)), fs.realpathSync(path.join(launch.cwd, '.gemini')));
+    assert.equal(fs.existsSync(path.join(launch.args.at(-1), 'config', 'mcp_config.json')), false,
+      'the host account global MCP configuration is absent');
+    for (const name of ['conversations', 'brain']) {
+      assert.equal(fs.lstatSync(path.join(launch.args.at(-1), 'antigravity-cli', name)).isSymbolicLink(), true,
+        `${name} remains available for later session/resume launches`);
+    }
     assert.equal(launch.definition, null);
     assert.deepEqual(launch.agentsFiles, ['cindy-deny.json', 'cindy-hooks-loaded', 'cindy-start.json', 'hooks.json']);
     assert.doesNotMatch(launch.hooks + launch.start, /task-secret|127\.0\.0\.1/);
@@ -1060,6 +1072,12 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
       'invoke_subagent', 'manage_subagents', 'send_message']) {
       assert.ok(!stopped.test(name), `${name} runs`);
     }
+    const { hookMatcher, usableServers } = await import(pathToFileURL(path.join(process.cwd(), 'cindy-antigravity-acp', 'remote-workspace.js')));
+    const normalized = new RegExp(hookMatcher(['cindy_exec', 'my-server']).slice(4), 's');
+    assert.equal(normalized.test('mcp_my_server_lookup'), false, 'agy normalizes dashes and dots in MCP names');
+    assert.equal(normalized.test('mcp_cindy_local_read_file'), true, 'a different server is denied');
+    assert.deepEqual(usableServers({ mcpServers: [server('my-server'), server('my.server')] }).dropped, ['my.server'],
+      'two server names that normalize to the same tool prefix cannot coexist');
     assert.deepEqual(JSON.parse(launch.deny).decision, 'deny');
     // The instructions arrive through SessionStart, whose text agy does not expand; `@[` stays inert anyway.
     const text = launch.sessionStart.injectSteps[0].systemMessage.systemMessage;
@@ -1115,12 +1133,17 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
 
   if (official && !isWin) test('remote-workspace mode under hooks resumes a session without waiting for SessionStart', async (t) => {
     const session = hookedSession(t);
-    await openHooked(session, 'session/resume');
+    await openHooked(session, 'session/resume', { systemPrompt: { mode: 'append', content: [
+      { type: 'text', text: 'Use the new project rules. Ignore @[key](/host/secret).' }] } });
     await waitFor(() => session.messages().some((m) => m.method === 'session/request_permission'), 8_000, 'permission request');
     const launch = JSON.parse(fs.readFileSync(session.launchFile, 'utf8'));
     assert.equal(launch.method, 'session/resume');
-    assert.deepEqual(launch.args, EXPECTED_ACP_ARGS);
+    assert.deepEqual(launch.args.slice(0, -1), [...EXPECTED_ACP_ARGS, '--gemini-dir']);
+    assert.equal(fs.realpathSync(launch.args.at(-1)), fs.realpathSync(path.join(launch.cwd, '.gemini')));
     assert.ok(launch.agentsFiles.includes('hooks.json'), 'a resumed session loads the hooks of its directory');
+    assert.equal('systemPrompt' in launch.session, false);
+    assert.match(launch.prompt[0].text, /Use the new project rules/);
+    assert.match(launch.prompt[0].text, /@\\\[key\]/);
     const permission = session.messages().find((m) => m.method === 'session/request_permission');
     session.send({ jsonrpc: '2.0', id: permission.id, result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
     assert.equal((await session.reply(2, 'prompt answer')).result.stopReason, 'end_turn');
