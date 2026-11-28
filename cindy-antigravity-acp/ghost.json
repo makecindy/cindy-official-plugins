@@ -3,8 +3,8 @@
   "id": "cindy-antigravity-acp",
   "name": "Antigravity",
   "description": "Run Cindy tasks with the Google Antigravity CLI (agy) installed on this computer.",
-  "version": "0.7.1",
-  "releaseNotes": "Background quota checks first verify the default Google sign-in without opening a browser. Failed quota reads back off, and signing in lets the next check run immediately.",
+  "version": "0.7.2",
+  "releaseNotes": "On Windows (default account, agy 1.5.19 or later), tasks on another computer and shared tasks now run under Antigravity's default agent, billed at the normal Gemini rate instead of the custom agent's fourfold rate. As on macOS, hooks and a private Gemini directory keep Antigravity's own tools off. Added accounts, older agy versions and Linux keep the restricted custom agent.",
   "minCindyVersion": "0.1.148",
   "icon": "icon.png",
   "locales": {
