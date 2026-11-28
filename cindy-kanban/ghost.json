@@ -1,0 +1,480 @@
+{
+  "schemaVersion": 3,
+  "id": "cindy-kanban",
+  "name": "Agent 看板",
+  "description": "侧栏看板：四列展示 Cindy 伙伴与 Herdr agent，点卡片跳转对话或 pane，支持策略、启发分析和自动机制。",
+  "whenToUse": "用户想一眼看清各个 agent 和任务谁在跑、谁卡住、谁排队、谁空闲，要制定调度策略、分析现状或设置自动机制时使用。",
+  "version": "1.0.8",
+  "minCindyVersion": "0.1.144",
+  "entry": "main.js",
+  "icon": "assets/icon.png",
+  "node": {
+    "entry": "node/worker.cjs",
+    "protocol": "json-rpc-stdio"
+  },
+  "tools": [
+    {
+      "name": "board_snapshot",
+      "description": "读取伙伴状态与本机各项目任务状态，返回看板数据快照。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "board_state",
+      "description": "读取看板当前状态与调度协议：四列归属、每个 agent 持有的 task 列表、常驻策略、派活规则。要在看板上调度 agent 前先调用它，不要凭猜测派活。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "board_dispatch",
+      "description": "给看板上的某个 agent 派活。targetKind=herdr 按 paneId 派给 Herdr agent；targetKind=cindy 按伙伴 id 派给 Cindy 伙伴。只给空闲或排队的条目派活，一次一件可验收的活。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "targetKind": {
+            "type": "string",
+            "enum": [
+              "herdr",
+              "cindy"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "description": "Herdr 的 paneId，或 Cindy 伙伴 id"
+          },
+          "text": {
+            "type": "string",
+            "description": "派给该 agent 的具体任务描述"
+          }
+        },
+        "required": [
+          "targetKind",
+          "target",
+          "text"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "board_open",
+      "description": "打开看板卡片对应的目标：kind=companion 打开伙伴对话，kind=task 打开任务，kind=pane 聚焦 Herdr pane。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "companion",
+              "task",
+              "pane"
+            ]
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "board_policy",
+      "description": "读取或保存看板常驻策略。get 返回当前策略；set 覆盖保存。策略会随 board_state 提供给每个读看板的 agent。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "get",
+              "set"
+            ]
+          },
+          "policy": {
+            "type": "string"
+          },
+          "patrol": {
+            "type": "string",
+            "description": "巡检方式：每轮检查哪些列、阈值与处理规则"
+          },
+          "herdrIdleAsBusy": {
+            "type": "boolean",
+            "description": "Herdr idle 是否计入在途"
+          },
+          "termInputVisible": {
+            "type": "boolean",
+            "description": "终端输入行是否显示"
+          },
+          "includeTerminalText": {
+            "type": "boolean",
+            "description": "是否把 Herdr 终端正文摘要交给模型（默认关闭）"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "board_report",
+      "description": "巡检结束时写入本次判断依据：整体结论、卡点和排队清单、原因说明，以及卡点目标 id（refs，用于去重）。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "description": "一句话结论，如 ok / 有卡点 / 有排队待处理"
+          },
+          "basis": {
+            "type": "string",
+            "description": "判断依据说明"
+          },
+          "blocked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "queued": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "本轮卡点对应的目标 id（如 Herdr paneId），用于下一轮去重"
+          }
+        },
+        "required": [
+          "verdict"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "board_pick_model",
+      "description": "打开模型选择器，返回用户选中的 route 供分析与自动机制使用。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "board_analyze",
+      "description": "用选定模型读当前看板状态与常驻策略，输出整体判断与最多 3 条启发式建议。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "focus": {
+            "type": "string"
+          },
+          "route": {
+            "description": "board_pick_model 返回的完整 route"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "board_automate",
+      "description": "把自然语言目的优化成自动化提示词，并打开预填的自动化创建面板让主人亲手保存。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "purpose": {
+            "type": "string"
+          },
+          "companionName": {
+            "type": "string"
+          },
+          "intervalMs": {
+            "type": "number"
+          },
+          "route": {}
+        },
+        "required": [
+          "purpose"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "board_pane_read",
+      "description": "读取某个 Herdr pane 的最近画面内容（recent 行），用于判断卡点原因。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "paneId": {
+            "type": "string"
+          },
+          "lines": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "paneId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "board_pane_action",
+      "description": "对某个 Herdr pane 执行动作：send=输入文本，keys=发送按键，interrupt=发送 Ctrl+C 中断。用于解卡点，谨慎使用。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "paneId": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "send",
+              "send_input",
+              "keys",
+              "interrupt"
+            ],
+            "description": "send=输入文本；send_input=输入整行并回车（原子）；keys=发送按键；interrupt=发送 Ctrl+C 中断"
+          },
+          "text": {
+            "type": "string"
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "paneId",
+          "action"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "board_schedule_get",
+      "description": "读取看板巡检自动化的当前状态：频率、下次触发、是否暂停。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "board_schedule_apply",
+      "description": "应用巡检计划：频率档位（30m/1h/2h/4h/daily/weekly）、时间点与星期、启用开关。实际修改 Cindy 自动化。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "preset": {
+            "type": "string",
+            "enum": [
+              "30m",
+              "1h",
+              "2h",
+              "4h",
+              "daily",
+              "weekly"
+            ]
+          },
+          "time": {
+            "type": "string",
+            "description": "daily/weekly 的时间点 HH:MM"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "interval",
+              "daily",
+              "weekly"
+            ],
+            "description": "重复方式：interval 按间隔，daily 每天，weekly 每周"
+          },
+          "every": {
+            "type": "number",
+            "description": "interval 模式下的数量"
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "minutes",
+              "hours"
+            ],
+            "description": "interval 模式的单位"
+          },
+          "weekdays": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "weekly 模式下的星期，0=周日…6=周六"
+          }
+        },
+        "required": [
+          "mode",
+          "enabled"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "board_chat",
+      "description": "看板底部聊天：主人发指令，指挥官 agent 读看板、派活、改策略后回复。无 text 时只返回历史。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "route": {}
+        },
+        "additionalProperties": false
+      }
+    }
+  ],
+  "agent": {
+    "observe": true,
+    "companions": true,
+    "tasks": true,
+    "targets": true,
+    "schedule": true,
+    "hostTools": [
+      "scheduler"
+    ]
+  },
+  "mcpApps": {
+    "ui": {
+      "resources": [
+        {
+          "uri": "ui://cindy-kanban/board",
+          "file": "ui/board.html"
+        }
+      ],
+      "tools": {
+        "board_snapshot": {
+          "visibility": [
+            "app"
+          ]
+        },
+        "board_state": {
+          "visibility": [
+            "app",
+            "model"
+          ]
+        },
+        "board_dispatch": {
+          "visibility": [
+            "app",
+            "model"
+          ]
+        },
+        "board_open": {
+          "visibility": [
+            "app"
+          ]
+        },
+        "board_policy": {
+          "visibility": [
+            "app",
+            "model"
+          ]
+        },
+        "board_report": {
+          "visibility": [
+            "app",
+            "model"
+          ]
+        },
+        "board_pick_model": {
+          "visibility": [
+            "app"
+          ]
+        },
+        "board_analyze": {
+          "visibility": [
+            "app"
+          ]
+        },
+        "board_automate": {
+          "visibility": [
+            "app"
+          ]
+        },
+        "board_pane_read": {
+          "visibility": [
+            "app",
+            "model"
+          ]
+        },
+        "board_pane_action": {
+          "visibility": [
+            "app",
+            "model"
+          ]
+        },
+        "board_schedule_get": {
+          "visibility": [
+            "app"
+          ]
+        },
+        "board_schedule_apply": {
+          "visibility": [
+            "app"
+          ]
+        },
+        "board_chat": {
+          "visibility": [
+            "app"
+          ]
+        }
+      }
+    },
+    "host": {
+      "views": [
+        {
+          "id": "board",
+          "title": "Agent 看板",
+          "resourceUri": "ui://cindy-kanban/board",
+          "scope": "global"
+        }
+      ],
+      "contributions": [
+        {
+          "id": "navigation",
+          "title": "Agent 看板",
+          "position": "sidebar.navigation",
+          "view": "board",
+          "icon": "chart-column"
+        }
+      ]
+    }
+  },
+  "locales": {
+    "zh-CN": "locales/zh-CN.json",
+    "en": "locales/en.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "releaseNotes": "修复评审指出的聊天首流问题：建任务失败不再让后续请求永久等待；首次「建任务+发首条+写绑定」整体串行，后续指令不会再落到第二个指挥官任务。",
+  "author": "joei4cm"
+}

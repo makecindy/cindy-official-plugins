@@ -1,0 +1,49 @@
+{
+  "name": "Agent 보드",
+  "description": "사이드바 보드: Cindy 파트너와 Herdr agent를 네 열로 보여주고 카드를 누르면 대화나 pane이 열립니다. 컬러 터미널, 지시용 채팅창, 점검 일정과 상시 정책을 갖췄습니다.",
+  "whenToUse": "어떤 agent와 작업이 진행 중·막힘·대기·유휴인지 보고 싶을 때, 배정 정책을 정하거나 현황을 분석하거나 자동화를 설정할 때 사용합니다.",
+  "tools": {
+    "board_snapshot": {
+      "description": "파트너 상태와 이 PC 프로젝트의 작업을 읽어 보드 데이터 스냅샷을 반환합니다."
+    },
+    "board_state": {
+      "description": "보드 현재 상태와调度 규칙 규칙을 읽습니다: 열 소속, agent별 작업, 상시 정책, 점검 규칙, 지난 보고, 막힘 pane 화면 요약.调度 전에 호출하세요."
+    },
+    "board_dispatch": {
+      "description": "보드의 agent에게 작업을 배정합니다. targetKind=herdr 은 paneId, targetKind=cindy 는 파트너 id. 유휴 또는 대기 열의 항목에만 배정하고 한 번에 검증 가능한 한 건만 맡깁니다."
+    },
+    "board_open": {
+      "description": "보드 카드 뒤 대상을 엽니다: kind=companion 은 파트너 대화, kind=task 는 작업, kind=pane 은 Herdr pane 으로 포커스."
+    },
+    "board_policy": {
+      "description": "상시 정책, 점검 규칙, 화면 설정을 읽거나 저장합니다. 정책은 board_state 를 통해 보드를 읽는 모든 agent에 전달됩니다."
+    },
+    "board_report": {
+      "description": "점검을 마칠 때 이번 판단 근거를 기록합니다: 종합 결론, 막힘·대기 목록, 이유, 막힘 대상 id(refs, 중복 제거용)."
+    },
+    "board_pick_model": {
+      "description": "모델 선택기를 열고 사용자가 고른 route를 돌려줍니다. 분석과 자동화에 사용합니다."
+    },
+    "board_analyze": {
+      "description": "선택한 모델로 현재 보드 상태와 상시 정책을 읽어 종합 판단과 최대 3개 제안을 줍니다."
+    },
+    "board_automate": {
+      "description": "자연어로 쓴 목적을 자동화 프롬프트로 다듬어 미리 채워진 자동화 만들기 패널을 열고,오너이 직접 저장하게 합니다."
+    },
+    "board_pane_read": {
+      "description": "Herdr pane의 최근 화면(ANSI 색상 유지)을 읽어 막힘 원인을 확인합니다."
+    },
+    "board_pane_action": {
+      "description": "Herdr pane을 조작합니다: send는 텍스트 입력, keys는 키 전송, interrupt는 Ctrl+C 중단. 권한 상승, 샌드박스 우회, 대외 게시는오너 대신 하지 않습니다."
+    },
+    "board_schedule_get": {
+      "description": "보드 점검 자동화의 현재 상태를 읽습니다: 주기, 다음 실행 시각, 일시중지 여부."
+    },
+    "board_schedule_apply": {
+      "description": "점검 일정을 적용합니다: N 분 또는 N 시간마다, 매일, 매주(요일 여러 개 선택 + 시각), 그리고 사용·중지 스위치. Cindy 자동화를 직접 수정합니다."
+    },
+    "board_chat": {
+      "description": "보드 하단의 채팅창입니다.오너이 지시하면지휘 agent agent가 보드를 읽고 작업을 배정하거나 정책을 바꾼 뒤 응답합니다. text가 비면 기록만 돌려줍니다."
+    }
+  }
+}
