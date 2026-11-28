@@ -128,7 +128,7 @@ function makeError(id, message, rawError) {
  * segmented token usage, block steering while waiting for interactive/permission
  * replies, and guard against cancellation and rejection races.
  */
-function createSteeringRelay() {
+function createSteeringRelay(onSteeringDispatch) {
   const turns = new Map();
   const backendIds = new Map();
   const agentRequestSessions = new Map();
@@ -238,6 +238,7 @@ function createSteeringRelay() {
       method: 'session/prompt',
       params: { sessionId: turn.sessionId, prompt: item.prompt },
     });
+    onSteeringDispatch?.(turn.sessionId);
   }
 
   function settleAbortingInjection(turn, actions) {
@@ -514,7 +515,7 @@ function createSteeringRelay() {
 }
 
 function attachSteering(input, output, child, stop, errorRelay, verification) {
-  const steering = createSteeringRelay();
+  const steering = createSteeringRelay(errorRelay?.steeringDispatched);
   const openingSessions = new Map();
   const mcpSessions = new Map();
   let initializeId;

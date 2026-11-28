@@ -451,4 +451,104 @@ rl.on('line', (line) => {
       await bridge.closed;
     }
   });
+
+  for (const [mode, args] of [['local', []], ['remote', ['--cindy-remote-workspace']]]) {
+    test(`the ${mode} bridge recognizes a quota warning after steering without a task log`, async (t) => {
+      const env = makeFakeAgyEnv(t, `'use strict';
+const readline = require('node:readline');
+if (process.argv.includes('--version')) { console.log('1.5.18'); process.exit(0); }
+const send = (message) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\\n');
+const finish = (id) => send({ id, result: { stopReason: 'end_turn' } });
+const output = (text) => send({
+  method: 'session/update',
+  params: { sessionId: 'sess-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } } },
+});
+const warn = () => output('\\n⚠ ${QUOTA_MSG}\\n');
+let currentId;
+let firstSteerId;
+readline.createInterface({ input: process.stdin }).on('line', (line) => {
+  const message = JSON.parse(line);
+  if (message.method === 'initialize') {
+    send({ id: message.id, result: { protocolVersion: 1, agentInfo: { name: 'Antigravity ACP Server', version: '1.5.18' }, agentCapabilities: {} } });
+  } else if (message.method === 'session/new') {
+    send({ id: message.id, result: { sessionId: 'sess-1' } });
+  } else if (message.method === 'session/prompt') {
+    const text = message.params.prompt[0].text;
+    if (text === 'start') {
+      currentId = message.id;
+      output('Initial prose.');
+    } else if (text === 'hold handoff') {
+      firstSteerId = message.id;
+      output('Prose before queued steering.');
+    } else if (text === 'hit quota') {
+      finish(currentId);
+      warn();
+      finish(message.id);
+    }
+  } else if (message.method === 'test/releaseHandoff') {
+    output('Prose while steering is queued.');
+    const previousId = currentId;
+    currentId = firstSteerId;
+    finish(previousId);
+  } else if (message.method === 'test/finishWithQuote') {
+    warn();
+    finish(currentId);
+  }
+});
+`);
+      const bridge = startRelay(env, args);
+      t.after(() => bridge.child.kill());
+      const reply = (id) => waitFor(() => bridge.lines.find((m) => m.id === id), 5_000, `reply ${id}`);
+      const output = (text, from) => waitFor(() => bridge.lines.slice(from)
+        .some((m) => m.params?.update?.content?.text === text), 5_000, text);
+      const send = (id, method, params) => bridge.send({ jsonrpc: '2.0', id, method, params });
+      const prompt = (id, method, text) => send(id, method, {
+        sessionId: 'sess-1', prompt: [{ type: 'text', text }],
+      });
+      const begin = async (id) => {
+        const offset = bridge.lines.length;
+        prompt(id, 'session/prompt', 'start');
+        await output('Initial prose.', offset);
+        return offset;
+      };
+      const quotaWarning = `\n⚠ ${QUOTA_MSG}\n`;
+      const assertClassified = async (id, offset) => {
+        assert.equal((await reply(id)).error?.data?._meta?.cindy?.kind, 'usage-limit');
+        assert.equal(bridge.lines.slice(offset).some((m) => m.params?.update?.content?.text === quotaWarning), false);
+      };
+
+      send(1, 'initialize', { protocolVersion: 1 });
+      await reply(1);
+      send(2, 'session/new', {
+        cwd: os.tmpdir(),
+        mcpServers: args.length ? [{ name: 'cindy_exec', type: 'http', url: 'http://127.0.0.1:9/mcp' }] : [],
+      });
+      assert.equal((await reply(2)).result?.sessionId, 'sess-1');
+
+      const rejected = await begin(3);
+      send(4, '_session/steering', { sessionId: 'sess-1', prompt: [] });
+      assert.equal((await reply(4)).error?.code, -32603);
+      send(undefined, 'test/finishWithQuote');
+      assert.equal((await reply(3)).result?.stopReason, 'end_turn');
+      await output(quotaWarning, rejected);
+
+      const immediate = await begin(5);
+      prompt(6, '_session/steering', 'hit quota');
+      assert.equal((await reply(6)).result?.outcome, 'injected');
+      await assertClassified(5, immediate);
+
+      const queued = await begin(7);
+      prompt(8, '_session/steering', 'hold handoff');
+      await output('Prose before queued steering.', queued);
+      prompt(9, '_session/steering', 'hit quota');
+      send(undefined, 'test/releaseHandoff');
+      assert.equal((await reply(8)).result?.outcome, 'injected');
+      assert.equal((await reply(9)).result?.outcome, 'injected');
+      await assertClassified(7, queued);
+      await output('Prose while steering is queued.', queued);
+
+      bridge.child.stdin.end();
+      await bridge.closed;
+    });
+  }
 });

@@ -569,7 +569,6 @@ function startRemoteWorkspace(agyPath, host) {
   const seenSteps = new Map();
   const seenSafeTools = new Set();
   let serverNames = [];
-  const steering = createSteeringRelay();
   /** The session runs under the default agent and the hooks (instead of the restricted agent). */
   let hooked = false;
   let resumeInstructions = '';
@@ -731,6 +730,7 @@ function startRemoteWorkspace(agyPath, host) {
       },
     } : {}),
   });
+  const steering = createSteeringRelay(errorRelay.steeringDispatched);
 
   const launch = (args, launchOptions) => {
     const isolate = !host.accountDir && hooksSupported(host.agyVersion);
