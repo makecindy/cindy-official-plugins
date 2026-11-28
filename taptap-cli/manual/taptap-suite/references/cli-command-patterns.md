@@ -37,7 +37,7 @@ taptap-cli auth login                     # 用户自己补做授权
 
 ```text
 # ✅ 完整 operation input：业务字段按当前 schema 放进 data
-call_tool(name:"app get-app-module", args:{app_id:"1", developer_id:"1", data:{module_id:"assets-upload"}})
+call_tool(name:"app get-module", args:{app_id:"1", developer_id:"1", data:{module_id:"assets-upload"}})
 
 # ✅ 长 JSON / 多行 JSON：写进会话工作目录里的文件，用 @ 引用
 call_tool(name:"app save-changes", args:{app_id:"1", developer_id:"1", data:"@changes.json", idempotency_key:"<intent-key>", dry_run:true})
@@ -62,18 +62,14 @@ call_tool(name:"app +list", args:{dev_id:"1", page_size:50})
 ```text
 list_tools()                                                                   # 顶层命令
 call_tool(name:"app", args:{_help:true})                                       # 浏览 app 下的 method
-call_tool(name:"schema", args:{_positional:["app","prepare-review-snapshot"]})
-call_tool(name:"schema", args:{_positional:["app","precheck-app-review"]})
-call_tool(name:"app prepare-review-snapshot", args:{app_id:"1", developer_id:"2"})
-call_tool(name:"app precheck-app-review", args:{app_id:"1", developer_id:"2", data:"@review-precheck.json"})
-call_tool(name:"app submit-app-review", args:{app_id:"1", developer_id:"2", data:"@audit-confirmation.json", idempotency_key:"review-submit-1", yes:true})
+call_tool(name:"schema", args:{_positional:["app","get-module"]})
 ```
 
 规则：
 
 - `list_tools(category:"<service>")` 浏览该域的操作；`call_tool(name:"schema", args:{_positional:[service, method]})` 返回完整 input/output schema,它会在 metadata 缓存到期时做一次有界刷新。真实 operation 执行前若发现 catalog 已更新，CLI 会停止并要求重跑。
-- metadata 标记为 write / high-risk-write 的 operation 缺 `yes:true` 时返回 `CONFIRM_REQUIRED`；`dry_run:true` 只预览最终 HTTP 请求。命令接受幂等键时，预览和真实写入都要传稳定 `idempotency_key`，并在同一业务意图内复用。当前提审前两步（`prepare-review-snapshot`、`precheck-app-review`）标为 `read`，无需确认；`submit-app-review` 仍为 `write`，需用户确认与稳定幂等键。
-- 当前 schema 没有声明的风险确认或协议凭证字段不得由 CLI 补造。`precheck-app-review` 只在 `blockers` / `warnings` 里给出要求；SCE 等协议签署走独立的 `agree-sce-agreement`，`submit-app-review` 只传 `release_schedule`，其它无法完成的要求应向用户说明具体未完成事项及其对提审的影响。
+- metadata 标记为 write / high-risk-write 的 operation 缺 `yes:true` 时返回 `CONFIRM_REQUIRED`。`dry_run:true` 只生成最终 HTTP 请求预览。命令接受幂等键时，预览和真实写入都要传稳定 `idempotency_key`，并在同一业务意图内复用。
+- 风险确认和协议凭证只传当前 schema 声明的字段。无法满足服务端要求时，向用户说明具体未完成事项及其影响。
 - 分页 flag 只在 operation 声明分页时注册（接口定义字段 `x-pagination`，catalog 里序列化为 `pagination`）；输出字段以 output schema 为准。
 - `aliases` 只提供人类友好的转发，例如 `audit:submit`；手写 workflow shortcut 只编排 metadata 已声明的能力，不能扩展 API capability。
 - `completion zsh|bash|fish|powershell` 从当前注册命令树生成补全（用户在本机终端执行，插件不提供）。

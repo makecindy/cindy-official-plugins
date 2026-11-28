@@ -14,17 +14,35 @@
 
 #### 提审意图门禁
 
-哪些请求算提审意图、哪些只算目标方向，以 [shared execution](taptap-suite/references/shared-execution.md)「提审意图门禁」的唯一词表为准，本文件不另立清单；本节流程从“用户已明确提审”开始。
+“上传包体”“补资料”“绑定包体”“查询准备度”“处理这个版本”“更新版本”“帮我上架”按用户请求推进准备工作。“正式上线”“发新版”或创建时选择“正式上线”只描述目标方向，先报告准备状态和可选的提审动作。
 
-默认流程为：`prepare-review-snapshot` → `precheck-app-review` → 单独最终确认 → `submit-app-review --idempotency-key <submit-key> --yes`。**第 2、3 步必须传完全相同的 `release_schedule`**；第 1 步的入参只有 scope，不接受该字段（`additionalProperties: false`，多传即校验失败）。用 `version_id` 校验第 2、3 步仍在复核第 1 步的同一版本（`revision` 只有第 1 步返回）。当前 metadata 把前两步标为 `read`，无需 `--yes` 与幂等键；`submit-app-review` 仍为 `write`，需稳定幂等键与 `--yes`。CLI 不覆盖其风险分类。用户明确要求跳过预检或继续提交时可直接进入 `submit-app-review`，由服务端校验裁决。
+只有用户明确说出“提交审核”或“提审”后，才进入 `prepare-review-snapshot`、`precheck-review` 或 `submit-review`。这份词表统一用于游戏资料提审。
+
+#### 提审流程
+
+默认流程为 `prepare-review-snapshot` → `precheck-review` → 单独最终确认 → `submit-review --idempotency-key <submit-key> --yes`。三步使用同一游戏 scope。执行预检时，第 2、3 步的 `release_schedule` 必须完全相同。第 1 步只接受 scope（`additionalProperties: false`）。用 `version_id` 校验后两步与第 1 步为同一版本，`revision` 只在第 1 步返回，用于记录。
+
+当前 metadata 把前两步标为 `read`，无需 `--yes` 与幂等键。`submit-review` 是写入，需要稳定幂等键与 `--yes`。`--dry-run` 只生成 HTTP 请求预览，获取复核和预审结果需实际执行对应只读命令。CLI 沿用服务端的风险分类。
+
+#### 提审前检查
+
+《创意工坊内容授权协议》由 `analyze-app-status` 提前暴露，**不要在 precheck 时才处理**：
+
+- 关卡 / TapTap 制造游戏（`isLevel || isTapMaker`）未签署时，`analyze-app-status` 返回 `SCE_AGREEMENT_REQUIRED` blocker（含协议 url）。体检阶段就要引导签约，不要等到提审卡控。
+- 展示协议：名称《创意工坊内容授权协议》，url `https://www.taptap.cn/doc/ugcgame-agreement`。
+- 用户在当前对话明确同意后，调 `call_tool(name:"app agree-sce-agreement", args:{app_id:"<appId>", developer_id:"<developerId>", yes:true})` 签署，再重查 `analyze-app-status` 确认 blocker 消失。
+- 用户不愿用 CLI 签时，给协议 url 引导去开发者后台签约，签完回来重查。
+- 继续提审的授权和 `--yes` 只覆盖各自的执行动作。签署前必须取得用户对协议的明确同意。
+- 签署失败或协议状态无法确认时停止，不继续调用提审；向用户说明工具返回的错误。
+- `submit-review` 仍会做最终卡控（未签署 → 拒绝提交）；签约后该卡控自动通过。
 
 发布前必须把“版本发布”和“平台分发状态”拆开处理：
 
-- 调 `get-app-module` 并传 `{"module_id":"platform-status"}`，只筛选接口当次实际返回且可见的 `region_flag_*` 字段，读取各字段的 `current_value`、`value_labels` 和 `options`。
+- 调 `get-module` 并传 `{"module_id":"platform-status"}`，只筛选接口当次实际返回且可见的 `region_flag_*` 字段，读取各字段的 `current_value`、`value_labels` 和 `options`。
 - 不要把同模块的 `app_platforms`、`itunes_id`、`steam_id` 当成分发状态入口，也不要预设游戏类型、包体方向与状态枚举之间的映射；工具未返回的入口不要猜测或补写。
 - 使用 `value_labels[String(current_value)]` 逐项解释当前状态；不要把字段自身的 `label` 当成状态文案。若任一可见分发状态入口是“敬请期待”，说明发布版本不会自动改变该入口；如需开放下载或游玩，应在提审前把该入口改为当前 options 中的可用值、随本次版本一起审核生效，并询问保留当前值还是调整。
 - 用户选择修改时，先展示当前状态、目标状态、该字段动态 `options` 和影响，并执行带最新 `expected`、稳定 `--idempotency-key` 的 `save-changes --dry-run`。用户明确确认后复用同一个 key，去掉 `--dry-run` 并追加 `--yes` 写入；成功后重新读取 `platform-status`。
-- 用户不修改时保留原值。执行 `submit-app-review --yes` 前必须再次读取 `platform-status`；若可见字段、当前值或 options 变化，废弃旧摘要并按最新结果重新确认。
+- 用户选择保留时不修改分发设置。执行 `submit-review --yes` 前再次读取 `platform-status`；可见字段、当前值或 `options` 有变化时，向用户展示变化并重新确认。
 
 #### H5 开通 PC 分发入口
 
@@ -40,16 +58,20 @@ H5 开通 PC 分发入口时按两阶段执行：
 
 进入步骤 ① 前，先按 [review risk checklist](taptap-suite/references/taptap-app-edit/references/review-risk-checklist.md) 输出本地风险清单，分开列出官方规则、当前事实、历史审核、测试证据和无法验证项；其中**资质确认**转 qualification 手册（见其「提审前资质确认」执行规则）。该清单不替代服务端 blocker，也不能把历史拒审写成官方规则。
 
-然后确定本次上线方式，只允许 `{"kind":"immediate"}` 或 `{"kind":"scheduled_exact","release_time":<Unix秒>}`；不传时沿用草稿设置。**步骤 ① 的 operation 只接受 scope，不接受这个字段**，所以此处只确定取值，到步骤 ② 才作为 `release_schedule` 传入。调用后：
+然后确定本次上线方式，只允许 `{"kind":"immediate"}` 或 `{"kind":"scheduled_exact","release_time":<Unix秒>}`。沿用草稿设置时可省略。需要传入时，把该值放入 `review-release.json` 的 `release_schedule` 字段，从步骤 ② 开始使用该文件。
 
 - 用 `prepare-review-snapshot` 返回的 `changes` 和 `warnings` 向用户复核资料、包体、资质和风险提示；未填写与不适用要明确区分。
 - 合并展示本地风险清单与服务端结果时保留来源；服务端结果优先，不能静默删除其 blocker 或 warning。
-- `prepare-review-snapshot` 返回的 `warnings` 非空时，说明当前无法确认的风险事实，不能把它们当作已通过。
-- 保存本次返回的 `revision` 和 `version_id`，后续两步用它校验复核对象未漂移；禁止自行生成或修改。（`preaudit_passed` / `blockers` 不在本步的返回里，属于步骤 ②。）
+- `prepare-review-snapshot` 返回的 `warnings` 非空时，展示尚无法确认的风险事实，让用户自行核对，未核实的风险标记为待核实。
+- 原样保存本次返回的 `version_id` 和 `revision`。后续两步用 `version_id` 校验复核对象，`revision` 用于记录。（`preaudit_passed` / `blockers` 属于步骤 ② 的返回。）
 
-#### 步骤 ② `precheck-app-review`
+#### 步骤 ② `precheck-review`
 
-传入完全相同的 `release_schedule`。先按本节的返回表判定：`blockers` 非空、或 `preaudit_status === "rejected"` 时，向用户逐项展示 `blockers`（服务端报告的阻断原因，提交时仍由服务端校验）与 `warnings`（风险提示），并询问是否继续；`preaudit_status === "unavailable"` 走下面「没审成」的分支，不要当成卡点、也不要建议改资料。预检是**可跳过**的：用户明确「强制提交」时允许进入步骤 ③ 执行 `submit-app-review`，由服务端做最终校验裁决；未明确时建议先修复 `blockers`。
+传入步骤 ① 确定的 `release_schedule`。沿用草稿设置且未填写该字段时省略 `--data`。
+
+##### 预检结果口径
+
+HTTP 200 只表示 HTTP 请求成功。以顶层 `ok` 判断预检是否执行成功，再分别核对机审结论、阻断项和风险提示。机审通过时仍按实际返回的阻断项处理。仅在 `blockers` 明确为空时才报告「阻塞项：无」，缺少该字段时报告阻断项待核实。
 
 向用户展示预检结果时保留业务语义，不直接回显字段名或布尔值。正式预检通过（`preaudit_status === "passed"`）、且没有阻断项（`blockers` 为空）时，固定输出：
 
@@ -58,13 +80,15 @@ H5 开通 PC 分发入口时按两阶段执行：
 
 `preaudit_status === "rejected"`（机审未通过）且本次 `blockers` 明确为空时，仍输出「阻塞项：无」「提交状态：可提交审核」，但**必须同时说明「内容预审未通过：不阻断提交，但提交后可能被审核驳回」**并逐项展示 `PREAUDIT` warnings——「可提交」与「机审未过」两者要同时说清，不能只报其一。
 
-`preaudit_status === "unavailable"`（机审服务暂时不可用，本次没得出预审结论；此时 `preaudit_passed` 为 `false`）**既不是「未通过」，也不是阻断项**：告诉用户本次预检没跑成，并给出两个选项——稍后重试 `precheck-app-review`，或直接提交（提交后仍会走内容审核）；展示 `PREAUDIT_UNAVAILABLE` 时不得表述成「内容预审未通过」，也不得因此要求用户修改资料。若本次 `blockers` 非空，仍按阻断项处理。
+`preaudit_status === "unavailable"`（机审服务暂时不可用，本次没得出预审结论；此时 `preaudit_passed` 为 `false`）**既不是「未通过」，也不是阻断项**：告诉用户本次预检没跑成，并给出两个选项——稍后重试 `precheck-review`，或直接提交（提交后仍会走内容审核）；展示 `PREAUDIT_UNAVAILABLE` 时不得表述成「内容预审未通过」，也不得因此要求用户修改资料。若本次 `blockers` 非空，仍按阻断项处理。
 
 取值不在上述三态内（未来新增或拼写异常）时按「没有结论」处理：既不当作 `passed`，也不当作阻断项。
 
-响应缺少 `preaudit_status` 时，说明无法确认机审结论，不推断通过或拒绝。
+响应缺少 `preaudit_status` 时，说明无法确认机审结论。
 
-向用户解释预审结论和具体问题，不直接输出内部字段。存在阻断项时逐项展示原因，不得声称可提交；用户明确要求继续提交时，说明服务端仍可能拒绝，再执行提交。
+按下方返回表向用户解释机审结论、具体阻断原因和风险提示，省去内部字段。存在阻断项时不得声称可提交。用户未明确要求继续时，先处理阻断项。用户了解风险后明确要求继续时，说明服务端仍可能拒绝，按既有前置条件、当前 schema 和授权执行，由提交接口校验。Agent 不自行增加本地硬门禁。
+
+资料体检返回的资质缺口（`QUALIFICATION_INCOMPLETE`）按建议性 warning 展示。具体门禁以本次预检和服务端提交结果为准，说明继续提审可能被驳回的风险，由用户明确选择是否继续。
 
 | 返回 | 含义 | 处理 |
 | --- | --- | --- |
@@ -76,42 +100,34 @@ H5 开通 PC 分发入口时按两阶段执行：
 | `version_id` 与步骤 ① 不一致 | 复核后版本已变化 | 回到步骤 ①重新生成快照并复核，禁止沿用旧快照 |
 | 顶层 `ok: false` | 工具失败 | 按 `error.type` / `error.subtype` 告知失败，停止；业务成功或状态读取当前 operation 已声明字段 |
 
-#### 步骤 ③ `submit-app-review`
+#### 步骤 ③ `submit-review`
 
-步骤 ② 预检是**可跳过**的：`preaudit_status === "passed"` 且 `blockers` 为空时可直接提交；否则向用户展示卡点后，用户明确「强制提交」仍可进入本步执行 `submit-app-review`，最终由提交接口按当前状态校验裁决。`preaudit_status === "unavailable"` 时预检没有结论，重试预检还是直接提交由用户选择，不要自行卡住流程。预检调用成功不代表内容通过；字段缺失或预检执行失败时标记未确认，不伪造通过结果。
+默认展示步骤 ② 的结果并取得最终提交确认。用户明确要求跳过预检并提交，或了解风险后明确选择继续提交时，按授权执行，由提交接口做最终校验。预检跳过、调用失败或缺少结论时，如实说明当前结论未确认。用户拒绝提交时停在当前阶段。
 
 参数：
 
-- 复用步骤 ②的同一个 `release_schedule`；`version_id` 与第一步不一致时回到步骤 ①。
-- 传与前两步一致的 `release_schedule`；精确定时的 `release_time` 必须是 Unix 秒。
+- 已执行步骤 ② 时复用其中的 `release_schedule`。跳过预检时按用户确认的上线方式填写，沿用草稿设置时可省略。精确定时的 `release_time` 必须是 Unix 秒。`version_id` 与第一步不一致时回到步骤 ①。
 - 精确定时上线时间必须 **≥ 当前时间 + 6 小时**（这是 taptap-cli 与 tds-dc 共同遵循的**前端校验**约定，不是后端硬约束；BFF 在 `submit-core` 自校验后再调后端）。
-- 若步骤 ①返回的 `warnings` 非空，必须展示无法确认的事实。`submit-app-review` 只接受 `release_schedule`，不能补造本地 flag 或请求字段；`--yes` 不代表已核对。
-
-《创意工坊内容授权协议》由 `analyze-app-status` 提前暴露，**不要在 precheck 时才处理**：
-
-- 关卡 / TapTap 制造游戏（`isLevel || isTapMaker`）未签署时，`analyze-app-status` 返回 `SCE_AGREEMENT_REQUIRED` blocker（含协议 url）。体检阶段就要引导签约，不要等到提审卡控。
-- 展示协议：名称《创意工坊内容授权协议》，url `https://www.taptap.cn/doc/ugcgame-agreement`。
-- 用户在当前对话明确同意后，调 `call_tool(name:"app agree-sce-agreement", args:{app_id:"<appId>", developer_id:"<developerId>", yes:true})` 签署，再重查 `analyze-app-status` 确认 blocker 消失。
-- 用户不愿用 CLI 签时，给协议 url 引导去开发者后台签约，签完回来重查。
-- `--yes` 只确认签署动作，不代表用户已同意协议；签署前必须用户明确同意，不得自行声称已同意。
-- 签署失败或协议状态无法确认时停止，不继续调用提审；向用户说明工具返回的错误。
-- `submit-app-review` 仍会做最终卡控（未签署 → 拒绝提交）；签约后该卡控自动通过。
-- 若 `version_id` 与步骤 ① 不一致，回到步骤 ①，不得用旧快照重试。
+- `submit-review` 的业务输入只有 `release_schedule`。若复核返回风险数据不可用且仍要求额外确认，展示尚无法核实的风险。当前 schema 缺少服务端要求的确认输入时，说明无法完成该确认并停止提交。`--yes` 只确认执行动作，不补造 flag、风险确认字段或协议凭证。
 
 询问上线方式："立即上线"还是"精确定时上线"。**草稿已有受支持的上线方式设置时优先沿用，不要重复询问**（从 `release-settings` 模块读取当前 `release_schedule`）。
 
 **用户说"今晚 10 点发布 / 帮我定到明早 9 点 / X 时间上线"**——把换算后的 `release_schedule={"kind":"scheduled_exact","release_time":<Unix秒>}` 从步骤 ② 开始传入两步，不要先提审通过再去单独设时间。用户说"2026 年 Q4 / 暑期 / 春节前后"这类非精确档期时，说明当前链路只支持精确时间或立即上线，要求补充具体时间或选择立即上线。
 
-**相对时间表达必须先取精确时间再换算**：当用户说"5 小时后 / N 小时后 / 明早 9 点 / 今晚 10 点"等相对时间或仅含时分的表达时，使用本地系统时间（Asia/Shanghai）换算成 Unix 秒传给 `submit-app-review`；如果无法可靠取得当前时分秒，就要求用户给绝对时间。不要凭空估算时分。
+**相对时间表达必须先取精确时间再换算**：当用户说"5 小时后 / N 小时后 / 明早 9 点 / 今晚 10 点"等相对时间或仅含时分的表达时，使用本地系统时间（Asia/Shanghai）换算成 Unix 秒传给 `submit-review`；如果无法可靠取得当前时分秒，就要求用户给绝对时间。不要凭空估算时分。
 
-成功后告知"已成功提交审核，请耐心等待审核结果，通常 1-3 个工作日"，并附最新读回的各可见 `region_flag_*` 分发状态。仍为“敬请期待”的入口要说明：本次提交未调整该入口，发布后它仍会保持“敬请期待”；如需开放下载或游玩，请在下一轮提审前先调整对应分发状态。这不代表发布失败。
+取得最终提交确认后执行 `submit-review`。沿用草稿设置且未填写 `release_schedule` 时省略 `--data`。提交后用 `list-versions --page-all` 读回，按 `version_id` 核对同一版本的审核状态。
 
-最后按 shared execution 的“运营阶段手册交接”补充一个后续运营入口和一句官方描述摘要；进入提审链路时先用 `list-app-versions --page-all` 读取完整发布历史并保存本次证据，作为后续阶段判定的输入。提审成功本身不能证明运营阶段，历史不完整或证据冲突时只给快速入门总入口。
+提交回执明确成功时，保留版本 ID 和已返回的审核单 ID。若后续读回失败或未查到本次版本，告知用户「已提交，当前审核状态待核实」。后续只读核对同一版本，不重复提交或更换幂等键。
+
+按读回状态告知用户结果。审核中时告知"已成功提交审核，请耐心等待审核结果，通常 1-3 个工作日"，并附最新读回的各可见 `region_flag_*` 分发状态。仍为“敬请期待”的入口要说明：本次提交未调整该入口，发布后它仍会保持“敬请期待”；如需开放下载或游玩，请在下一轮提审前先调整对应分发状态。这不代表发布失败。
+
+最后按 shared execution 的“运营阶段手册交接”补充一个后续运营入口和一句官方描述摘要；进入提审链路时先用 `list-versions --page-all` 读取完整发布历史并保存本次证据，作为后续阶段判定的输入。提审成功本身不能证明运营阶段，历史不完整或证据冲突时只给快速入门总入口。
 
 ### 提审失败与重复调用防护
 
 - 正式提交明确拒绝时，原样说明服务端原因，不自动重复提交或换幂等键重放；不要用改包或重建草稿处理无关的业务拒绝。条件变化后按用户当前授权重新决策。
-- 正式提交结果未知时，先用 `list-app-versions` / `get-app-version` 读回状态；已在审核中则不重复提交，无法确认时报告结果未知并停止自动重放。
+- 正式提交结果未知时，先用 `list-versions` / `get-version` 读回状态；已在审核中则不重复提交，无法确认时报告结果未知并停止自动重放。
 
 ### F. 撤销 / 回退（字段级）
 
@@ -201,7 +217,7 @@ H5 开通 PC 分发入口时按两阶段执行：
 #### H-1. "上一版为什么被拒？" / "刚才那次提审什么结果？"
 
 ```text
-call_tool(name:"app list-app-versions", args:{app_id:"<appId>", developer_id:"<developerId>", page:1, page_size:20})
+call_tool(name:"app list-versions", args:{app_id:"<appId>", developer_id:"<developerId>", page:1, page_size:20})
 ```
 
 - 按返回 `list` 顺序从新到旧扫描每个 item
@@ -212,7 +228,7 @@ call_tool(name:"app list-app-versions", args:{app_id:"<appId>", developer_id:"<d
 #### H-2. "最近发了几版？" / "这个月上了几次新版本？"
 
 ```text
-call_tool(name:"app list-app-versions", args:{app_id:"<appId>", developer_id:"<developerId>", page:1, page_size:50})
+call_tool(name:"app list-versions", args:{app_id:"<appId>", developer_id:"<developerId>", page:1, page_size:50})
 ```
 
 - 按当前声明的 `status === 'online'` 过滤已上线版本，并使用 `version` 和 `release_time` 报告。
@@ -221,7 +237,7 @@ call_tool(name:"app list-app-versions", args:{app_id:"<appId>", developer_id:"<d
 #### H-3. "我想看下 X.Y.Z 版本当时改了什么字段"
 
 ```text
-call_tool(name:"app get-app-version", args:{app_id:"<appId>", developer_id:"<developerId>", data:{version:"X.Y.Z"}})
+call_tool(name:"app get-version", args:{app_id:"<appId>", developer_id:"<developerId>", data:{version:"X.Y.Z"}})
 ```
 
 - `version` 必须取自 `list-app-versions.result.list[].version`；列表项的 `version_id`
