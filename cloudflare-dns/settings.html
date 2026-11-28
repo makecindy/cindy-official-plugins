@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cloudflare DNS</title>
+<style>
+  :root { color-scheme: light dark; font: 1rem system-ui; }
+  body { max-width: 34rem; margin: 1rem auto; padding: 0 1rem; }
+  input { box-sizing: border-box; width: 100%; margin: .5rem 0; padding: .5rem; }
+  button { padding: .4rem .8rem; }
+</style>
+<h1>Cloudflare DNS</h1>
+<p>Create an API token limited to the zones you manage. Choose Zone Read and DNS Read for queries. Use DNS Edit for changes.</p>
+<form id="settings" method="dialog">
+  <label for="token">Cloudflare API token</label>
+  <input id="token" type="password" autocomplete="off" required>
+  <button type="submit">Save token</button>
+</form>
+<p role="status" id="status"></p>
+<script src="settings.js"></script>
+</html>

@@ -1,0 +1,30 @@
+{
+  "name": "Cloudflare DNS",
+  "description": "Cloudflare 영역 및 DNS 레코드를 조회하고 A, AAAA, CNAME 변경을 한 건씩 확인 후 적용합니다.",
+  "whenToUse": "Cloudflare 영역 및 DNS 레코드를 조회하고 A, AAAA, CNAME 변경을 한 건씩 확인 후 적용합니다.",
+  "tools": {
+    "list_zones": {
+      "description": "영역 조회"
+    },
+    "list_dns_records": {
+      "description": "DNS 레코드 조회"
+    },
+    "create_dns_record": {
+      "description": "레코드 생성"
+    },
+    "update_dns_record": {
+      "description": "레코드 수정"
+    },
+    "delete_dns_record": {
+      "description": "레코드 삭제"
+    }
+  },
+  "network": {
+    "secrets": {
+      "cloudflare_token": {
+        "label": "Cloudflare API Token",
+        "hint": "토큰을 대상 영역으로 제한하세요. 조회에는 Zone Read 및 DNS Read, 변경에는 DNS Edit 권한이 필요합니다."
+      }
+    }
+  }
+}

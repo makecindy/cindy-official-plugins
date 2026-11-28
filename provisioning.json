@@ -118,6 +118,9 @@
     "ntfy": {
       "audience": { "emails": [] }
     },
+    "cloudflare-dns": {
+      "audience": { "emails": [] }
+    },
     "gitea": {
       "audience": { "emails": [] }
     },
