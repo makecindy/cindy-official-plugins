@@ -20,6 +20,7 @@ function mock(responses) {
     const next = responses.shift();
     assert.ok(next, 'Unexpected extra API request');
     if (next instanceof Error) throw next;
+    if (next instanceof Response) return next;
     return {ok: true, json: async () => ({...identity, ...next})};
   }});
   return {client, calls};
@@ -92,6 +93,23 @@ test('unknown publish outcome is not retried; credentials/remote bodies stay out
   assert.equal(calls.filter(call => call.method === 'POST').length, 2);
 });
 
+test('publish 400 exposes only fixed public diagnostics', async () => {
+  for (const [error, expected] of [
+    [{status: 'INVALID_ARGUMENT'}, 'INVALID_ARGUMENT: Check the submission fields'],
+    [{status: 'privateCode', details: [{warnings: [{reason: 'privateCode', description: 'private text'}]}]},
+      'STORE_WARNING: Inspect submission warnings in the developer dashboard'],
+    [{status: 'privateCode', message: 'private text'}, 'UNKNOWN: Inspect the developer dashboard for details'],
+  ]) {
+    const {client, calls} = mock([published, {uploadState: 'SUCCEEDED'}, Response.json({error}, {status: 400})]);
+    await assert.rejects(client.publish(Buffer.from('zip'), '0.4.60'), err => {
+      assert.ok(err.message.includes('HTTP 400 ' + expected));
+      assert.doesNotMatch(err.message, /private/);
+      return true;
+    });
+    assert.equal(calls.length, 3);
+  }
+});
+
 test('wrong identity fails before upload', async () => {
   const {client, calls} = mock([{...published, itemId: 'b'.repeat(32)}]);
   await assert.rejects(client.publish(Buffer.from('zip'), '0.4.60'));
@@ -127,4 +145,39 @@ test('artifact validates source, digest and actual ZIP manifest before API use',
   await assert.rejects(validateArtifact(directory, {...receipt, version: '1.2.4'}), /mismatch/);
   await fs.appendFile(path.join(directory, 'extension.zip'), 'tampered');
   await assert.rejects(validateArtifact(directory, receipt), /mismatch/);
+});
+
+test('failure notice updates the matching issue on retry and creates a new issue for a different stage or version', async () => {
+  const workflow = await fs.readFile(new URL('../.github/workflows/publish-chrome-extension.yml', import.meta.url), 'utf8');
+  const job = workflow.split('\n  notify-failure:\n')[1];
+  const script = job.split('        run: |\n')[1].replace(/^          /gm, '');
+  // Stand in for the GitHub API. The workflow still runs its real issue lookup
+  // filter, builds the request body, and selects the HTTP method.
+  const fakeGh = `gh() {
+    if [[ "$2" == --paginate ]]; then
+      [[ "$3" == *'creator=github-actions%5Bbot%5D'* ]] || return 1
+      printf '%s\\n' "$ISSUE_PAGE"
+    else
+      printf '%s\\n' "$@"
+    fi
+  }`;
+  function notify(issues, version, stage, attempt) {
+    return execFileSync('bash', ['-eo', 'pipefail', '-c', fakeGh + '\n' + script], {encoding: 'utf8', env: {
+      ...process.env, ISSUE_PAGE: JSON.stringify(issues), VERSION: version,
+      CHECK_RESULT: 'success', PACKAGE_RESULT: stage === 'package' ? 'failure' : 'success',
+      PUBLISH_RESULT: stage === 'publish' ? 'failure' : 'skipped',
+      GITHUB_REPOSITORY: 'example/repo', GITHUB_SERVER_URL: 'https://github.com',
+      GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: String(attempt),
+    }});
+  }
+  const first = notify([], '0.4.72', 'publish', 1);
+  assert.match(first, /\nPOST\n/);
+  assert.match(first, /body=@dashhuang/);
+  const issue = {number: 73, title: first.match(/^title=(.+)$/m)[1]};
+  const retry = notify([issue], '0.4.72', 'publish', 2);
+  assert.match(retry, /\nPATCH\nrepos\/example\/repo\/issues\/73\n/);
+  assert.match(retry, /runs\/42\/attempts\/2/);
+  assert.doesNotMatch(retry, /@dashhuang/);
+  assert.match(notify([issue], '0.4.72', 'package', 1), /\nPOST\n/);
+  assert.match(notify([issue], '0.4.73', 'publish', 1), /\nPOST\n/);
 });

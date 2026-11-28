@@ -75,13 +75,18 @@
   // and the name follows the model until edited.
   const SHEET = {
     en: { any: 'New device', android:'New Android', setup:'Set up Android…', iphone: 'New iPhone', ipad: 'New iPad', tv: 'New Apple TV', vision: 'New Vision Pro', name: 'Name', os: 'OS Version', model: 'Model', create: 'Create', cancel: 'Cancel', creating: 'Creating…',
-      loading: 'Loading models…', none: 'No matching runtime. Set up Android here, or install Apple runtimes in Xcode.', failed: 'Could not create the device. Check the environment and available disk space, then try again.', iosFailed: 'Not created. Check Xcode and try again.' },
+      loading: 'Loading models…', none: 'No matching runtime. Set up Android here, or install Apple runtimes in Xcode.', failed: 'Could not create the device. Check the environment and available disk space, then try again.', iosFailed: 'Not created. Check Xcode and try again.',
+      unknownLocal: 'Could not confirm whether the device was created. Check the local device list before taking further action.', unknownRemote: "Could not confirm whether the device was created. Check the remote computer's device list before taking further action." },
     'zh-CN': { any: '新建设备', android:'新建安卓设备', setup:'安装安卓环境…', iphone: '新建 iPhone', ipad: '新建 iPad', tv: '新建 Apple TV', vision: '新建 Vision Pro', name: '名称', os: '系统版本', model: '机型', create: '创建', cancel: '取消', creating: '正在创建…',
-      loading: '正在读取机型…', none: '没有匹配的系统。可在这里安装安卓环境，Apple 系统请通过 Xcode 安装。', failed: '没有创建成功，请检查运行环境和可用磁盘空间后重试。', iosFailed: '没有创建成功，请检查 Xcode 后重试。' },
+      loading: '正在读取机型…', none: '没有匹配的系统。可在这里安装安卓环境，Apple 系统请通过 Xcode 安装。', failed: '没有创建成功，请检查运行环境和可用磁盘空间后重试。', iosFailed: '没有创建成功，请检查 Xcode 后重试。',
+      unknownLocal: '无法确认设备是否已创建。请先检查本机设备列表，再决定下一步。', unknownRemote: '无法确认设备是否已创建。请先检查远程电脑的设备列表，再决定下一步。' },
   };
   let catalogCache = null;
   async function catalog() { if (!catalogCache) { const c = await rpc('catalog', {}); if (!c?.ok) throw c; catalogCache = c; } return catalogCache; }
-  function createDevice({ family = 'any', lang = 'en' } = {}) {
+  // `call` replaces the page RPC when the device is created on another computer
+  // (the task page of a remote task): that computer's models and systems are
+  // asked each time, and its Android environment is not set up from here.
+  function createDevice({ family = 'any', lang = 'en', call = null, heading = null, scope = '' } = {}) {
     const T = SHEET[lang] || SHEET.en, M = root.CindySimModel;
     return new Promise((resolve) => {
       const nameInput = h('input', { maxlength: '64', autocomplete: 'off', spellcheck: 'false' });
@@ -95,7 +100,7 @@
       const setup = h('button', {class:'btn quiet',type:'button',text:T.setup,hidden:true});
       const row = (label, control) => h('label', { class: 'sheet-row' }, [h('span', { text: label }), control]);
       const form = h('form', { class: 'sheet', method: 'dialog' }, [
-        h('h2', { text: T[family] || T.iphone }),
+        h('h2', { text: heading || T[family] || T.iphone }),
         h('div', { class: 'sheet-group' }, [row(T.name, nameInput), row(T.os, osSelect), row(T.model, modelSelect)]),
         modeChoice, error, setup, h('div', { class: 'sheet-actions' }, [cancel, create])]);
       const dialog = h('dialog', { class: 'sheet-dialog' }, [form]);
@@ -121,7 +126,7 @@
       error.textContent = T.loading;
       function populate(c) {
         cat = c;
-        setup.hidden=(family!=='android'&&family!=='any')||c.platforms?.android?.ready===true;
+        setup.hidden=!!call||(family!=='android'&&family!=='any')||c.platforms?.android?.ready===true;
         const runtimes = c.runtimes.filter((r) => models().some((d) => M.runtimesFor(c, d.identifier).some((v) => v.identifier === r.identifier)))
           .sort((a, b) => String(b.version).localeCompare(String(a.version), undefined, { numeric: true }));
         if (!runtimes.length) { error.textContent = T.none; return; }
@@ -137,7 +142,7 @@
         const apple = selected ? M.platform(selected) !== 'android' : family !== 'android' && family !== 'any';
         error.textContent = e?.message || (apple ? T.iosFailed : T.failed);
       }
-      catalog().then(populate).catch(showError);
+      (call ? call('catalog', {}).then((c) => { if (!c?.ok) throw c; return c; }) : catalog()).then(populate).catch(showError);
       setup.addEventListener('click',async()=>{try{if(await setupAndroid(lang)){catalogCache=null;populate(await catalog());}}catch(e){showError(e);}});
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -145,11 +150,17 @@
         const memoryMode = modeChoice.hidden ? null : selectedMode;
         create.disabled = true; create.textContent = T.creating; error.textContent = '';
         try {
-          const r = await rpc('create', { name, deviceType: modelSelect.value, runtime: osSelect.value });
+          const r = await (call || rpc)('create', { name, deviceType: modelSelect.value, runtime: osSelect.value });
           if (!r?.ok) throw r;
-          if (r.udid && memoryMode) memoryChoices.set(r.udid,memoryMode);
+          if (r.udid && memoryMode) memoryChoices.set(memoryKey(r.udid,{scope}),memoryMode);
           finish({ udid: r.udid, name: r.name || name });
-        } catch (e) { showError(e); create.disabled = false; create.textContent = T.create; }
+        } catch (e) {
+          // Only explicit non-execution evidence permits the existing retry advice.
+          // Missing replies, timeouts and unclassified failures may follow creation.
+          if (e?.execution === 'not_executed') showError(e);
+          else error.textContent = call ? T.unknownRemote : T.unknownLocal;
+          create.disabled = false; create.textContent = T.create;
+        }
       });
     });
   }
@@ -186,28 +197,35 @@
     });
   }
   const memoryChoices=new Map();
-  function rememberMemoryChoice(udid,mode) {
-    if(typeof udid==='string' && /^[0-9a-f-]{36}$/i.test(udid) && ['saving','standard','minimal'].includes(mode)) memoryChoices.set(udid,mode);
+  // The same simulator ID may exist on multiple computers. Local callers keep
+  // the default scope; remote task controls carry both identity and transport.
+  const memoryKey=(udid,{scope=''}={})=>JSON.stringify([scope,udid]);
+  function rememberMemoryChoice(udid,mode,context={}) {
+    if(typeof udid==='string' && /^[0-9a-f-]{36}$/i.test(udid) && ['saving','standard','minimal'].includes(mode)) memoryChoices.set(memoryKey(udid,context),mode);
   }
-  function memoryArgs(device) {
-    return device && device.kind!=='physical' && root.CindySimModel.platform(device)==='iOS' ? {memoryMode:memoryChoices.get(device.udid)||'saving'} : {};
+  function memoryArgs(device,context={}) {
+    return device && device.kind!=='physical' && root.CindySimModel.platform(device)==='iOS' ? {memoryMode:memoryChoices.get(memoryKey(device.udid,context))||'saving'} : {};
   }
-  function memoryPicker(device,lang,disabled=false) {
+  function memoryPicker(device,lang,disabled=false,context={}) {
     const M=root.CindySimModel;if(!device||device.kind==='physical'||M.platform(device)!=='iOS')return null;
-    return M.memoryPicker(memoryArgs(device).memoryMode,lang,mode=>memoryChoices.set(device.udid,mode),disabled);
+    return M.memoryPicker(memoryArgs(device,context).memoryMode,lang,mode=>memoryChoices.set(memoryKey(device.udid,context),mode),disabled);
   }
 
-  function memoryBadge(device,lang,disabled=false,compact=false) {
+  function memoryDetails(device,lang,context={},changed=()=>{}) {
+    const M=root.CindySimModel;
+    return M.showMemoryDetails(context.computer ? {...device,name:context.computer+' / '+device.name} : device,lang,{value:memoryChoices.get(memoryKey(device.udid,context)),onChange:mode=>{
+      memoryChoices.set(memoryKey(device.udid,context),mode);changed(mode);
+    },onRestart:device.state==='Booted' ? async mode=>{
+      const result=await M.restartMemoryMode(device,mode,context.request || rpc);
+      M.showMemoryNotice(result,lang,mode,device.name);
+    } : undefined});
+  }
+  function memoryBadge(device,lang,disabled=false,compact=false,context={}) {
     if(device?.kind==='physical')return null;
-    const M=root.CindySimModel,text=M.memoryStatus(device,lang,memoryChoices.get(device.udid));
+    const M=root.CindySimModel,text=M.memoryStatus(device,lang,memoryChoices.get(memoryKey(device.udid,context)));
     if (!text) return null;
     const button=h('button',{class:compact?'memory-badge memory-icon':'memory-badge',type:'button',disabled,'aria-haspopup':'dialog',
-      onclick:()=>M.showMemoryDetails(device,lang,{value:memoryChoices.get(device.udid),onChange:mode=>{
-        memoryChoices.set(device.udid,mode);update(M.memoryStatus(device,lang,mode));
-      },onRestart:device.state==='Booted' ? async mode=>{
-        const result=await M.restartMemoryMode(device,mode,rpc);
-        M.showMemoryNotice(result,lang,mode,device.name);
-      } : undefined})});
+      onclick:()=>memoryDetails(device,lang,context,mode=>update(M.memoryStatus(device,lang,mode)))});
     if(compact)button.innerHTML='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4"/><path d="M10 10h4v4h-4z"/></svg>';
     function update(label){button.title=label;button.setAttribute('aria-label',label);if(!compact)button.textContent=label;}
     update(text);
@@ -219,5 +237,5 @@
     return resources.label(device);
   }
 
-  root.CindySimPages = { rpc, h, locale, GLYPH, createDevice, catalog, setupAndroid, memoryArgs, memoryPicker, memoryBadge, rememberMemoryChoice, resourceLabel, onPush: (fn) => listeners.add(fn) };
+  root.CindySimPages = { rpc, h, locale, GLYPH, createDevice, catalog, setupAndroid, memoryArgs, memoryPicker, memoryBadge, memoryDetails, rememberMemoryChoice, resourceLabel, onPush: (fn) => listeners.add(fn) };
 })(globalThis);

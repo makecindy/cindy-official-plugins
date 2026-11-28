@@ -79,46 +79,35 @@ yourself and submit it here.
 
 The full path from idea to marketplace:
 
-1. **Idea** — check the table above for overlap first. Official plugins avoid
-   duplicating each other's scenarios; same-provider product families
-   (Gmail / Drive / Calendar) and same-protocol different providers
-   (163 / iCloud / QQ mail) are fine, but a second generic web search is not.
-2. **Check the standard** — admission and audience are judged by the
-   [admission and audience standard](.greptile/rules.md#插件准入与受众标准).
-   A plugin that fits needs no separate maintainer approval and no prior proposal.
-   A [proposal issue](https://github.com/makecindy/cindy-official-plugins/issues/new?template=new_plugin_proposal.yml)
-   or Draft PR may record the scenario, boundaries, and autonomous Host
-   capabilities (network hosts, credentials, long-lived Node runtime); it is not
-   an approval gate. `all` is only for plugins most users benefit from, that work
-   out of the box with no self-obtained third-party key or account, that are not
-   tied to one person's or one team's workflow, and that are stable. Popularity
-   or many submissions alone never justify `all`. Useful but niche plugins, or
-   plugins that need the user's own key or account, are accepted as opt-in
-   (`{ "emails": [] }`; users choose them in the marketplace). Very personal
-   plugins, pure demos (use `docs/` instead), and tasks the agent can already
-   do without a plugin are not accepted. `author` must be the real author.
+1. **Idea** — check the table above for overlap first. Same-provider product
+   families (Gmail / Drive / Calendar) and same-protocol different providers
+   (163 / iCloud / QQ mail) coexist fine; duplicate generic capabilities (e.g.
+   a second generic web search) do not.
+2. **Check the standard** — admission and audience are judged by
+   [`.greptile/rules.md`](.greptile/rules.md#4-新插件准入受众与查重). A plugin
+   that fits needs no prior approval; the
+   [proposal issue](https://github.com/makecindy/cindy-official-plugins/issues/new?template=new_plugin_proposal.yml)
+   is optional. `all` is only for plugins most users benefit from out of the
+   box without self-obtained keys/accounts; useful niche or BYO-key plugins are
+   accepted as opt-in (`{ "emails": [] }`). `author` must be the real author.
 3. **Build** — follow the [harness-independent quick path](#harness-independent-quick-path)
-   with any coding Agent or development environment. The repository documents
-   the file format, runtime messages, validation command, and packaging format;
-   no Cindy-specific authoring tool is required.
-4. **Open a PR** — title `feat(<directory>): …`; bump `ghost.json.version`;
-   add the `provisioning.json` entry; complete four-language locales
-   (`zh-CN` / `en` / `ja` / `ko`); sign off every commit (`git commit -s`,
-   [DCO](./DCO)). Details in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
-5. **Review** — CI validates each manifest and the Server/Desktop delivery
-   limits within this repository, checks localization / provisioning,
-   and dry-runs the exact package; automated review enforces the full ruleset in
-   [`.greptile/rules.md`](./.greptile/rules.md); the maintainers apply the same
-   [review standards](#review-standards). Once checks, effective review, and
-   verification are satisfied, already-authorized merge automation may execute
-   without another confirmation for routine maintenance. A fitting admission
-   needs no extra decision. A plugin that uses or depends on a Cindy host
-   authorization still waits until that grant is approved and released; see
-   [Review standards](#review-standards).
+   with any coding Agent or development environment. No Cindy-specific authoring
+   tool is required.
+4. **Open a PR** — title `feat(<directory>): …`; set initial
+   `ghost.json.version` (for updates to existing plugins, manual patch bumps
+   are optional — packaging auto-increments patch versions on `main`); add the
+   `provisioning.json` entry; complete four-language locales (`zh-CN` / `en` /
+   `ja` / `ko`); sign off every commit (`git commit -s`, [DCO](./DCO)). Details
+   in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+5. **Review** — CI validates manifests, delivery limits, localization,
+   provisioning, changed-plugin tests, and dry-run packaging; automated review
+   (Greptile + Codex) guards security redlines and confirmed P0/P1 defects.
+   Routine updates (L1) merge directly once CI is green and automated review
+   passes — manual device testing is not a merge gate.
 6. **Submit and approve** — merging to `main` submits changed packages to Global
-   Plugin Platform. Only approved releases become available to compatible clients;
-   rejection leaves the previous approved release in service. CN submission remains
-   removed.
+   Plugin Platform as pending releases. Only approved releases become visible to
+   compatible clients; rejection leaves the previous approved release in
+   service. CN submission remains removed.
 
 ## Review standards
 
@@ -126,86 +115,55 @@ Published plugin ID changes require a separately reviewed
 [migration registration](./docs/plugin-id-migrations.md) and coordinated Server
 and client rollout before the renamed package is released.
 
-Every official plugin is installed by real users who carry its security and
-experience risk. Review actual behavior, impact and evidence: routine packaging
-fixes, dependency maintenance, traceable generated artifacts and static images
-do not require human approval just because of their paths. Admission and
-audience that fit the standard need no separate maintainer approval; a mismatch
-is a concrete review finding. Real permission, credential, or publish-trust
-widening, undisclosed network access, and renaming or deleting a published
-plugin still need the maintainers' explicit decision. Review of a plugin also
-checks any Cindy host authorization it uses or depends on, besides scopes the
-plugin itself requests: which grant, whether the platform has approved it, and
-whether a host release contains it. If that grant changed or is not ready, do
-not merge, and plan the scopes that still need requesting together. Leave
-unused ones out. Other changes that fit the existing standard are still judged
-directly. Details are in
-[第三方平台授权](.greptile/rules.md#第三方平台授权).
-Separate code defects, verification gaps, boundary decisions, and platform
-approval. Four principles:
+Review is tiered (full contract in [`.greptile/rules.md`](./.greptile/rules.md)
+and [`AGENTS.md`](./AGENTS.md)):
+- **L1 Routine updates (Fast-Lane)**: bugfixes, perf, small enhancements,
+  locales/icons, tests, and traceable dependency updates on existing plugins
+  (especially by listed maintainers or plugin owners in
+  [`.github/plugin-owners.json`](./.github/plugin-owners.json)) merge directly
+  once CI is green, Greptile approves, and Codex reports no P0/P1 defects.
+- **L2 Boundary changes**: new plugins, widening `provisioning.json` to `all`,
+  new/widened permissions, credentials, autonomous hosts, or subprocesses, or
+  changed third-party OAuth scopes / unready host OAuth grants require boundary
+  confirmation (and platform approval for pending OAuth grants).
+- **L3 Repository governance**: `.github/workflows/**`, `.greptile/**`,
+  `AGENTS.md`, `.github/plugin-owners.json`, weakening `.tests/` gates, or
+  renaming/deleting a published plugin require maintainer approval.
+
+Four security & design principles:
 
 1. **Pure sandbox by default; authorization follows the executor.** Regular
-   plugins run in Cindy's isolated sandbox. Whether a plugin tool runs is decided
-   by the current `ghost_call` and Cindy's existing Agent authorization. Ordinary
-   HTTPS and workdir operations use the Host-issued, strictly in-flight `callId`;
-   bundled code and CLIs continue to use the existing Node worker. Do not add a
-   Slot or manifest field just to pre-register a specific command, host, or path.
-   A plugin that uses Host capabilities autonomously from a panel,
-   subscription, scheduler, or long-lived process must declare the corresponding
-   direct field in `ghost.json`. Any bundled Node Runtime, including one used
-   inside the current Agent tool call, requires the
-   top-level `node` field, a fixed entry point, and a minimal child-process boundary.
-2. **Clear secret ownership.** Ordinary API tokens are stored through the
-   host's write-only `/secrets` channel. When a Node plugin needs plaintext
-   credentials, use `node.secretBindings` to restrict them to specific Worker
-   methods, injected transiently by the host — never passing through the
-   browser `main.js`, Agent parameters, or logs. If an official third-party
-   runtime manages account credentials itself (e.g. TapTap Maker), the plugin
-   only hands credentials to the runtime; it does not copy them into Cindy
-   KV/Secret or keep plaintext in logs or page state.
+   plugins run in Cindy's isolated sandbox. Ordinary HTTPS and workdir
+   operations inside an active Agent tool call reuse existing Agent
+   authorization via in-flight `callId`; bundled CLIs use the existing Node
+   worker. Only autonomous Host capabilities (panel, subscription, scheduler,
+   long-lived process) and any bundled Node Runtime (`node` field, fixed entry,
+   minimal child-process boundary) are declared directly in `ghost.json`.
+2. **Clear secret ownership.** API tokens use the host's write-only `/secrets`
+   channel; Node plugins use `node.secretBindings` injected transiently by the
+   host — never passing through `main.js`, Agent parameters, logs, or KV.
+   Approved third-party runtimes (e.g. TapTap Maker) may manage their own
+   credentials without copying plaintext into Cindy KV/Secret.
 3. **Tool descriptions are contracts.** Each tool's `description` in
-   `ghost.json` is the usage manual the Agent reads; it must accurately
-   describe behavioral boundaries (what it does, what it doesn't, what it
-   returns, and any side effects).
-4. **Error messages speak human.** User-facing errors must be actionable
-   (e.g. 401 → tell the user where to fill in the token), not raw HTTP status
-   codes.
+   `ghost.json` must accurately reflect capabilities, limits, return semantics,
+   and irreversible side effects (whose failure paths must distinguish
+   `not_executed / executed / unknown` without suggesting blind retries on
+   `unknown`).
+4. **Error messages speak human.** User-facing errors should be actionable
+   (e.g. 401 → where to configure the token), not raw stack traces.
 
-### Self-check before requesting review
+### Quick checklist before opening a PR
 
-- [ ] Execution ownership is explicit: plugin tools use existing Agent authorization,
-      HTTPS/workdir operations use the current `callId`, and CLIs use the existing
-      Node worker without pre-registering individual commands
-- [ ] Node plugins: explicit `node` field, fixed entry, minimal child-process
-      boundary; generated workers rebuilt from their source and documented build steps
-- [ ] No plaintext credentials anywhere: tokens go through the write-only
-      `/secrets` channel or `node.secretBindings`; never through `main.js`,
-      Agent parameters, logs, KV, or page state
-- [ ] Tools with irreversible external side effects (send / post / delete)
-      distinguish "definitely not executed / definitely executed / unknown"
-      in every failure path, and never suggest a blind retry on "unknown"
-- [ ] Every tool `description` matches actual behavior — capabilities, limits,
-      return values, side effects
-- [ ] User-facing errors are actionable; no raw status codes or stack traces
-- [ ] Four-language locales complete; `node --test .tests/localization.test.mjs`
-      passes
-- [ ] Actual runtime evidence for affected paths, or linked valid prior evidence
-      with applicability across the full subsequent diff; accurate environment,
-      version, results and gaps. No fixed PR checkbox; green CI is not runtime proof
-- [ ] `ghost.json.version` bumped; `provisioning.json` audience matches the
-      standard (`all`, or opt-in `{ "emails": [] }`); `author` is the real author
-- [ ] Scopes the plugin requests are unchanged, and it does not use or depend on
-      a changed or unready Cindy host authorization; otherwise the pull request
-      lists those scopes and, for each host grant, platform approval and host
-      release
-- [ ] No credentials, real user data, `node_modules`, or unrelated generated
-      files in the diff; fixtures use placeholder domains (`example.test`)
-- [ ] Bundled dependency changes reflected in `THIRD-PARTY-LICENSES.txt`
+- [ ] No hardcoded secrets; credentials only via `/secrets` or `node.secretBindings`
+- [ ] Autonomous network hosts, `node` entry, and child-process bounds are minimal
+- [ ] Irreversible side-effect failures distinguish `not_executed / executed / unknown`
+- [ ] Four-language locales pass `node --test .tests/localization.test.mjs`
+- [ ] `ghost.json.version` not downgraded (manual patch bump optional); `provisioning.json` entry and `THIRD-PARTY-LICENSES.txt` updated if applicable
+- [ ] Changed OAuth scopes or unready Cindy host grants disclosed if applicable
 - [ ] Every commit signed off (`git commit -s`)
 
 The complete machine-and-human review contract lives in
-[`.greptile/rules.md`](./.greptile/rules.md) — automated review enforces it on
-every PR, and maintainers apply the same standards.
+[`.greptile/rules.md`](./.greptile/rules.md).
 
 ## Repository layout
 
@@ -265,9 +223,11 @@ After approval, compatible clients receive that release; clients below its
 one exists. Desktop trusts this Server projection and does not add a second
 version-confirmation step.
 
-When changing plugin content you must bump `ghost.json.version` in the same
-change. The new `major.minor.patch` SemVer must be greater than the version on
-`main`; otherwise CI blocks the pull request before Server submission.
+When changing plugin content, do not lower `ghost.json.version` below `main`.
+Manual patch bumps are optional for routine updates — `.github/scripts/package-plugin.sh`
+auto-computes a strictly increasing `major.minor.patch` SemVer on `main` when
+`ghost.json.version` is unchanged; bump manually only for explicit minor/major
+releases.
 
 ## Local development
 
@@ -453,12 +413,12 @@ complete declaration examples and downloading PR verification packages.
 
 Before submitting to this official repository, add a `provisioning.json` entry
 and locale files for `zh-CN`, `en`, `ja` and `ko`, covering plugin text and tool
-descriptions. Follow [`CONTRIBUTING.md`](./CONTRIBUTING.md). Open a PR to obtain a
-test package; authors or maintainers supply runtime and compatibility evidence
-appropriate to the affected behavior before merge. Valid evidence for unaffected
-paths can be reused without reinstalling after every wording change.
+descriptions. Follow [`CONTRIBUTING.md`](./CONTRIBUTING.md). You can open a PR
+to obtain a test package from CI; automated tests and CI packaging are the merge
+gates, while manual Cindy client testing is recommended for brand-new plugins or
+major host-capability integrations rather than a hard merge gate.
 
-`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.40`
+`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.42`
 with the plugin. When upgrading, replace the published npm package content
 wholesale and bump the plugin version accordingly. Preserve these reviewed Cindy
 compatibility patches until the official package includes equivalent fixes:
@@ -515,9 +475,9 @@ and returns bounded summaries for large reports with links to the full evidence.
 ## Community
 
 Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before opening a PR — it covers
-the PR title convention, the mandatory `ghost.json` version bump, the
-localization check, how to rebuild the bundled Node Workers, and the
-[DCO](./DCO) sign-off required on every commit (`git commit -s`).
+the PR title convention, versioning (auto-incremented patches on `main` without
+manual PR bumps), the localization check, how to rebuild the bundled Node
+Workers, and the [DCO](./DCO) sign-off required on every commit (`git commit -s`).
 
 Participation is governed by
 [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md). For usage questions and what

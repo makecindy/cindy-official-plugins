@@ -52,7 +52,7 @@
 6. `已通过项`：只列有当前确定性证据的检查，空数据和未检查项不能列为通过。
 7. `下一步`：优先补包体（按当前包体类型与 `package_slots` 能力给可执行动作），再逐项引导补充其余缺口；用户未明确要求提审时，不进入提审链路。
 
-Skill 分析是资料准备建议，不生成服务端 `submitReadiness`，也不能替代正式提审门禁。用户明确要求提审后，仍必须执行 `prepare-review-snapshot` → `precheck-app-review` → 最终确认 → `submit-app-review`；任一步返回 blocker、warning 或 stale 都以服务端结果为准。
+Skill 分析是资料准备建议，不生成服务端 `submitReadiness`。用户明确要求提审后，按本域提审流程使用服务端当次返回的 blocker、warning 和 stale 结果。
 
 ## 文案文件候选
 

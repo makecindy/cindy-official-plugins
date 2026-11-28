@@ -530,6 +530,7 @@ const SERVICE_DESCRIPTIONS = {
   'whats-new': '活动/公告位排期、上下线、置顶、容量与失效巡检',
   'dashboard-stats': '下载、曝光、转化、预约、订单、评分等数据表现查询',
   developer: '开发者账号与厂商列表',
+  member: '厂商成员、角色、单游戏权限与权限变更',
   'package-management': '包体库、线上/待处理包、自测入口与小游戏能力',
   qualification: '上架资质分析、非敏感材料草稿、资质增量审核',
   'reserve-milestone': '预约里程碑档位、奖励图、提交审核与撤回',
@@ -568,7 +569,7 @@ const DESCRIPTION_OVERLAY = {
 const TOKEN_RE = /^[a-z0-9+][a-z0-9+._:-]*$/i;
 
 const GLOBAL_RULES = [
-  '写门禁:risk 为 write / high-risk-write 的操作,必须先向用户说明参数与影响并取得明确同意;先用 dry_run:true 预览,再用完全相同的参数加 yes:true 执行。既没有 dry_run 也没有 yes 的写调用会被拒绝,只读会话里的写调用一律拒绝;取得用户同意是你的职责,yes 是执行开关而不是同意本身。例外:插件编排的 auth login-start / auth login-wait 是登录流程本身(用户在浏览器里完成授权),不走这道确认门禁,但只读会话仍然拒绝。--yes 不代表用户同意协议;遇到服务端要求额外确认时只展示响应实际返回的 blockers / warnings,协议签署走独立的 agree-sce-agreement(先展示协议名称与 URL,用户明确同意后加 yes:true 执行,再重查确认 blocker 消失)。',
+  '写门禁:risk 为 write / high-risk-write 的操作,必须先向用户说明参数与影响并取得明确同意;先用 dry_run:true 预览,再用完全相同的参数加 yes:true 执行。既没有 dry_run 也没有 yes 的写调用会被拒绝,只读会话里的写调用一律拒绝;取得用户同意是你的职责,yes 是执行开关而不是同意本身。例外:插件编排的 auth login-start / auth login-wait 是登录流程本身(用户在浏览器里完成授权);task +resume 是恢复已授权的上传任务,包体任务不需要 dry_run/yes,导码恢复按 CLI 要求传 yes:true。这两类不走这道确认门禁,但只读会话仍然拒绝。--yes 不代表用户同意协议;遇到服务端要求额外确认时只展示响应实际返回的 blockers / warnings,协议签署走独立的 agree-sce-agreement(先展示协议名称与 URL,用户明确同意后加 yes:true 执行,再重查确认 blocker 消失)。',
   '参数:scope 字段(developer_id / app_id)直接传,worker 映射成 --dev-id / --app-id;其余业务字段必须放进 args.data(JSON 对象);除 scope 和 data 外的键都是控制 flag,透传成 --flag,合法性由 CLI 按各命令自己的 schema 校验(未知 flag 由 CLI 拒绝);位置参数(如文件路径)放 args._positional 数组。本地文件路径必须是相对会话工作目录的路径:CLI 以会话工作目录为基准校验并拒绝绝对路径与 ../ 越界。',
   '发现命令:list_tools() 给顶层命令;list_tools(category:"<命令路径>") 下钻某个服务的操作(如 category:"asset-library");不确定命令名时直接传前缀搜索(如 category:"up")。某命令的完整帮助(含全部 flag)用 call_tool(name:"<命令>", args:{_help:true}),也可以用 call_tool(name:"help", args:{_positional:["<命令>"]})。list_tools 下钻不含 outputSchema,需要某操作的输出结构时用 call_tool(name:"schema", args:{_positional:[service, method]}) 查完整输入输出。',
   '调用示例:先 list_tools(category) 看该域操作与参数(enum=可选值、pattern=格式、required=true=必填),再 call_tool。例——创建冒险游戏:call_tool(name:"app create-app", args:{developer_id:"1001", data:{title:"我的游戏", category:"adventure", package_type:"apk", developer_role:"developer"}, dry_run:true});用户确认后同参数加 yes:true。务必按 inputSchema 的 enum 取值、按 pattern 校验格式,不要猜值。',
@@ -984,6 +985,12 @@ const ORCHESTRATED_RISKS = new Map([
 // inheriting this exemption.
 const DOCUMENTATION_PATHS = new Set(['help', 'skills list', 'skills read', 'skills status']);
 
+// A resume continues an upload the user already authorized; it does not start
+// a new external write. Package-task resumes reject `--yes`/`--dry-run`, so the
+// ordinary confirmation gate would make them impossible to run. Code-import
+// resumes still require `--yes` from the CLI itself when it asks for one.
+const CONTINUATION_PATHS = new Set(['task +resume']);
+
 // Heads whose positional operands are identifiers — a service and method, a
 // manual name, a command name, a profile, an event key, a task id, a URL —
 // rather than local files. Everything else that takes an operand is assumed to
@@ -1306,7 +1313,8 @@ async function callTool(params) {
         + ';CLI 以会话工作目录为基准限定文件路径,没有它就无法安全执行。请在带本地工作目录的会话里重试。',
     };
   }
-  if (!helpOnly && risk !== 'read' && args.yes !== true && args.dry_run !== true) {
+  const continuation = CONTINUATION_PATHS.has(riskTokens.join(' '));
+  if (!helpOnly && risk !== 'read' && !continuation && args.yes !== true && args.dry_run !== true) {
     return {
       ok: false,
       errorCode: 'CONFIRM_REQUIRED',

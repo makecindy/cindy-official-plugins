@@ -15,10 +15,13 @@
       }
     },
     "get": {
-      "description": "Read one person’s full file by id: identities and contact details, intro (narrative), key facts, latest update, open loops, interactions (newest first, up to 200), events, groups, relationships and merge history. The id comes from find or list.",
+      "description": "Read a contact’s complete profile. compact:true keeps profile fields and loops but returns only the 5 most recent interactions and events; default false retains the full history limits.",
       "parameters": {
         "/properties/id": {
           "description": "Entry id"
+        },
+        "/properties/compact": {
+          "description": "Default false; true returns only the 5 most recent interactions and events."
         }
       }
     },
@@ -222,7 +225,7 @@
       }
     },
     "maintenance": {
-      "description": "Start, check sources for and finish a time-window tidy-up. begin returns run_id, the window, each source’s own from/to and how to query it (for chats, find group chats and direct messages separately), the backlog left unread last time, first_step and coverage_rule; scope is recent, backfill or contact. Report which sources work with action \"sources\"; after reading and recording, call end with run_id and each source’s coverage (complete / partial / none, partial with gaps). Only sources read fully, or partly with gaps listed, move their checkpoint forward; gaps are read first next time.",
+      "description": "Incremental tidy-up: begin returns source windows, budget and a limited backlog; new content first. sources reports access. filter checks acknowledged refs by source/account before body reads; ack only after all records/profile updates are saved or items are confirmed irrelevant. progress saves each backlog page; blocked backs off. end requires coverage with exact gaps/resume for partial reads. Supports recent/backfill/contact.",
       "parameters": {
         "/properties/checkpoint": {
           "description": "Legacy: without run_id, the time processed up to (ISO 8601)"
@@ -246,7 +249,7 @@
           "description": "How many months further back for backfill / contact; default 3"
         },
         "/properties/run_id": {
-          "description": "For end: the run_id returned by begin"
+          "description": "For end/progress: run_id returned by begin"
         },
         "/properties/sources_status": {
           "description": "For sources (also accepted by end): whether each source can be read"
@@ -255,7 +258,25 @@
           "description": "Required for end: whether each source was read completely this time"
         },
         "/properties/backlog_done": {
-          "description": "For end: backlog ids finished this time"
+          "description": "For end: issued backlog ids fully completed; use progress after each page"
+        },
+        "/properties/source": {
+          "description": "For filter/ack: source category"
+        },
+        "/properties/account": {
+          "description": "For filter/ack: stable account/workspace identifier; keep mailboxes separate"
+        },
+        "/properties/refs": {
+          "description": "For filter/ack: item IDs, not thread IDs; add a revision for mutable events. Ack only after all participants’ records and profiles are saved or the item is confirmed irrelevant."
+        },
+        "/properties/backlog_id": {
+          "description": "For progress: id issued in this run’s begin.backlog"
+        },
+        "/properties/status": {
+          "description": "For progress: partial with remaining; blocked without progress; complete when fully finished"
+        },
+        "/properties/remaining": {
+          "description": "Remaining gap inside the original window; preserve account/query, save next cursor. On cursor expiry, use an empty cursor and filter completed items."
         }
       }
     }

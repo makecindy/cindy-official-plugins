@@ -4,6 +4,14 @@
 
 ## Read first
 
+### 2.1.32: Runtime 0.0.42
+
+The official npm release uses an independent recipe pinned to its integrity and complete vendor inventory. Upstream provenance points to fffc0d70. The recipe retains V1–V12 and the three 0.0.41 workflow-file patches. V10 reuses the upstream canvas stop and local-result recovery paths while preserving paid-request recovery, pending IDs, and both recognition submission guards. V12 continues reading the Host-provided virtual stdin as a stream.
+
+V13 constrains preview release metadata and the versioned archive to direct HTTPS downloads from the existing Runtime CDN. The installer checks SHA-256 before opening the ZIP. The Node-side check remains in place before publishing the installation record. A failed update preserves the previous installation.
+
+Windows smoke covered the bundled CLI doctor, Console start/restart/stop, the Canvas and UI Motion pages, and the server-only settings endpoints. A separate Maker home downloaded and installed Windows UrhoXRuntime 1.40.6 and ran 240 local validation frames against an existing game copy with zero Lua, resource, or engine errors and confirmed process cleanup. The wrong-checksum fixture blocks extraction, and all seven isolated Git cases passed. Installed Cindy 0.1.148, macOS/Linux, production writes, and paid media are outside this run’s coverage.
+
 ### 2.1.31: Recognition submission variable fix
 
 Correct both V10 stop checks in the 0.0.41 recipe from source to the actual

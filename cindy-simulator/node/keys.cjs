@@ -51,4 +51,26 @@ function parseKey(text){
 /** True when every character can be typed on a US keyboard (what HID typing supports). */
 function typeable(text){return /^[\x20-\x7e\n\t]*$/.test(text);}
 
-module.exports={chord,parseKey,typeable};
+const PUNCTUATION={Minus:'-',Equal:'=',BracketLeft:'[',BracketRight:']',Backslash:'\\',Semicolon:';',Quote:"'",Backquote:'`',Comma:',',Period:'.',Slash:'/'};
+// KeyboardEvent.code to the Android key names typeText accepts.
+function androidKey(code,modifiers){
+  const base=/^Key[A-Z]$/.test(code)?code.slice(3).toLowerCase():/^Digit\d$/.test(code)?code.slice(5):code==='Space'?'space':PUNCTUATION[code]
+    ||(/^(Enter|Escape|Tab|Backspace|Delete|Arrow(Up|Down|Left|Right)|F([1-9]|1[0-2]))$/.test(code)?code:null);
+  if(!base)throw Error('Unsupported key');
+  return [...modifiers.map(m=>({shift:'shift',control:'ctrl',option:'alt',command:'cmd'})[m]),base].join('+');
+}
+// Provider complete chords -> host down/up events. Shared with the remote page
+// so its sole input queue measures the exact packet the worker forwards.
+function hostEvents(events){
+  const modifierCodes={shift:'ShiftLeft',control:'ControlLeft',option:'AltLeft',command:'MetaLeft'};
+  return events.flatMap(event=>{
+      if(event?.kind!=='key'||typeof event.down==='boolean')return [event];
+      const modifiers=event.modifiers??[];
+      if(typeof event.code!=='string'||!Array.isArray(modifiers)||modifiers.length>4||modifiers.some(m=>!Object.hasOwn(modifierCodes,m)))
+        throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT',execution:'not_executed'});
+      const codes=[...new Set(modifiers)].map(m=>modifierCodes[m]);
+      return [...codes.map(code=>({kind:'key',code,down:true})),{kind:'key',code:event.code,down:true},{kind:'key',code:event.code,down:false},...codes.reverse().map(code=>({kind:'key',code,down:false}))];
+  });
+}
+if(typeof module!=='undefined')module.exports={chord,parseKey,typeable,androidKey,hostEvents};
+else window.DeviceKeys={chord,parseKey,typeable,androidKey,hostEvents};
