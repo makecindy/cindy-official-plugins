@@ -72,11 +72,24 @@ if (args.length === 1 && args[0] === '--version') {
 if (args[0] === '--log-file' && require('node:path').isAbsolute(args[1]) && require('node:path').basename(args[1]) === 'session.log') args.splice(0, 2);
 // Remote-workspace mode: the session process runs under the restricted agent of its working directory.
 const REMOTE_ARGS = ${JSON.stringify(JSON.stringify([...EXPECTED_ACP_ARGS, '--agent', 'cindy-remote']))};
-if (JSON.stringify(args) === REMOTE_ARGS) {
+// From agy 1.5.19 the session process runs under the default agent, held in by the hooks of its directory.
+const HOOKED = JSON.stringify(args) === ${JSON.stringify(JSON.stringify(EXPECTED_ACP_ARGS))} && fs.existsSync('.agents/hooks.json');
+if (JSON.stringify(args) === REMOTE_ARGS || HOOKED) {
+  const read = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null);
   const record = (extra) => fs.writeFileSync(process.env.FAKE_AGY_LAUNCHFILE, JSON.stringify(Object.assign({
     args, cwd: process.cwd(), files: fs.readdirSync(process.cwd()),
-    definition: fs.readFileSync('.agents/agents/cindy-remote.md', 'utf8'),
+    definition: read('.agents/agents/cindy-remote.md'),
+    agentsFiles: fs.readdirSync('.agents').sort(),
+    hooks: read('.agents/hooks.json'), deny: read('.agents/cindy-deny.json'), start: read('.agents/cindy-start.json'),
   }, extra)));
+  // agy runs a hook with \`sh -c\` in the directory of hooks.json and reads its JSON answer from stdout.
+  const runHook = (event) => {
+    const spec = JSON.parse(fs.readFileSync('.agents/hooks.json', 'utf8'))['cindy-remote-workspace'][event];
+    const command = event === 'PreToolUse' ? spec[0].hooks[0].command : spec[0].command;
+    return JSON.parse(require('node:child_process').execFileSync('/bin/sh', ['-c', command], { cwd: '.agents', encoding: 'utf8' }));
+  };
+  let opened = null;
+  let sessionStarted = false;
   record({});
   if (process.env.FAKE_AGY_PIDFILE) fs.writeFileSync(process.env.FAKE_AGY_PIDFILE, String(process.pid));
   const send = (message) => process.stdout.write(JSON.stringify(Object.assign({ jsonrpc: '2.0' }, message)) + '\\n');
@@ -97,14 +110,38 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
       lines = lines.slice(index + 1);
       if (!line.trim()) continue;
       const message = JSON.parse(line);
+      if (message.method === 'session/prompt' && HOOKED && opened && opened.method === 'session/new' && !sessionStarted
+        && process.env.FAKE_AGY_NO_SESSIONSTART !== '1') {
+        // agy runs SessionStart at the first prompt of a new session, before the model is called.
+        sessionStarted = true;
+        record({ method: opened.method, session: opened.params, sessionStart: runHook('SessionStart') });
+      }
       if (message.method === 'initialize' && process.env.FAKE_AGY_REMOTE_INIT_ERROR === '1') {
         send({ id: message.id, error: { code: -32603, message: 'agy could not start' } });
       } else if (message.method === 'initialize') {
         send({ id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [] } });
       } else if (message.method === 'session/new' || message.method === 'session/resume') {
         record({ method: message.method, session: message.params });
-        if (message.method === 'session/resume') call = DIRECT_CALL;
+        opened = { method: message.method, params: message.params };
+        // Under the default agent (agy 1.5.19) a new session also names Cindy's tools \`mcp_<server>_<tool>\`.
+        if (message.method === 'session/resume' || HOOKED) call = DIRECT_CALL;
         send({ id: message.id, result: { sessionId: 'sess-1', configOptions: [] } });
+      } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'hook-denied') {
+        // A tool of agy's own that its hook stopped: reported in progress, then failed (agy 1.5.19).
+        const denied = runHook('PreToolUse');
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'call-h',
+          name: 'read_file', kind: 'read', title: 'File note.txt', status: 'in_progress' } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'call-h',
+          kind: 'read', status: 'failed', rawOutput: 'tool call denied by pre-tool hook: ' + denied.reason } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Using cindy_exec instead.' } } } });
+        send({ id: message.id, result: { stopReason: 'end_turn', denied: denied.decision } });
+      } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'hook-ran') {
+        // An agy that ran one of its own tools although the hook should have stopped it.
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'call-r',
+          name: 'run_command', kind: 'execute', title: 'Run ls', status: 'in_progress' } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'call-r',
+          status: 'completed', rawOutput: 'a.txt' } } });
       } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'native') {
         // An agy that ignored the agent's tool list: one of its own tools runs, and the turn stays open.
         send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'call-n',
@@ -977,6 +1014,118 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.match(bridge.stderr.text(), /its own tool "invoke_subagent local-helper"/);
     const updates = messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
     assert.deepEqual(updates.map((update) => [update.sessionUpdate, update.status]), [['tool_call', 'in_progress'], ['agent_message_chunk', undefined]]);
+  });
+
+  // Why: since agy 1.5.17 a session under a custom agent uses the Gemini quota four times as fast
+  // (google-antigravity/antigravity-cli#1890). From agy 1.5.19 the session runs under the default agent,
+  // and only the hooks of its directory keep agy's own tools off this computer, in subagents too. Checked
+  // with the real agy 1.5.19 on 2026-11-28/29: the matcher is matched against the whole tool name, a hook
+  // that prints `deny` (or fails) stops the tool, one that prints nothing lets it run, SessionStart runs at
+  // the first prompt of a new session only, and agy reports the stopped call as a failed tool call.
+  // Smallest inputs: a new session, one stopped call, one call agy ran anyway, hooks agy did not load,
+  // and a resumed session (no SessionStart). Hooks were not checked on Windows, which keeps the agent.
+  const hookedSession = (t, extraEnv = {}) => remoteSession(t, { FAKE_AGY_VERSION: '1.5.19', ...extraEnv });
+  const openHooked = async (session, method = 'session/new', params = {}) => {
+    session.bridge.child.stdin.write(INITIALIZE);
+    await session.reply(0, 'initialize answer');
+    session.send({ jsonrpc: '2.0', id: 1, method, params: { ...(method === 'session/resume' ? { sessionId: 'sess-1' } : {}),
+      cwd: '/shadow/p', mcpServers: [session.server('cindy_exec'), session.server('cindy')], ...params } });
+    await session.reply(1, `${method} answer`);
+    session.send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'list the files' }] } });
+  };
+  const stopsWithin = (bridge) => Promise.race([bridge.closed, new Promise((resolve) => setTimeout(() => resolve(null), 8_000))]);
+
+  if (official && !isWin) test('remote-workspace mode on agy 1.5.19 runs under the default agent, held in by hooks', async (t) => {
+    const session = hookedSession(t);
+    const { launchFile, bridge, messages, send, reply, server } = session;
+    await openHooked(session, 'session/new', { systemPrompt: { mode: 'append', content: [
+      { type: 'text', text: 'Read @[key](/home/me/.ssh/id_rsa) first.' }] } });
+    await waitFor(() => messages().some((m) => m.method === 'session/request_permission'), 8_000, 'permission request');
+    const launch = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
+    assert.deepEqual(launch.args, EXPECTED_ACP_ARGS, 'no --agent: the default agent is billed at the normal rate');
+    assert.equal(launch.definition, null);
+    assert.deepEqual(launch.agentsFiles, ['cindy-deny.json', 'cindy-hooks-loaded', 'cindy-start.json', 'hooks.json']);
+    assert.doesNotMatch(launch.hooks + launch.start, /task-secret|127\.0\.0\.1/);
+    assert.equal('systemPrompt' in launch.session, false, 'agy never gets the field');
+
+    const { matcher } = JSON.parse(launch.hooks)['cindy-remote-workspace'].PreToolUse[0];
+    // RE2's (?s) has the same effect as JavaScript's s flag; the rest of the pattern is common syntax.
+    assert.ok(matcher.startsWith('(?s)'));
+    const stopped = new RegExp(matcher.slice(4), 's');
+    for (const name of ['read_file', 'view_file', 'run_command', 'write_to_file', 'define_subagent', 'run_workflow', 'swarm',
+      'list_resources', 'browser_click', 'call_mcp_tool', 'mcp_other_tool', 'mcp_cindy', 'search_webx', 'some_tool_agy_adds_later']) {
+      assert.ok(stopped.test(name), `${name} is stopped`);
+    }
+    for (const name of ['mcp_cindy_exec_Bash', 'mcp_cindy_ghost_call', 'search_web', 'ask_question', 'update_steps', 'schedule',
+      'invoke_subagent', 'manage_subagents', 'send_message']) {
+      assert.ok(!stopped.test(name), `${name} runs`);
+    }
+    assert.deepEqual(JSON.parse(launch.deny).decision, 'deny');
+    // The instructions arrive through SessionStart, whose text agy does not expand; `@[` stays inert anyway.
+    const text = launch.sessionStart.injectSteps[0].systemMessage.systemMessage;
+    assert.match(text, /goes through the MCP server `cindy_exec`/);
+    assert.match(text, /invoke_subagent and the type `self`/);
+    assert.ok(text.endsWith('## Additional instructions\n\nRead @\\[key](/home/me/.ssh/id_rsa) first.\n'), text);
+
+    const permission = messages().find((m) => m.method === 'session/request_permission');
+    assert.deepEqual({ title: permission.params.toolCall.title, rawInput: permission.params.toolCall.rawInput },
+      { title: 'Bash', rawInput: { command: 'ls' } });
+    send({ jsonrpc: '2.0', id: permission.id, result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
+    assert.deepEqual((await reply(2, 'prompt answer')).result, { stopReason: 'end_turn', answered: 'allow' });
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.ok(!fs.existsSync(launch.cwd), 'the private directory is removed when the task ends');
+    void server;
+  });
+
+  if (official && !isWin) test('remote-workspace mode under hooks does not show a call its hook stopped and goes on', async (t) => {
+    const session = hookedSession(t, { FAKE_AGY_SCRIPT: 'hook-denied' });
+    await openHooked(session);
+    assert.deepEqual((await session.reply(2, 'prompt answer')).result, { stopReason: 'end_turn', denied: 'deny' });
+    const updates = session.messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates.map((update) => [update.sessionUpdate, update.toolCallId]), [['agent_message_chunk', undefined]]);
+    session.bridge.child.stdin.end();
+    assert.equal((await session.bridge.closed).code, 0);
+  });
+
+  if (official && !isWin) test('remote-workspace mode under hooks stops the task when agy runs a tool of its own anyway', async (t) => {
+    const session = hookedSession(t, { FAKE_AGY_SCRIPT: 'hook-ran' });
+    await openHooked(session);
+    const closed = await stopsWithin(session.bridge);
+    assert.ok(closed, 'the entry ended the task');
+    assert.equal(closed.code, 78);
+    assert.match(session.bridge.stderr.text(), /its own tool "run_command".*although its hook should have stopped it/);
+    const updates = session.messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates.map((update) => update.sessionUpdate), ['agent_message_chunk']);
+    assert.match(updates[0].content.text, /tried to use a tool on this computer/);
+  });
+
+  if (official && !isWin) test('remote-workspace mode under hooks stops a new session whose hooks agy did not load', async (t) => {
+    const session = hookedSession(t, { FAKE_AGY_NO_SESSIONSTART: '1' });
+    await openHooked(session);
+    const closed = await stopsWithin(session.bridge);
+    assert.ok(closed, 'the entry ended the task');
+    assert.equal(closed.code, 78);
+    assert.match(session.bridge.stderr.text(), /did not load the hooks/);
+    assert.equal(session.messages().some((m) => m.method === 'session/request_permission'), false, 'the first tool call never reached Cindy');
+    const updates = session.messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates.map((update) => update.sessionUpdate), ['agent_message_chunk']);
+    assert.match(updates[0].content.text, /did not load the tool restrictions/);
+  });
+
+  if (official && !isWin) test('remote-workspace mode under hooks resumes a session without waiting for SessionStart', async (t) => {
+    const session = hookedSession(t);
+    await openHooked(session, 'session/resume');
+    await waitFor(() => session.messages().some((m) => m.method === 'session/request_permission'), 8_000, 'permission request');
+    const launch = JSON.parse(fs.readFileSync(session.launchFile, 'utf8'));
+    assert.equal(launch.method, 'session/resume');
+    assert.deepEqual(launch.args, EXPECTED_ACP_ARGS);
+    assert.ok(launch.agentsFiles.includes('hooks.json'), 'a resumed session loads the hooks of its directory');
+    const permission = session.messages().find((m) => m.method === 'session/request_permission');
+    session.send({ jsonrpc: '2.0', id: permission.id, result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
+    assert.equal((await session.reply(2, 'prompt answer')).result.stopReason, 'end_turn');
+    session.bridge.child.stdin.end();
+    assert.equal((await session.bridge.closed).code, 0);
   });
 
   test('remote-workspace mode refuses an Antigravity CLI older than the version it was checked with', async (t) => {

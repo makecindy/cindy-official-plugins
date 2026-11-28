@@ -3,8 +3,8 @@
   "id": "cindy-antigravity-acp",
   "name": "Antigravity",
   "description": "Run Cindy tasks with the Google Antigravity CLI (agy) installed on this computer.",
-  "version": "0.6.1",
-  "releaseNotes": "Fixed mid-turn quota, capacity, and authentication failure detection when Antigravity runs out of quota after thinking, tool calls, or intermediate progress updates in a multi-step turn, using step boundaries and agy's private session log to confirm native errors without misclassifying quoted warnings.",
+  "version": "0.7.0",
+  "releaseNotes": "Tasks on another computer and shared tasks now use about a third of the Gemini quota on agy 1.5.19 or later (macOS and Linux): they run under Antigravity's default agent, which is billed at the normal rate, instead of a custom agent billed at four times the rate. Hooks keep Antigravity's own file, command, browser and image tools off in the session and its subagents; a task whose hooks did not load, or in which Antigravity runs such a tool anyway, is stopped.",
   "minCindyVersion": "0.1.148",
   "icon": "icon.png",
   "locales": {
