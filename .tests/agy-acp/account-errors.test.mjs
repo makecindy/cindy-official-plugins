@@ -191,10 +191,92 @@ describe('cindy-antigravity-acp account-errors', () => {
     assert.equal(relay.response(overlapping), overlapping);
   });
 
+  test('accountErrorRelay converts mid-turn quota warnings after thoughts, tool calls, or steering', () => {
+    const relay = accountErrorRelay(() => NOW);
+    const update = (u) => ({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1', update: u } });
+
+    // Multi-step turn: thought -> intermediate reply -> tool call -> tool result -> quota exhaustion.
+    relay.request({ jsonrpc: '2.0', id: 20, method: 'session/prompt', params: { sessionId: 's1', prompt: [] } });
+    assert.equal(relay.notification(update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Planning...' } })), null);
+    assert.equal(relay.notification(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Let me check that file.' } })), null);
+    assert.equal(relay.notification(update({ sessionUpdate: 'tool_call', toolCallId: 'tc1', title: 'Read', status: 'in_progress' })), null);
+    assert.equal(relay.notification(update({ sessionUpdate: 'tool_call_update', toolCallId: 'tc1', status: 'completed' })), null);
+    assert.deepEqual(
+      relay.notification(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `\n⚠ ${QUOTA_MSG}\n` } })),
+      { hold: true },
+    );
+    const converted = relay.response({ jsonrpc: '2.0', id: 20, result: { stopReason: 'end_turn' } });
+    assert.equal(converted.result, undefined);
+    assert.equal(converted.error.message, QUOTA_MSG);
+    assert.deepEqual(converted.error.data._meta.cindy, { kind: 'usage-limit', resetsAt: EXPECTED_RESET_MS });
+
+    // Steering after prior prose opens a fresh step within the active turn.
+    relay.request({ jsonrpc: '2.0', id: 21, method: 'session/prompt', params: { sessionId: 's1', prompt: [] } });
+    assert.equal(relay.notification(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Working on step 1...' } })), null);
+    relay.request({ jsonrpc: '2.0', id: 22, method: '_session/steering', params: { sessionId: 's1', prompt: [] } });
+    assert.deepEqual(
+      relay.notification(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `\n⚠ ${QUOTA_MSG}\n` } })),
+      { hold: true },
+    );
+    const steered = relay.response({ jsonrpc: '2.0', id: 21, result: { stopReason: 'end_turn' } });
+    assert.equal(steered.error?.data?._meta?.cindy?.kind, 'usage-limit');
+  });
+
+  test('accountErrorRelay verifies warnings against agy task log for mid-stream errors and quote protection', (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-official-log-check-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const taskLog = path.join(dir, 'session.log');
+    fs.writeFileSync(taskLog, 'I1128 23:00:00.000001 100 server_oauth.go:1] OAuth: authenticated successfully\n', 'utf8');
+
+    const relay = accountErrorRelay(() => NOW, { taskLog });
+    const update = (u) => ({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1', update: u } });
+    const warnMsg = update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `\n⚠ ${QUOTA_MSG}\n` } });
+
+    // 1. Mid-stream quota error after prose in the SAME step: confirmed by agy's E-level glog line.
+    relay.request({ jsonrpc: '2.0', id: 30, method: 'session/prompt', params: { sessionId: 's1', prompt: [] } });
+    assert.equal(relay.notification(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Partial answer before 429' } })), null);
+    fs.appendFileSync(
+      taskLog,
+      `E1128 23:01:00.000001 100 errorreport.go:282] agent executor error: generating and executing: transport error (ResourceExhausted, HTTP 429): ${QUOTA_MSG}\n`,
+      'utf8',
+    );
+    assert.deepEqual(relay.notification(warnMsg), { hold: true });
+    const confirmed = relay.response({ jsonrpc: '2.0', id: 30, result: { stopReason: 'end_turn' } });
+    assert.equal(confirmed.error?.message, QUOTA_MSG);
+    assert.deepEqual(confirmed.error?.data?._meta?.cindy, { kind: 'usage-limit', resetsAt: EXPECTED_RESET_MS });
+
+    // 2. Quoted warning right after tool_call_update (zero prose before quote), while agy actively logged I-lines and no E-line.
+    relay.request({ jsonrpc: '2.0', id: 31, method: 'session/prompt', params: { sessionId: 's1', prompt: [] } });
+    assert.equal(relay.notification(update({ sessionUpdate: 'tool_call_update', toolCallId: 'tc2', status: 'completed' })), null);
+    fs.appendFileSync(taskLog, 'I1128 23:02:00.000001 100 executor.go:42] turn finished normally\n', 'utf8');
+    assert.deepEqual(relay.notification(warnMsg), { hold: true });
+    const flushed = [];
+    const ok = { jsonrpc: '2.0', id: 31, result: { stopReason: 'end_turn' } };
+    assert.equal(relay.response(ok, (m) => flushed.push(m)), ok);
+    assert.deepEqual(flushed, [warnMsg]);
+
+    // 3. Large prompt log (>256 KiB delta): tail still confirms the terminal error.
+    relay.request({ jsonrpc: '2.0', id: 32, method: 'session/prompt', params: { sessionId: 's1', prompt: [] } });
+    const filler = 'I1128 23:03:00.000001 100 verbose.go:1] ' + 'x'.repeat(1000) + '\n';
+    fs.appendFileSync(
+      taskLog,
+      filler.repeat(300)
+        + `E1128 23:03:05.000001 100 errorreport.go:282] agent executor error: transport error (ResourceExhausted, HTTP 429): ${QUOTA_MSG}\n`,
+      'utf8',
+    );
+    assert.deepEqual(relay.notification(warnMsg), { hold: true });
+    const tailConfirmed = relay.response({ jsonrpc: '2.0', id: 32, result: { stopReason: 'end_turn' } });
+    assert.equal(tailConfirmed.error?.data?._meta?.cindy?.kind, 'usage-limit');
+  });
+
   test('local and remote bridges preserve quoted warnings and classify native quota failures', async (t) => {
     const fakeAgy = `'use strict';
+const fs = require('node:fs');
 const readline = require('node:readline');
 if (process.argv.includes('--version')) { console.log('1.5.18'); process.exit(0); }
+const logIdx = process.argv.indexOf('--log-file');
+const logFile = logIdx !== -1 ? process.argv[logIdx + 1] : null;
+const appendLog = (line) => { if (logFile) fs.appendFileSync(logFile, line + '\\n', 'utf8'); };
 const rl = readline.createInterface({ input: process.stdin });
 const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\\n');
 rl.on('line', (line) => {
@@ -205,8 +287,20 @@ rl.on('line', (line) => {
     send({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'sess-1' } });
   } else if (msg.method === 'session/prompt') {
     const scenario = msg.params.prompt[0].text;
-    if (scenario === 'quote' || scenario === 'explicit') {
+    if (scenario === 'quote' || scenario === 'explicit' || scenario === 'midstream-logged') {
       send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'The CLI displayed this message:' } } } });
+    }
+    if (scenario === 'multistep-quota' || scenario === 'post-tool-logged-quote') {
+      send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Checking files...' } } } });
+      send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Inspecting workspace.' } } } });
+      send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'search_web', kind: 'search', status: 'in_progress' } } });
+      send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'completed' } } });
+    }
+    if (scenario === 'midstream-logged') {
+      appendLog('E1128 23:15:55.818089 267 errorreport.go:282] agent executor error: generating and executing: transport error (ResourceExhausted, HTTP 429): ${QUOTA_MSG}');
+    }
+    if (scenario === 'post-tool-logged-quote') {
+      appendLog('I1128 23:16:00.000001 267 executor.go:10] step completed cleanly');
     }
     send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\\n⚠ ${QUOTA_MSG}\\n' } } } });
     send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'usage_update', used: 200, size: 100000 } } });
@@ -260,6 +354,13 @@ rl.on('line', (line) => {
       assert.equal(quota.response.error?.data?._meta?.cindy?.kind, 'usage-limit');
       assert.equal(typeof quota.response.error?.data?._meta?.cindy?.resetsAt, 'number');
 
+      // Multi-step turn hitting quota after thought + intermediate text + tool call.
+      const multistep = await prompt('multistep-quota');
+      assert.deepEqual(multistep.text, ['Inspecting workspace.']);
+      assert.equal(multistep.response.error?.message, QUOTA_MSG);
+      assert.equal(multistep.response.error?.data?._meta?.cindy?.kind, 'usage-limit');
+      assert.equal(typeof multistep.response.error?.data?._meta?.cindy?.resetsAt, 'number');
+
       const failed = await prompt('explicit');
       assert.equal(failed.response.error?.data?._meta?.cindy?.kind, 'usage-limit');
       assert.deepEqual(failed.text, quoted.text);
@@ -267,6 +368,18 @@ rl.on('line', (line) => {
       const cancelled = await prompt('cancel');
       assert.deepEqual(cancelled.text, [quotaWarning]);
       assert.deepEqual(cancelled.response.result, { stopReason: 'cancelled' });
+
+      // Same-step prose followed by a real logged quota error (activates session.log).
+      const midstream = await prompt('midstream-logged');
+      assert.deepEqual(midstream.text, ['The CLI displayed this message:']);
+      assert.equal(midstream.response.error?.message, QUOTA_MSG);
+      assert.equal(midstream.response.error?.data?._meta?.cindy?.kind, 'usage-limit');
+
+      // With session.log active and no error logged for this prompt, a quoted warning right
+      // after a tool call stays ordinary text instead of triggering a false failover.
+      const loggedQuote = await prompt('post-tool-logged-quote');
+      assert.deepEqual(loggedQuote.text, ['Inspecting workspace.', quotaWarning]);
+      assert.deepEqual(loggedQuote.response.result, { stopReason: 'end_turn' });
 
       bridge.child.stdin.end();
       await bridge.closed;
