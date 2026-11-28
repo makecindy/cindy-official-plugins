@@ -8,10 +8,11 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -20,6 +21,14 @@ import vm from 'node:vm';
 
 const official = new URL(import.meta.url).searchParams.has('official');
 const pluginId = official ? 'cindy-antigravity-acp' : 'agy-acp';
+// The legacy plugin signs in from its own settings page (worker `login`). The official plugin has no
+// sign-in of its own: Cindy's engine accounts call `accountLogin`, here for agy's original login.
+const SIGN_IN = official
+  ? { method: 'accountLogin', params: { harnessId: 'agy', methodId: 'oauth-personal' } }
+  : { method: 'login', params: {} };
+const CANCEL_SIGN_IN = official
+  ? { method: 'accountLoginCancel', params: { harnessId: 'agy' } }
+  : { method: 'cancelLogin', params: {} };
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..', pluginId);
 const isWin = process.platform === 'win32';
 
@@ -85,7 +94,9 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
       lines = lines.slice(index + 1);
       if (!line.trim()) continue;
       const message = JSON.parse(line);
-      if (message.method === 'initialize') {
+      if (message.method === 'initialize' && process.env.FAKE_AGY_REMOTE_INIT_ERROR === '1') {
+        send({ id: message.id, error: { code: -32603, message: 'agy could not start' } });
+      } else if (message.method === 'initialize') {
         send({ id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [] } });
       } else if (message.method === 'session/new' || message.method === 'session/resume') {
         record({ method: message.method, session: message.params });
@@ -95,6 +106,62 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
         // An agy that ignored the agent's tool list: one of its own tools runs, and the turn stays open.
         send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'call-n',
           name: 'write_to_file', kind: 'edit', title: 'note.txt', status: 'in_progress' } } });
+      } else if (message.method === 'session/prompt' && /subagent/.test(process.env.FAKE_AGY_SCRIPT || '')) {
+        // Subagent launches as agy 1.5.18 reports them: a tool call that ends completed (started) or failed (refused).
+        const launch = (id, type, status) => {
+          const call = { toolCallId: id, name: 'invoke_subagent', kind: 'other', title: 'Run invoke_subagent',
+            rawInput: { TypeName: type, Role: 'Helper', Prompt: 'list the files' } };
+          send({ method: 'session/update', params: { sessionId: 'sess-1', update: Object.assign({ sessionUpdate: 'tool_call', status: 'in_progress' }, call) } });
+          send({ method: 'session/update', params: { sessionId: 'sess-1', update: Object.assign({ sessionUpdate: 'tool_call_update', status }, call) } });
+        };
+        if (process.env.FAKE_AGY_SCRIPT === 'foreign-subagent') {
+          // An agy that let a subagent run under another agent (whose own tools would act on this computer).
+          launch('call-s', 'local-helper', 'completed');
+        } else {
+          launch('call-b', 'browser', 'failed');
+          launch('call-s', 'cindy-remote', 'completed');
+          send({ id: message.id, result: { stopReason: 'end_turn' } });
+        }
+      } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'cards') {
+        // Native UI tools (even if tagged with edit/execute kinds) are adapted when elicitation.form is negotiated,
+        // preserved unchanged on older hosts, and failure updates are never dropped.
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'steps-r1',
+          name: 'update_steps', kind: 'edit', title: 'Run update_steps', status: 'in_progress',
+          rawInput: { steps: [{ title: 'Inspect', status: 'done' }, { title: 'Optional', status: 'skipped' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'steps-r1',
+          kind: 'edit', status: 'completed',
+          rawInput: { steps: [{ title: 'Inspect', status: 'done' }, { title: 'Optional', status: 'skipped' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'steps-r2',
+          name: 'update_steps', kind: 'edit', title: 'Run update_steps', status: 'in_progress',
+          rawInput: { steps: [{ title: 'Verify', status: 'in_progress' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'steps-r2',
+          kind: 'edit', status: 'failed', rawOutput: 'validation failed' } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ask-r1',
+          name: 'ask_question', kind: 'execute', title: 'Run ask_question', status: 'in_progress' } } });
+        send({ id: message.id, result: { stopReason: 'end_turn' } });
+      } else if (message.method === 'session/prompt' && process.env.FAKE_AGY_SCRIPT === 'cards_and_mcp') {
+        // Mix Antigravity native ask_question/update_steps with external MCP tools sharing the exact same names.
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'steps-native',
+          name: 'update_steps', kind: 'edit', title: 'Run update_steps', status: 'in_progress',
+          rawInput: { steps: [{ title: 'Native plan', status: 'in_progress' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ask-native',
+          name: 'ask_question', kind: 'execute', title: 'Run ask_question', status: 'in_progress' } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ext-ask',
+          name: 'ask_question', kind: 'other', title: 'Run ask_question', status: 'in_progress',
+          rawInput: { ServerName: 'partner', ToolName: 'ask_question', Arguments: { prompt: 'External prompt' } } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ext-steps',
+          name: 'update_steps', kind: 'other', title: 'Run update_steps', status: 'in_progress',
+          rawInput: { ServerName: 'partner', ToolName: 'update_steps', Arguments: { steps: [{ title: 'External step', status: 'in_progress' }] } } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'ext-steps',
+          name: 'update_steps', kind: 'other', title: 'Run update_steps', status: 'completed',
+          rawInput: { steps: [{ title: 'External step', status: 'done' }] } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call', toolCallId: 'ext-direct',
+          name: 'mcp_partner_update_steps', kind: 'other', title: 'Run mcp_partner_update_steps', status: 'in_progress',
+          rawInput: { steps: [{ title: 'Direct MCP step', status: 'in_progress' }], toolSummary: 'update steps' } } } });
+        send({ method: 'session/update', params: { sessionId: 'sess-1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'ext-direct',
+          name: 'update_steps', kind: 'other', title: 'Run update_steps', status: 'completed',
+          rawInput: { steps: [{ title: 'Direct MCP step', status: 'done' }] } } } });
+        send({ id: message.id, result: { stopReason: 'end_turn' } });
       } else if (message.method === 'session/prompt') {
         promptId = message.id;
         send({ id: 'perm-1', method: 'session/request_permission', params: { sessionId: 'sess-1',
@@ -112,8 +179,12 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
   process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
   return;
 }
-// Every launch must pass the constant ACP args (including no paid credits and no telemetry).
-if (JSON.stringify(args) !== ${JSON.stringify(JSON.stringify(EXPECTED_ACP_ARGS))}) {
+// Every launch must pass the constant ACP args (including no paid credits and no telemetry). The
+// plugin's own verification or sign-in check may add \`--log-file <file>\` at the start or end.
+if (args[0] === '--log-file' && require('node:path').isAbsolute(args[1]) && require('node:path').basename(args[1]) === 'session.log') args.splice(0, 2);
+const logFileAt = args.indexOf('--log-file');
+const acpArgs = logFileAt !== -1 && logFileAt === args.length - 2 && require('node:path').isAbsolute(args[logFileAt + 1]) ? args.slice(0, logFileAt) : args;
+if (JSON.stringify(acpArgs) !== ${JSON.stringify(JSON.stringify(EXPECTED_ACP_ARGS))}) {
   process.stderr.write('fake-agy: unexpected arguments ' + JSON.stringify(args) + '\\n');
   process.exit(2);
 }
@@ -421,7 +492,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.deepEqual(launch.files, ['.agents'], 'agy runs in a directory holding only the agent definition');
     assert.ok(!samePath(launch.cwd, os.tmpdir()), 'not the shared temp folder');
     // One harmless tool of agy's own; the servers by name only. Their address and the task token stay in session/new.
-    assert.match(launch.definition, /^tools:\n  - search_web\nmcpServers:\n  - name: cindy_exec\n  - name: cindy\n---$/m);
+    assert.match(launch.definition, /^tools:\n  - search_web\n  - ask_question\n  - update_steps\nmcpServers:\n  - name: cindy_exec\n  - name: cindy\n---$/m);
     assert.doesNotMatch(launch.definition, /task-secret|127\.0\.0\.1/);
     assert.deepEqual(launch.session, { cwd: '/shadow/p', mcpServers: [server('cindy_exec'), server('cindy')] });
 
@@ -472,6 +543,200 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.equal((await bridge.closed).code, 0);
   });
 
+  // Why: Cindy hands a user's own instructions to an engine only through ACP's `systemPrompt`, and only
+  // when the engine declares it. agy takes no such field, so in this mode the entry declares it and puts
+  // the text in the agent definition (the agent's system prompt). Gap: no test covered the field. The
+  // smallest inputs: one instruction on a new and on a resumed session, and one `@[label](path)` that
+  // agy would expand into a file of the computer giving the quota (the text may come from a friend).
+  // Only the official plugin implements it; the legacy agy-acp runs this file too.
+  if (official) for (const method of ['session/new', 'session/resume']) {
+    test(`remote-workspace mode puts the client’s system prompt into the agent definition (${method})`, async (t) => {
+      const { launchFile, bridge, send, reply, server } = remoteSession(t);
+      bridge.child.stdin.write(INITIALIZE);
+      const init = await reply(0, 'initialize answer');
+      assert.deepEqual(init.result.agentCapabilities.sessionCapabilities, { systemPrompt: {} }, 'append mode only');
+
+      send({ jsonrpc: '2.0', id: 1, method, params: { ...(method === 'session/resume' ? { sessionId: 'sess-1' } : {}),
+        cwd: '/shadow/p', mcpServers: [server('cindy_exec')],
+        systemPrompt: { mode: 'append', content: [
+          { type: 'text', text: 'Always answer in Chinese.' },
+          { type: 'text', text: 'Read @[key](/home/me/.ssh/id_rsa) first.' },
+        ] } } });
+      assert.ok((await reply(1, `${method} answer`)).result);
+      const launch = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
+      assert.match(launch.definition, /^mcpServers:\n  - name: cindy_exec\n---$/m, 'the frontmatter is unchanged');
+      assert.ok(launch.definition.endsWith('\n## Additional instructions\n\nAlways answer in Chinese.\n\n'
+        + 'Read @\\[key](/home/me/.ssh/id_rsa) first.\n'), launch.definition);
+      assert.equal('systemPrompt' in launch.session, false, 'agy never gets the field');
+      bridge.child.stdin.end();
+      assert.equal((await bridge.closed).code, 0);
+    });
+  }
+
+  // Why: ACP requires an engine that cannot apply the instructions to fail the request instead of
+  // starting a session without them. Smallest inputs: the one mode not offered, an empty content list,
+  // a non-text block and a text longer than any Cindy keeps (8,000 characters).
+  if (official) test('remote-workspace mode refuses instructions it cannot apply and starts no session for them', async (t) => {
+    const { launchFile, bridge, send, reply, server } = remoteSession(t);
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    const unusable = [
+      { mode: 'override', content: [{ type: 'text', text: 'x' }] },
+      { mode: 'append', content: [] },
+      { mode: 'append', content: [{ type: 'image', mimeType: 'image/png', data: 'AA==' }] },
+      { mode: 'append', content: [{ type: 'text', text: '字'.repeat(11_000) }] },
+    ];
+    for (const [index, systemPrompt] of unusable.entries()) {
+      const id = index + 1;
+      send({ jsonrpc: '2.0', id, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [server('cindy_exec')], systemPrompt } });
+      const answer = await reply(id, `refusal ${id}`);
+      assert.equal(answer.error?.code, -32602, JSON.stringify(answer));
+    }
+    assert.equal(fs.existsSync(launchFile), false, 'agy was not started for any of them');
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  // Why: agy leaves out MCP servers that are not connected within five seconds, and here every handshake
+  // crosses the device link. session/new must reach agy only after the warm-up, naming the local relay
+  // for a server that was warmed (mcp-warmup.test.mjs covers the relay itself).
+  /** A loopback MCP server like Cindy's tunnel, answering after `delayMs`; `sessions` lists the open ones. */
+  const tunnelServer = async (t, delayMs = 300) => {
+    const sessions = new Set();
+    const counts = { requests: 0 };
+    let created = 0;
+    const mcp = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        counts.requests += 1;
+        const message = body ? JSON.parse(body) : {};
+        const sid = req.headers['mcp-session-id'];
+        // The session exists on the server as soon as initialize arrives, before its answer is sent.
+        const id = !sid && message.method === 'initialize' ? `s${created++}` : null;
+        if (id) sessions.add(id);
+        setTimeout(() => {
+          if (req.method === 'GET') return res.writeHead(405).end();
+          if (req.method === 'DELETE') {
+            sessions.delete(sid);
+            return res.writeHead(200).end();
+          }
+          if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+          if (id) {
+            res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
+            return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id,
+              result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
+          }
+          if (message.id === undefined) return res.writeHead(202).end();
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [] } }));
+        }, delayMs);
+      });
+    });
+    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
+    t.after(() => mcp.close());
+    return { sessions, counts, url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec` };
+  };
+
+  /**
+   * Makes the entry's start of the session process fail: `throw` throws from spawn itself, `missing`
+   * starts a program that does not exist (spawn reports it asynchronously). Preloaded into the entry only.
+   */
+  const failSessionLaunch = (t, mode) => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agy-acp-spawn-')), 'fail-launch.cjs');
+    t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }));
+    fs.writeFileSync(file, `'use strict';
+if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
+  const childProcess = require('node:child_process');
+  const spawn = childProcess.spawn;
+  childProcess.spawn = function (command, args, options) {
+    if (Array.isArray(args) && args.includes('--agent')) {
+      if (${JSON.stringify(mode)} === 'throw') throw new Error('spawn failed');
+      return spawn.call(this, '/nonexistent/agy-for-test', args, options);
+    }
+    return spawn.apply(this, arguments);
+  };
+}
+`);
+    return { NODE_OPTIONS: `--require=${file}` };
+  };
+
+  if (official) test('remote-workspace mode hands agy its MCP servers only after their handshake is done', async (t) => {
+    const { sessions, url } = await tunnelServer(t);
+    const { launchFile, bridge, send, reply, server } = remoteSession(t);
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    const exec = { ...server('cindy_exec'), url };
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec, server('cindy')] } });
+    await reply(1, 'session/new answer');
+    const { session } = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
+    assert.equal(sessions.size, 1, 'the server was warmed before agy got session/new');
+    assert.match(session.mcpServers[0].url, /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{32}\/0$/);
+    assert.deepEqual(session.mcpServers[0].headers, exec.headers);
+    assert.deepEqual(session.mcpServers[1], server('cindy'), 'a server that could not be warmed keeps its own address');
+    // The task ends before agy connected (the fake never does): its warmed session must not stay on the other computer.
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.equal(sessions.size, 0, 'the warmed session agy never took over was ended before the entry exited');
+  });
+
+  // Why: when agy itself cannot start, nobody will take over the warmed sessions; they must be ended at
+  // once, not left on the other computer while the task stays open.
+  if (official) test('remote-workspace mode ends the warmed sessions when agy fails to start', async (t) => {
+    const { sessions, url } = await tunnelServer(t, 50);
+    const { bridge, send, reply, server } = remoteSession(t, { FAKE_AGY_REMOTE_INIT_ERROR: '1' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    assert.equal((await reply(1, 'session/new answer')).error.message, 'agy could not start');
+    await waitFor(() => sessions.size === 0, 3_000, 'the warmed session to be ended while the task is still open');
+    assert.equal(bridge.child.exitCode, null, 'released without waiting for the task to end');
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  // Why: the task can end while a handshake is still on its way. The server may already have created the
+  // session; the entry waits for the answer that names it and ends it before exiting.
+  // The answer takes longer than a short exit wait would allow: the entry's wait covers the warm-up's close budget.
+  if (official) test('remote-workspace mode ends a session whose handshake was still on its way at exit', async (t) => {
+    const { sessions, url } = await tunnelServer(t, 1_800);
+    const { bridge, send, reply, server } = remoteSession(t);
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    await waitFor(() => sessions.size === 1, 3_000, 'the server to create the session');
+    bridge.child.stdin.end(); // before the initialize answer arrives
+    assert.equal((await bridge.closed).code, 0);
+    assert.equal(sessions.size, 0, 'the session was ended before the entry exited');
+  });
+
+  // Why: starting the session process can fail synchronously (spawnAgy refuses unsafe paths or arguments)
+  // or asynchronously (the program is gone). Either way agy never runs, so no warmed session may stay.
+  if (official) test('remote-workspace mode leaves no warm-up running when agy cannot be started', async (t) => {
+    const { counts, url } = await tunnelServer(t, 50);
+    const { bridge, send, reply, server } = remoteSession(t, failSessionLaunch(t, 'throw'));
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    assert.match((await reply(1, 'session/new answer')).error.message, /could not be started/);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(counts.requests, 0, 'no handshake was started for an agy that never ran');
+    bridge.child.stdin.end();
+    await bridge.closed;
+  });
+
+  if (official) test('remote-workspace mode ends the warmed sessions when the agy program is gone', async (t) => {
+    const { sessions, url } = await tunnelServer(t, 50);
+    const { bridge, send, reply, server } = remoteSession(t, failSessionLaunch(t, 'missing'));
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [{ ...server('cindy_exec'), url }] } });
+    await bridge.closed;
+    assert.match(bridge.stderr.text(), /Could not start Antigravity/);
+    // Whether the handshake got as far as creating a session or was stopped before it, none is left.
+    assert.equal(sessions.size, 0, 'no warmed session is left on the other computer');
+  });
+
   test('remote-workspace mode does not start a session without Cindy’s file and command tools', async (t) => {
     const { launchFile, bridge, send, reply, server } = remoteSession(t);
     bridge.child.stdin.write(INITIALIZE);
@@ -483,6 +748,173 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.ok(!fs.existsSync(launchFile), 'the session process was never started');
     bridge.child.stdin.end();
     assert.equal((await bridge.closed).code, 0);
+  });
+
+  test('remote-workspace mode adapts native update_steps and ask_question updates through the relay and preserves compatibility without elicitation.form', async (t) => {
+    const withForm = remoteSession(t, { FAKE_AGY_SCRIPT: 'cards' });
+    withForm.send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { elicitation: { form: {} } } },
+    });
+    await withForm.reply(0, 'initialize answer');
+    withForm.send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [withForm.server('cindy_exec')] } });
+    await withForm.reply(1, 'session/new answer');
+    withForm.send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'plan and ask' }] } });
+    assert.deepEqual((await withForm.reply(2, 'prompt answer')).result, { stopReason: 'end_turn' });
+    const updates = withForm.messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates, [
+      {
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Inspect', priority: 'medium', status: 'completed' },
+          { content: 'Optional', priority: 'medium', status: 'completed' },
+        ],
+      },
+      {
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Verify', priority: 'medium', status: 'in_progress' },
+        ],
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'steps-r2',
+        kind: 'edit',
+        status: 'failed',
+        rawOutput: 'validation failed',
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ask-r1',
+        name: 'AskUserQuestion',
+        kind: 'execute',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+    ]);
+    withForm.bridge.child.stdin.end();
+    assert.equal((await withForm.bridge.closed).code, 0);
+
+    // Older Cindy hosts (without elicitation.form) keep the raw update_steps and ask_question tool rows unchanged.
+    const legacy = remoteSession(t, { FAKE_AGY_SCRIPT: 'cards' });
+    legacy.send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false } } },
+    });
+    await legacy.reply(0, 'legacy initialize answer');
+    legacy.send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [legacy.server('cindy_exec')] } });
+    await legacy.reply(1, 'legacy session/new answer');
+    legacy.send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'plan and ask' }] } });
+    assert.deepEqual((await legacy.reply(2, 'legacy prompt answer')).result, { stopReason: 'end_turn' });
+    const legacyUpdates = legacy.messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.equal(legacyUpdates.some((u) => u.sessionUpdate === 'plan'), false);
+    assert.equal(legacyUpdates[0].name, 'update_steps');
+    assert.equal(legacyUpdates.at(-1).name, 'ask_question');
+    legacy.bridge.child.stdin.end();
+    assert.equal((await legacy.bridge.closed).code, 0);
+  });
+
+  test('remote-workspace mode checks MCP ownership before native card adaptation while keeping local-tool blocking active', async (t) => {
+    const relay = remoteSession(t, { FAKE_AGY_SCRIPT: 'cards_and_mcp' });
+    relay.send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { elicitation: { form: {} } } },
+    });
+    await relay.reply(0, 'initialize answer');
+    relay.send({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'session/new',
+      params: { cwd: '/shadow/p', mcpServers: [relay.server('cindy_exec'), relay.server('partner')] },
+    });
+    await relay.reply(1, 'session/new answer');
+    relay.send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'native and mcp' }] } });
+    assert.deepEqual((await relay.reply(2, 'prompt answer')).result, { stopReason: 'end_turn' });
+    const updates = relay.messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates, [
+      {
+        sessionUpdate: 'plan',
+        entries: [{ content: 'Native plan', priority: 'medium', status: 'in_progress' }],
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ask-native',
+        name: 'AskUserQuestion',
+        kind: 'execute',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ext-ask',
+        name: 'mcp__partner__ask_question',
+        kind: 'other',
+        title: 'mcp__partner__ask_question',
+        status: 'in_progress',
+        rawInput: { prompt: 'External prompt' },
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ext-steps',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'in_progress',
+        rawInput: { steps: [{ title: 'External step', status: 'in_progress' }] },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'ext-steps',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'completed',
+        rawInput: { steps: [{ title: 'External step', status: 'done' }] },
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ext-direct',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'in_progress',
+        rawInput: { steps: [{ title: 'Direct MCP step', status: 'in_progress' }] },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'ext-direct',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'completed',
+        rawInput: { steps: [{ title: 'Direct MCP step', status: 'done' }] },
+      },
+    ]);
+    relay.bridge.child.stdin.end();
+    assert.equal((await relay.bridge.closed).code, 0);
+
+    // Local file/command tools still terminate the remote task even when elicitation.form is negotiated.
+    const blocked = remoteSession(t, { FAKE_AGY_SCRIPT: 'native' });
+    blocked.send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { elicitation: { form: {} } } },
+    });
+    await blocked.reply(0, 'blocked initialize answer');
+    blocked.send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [blocked.server('cindy_exec')] } });
+    await blocked.reply(1, 'blocked session/new answer');
+    blocked.send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'write a note' }] } });
+    const closed = await Promise.race([blocked.bridge.closed, new Promise((resolve) => setTimeout(() => resolve(null), 8_000))]);
+    assert.ok(closed, 'the entry ended the task');
+    assert.equal(closed.code, 78);
+    assert.match(blocked.bridge.stderr.text(), /its own tool "write_to_file"/);
   });
 
   test('remote-workspace mode stops the task when Antigravity uses a tool of its own', async (t) => {
@@ -503,6 +935,46 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     const pid = readPid(fixture.pidFile);
     assert.ok(pid, 'the session process had started');
     await waitFor(() => !isAlive(pid), 4_000, 'fake agy to be stopped');
+  });
+
+  // Why: users asked for subagents in tasks on another computer (2026-11-27). agy does not report a
+  // subagent's own tool calls, so only the definition keeps a subagent off this computer's files:
+  // the restricted agent must be the one subagent there is, with nothing inherited. Checked with
+  // the real agy 1.5.18 (a user-level agent with view_file read a file here until both were set);
+  // an older agy keeps the basic definition of the first remote-workspace test.
+  if (official) test('remote-workspace mode gives a checked agy subagents that are the restricted agent itself', async (t) => {
+    const { launchFile, bridge, messages, send, reply, server } = remoteSession(t, { FAKE_AGY_VERSION: '1.5.18', FAKE_AGY_SCRIPT: 'subagents' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [server('cindy_exec')] } });
+    await reply(1, 'session/new answer');
+    const { definition } = JSON.parse(fs.readFileSync(launchFile, 'utf8'));
+    assert.match(definition, /^inheritCustomizations: false\ntools:\n  - search_web\n  - ask_question\n  - update_steps\n  - schedule\n  - invoke_subagent\n  - manage_subagents\n  - send_message\nagents:\n  - cindy-remote\.md\nmcpServers:\n  - name: cindy_exec\n---$/m);
+    assert.doesNotMatch(definition, /define_subagent|run_workflow|swarm|run_command|view_file/);
+
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'delegate' }] } });
+    // A refused launch and a launch of the restricted agent are both passed on; the task goes on.
+    assert.deepEqual((await reply(2, 'prompt answer')).result, { stopReason: 'end_turn' });
+    const launches = messages().filter((m) => m.method === 'session/update' && m.params.update.name === 'invoke_subagent')
+      .map((m) => [m.params.update.rawInput.TypeName, m.params.update.status]);
+    assert.deepEqual(launches, [['browser', 'in_progress'], ['browser', 'failed'], ['cindy-remote', 'in_progress'], ['cindy-remote', 'completed']]);
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  if (official) test('remote-workspace mode stops the task when agy lets a subagent run under another agent', async (t) => {
+    const { bridge, messages, send, reply, server } = remoteSession(t, { FAKE_AGY_VERSION: '1.5.18', FAKE_AGY_SCRIPT: 'foreign-subagent' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [server('cindy_exec')] } });
+    await reply(1, 'session/new answer');
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-1', prompt: [{ type: 'text', text: 'delegate' }] } });
+    const closed = await Promise.race([bridge.closed, new Promise((resolve) => setTimeout(() => resolve(null), 8_000))]);
+    assert.ok(closed, 'the entry ended the task');
+    assert.equal(closed.code, 78);
+    assert.match(bridge.stderr.text(), /its own tool "invoke_subagent local-helper"/);
+    const updates = messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates.map((update) => [update.sessionUpdate, update.status]), [['tool_call', 'in_progress'], ['agent_message_chunk', undefined]]);
   });
 
   test('remote-workspace mode refuses an Antigravity CLI older than the version it was checked with', async (t) => {
@@ -725,10 +1197,19 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     const calls = (method) => nodeCalls.filter((call) => call.method === method);
     vm.runInContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context, { filename: 'main.js' });
 
-    // Start-up: agy is installed but refuses a session: unavailable with the sign-in hint.
-    await waitFor(() => puts.some((body) => body.harnesses[0].reason === 'not-signed-in'), 3_000, 'sign-in hint');
-    assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: false, reason: 'not-signed-in', version: '1.5.12',
-      message: 'Antigravity is not signed in. Open the Antigravity plugin settings and select Sign in with Google.' }] });
+    if (official) {
+      // Start-up: agy is installed; default login is signed out, but the engine stays available with
+      // Google sign-in methods so Cindy can sign in or add isolated accounts in the pool.
+      await waitFor(() => calls('listModels').length === 1 && puts.length >= 1, 3_000, 'initial publish and probe');
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: true, reportsUsage: true,
+        accounts: { methods: [{ id: 'oauth-personal', label: 'Google account', kind: 'browser' }] }, version: '1.5.12' }] });
+    } else {
+      // Start-up: agy is installed but refuses a session: unavailable with the sign-in hint.
+      await waitFor(() => puts.some((body) => body.harnesses[0].reason === 'not-signed-in'), 3_000, 'sign-in hint');
+      assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: false, reason: 'not-signed-in', version: '1.5.12',
+        message: 'Antigravity is not signed in. Open the Antigravity plugin settings and select Sign in with Google.' }] });
+    }
 
     // Signed in, then "Check again": listed right away (no one-minute wait) and published with the modes.
     signedIn = true;
@@ -737,7 +1218,8 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     page.onmessage = (event) => received.push(event.data);
     page.postMessage({ type: 'detect-request', reqId: 'r1' });
     await waitFor(() => puts.some((body) => body.harnesses[0].modes), 3_000, 'models and modes published');
-    assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: true, reportsUsage: true, ...(official ? { accounts: { methods: [] } } : {}), version: '1.5.12',
+    assert.deepEqual(puts.at(-1), { harnesses: [{ id: 'agy', available: true, reportsUsage: true,
+      ...(official ? { accounts: { methods: [{ id: 'oauth-personal', label: 'Google account', kind: 'browser' }] } } : {}), version: '1.5.12',
       models: [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high' }],
       modes: ['default', 'acceptEdits', 'auto', 'plan'], defaultMode: 'default' }] });
     assert.equal(calls('listModels').length, 2);
@@ -748,7 +1230,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
   });
 
   // 2026-11-19 实测 agy 1.5.12:ACP 的 authenticate(oauth-personal)由 agy 打开浏览器登录；logout 一调用就登出。
-  test('the worker signs agy in and out over ACP and reports only the sign-in and the tier', async (t) => {
+  if (!official) test('the worker signs agy in and out over ACP and reports only the sign-in and the tier', async (t) => {
     const fixture = makeFixture(t);
     const state = path.join(fixture.dir, 'agy-state');
     fixture.env.FAKE_AGY_STATE = state;
@@ -767,16 +1249,37 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     await worker.close();
   });
 
+  // Accounts are managed in Cindy's Model Providers: the worker signs agy in for Cindy's engine accounts
+  // and offers the settings page no sign-in, status or sign-out of its own.
+  if (official) test('the worker signs agy in only for Cindy’s engine accounts and has no sign-out', async (t) => {
+    const fixture = makeFixture(t);
+    const state = path.join(fixture.dir, 'agy-state');
+    fixture.env.FAKE_AGY_STATE = state;
+    const worker = startWorker(fixture.env);
+    t.after(() => worker.close());
+    let id = 0;
+    const call = (method, params) => worker.call({ jsonrpc: '2.0', id: ++id, method, params });
+    assert.deepEqual((await call('accountStatus', { harnessId: 'agy' })).result, { state: 'signed-out' });
+    assert.deepEqual((await call(SIGN_IN.method, SIGN_IN.params)).result, { ok: true });
+    assert.deepEqual((await call('accountStatus', { harnessId: 'agy' })).result, { state: 'signed-in', plan: 'Google AI Pro' });
+    for (const method of ['account', 'login', 'cancelLogin', 'logout']) {
+      assert.equal((await call(method, {})).error.code, -32601, `${method} is not a worker method`);
+    }
+    const sent = fs.readFileSync(state + '.log', 'utf8').trim().split('\n');
+    assert.deepEqual(sent.filter((method) => method.startsWith('authenticate') || method === 'logout'), ['authenticate:oauth-personal']);
+    assert.equal(fs.readFileSync(state, 'utf8'), 'signed-in');
+  });
+
   test('cancelling a sign-in stops agy and reports it as cancelled', async (t) => {
     const fixture = makeFixture(t, { extraEnv: { FAKE_AGY_LOGIN: 'hang' } });
     const state = path.join(fixture.dir, 'agy-state');
     fixture.env.FAKE_AGY_STATE = state;
     const worker = startWorker(fixture.env);
-    const login = worker.call({ jsonrpc: '2.0', id: 1, method: 'login' });
+    const login = worker.call({ jsonrpc: '2.0', id: 1, ...SIGN_IN });
     await waitFor(() => fs.existsSync(state + '.log') && fs.readFileSync(state + '.log', 'utf8').includes('authenticate'),
       5_000, 'sign-in sent to agy');
     const agyPid = readPid(fixture.pidFile);
-    assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 2, method: 'cancelLogin' })).result, { ok: true, cancelled: true });
+    assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 2, ...CANCEL_SIGN_IN })).result, official ? { ok: true } : { ok: true, cancelled: true });
     assert.deepEqual((await login).result, { ok: false, error: 'cancelled' });
     await waitFor(() => !isAlive(agyPid), 5_000, 'agy stopped');
     await worker.close();
@@ -794,9 +1297,9 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     const sent = (method) => fs.readFileSync(state + '.log', 'utf8').trim().split('\n').filter((line) => line === method).length;
 
     assert.deepEqual(await accountStatus(), { state: 'signed-out' });
-    assert.equal((await call('login', {})).ok, true);
-    // Signed in before any model listing: there is no session to read the tier from, so no plan.
-    assert.deepEqual(await accountStatus(), { state: 'signed-in' });
+    assert.equal((await call(SIGN_IN.method, SIGN_IN.params)).ok, true);
+    // Right after sign-in, the worker already remembers the tier from authenticate even before listing models.
+    assert.deepEqual(await accountStatus(), { state: 'signed-in', plan: 'Google AI Pro' });
     assert.equal((await call('listModels', {})).sessionId, 'fake-session');
     const opened = sent('session/new');
     const resumed = sent('session/resume');
@@ -804,11 +1307,12 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.equal(sent('session/new'), opened, 'accountStatus opened no session');
     assert.equal(sent('session/resume'), resumed + 1, 'accountStatus resumed the model-list session');
 
-    // Cindy can never add an Antigravity account: an account directory or another engine has no status.
+    // A missing account directory or another engine has no status.
     assert.equal(await accountStatus({ harnessId: 'agy', accountDir: path.join(fixture.dir, 'account-1') }), null);
     assert.equal(await accountStatus({ harnessId: 'other' }), null);
 
-    assert.deepEqual(await call('logout', {}), { ok: true });
+    // Signed out elsewhere (agy in a terminal): the next read says so.
+    fs.rmSync(state);
     assert.deepEqual(await accountStatus(), { state: 'signed-out' });
   });
 
@@ -894,7 +1398,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.ok(!sent().includes('session/resume'), 'the new path never resumes the old probe');
   });
 
-  if (official) test('a late account read is discarded after signing out', async (t) => {
+  if (official) test('a late account read is discarded after a sign-in', async (t) => {
     const fixture = makeFixture(t);
     const state = path.join(fixture.dir, 'agy-state');
     const resumeGate = path.join(fixture.dir, 'finish-account-read');
@@ -907,10 +1411,11 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.equal((await worker.call({ jsonrpc: '2.0', id: 1, method: 'listModels', params: {} })).result.sessionId, 'fake-session');
     const pending = worker.call({ jsonrpc: '2.0', id: 2, method: 'accountStatus', params: args });
     await waitFor(() => fs.readFileSync(state + '.log', 'utf8').includes('session/resume'), 5_000, 'account request has read old sign-in');
-    assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 3, method: 'logout', params: {} })).result, { ok: true });
+    assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 3, ...SIGN_IN })).result, { ok: true });
     fs.writeFileSync(resumeGate, '');
     assert.equal((await pending).result, null);
-    assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 4, method: 'accountStatus', params: args })).result, { state: 'signed-out' });
+    assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 4, method: 'accountStatus', params: args })).result,
+      { state: 'signed-in', plan: 'Google AI Pro' });
   });
 
   if (official) test('accountStatus answers null instead of guessing when agy is missing or the check fails', async (t) => {
@@ -928,12 +1433,10 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     const worker = startWorker(crashing.env);
     t.after(() => worker.close());
     assert.equal((await worker.call(request)).result, null);
-    // The settings page still sees the failure itself.
-    assert.equal((await worker.call({ jsonrpc: '2.0', id: 2, method: 'account', params: {} })).result.error, 'status-failed');
   });
 
   // 登录前就开始读取模型时，它晚于登录返回的「未登录」不能把引擎改回未登录。
-  test('main.js signs in and out for the settings page and keeps Cindy’s engine status in step', async () => {
+  if (!official) test('main.js signs in and out for the settings page and keeps Cindy’s engine status in step', async () => {
     class Channel {
       static all = [];
       constructor(name) {
@@ -1001,7 +1504,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     finishFirstListing();
     await waitFor(() => puts.length && puts.at(-1).models, 3_000, 'models read again after the sign-in');
     assert.ok(puts.every((entry) => entry.available), 'the late listing never marks the engine signed out');
-    assert.deepEqual(puts.at(-1), { id: 'agy', available: true, reportsUsage: true, ...(official ? { accounts: { methods: [] } } : {}), version: '1.5.12', models: [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon' }] });
+    assert.deepEqual(puts.at(-1), { id: 'agy', available: true, reportsUsage: true, version: '1.5.12', models: [{ id: 'gemini-4-neon', name: 'Gemini 4 Neon' }] });
 
     page.postMessage({ type: 'account-request', reqId: 'a2', op: 'logout' });
     await waitFor(() => result('a2'), 3_000, 'sign-out result');
@@ -1034,6 +1537,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
         }
       }
     }
+    const openProviders = { offered: true, refuse: false, posts: [] };
     const elements = new Map();
     const element = (id) => {
       if (!elements.has(id)) {
@@ -1049,8 +1553,17 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     const context = vm.createContext({
       BroadcastChannel: Channel, crypto: globalThis.crypto, setTimeout, clearTimeout, setInterval, clearInterval,
       document: { getElementById: element, documentElement: {}, visibilityState: 'visible', addEventListener() {} },
-      fetch: async (url) => ({ ok: true,
-        json: async () => (url === '/app-context' ? { context: { uiLocale: 'zh-CN' } } : { state: 'on' }) }),
+      fetch: async (url, init) => {
+        // Cindy's "show this engine in Model Providers": POST only, so a GET answers 405 where it exists.
+        if (url === '/harnesses/open-settings') {
+          if (!openProviders.offered) return { ok: false, status: 404 };
+          if (!init || init.method !== 'POST') return { ok: false, status: 405 };
+          openProviders.posts.push(init.body);
+          return openProviders.refuse ? { ok: false, status: 403 } : { ok: true, status: 200 };
+        }
+        return { ok: true, status: 200,
+          json: async () => (url === '/app-context' ? { context: { uiLocale: 'zh-CN' } } : { state: 'on' }) };
+      },
     });
     // Stands in for main.js: agy is installed and signed in.
     const main = new Channel(pluginId);
@@ -1059,12 +1572,13 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     let version = '1.5.11';
     let maintenanceState = { type: 'cli-state' };
     let finishUpdate;
+    let signInRequired = false;
     const account = { signedIn: true, tier: 'Google AI Pro', canSignIn: true, canSignOut: true, busy: null };
     main.onmessage = ({ data }) => {
       if (data.type === 'detect-request') {
         main.postMessage({ type: 'detect-ack', reqId: data.reqId });
-        main.postMessage({ type: 'detect-result', reqId: data.reqId, snapshot: { ok: true, account,
-          result: { available: true, version }, signInRequired: false, publish: { status: 'published' }, checkedAt: 1 } });
+        main.postMessage({ type: 'detect-result', reqId: data.reqId, snapshot: { ok: true, ...(official ? {} : { account }),
+          result: { available: true, version }, signInRequired, publish: { status: 'published' }, checkedAt: 1 } });
       }
       if (data.type === 'cli-state-request') main.postMessage(maintenanceState);
       if (data.type === 'cli-maintenance') {
@@ -1093,19 +1607,49 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     const openSettings = () => vm.runInContext(fs.readFileSync(path.join(root, 'settings.js'), 'utf8'), context, { filename: 'settings.js' });
     openSettings();
 
-    await waitFor(() => element('account-status').textContent === '已登录 · Google AI Pro', 3_000, 'signed-in status');
-    assert.equal(element('badge').textContent, '可以使用');
-    assert.equal(element('account-logout').hidden, false);
-    assert.equal(element('account-login').hidden, true);
-    // After each detection the page also asks once whether agy is signed in.
-    await waitFor(() => requests.length > 0, 3_000, 'sign-in check after detection');
-    assert.deepEqual(requests, ['status']);
-    element('account-logout').click();
-    assert.equal(element('account-confirm').hidden, false);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    assert.deepEqual(requests, ['status'], 'choosing Sign out only asks for confirmation');
-    element('account-confirm-yes').click();
-    await waitFor(() => requests.includes('logout'), 3_000, 'sign-out request after confirming');
+    if (official) {
+      // Accounts are managed in Cindy's Model Providers: the page points there and asks main.js nothing about them.
+      await waitFor(() => element('badge').textContent === '可以使用', 3_000, 'detection shown');
+      assert.equal(element('accounts-guide').hidden, false);
+      assert.equal(element('accounts-guide-title').textContent, '账号');
+      assert.match(element('accounts-guide-text').textContent, /设置 → 模型供应商 → Antigravity/);
+      assert.equal(element('accounts-guide-text').attributes['data-tone'], 'neutral');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.deepEqual(requests, [], 'the page sends no account request');
+      for (const id of ['account', 'account-login', 'account-logout', 'account-confirm-yes', 'harness-usage']) {
+        assert.equal(elements.has(id), false, `the page has no ${id}`);
+      }
+      // The button opens Antigravity in Cindy's Model Providers where Cindy offers that, naming this plugin's own engine.
+      await waitFor(() => element('accounts-open').hidden === false, 3_000, 'manage button offered');
+      assert.equal(element('accounts-open').textContent, '在模型供应商里管理');
+      assert.equal(element('accounts-open-note').hidden, true);
+      element('accounts-open').click();
+      await waitFor(() => openProviders.posts.length === 1, 3_000, 'open request sent');
+      assert.deepEqual(JSON.parse(openProviders.posts[0]), { id: 'agy' });
+      assert.equal(element('accounts-open-note').hidden, true);
+      // Cindy did not open it (for example the click was already used): the text path stays as the way there.
+      openProviders.refuse = true;
+      element('accounts-open').click();
+      await waitFor(() => element('accounts-open-note').hidden === false, 3_000, 'fallback note');
+      assert.match(element('accounts-open-note').textContent, /没能直接打开/);
+      openProviders.refuse = false;
+      element('accounts-open').click();
+      await waitFor(() => element('accounts-open-note').hidden === true, 3_000, 'note cleared after it opened');
+    } else {
+      await waitFor(() => element('account-status').textContent === '已登录 · Google AI Pro', 3_000, 'signed-in status');
+      assert.equal(element('badge').textContent, '可以使用');
+      assert.equal(element('account-logout').hidden, false);
+      assert.equal(element('account-login').hidden, true);
+      // After each detection the page also asks once whether agy is signed in.
+      await waitFor(() => requests.length > 0, 3_000, 'sign-in check after detection');
+      assert.deepEqual(requests, ['status']);
+      element('account-logout').click();
+      assert.equal(element('account-confirm').hidden, false);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.deepEqual(requests, ['status'], 'choosing Sign out only asks for confirmation');
+      element('account-confirm-yes').click();
+      await waitFor(() => requests.includes('logout'), 3_000, 'sign-out request after confirming');
+    }
 
     await waitFor(() => element('cli-action').textContent === '更新到 1.5.12', 3_000, 'automatic update check');
     assert.deepEqual(maintenance.map(item => item.action), ['check']);
@@ -1128,6 +1672,26 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.equal(element('cli-action').hidden, true);
     assert.deepEqual(maintenance.map(item => item.action), ['check', 'check', 'update']);
     assert.equal(maintenance[2].version, '1.5.12');
+
+    if (official) {
+      // No signed-in account could list the models: the badge says so and the guide asks to add one in Cindy.
+      signInRequired = true;
+      element('recheck').click();
+      await waitFor(() => element('badge').textContent === '未登录', 3_000, 'not signed in');
+      assert.equal(element('badge').attributes['data-tone'], 'warning');
+      assert.match(element('accounts-guide-text').textContent, /还没有已登录的账号.*模型供应商/);
+      assert.equal(element('accounts-guide-text').attributes['data-tone'], 'warning');
+
+      // An older Cindy, a phone or a remote view has no such path: no button, only the text.
+      openProviders.offered = false;
+      Channel.all = [main];
+      elements.clear();
+      openSettings();
+      await waitFor(() => element('accounts-guide').hidden === false, 3_000, 'guide on an older Cindy');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(element('accounts-open').hidden, true);
+      assert.match(element('accounts-guide-text').textContent, /设置 → 模型供应商 → Antigravity/);
+    }
   });
 
   test('listModels reads the model option agy offers, flattening its groups', async () => {
@@ -1147,6 +1711,83 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
       { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', description: 'Anthropic via Antigravity', group: 'Models' },
     ]);
     assert.deepEqual(modelsFromConfigOptions(undefined), []);
+  });
+
+  if (official) test('listModels places built-in Orchestrator modes after direct models while preserving relative order', async () => {
+    const { modelsFromConfigOptions } = await import(pathToFileURL(path.join(root, 'agy-models.js')).href);
+    assert.deepEqual(modelsFromConfigOptions([
+      { id: 'model', category: 'model', type: 'select', currentValue: 'gemini-4-neon', options: [
+        { value: 'gemini-4-neon', name: 'Gemini 4 Neon' },
+        { value: 'gemini-4-hydrogen', name: 'Gemini 4 Hydrogen' },
+        { value: 'gemini-pro-orchestrator-neon', name: 'Orchestrator (Neon)' },
+        { value: 'gemini-pro-orchestrator', name: 'Orchestrator (Carbon)' },
+        { value: 'gemini-pro-orchestrator-argon', name: 'Orchestrator (Argon)' },
+        { value: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
+        { value: 'claude-opus-5-5', name: 'Claude Opus 5.5' },
+      ] },
+    ]).map((model) => model.id), [
+      'gemini-4-neon',
+      'gemini-4-hydrogen',
+      'gemini-3.8-flash',
+      'claude-opus-5-5',
+      'gemini-pro-orchestrator-neon',
+      'gemini-pro-orchestrator',
+      'gemini-pro-orchestrator-argon',
+    ]);
+  });
+
+  if (official) test('main.js deprioritizes cached Orchestrator models, adds localized hints, and preserves upstream descriptions', async () => {
+    const puts = [];
+    const hostListeners = [];
+    let savedKv = null;
+    const cachedModels = [
+      { id: 'gemini-4-neon', name: 'Gemini 4 Neon', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high' },
+      { id: 'gemini-pro-orchestrator-neon', name: 'Orchestrator (Neon)' },
+      { id: 'gemini-pro-orchestrator', name: 'Orchestrator (Carbon)', description: 'Upstream planner note' },
+      { id: 'gemini-4-hydrogen', name: 'Gemini 4 Hydrogen', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high' },
+    ];
+    const context = vm.createContext({
+      setTimeout,
+      clearTimeout,
+      cindy: {
+        request: async () => ({ ok: true, context: { locale: 'en', uiLocale: 'en' } }),
+        node: {
+          request: async (request) => {
+            if (request.method === 'detect') return { ok: true, result: { available: true, version: '1.5.18' } };
+            return { ok: true, result: { supported: true, models: cachedModels } };
+          },
+        },
+        onHostMessage: (listener) => {
+          hostListeners.push(listener);
+          return () => {};
+        },
+      },
+      fetch: async (url, init) => {
+        if (url === '/kv' && !init) return { ok: true, json: async () => ({ models: cachedModels, modelsListedAt: Date.now() }) };
+        if (url === '/kv') savedKv = JSON.parse(init.body);
+        if (url === '/harnesses') puts.push(JSON.parse(init.body));
+        return { ok: true, status: 204 };
+      },
+    });
+    vm.runInContext(fs.readFileSync(path.join(root, 'main.js'), 'utf8'), context, { filename: 'main.js' });
+    await waitFor(() => puts.length >= 1, 3_000, 'initial publish from cached models');
+    const enModels = puts[0].harnesses[0].models;
+    assert.deepEqual(enModels.map((model) => model.id), [
+      'gemini-4-neon',
+      'gemini-4-hydrogen',
+      'gemini-pro-orchestrator-neon',
+      'gemini-pro-orchestrator',
+    ]);
+    assert.equal(enModels[0].description, undefined);
+    assert.match(enModels[2].description, /Built-in orchestrator/i);
+    assert.equal(enModels[3].description, 'Upstream planner note');
+    // Locale switch republishes localized hint dynamically without re-listing or mutating cached /kv.
+    hostListeners[0]({ type: 'host-context-changed', ok: true, context: { locale: 'zh-CN', uiLocale: 'zh-CN' } });
+    await waitFor(() => puts.length >= 2, 3_000, 'republish on locale switch');
+    const zhModels = puts[1].harnesses[0].models;
+    assert.match(zhModels[2].description, /内置编排模式/);
+    assert.equal(zhModels[3].description, 'Upstream planner note');
+    assert.equal(savedKv, null);
   });
 
   // 测试的是与 DSH 插件同一套档位规则(DSH 的 off 在 Cindy 中没有对应档)；agy 1.5.12 是 low / medium / high / xhigh。
@@ -1249,10 +1890,14 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     const badTypeAfterSave = await worker.call({ jsonrpc: '2.0', id: 8, method: 'setCustomPath', params: {} });
     assert.deepEqual(badTypeAfterSave.result, { ok: false, error: 'not-absolute' });
 
-    const acctBefore = await worker.call({ jsonrpc: '2.0', id: 9, method: 'account', params: {} });
-    assert.equal(acctBefore.result.supported, true);
-    assert.equal(acctBefore.result.signedIn, false);
-    const loginRes = await worker.call({ jsonrpc: '2.0', id: 10, method: 'login', params: {} });
+    if (official) {
+      assert.deepEqual((await worker.call({ jsonrpc: '2.0', id: 9, method: 'accountStatus', params: { harnessId: 'agy' } })).result, { state: 'signed-out' });
+    } else {
+      const acctBefore = await worker.call({ jsonrpc: '2.0', id: 9, method: 'account', params: {} });
+      assert.equal(acctBefore.result.supported, true);
+      assert.equal(acctBefore.result.signedIn, false);
+    }
+    const loginRes = await worker.call({ jsonrpc: '2.0', id: 10, ...SIGN_IN });
     assert.equal(loginRes.result.ok, true);
     const modelsRes = await worker.call({ jsonrpc: '2.0', id: 11, method: 'listModels', params: {} });
     assert.equal(modelsRes.result.supported, true);
@@ -1414,7 +2059,8 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     resolveDetectA({ ok: true, result: { available: true, path: '/bin/agy-a', version: '1.0.0' } });
     resolveListA({ ok: true, result: { supported: true, models: [{ id: 'model-a', name: 'Model A' }], sessionId: 'sess-a' } });
     await waitFor(() => puts.some((entry) => entry.version === '2.0.0' && entry.models?.[0]?.id === 'model-b'), 3_000, 'published B models');
-    await waitFor(() => received.some((m) => m.type === 'harness-usage' && m.usage?.windows?.[0]?.label === 'B · 5h'), 3_000, 'refreshed usage for B');
+    // Only the legacy settings page shows usage; the official plugin leaves it to Cindy's Model Providers.
+    if (!official) await waitFor(() => received.some((m) => m.type === 'harness-usage' && m.usage?.windows?.[0]?.label === 'B · 5h'), 3_000, 'refreshed usage for B');
 
     const latest = puts.at(-1);
     assert.equal(latest.version, '2.0.0');
@@ -1544,8 +2190,12 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.equal(element('custom-path-reset').hidden, false);
 
     // Reset sends empty path and restores auto-detection.
+    const checksBeforeReset = cliActions.filter((a) => a === 'check').length;
     element('custom-path-reset').click();
     await waitFor(() => element('version').textContent === '1.5.9', 3_000, 'reset to auto-detect');
+    // Wait for the reset-triggered CLI update check to settle so its active:false reply cannot race the update lock below.
+    await waitFor(() => cliActions.filter((a) => a === 'check').length > checksBeforeReset
+      && element('cli-status').textContent === 'Up to date', 8_000, 'reset CLI update check settled');
     assert.equal(element('custom-path-reset').hidden, true);
     assert.deepEqual(savedPaths, ['bad', '/opt/custom/agy', '/gone/agy', '']);
 
@@ -1553,18 +2203,19 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     // active install/update locks the custom path controls.
     const checksBefore = cliActions.filter((a) => a === 'check').length;
     main.postMessage({ type: 'cli-state', reqId: 'inst-1', action: 'update', active: true });
-    await waitFor(() => element('custom-path-input').disabled === true, 3_000, 'path locked during update');
+    await waitFor(() => element('custom-path-input').disabled === true, 8_000, 'path locked during update');
     assert.equal(element('custom-path-save').disabled, true);
     assert.equal(element('custom-path-reset').disabled, true);
     main.postMessage({ type: 'cli-state', reqId: 'inst-1', action: 'update', active: false, result: { state: 'installed', version: '2.0.0' } });
-    await waitFor(() => element('cli-status').textContent === 'Installed 2.0.0', 3_000, 'installed status shown');
+    await waitFor(() => element('cli-status').textContent === 'Installed 2.0.0', 8_000, 'installed status shown');
     assert.equal(element('custom-path-input').disabled, false);
 
     element('custom-path-input').value = '/opt/older/agy';
     element('custom-path-input').listeners.input();
     element('custom-path-save').click();
-    await waitFor(() => cliActions.filter((a) => a === 'check').length > checksBefore, 3_000, 'fresh check triggered after switching from installed binary');
-    assert.notEqual(element('cli-status').textContent, 'Installed 2.0.0');
+    await waitFor(() => cliActions.filter((a) => a === 'check').length > checksBefore, 8_000, 'fresh check triggered after switching from installed binary');
+    // The page clears the status asynchronously; on a loaded CI runner an earlier check can move the counter first.
+    await waitFor(() => element('cli-status').textContent !== 'Installed 2.0.0', 8_000, '"Installed" cleared after switching binary');
   });
 
   test('worker.js serializes overlapping setCustomPath calls and cancels active login on path switch', async (t) => {
@@ -1598,7 +2249,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     t.after(() => worker.close());
 
     // Start a hanging login on the default binary, then fire overlapping saves A (slow) and B (fast).
-    const loginPending = worker.call({ jsonrpc: '2.0', id: 1, method: 'login', params: {} });
+    const loginPending = worker.call({ jsonrpc: '2.0', id: 1, ...SIGN_IN });
     await waitFor(() => fs.existsSync(stateFile + '.log') && fs.readFileSync(stateFile + '.log', 'utf8').includes('authenticate:oauth-personal'), 5_000, 'login started');
 
     const saveA = worker.call({ jsonrpc: '2.0', id: 2, method: 'setCustomPath', params: { path: binA, locale: 'en' } });
@@ -1615,7 +2266,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.ok(samePath(finalDetect.result.customPath, binB));
 
     // A new login on B must succeed right away (never stuck as 'busy').
-    const loginB = await worker.call({ jsonrpc: '2.0', id: 5, method: 'login', params: {} });
+    const loginB = await worker.call({ jsonrpc: '2.0', id: 5, ...SIGN_IN });
     assert.equal(loginB.result.ok, true);
   });
 
@@ -1644,7 +2295,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     t.after(() => worker.close());
 
     // Start login on default binary which hangs before replying to initialize.
-    const loginPending = worker.call({ jsonrpc: '2.0', id: 1, method: 'login', params: {} });
+    const loginPending = worker.call({ jsonrpc: '2.0', id: 1, ...SIGN_IN });
     await waitFor(() => fs.existsSync(stateFile + '.log') && fs.readFileSync(stateFile + '.log', 'utf8').includes('initialize'), 5_000, 'login initialize sent');
     const hungPid = readPid(fixture.pidFile);
     assert.ok(hungPid, 'hung agy process started');
@@ -1658,7 +2309,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.equal(saveResult.result.detection.version, '2.2.2');
     await waitFor(() => !isAlive(hungPid), 3_000, 'hung initialize agy killed');
 
-    const loginB = await worker.call({ jsonrpc: '2.0', id: 3, method: 'login', params: {} });
+    const loginB = await worker.call({ jsonrpc: '2.0', id: 3, ...SIGN_IN });
     assert.equal(loginB.result.ok, true);
   });
 
@@ -1731,8 +2382,11 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     page.onmessage = (event) => received.push(event.data);
 
     // Start login on initial binary, then fire overlapping saves A (slow) and B (fast).
-    page.postMessage({ type: 'account-request', reqId: 'login-a', op: 'login' });
-    await waitFor(() => typeof resolveLoginA === 'function', 3_000, 'login A started');
+    // (Only the legacy settings page signs in; the official worker cancels a sign-in Cindy started itself.)
+    if (!official) {
+      page.postMessage({ type: 'account-request', reqId: 'login-a', op: 'login' });
+      await waitFor(() => typeof resolveLoginA === 'function', 3_000, 'login A started');
+    }
 
     page.postMessage({ type: 'custom-path-request', reqId: 'save-a', path: '/opt/agy-a' });
     page.postMessage({ type: 'custom-path-request', reqId: 'save-b', path: '/opt/agy-b' });
@@ -1742,18 +2396,20 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
 
     // Final published version must be B (2.0.0), and old login must have been cancelled.
     assert.equal(puts.at(-1).version, '2.0.0');
-    assert.ok(cancels.length >= 1, 'cancelLogin was called on path switch');
+    if (!official) {
+      assert.ok(cancels.length >= 1, 'cancelLogin was called on path switch');
 
-    // Late resolution of A's login must not taint B or block a new login on B.
-    resolveLoginA({ ok: true, result: { ok: true, tier: { name: 'Old Tier' } } });
-    await waitFor(() => received.some((m) => m.type === 'account-result' && m.reqId === 'login-a'), 3_000, 'stale login settled');
-    assert.equal(received.find((m) => m.type === 'account-result' && m.reqId === 'login-a').error, 'cancelled');
+      // Late resolution of A's login must not taint B or block a new login on B.
+      resolveLoginA({ ok: true, result: { ok: true, tier: { name: 'Old Tier' } } });
+      await waitFor(() => received.some((m) => m.type === 'account-result' && m.reqId === 'login-a'), 3_000, 'stale login settled');
+      assert.equal(received.find((m) => m.type === 'account-result' && m.reqId === 'login-a').error, 'cancelled');
 
-    page.postMessage({ type: 'account-request', reqId: 'login-b', op: 'login' });
-    await waitFor(() => received.some((m) => m.type === 'account-result' && m.reqId === 'login-b'), 3_000, 'login B succeeded');
-    const loginBResult = received.find((m) => m.type === 'account-result' && m.reqId === 'login-b');
-    assert.equal(loginBResult.error, undefined);
-    assert.equal(loginBResult.account.tier, 'New Tier');
+      page.postMessage({ type: 'account-request', reqId: 'login-b', op: 'login' });
+      await waitFor(() => received.some((m) => m.type === 'account-result' && m.reqId === 'login-b'), 3_000, 'login B succeeded');
+      const loginBResult = received.find((m) => m.type === 'account-result' && m.reqId === 'login-b');
+      assert.equal(loginBResult.error, undefined);
+      assert.equal(loginBResult.account.tier, 'New Tier');
+    }
 
     // Path changes are rejected with 'busy' while a CLI update is active.
     page.postMessage({ type: 'cli-maintenance', reqId: 'upd-1', action: 'update', version: '2.1.0' });
@@ -1790,12 +2446,14 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     t.after(() => worker.close());
 
     const save = worker.call({ jsonrpc: '2.0', id: 1, method: 'setCustomPath', params: { path: slowBin, locale: 'en' } });
-    const logout = await worker.call({ jsonrpc: '2.0', id: 2, method: 'logout', params: {} });
-    const login = await worker.call({ jsonrpc: '2.0', id: 3, method: 'login', params: {} });
-    assert.deepEqual(logout.result, { ok: false, error: 'busy' });
+    // The official plugin has no sign-out; its sign-in is the one Cindy's engine accounts ask for.
+    const logout = official ? null : await worker.call({ jsonrpc: '2.0', id: 2, method: 'logout', params: {} });
+    const login = await worker.call({ jsonrpc: '2.0', id: 3, ...SIGN_IN });
+    if (logout) assert.deepEqual(logout.result, { ok: false, error: 'busy' });
     assert.deepEqual(login.result, { ok: false, error: 'busy' });
     assert.equal((await save).result.ok, true);
     assert.equal(fs.readFileSync(stateFile, 'utf8'), 'signed-in', 'neither request reached an agy');
+    if (official) return;
 
     // Once the save is over, the same request signs out on the new binary.
     const after = await worker.call({ jsonrpc: '2.0', id: 4, method: 'logout', params: {} });
@@ -1803,7 +2461,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     assert.equal(fs.readFileSync(stateFile, 'utf8'), 'signed-out');
   });
 
-  test('main.js refuses sign-in and sign-out during a custom path save, and a sign-out asked for the replaced path', async () => {
+  if (!official) test('main.js refuses sign-in and sign-out during a custom path save, and a sign-out asked for the replaced path', async () => {
     class Channel {
       static all = [];
       constructor(name) { this.name = name; this.onmessage = null; Channel.all.push(this); }
@@ -1904,7 +2562,7 @@ describe('agy-acp plugin', { concurrency: true, timeout: 20_000 }, () => {
     t.after(() => worker.close());
 
     // The default binary never answers `initialize` and ignores SIGTERM.
-    const loginPending = worker.call({ jsonrpc: '2.0', id: 1, method: 'login', params: {} });
+    const loginPending = worker.call({ jsonrpc: '2.0', id: 1, ...SIGN_IN });
     await waitFor(() => fs.existsSync(stateFile + '.log') && fs.readFileSync(stateFile + '.log', 'utf8').includes('initialize'), 5_000, 'login initialize sent');
     const hungPid = readPid(fixture.pidFile);
     assert.ok(hungPid, 'hung agy process started');
@@ -2105,7 +2763,7 @@ process.stdin.on('end', () => process.exit(0));
     assert.equal((await bridge.closed).code, 0);
   });
 
-  test('settings.js tags sign-in and sign-out with the state the user acted on, and drops a refusal note once it no longer applies', async () => {
+  if (!official) test('settings.js tags sign-in and sign-out with the state the user acted on, and drops a refusal note once it no longer applies', async () => {
     class Channel {
       static all = [];
       constructor(name) { this.name = name; this.onmessage = null; this.listeners = []; Channel.all.push(this); }
@@ -2220,7 +2878,7 @@ process.stdin.on('end', () => process.exit(0));
     await waitFor(() => element('account-note').textContent === '', 3_000, 'busy note gone after the other window’s save failed');
   });
 
-  test('main.js never reuses a generation across restarts, so a restarted main.js refuses a sign-out asked for the previous one', async () => {
+  if (!official) test('main.js never reuses a generation across restarts, so a restarted main.js refuses a sign-out asked for the previous one', async () => {
     const boot = async () => {
       class Channel {
         static all = [];
@@ -2307,7 +2965,82 @@ test('native /usage preserves exhausted groups and ignores model turns and disab
   assert.equal(usageFromReport({ status: 'SUCCESS', num_turns: 1, command }), null);
 });
 
-async function localRelay(t) {
+if (official) test('launches the Windows verification probe with the CLI updater disabled', async t => {
+  const fx = makeFixture(t);
+  const launch = path.join(fx.dir, 'usage-environment');
+  const { createVerification } = await import(pathToFileURL(path.join(root, 'agy-verification.js')));
+  const owner = createVerification(fx.agyPath, { platform: 'win32', env: { ...fx.env, FAKE_AGY_LAUNCHFILE: launch } });
+  t.after(() => owner.dispose());
+  fs.writeFileSync(owner.taskLog, 'I1127 15:13:05.876413     68 server_oauth.go:226] OAuth: authenticated successfully as a@example.test\n');
+  assert.deepEqual(await owner.check(owner.sessionAccount()), { status: 'unknown' });
+  assert.equal(fs.readFileSync(launch, 'utf8'), 'true');
+});
+
+if (official) test('binds usage checks to the opening ACP account and removes a pending probe on relay exit', async t => {
+  const fx = makeFixture(t);
+  const control = path.join(fx.dir, 'control');
+  fs.writeFileSync(path.join(fx.dir, 'fake-agy.js'), String.raw`
+    const fs = require('node:fs'), path = require('node:path');
+    const args = process.argv.slice(2), control = process.env.TEST_CONTROL;
+    const log = args[args.indexOf('--log-file') + 1];
+    const identity = who => 'I1127 15:13:05.876413     68 server_oauth.go:226] OAuth: authenticated successfully as ' + who + '@example.test\n';
+    if (args.includes('/usage')) {
+      const [who, state] = fs.readFileSync(control, 'utf8').split(' ');
+      if (process.platform === 'win32' && process.env.AGY_CLI_DISABLE_AUTO_UPDATE !== 'true') process.exit(2);
+      const error = { code:403, status:'PERMISSION_DENIED', details:[{reason:'VALIDATION_REQUIRED',domain:'cloudcode-pa.googleapis.com',
+        '@type':'type.googleapis.com/google.rpc.ErrorInfo',metadata:{validation_url:process.env.TEST_LANDING}}] };
+      fs.writeFileSync(log, (who === '?' ? '' : identity(who)) + (state === 'gate' ? JSON.stringify({error}, null, 2) : ''));
+      fs.writeFileSync(control + '.probe', process.cwd());
+      if (state === 'hold') setInterval(() => {}, 1000);
+      else console.log(JSON.stringify({status:'SUCCESS', num_turns:0,command:{name:'usage',data:{groups:[{name:'test',buckets:[{window:'5h',remaining_fraction:1}]}]}}}));
+    } else {
+      fs.writeFileSync(log, identity('a'));
+      fs.writeFileSync(control + '.session', path.resolve(log));
+      require('node:readline').createInterface({input:process.stdin}).on('line', line => {
+        const {id,method} = JSON.parse(line), result = method === 'initialize'
+          ? {agentInfo:{name:'Antigravity ACP Server',version:'1.5.18'}} : {sessionId:'one'};
+        console.log(JSON.stringify({jsonrpc:'2.0',id,result}));
+      });
+    }`);
+  const landing = 'https://accounts.google.com/v3/signin/continue?plt=test&continue=https://developers.google.com/gemini-code-assist/auth/auth_success_gemini';
+  const bridge = startBridge({ ...fx.env, TEST_CONTROL: control, TEST_LANDING: landing });
+  t.after(() => bridge.child.stdin.end());
+  let next = 0;
+  const send = method => {
+    const id = ++next;
+    bridge.child.stdin.write(JSON.stringify({ jsonrpc:'2.0', id, method, params:{sessionId:'one'} }) + '\n');
+    return id;
+  };
+  const call = async method => {
+    const id = send(method);
+    const response = () => bridge.stdout.text().trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).find(item => item.id === id);
+    await waitFor(response, 6000, method);
+    return response().result;
+  };
+  await call('initialize');
+  await call('session/new');
+  const probe = '_cindy/checkAccountVerification';
+  for (const [input, result] of [
+    ['a gate', { status:'required', url:landing }], ['b ready', { status:'unknown' }],
+    ['b gate', { status:'unknown' }], ['? ready', { status:'unknown' }], ['a ready', { status:'ready' }],
+  ]) {
+    fs.writeFileSync(control, input);
+    assert.deepEqual(await call(probe), result);
+    assert.equal(fs.existsSync(fs.readFileSync(control + '.probe', 'utf8')), false);
+  }
+  fs.rmSync(control + '.probe');
+  fs.writeFileSync(control, 'a hold');
+  send(probe);
+  await waitFor(() => fs.existsSync(control + '.probe'), 6000, 'live verification child');
+  bridge.child.stdin.end();
+  assert.equal((await bridge.closed).code, 0);
+  assert.equal(fs.existsSync(fs.readFileSync(control + '.probe', 'utf8')), false);
+  assert.equal(fs.existsSync(path.dirname(fs.readFileSync(control + '.session', 'utf8'))), false);
+  assert.ok(!bridge.stdout.text().includes('@example.test'));
+  assert.ok(!bridge.stderr.text().includes('@example.test'));
+});
+
+async function localRelay(t, checkAccount) {
   const { PassThrough } = await import('node:stream');
   const { default: steering } = await import(pathToFileURL(path.join(root, 'agy-steering.js')));
   const source = new PassThrough();
@@ -2317,7 +3050,7 @@ async function localRelay(t) {
   const client = [];
   child.stdin.on('data', (data) => server.push(JSON.parse(data)));
   output.on('data', (data) => client.push(JSON.parse(data)));
-  steering.attachSteering(source, output, child, (error) => { throw error; });
+  steering.attachSteering(source, output, child, (error) => { throw error; }, undefined, checkAccount && { sessionAccount: () => "synthetic", check: checkAccount });
   const write = (stream, message) => stream.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
   const request = (id, method, extra = {}) => write(source, { id, method, params: { sessionId: 'one', ...extra } });
   const response = (id, result) => write(child.stdout, { id, result });
@@ -2329,6 +3062,25 @@ async function localRelay(t) {
 }
 
 describe('Antigravity local ACP relay', () => {
+  if (official) test('returns account verification only for the live native session and a provider 403', async t => {
+    const { default: verification } = await import(pathToFileURL(path.join(root, 'agy-verification.js')));
+    const url = 'https://accounts.google.com/v3/signin/continue?plt=synthetic&continue=https://developers.google.com/gemini-code-assist/auth/auth_success_gemini';
+    const detail = { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', domain: 'cloudcode-pa.googleapis.com',
+      reason: 'VALIDATION_REQUIRED', metadata: { validation_url: url } };
+    const log = (code, item) => 'agy diagnostics: ' + JSON.stringify({ error: { code, status: 'PERMISSION_DENIED', details: [item] } }, null, 2);
+    assert.equal(verification.validationUrl(log(429, detail)), null);
+    assert.equal(verification.validationUrl(log(403, { ...detail, domain: 'example.test' })), null);
+    assert.equal(verification.validationUrl(log(403, { ...detail, reason: 'OTHER' })), null);
+    const probe = () => Promise.resolve({ status: 'required', url: verification.validationUrl(log(403, detail)) });
+    const { server, client, request, response } = await localRelay(t, probe);
+    request(1, 'initialize');
+    response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.18' } });
+    request(2, 'session/new'); response(2, { sessionId: 'one' });
+    request(3, '_cindy/checkAccountVerification'); await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(client.at(-1).result, { status: 'required', url });
+    assert.ok(!server.some(req => req.method === '_cindy/checkAccountVerification'));
+  });
+
   test('adds HTTP MCP to Antigravity initialize and preserves capabilities and steering metadata', async (t) => {
     const { client, request, response } = await localRelay(t);
     const result = {
@@ -2494,6 +3246,272 @@ process.stdout.write('', () => process.exit(0));
    * How much the pipes take before stdout keeps a queue varies with the load, so the burst grows until the
    * relay is still running when Cindy reads. The first such burst leaves only a little queued.
    */
+  test('adapts update_steps into ACP plans, drops duplicates, and renames ask_question only when elicitation.form is negotiated', async (t) => {
+    const withForm = await localRelay(t);
+    withForm.request(1, 'initialize', { clientCapabilities: { elicitation: { form: {} } } });
+    withForm.response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+    withForm.request(2, 'session/new', { cwd: '/repo', mcpServers: [] });
+    withForm.response(2, { sessionId: 'one' });
+
+    withForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'steps-l1',
+          name: 'update_steps',
+          kind: 'other',
+          title: 'Run update_steps',
+          status: 'in_progress',
+          rawInput: { steps: [{ title: 'Check', status: 'in_progress' }, { title: 'Skip', status: 'skipped' }] },
+        },
+      },
+    });
+    withForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'steps-l1',
+          kind: 'other',
+          status: 'completed',
+          rawInput: { steps: [{ title: 'Check', status: 'in_progress' }, { title: 'Skip', status: 'skipped' }] },
+        },
+      },
+    });
+    withForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'ask-l1',
+          name: 'ask_question',
+          kind: 'other',
+          title: 'Run ask_question',
+          status: 'in_progress',
+        },
+      },
+    });
+
+    const updatesWithForm = withForm.client.filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updatesWithForm, [
+      {
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Check', priority: 'medium', status: 'in_progress' },
+          { content: 'Skip', priority: 'medium', status: 'completed' },
+        ],
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'ask-l1',
+        name: 'AskUserQuestion',
+        kind: 'other',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+    ]);
+
+    const withoutForm = await localRelay(t);
+    withoutForm.request(1, 'initialize', { clientCapabilities: { fs: { readTextFile: false } } });
+    withoutForm.response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+    withoutForm.request(2, 'session/new', { cwd: '/repo', mcpServers: [] });
+    withoutForm.response(2, { sessionId: 'one' });
+    withoutForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'steps-l2',
+          name: 'update_steps',
+          kind: 'other',
+          title: 'Run update_steps',
+          status: 'in_progress',
+          rawInput: { steps: [{ title: 'Keep legacy row', status: 'in_progress' }] },
+        },
+      },
+    });
+    withoutForm.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'ask-l2',
+          name: 'ask_question',
+          kind: 'other',
+          title: 'Run ask_question',
+          status: 'in_progress',
+        },
+      },
+    });
+    const updatesWithoutForm = withoutForm.client.filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.equal(updatesWithoutForm.length, 2);
+    assert.equal(updatesWithoutForm[0].sessionUpdate, 'tool_call');
+    assert.equal(updatesWithoutForm[0].name, 'update_steps');
+    assert.equal(updatesWithoutForm[1].name, 'ask_question');
+  });
+
+  test('local relay keeps follow-up short-name update_steps and ask_question updates on their registered MCP tool rows', async (t) => {
+    const relay = await localRelay(t);
+    relay.request(1, 'initialize', { clientCapabilities: { elicitation: { form: {} } } });
+    relay.response(1, { agentInfo: { name: 'Antigravity ACP Server', version: '1.5.17' } });
+    relay.request(2, 'session/new', {
+      cwd: '/repo',
+      mcpServers: [{ type: 'http', name: 'partner', url: 'http://127.0.0.1:4711/mcp/partner' }],
+    });
+    relay.response(2, { sessionId: 'one' });
+
+    // External MCP update_steps starts with direct name, then follows up with short name `update_steps`.
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'mcp-steps-1',
+          name: 'mcp_partner_update_steps',
+          kind: 'other',
+          title: 'Run mcp_partner_update_steps',
+          status: 'in_progress',
+          rawInput: { steps: [{ title: 'Partner step', status: 'in_progress' }], toolSummary: 'update steps' },
+        },
+      },
+    });
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'mcp-steps-1',
+          name: 'update_steps',
+          kind: 'other',
+          title: 'Run update_steps',
+          status: 'completed',
+          rawInput: { steps: [{ title: 'Partner step', status: 'done' }] },
+        },
+      },
+    });
+
+    // External MCP ask_question starts via nested call_mcp_tool (or direct name), then follows up with short name `ask_question`.
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'mcp-ask-1',
+          name: 'call_mcp_tool',
+          kind: 'other',
+          title: 'MCP Tool ask_question',
+          status: 'in_progress',
+          rawInput: { ServerName: 'partner', ToolName: 'ask_question', Arguments: { prompt: 'Partner question' } },
+        },
+      },
+    });
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'mcp-ask-1',
+          name: 'ask_question',
+          kind: 'other',
+          title: 'Run ask_question',
+          status: 'completed',
+        },
+      },
+    });
+
+    // Native Antigravity update_steps and ask_question in the same session still adapt normally.
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'native-steps-1',
+          name: 'update_steps',
+          kind: 'other',
+          title: 'Run update_steps',
+          status: 'in_progress',
+          rawInput: { steps: [{ title: 'Native step', status: 'in_progress' }] },
+        },
+      },
+    });
+    relay.send({
+      method: 'session/update',
+      params: {
+        sessionId: 'one',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'native-ask-1',
+          name: 'ask_question',
+          kind: 'other',
+          title: 'Run ask_question',
+          status: 'in_progress',
+        },
+      },
+    });
+
+    const updates = relay.client.filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates, [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'mcp-steps-1',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'in_progress',
+        rawInput: { steps: [{ title: 'Partner step', status: 'in_progress' }] },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'mcp-steps-1',
+        name: 'mcp__partner__update_steps',
+        kind: 'other',
+        title: 'mcp__partner__update_steps',
+        status: 'completed',
+        rawInput: { steps: [{ title: 'Partner step', status: 'done' }] },
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'mcp-ask-1',
+        name: 'mcp__partner__ask_question',
+        kind: 'other',
+        title: 'mcp__partner__ask_question',
+        status: 'in_progress',
+        rawInput: { prompt: 'Partner question' },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'mcp-ask-1',
+        name: 'mcp__partner__ask_question',
+        kind: 'other',
+        title: 'mcp__partner__ask_question',
+        status: 'completed',
+      },
+      {
+        sessionUpdate: 'plan',
+        entries: [{ content: 'Native step', priority: 'medium', status: 'in_progress' }],
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'native-ask-1',
+        name: 'AskUserQuestion',
+        kind: 'other',
+        title: 'AskUserQuestion',
+        status: 'in_progress',
+      },
+    ]);
+  });
+
   test('exits right after Cindy has read the last notification, not after the flush timeout', { timeout: 40_000 }, async (t) => {
     const flushTimeoutMs = 2_000;
     let bridge = null;
@@ -2570,4 +3588,577 @@ test('installation verifies the archive and staged CLI before activating it', {
   fs.rmdirSync(target);
   assert.deepEqual(install(digest), { state: 'installed', version: '1.5.14' });
   assert.deepEqual(fs.readFileSync(target), fs.readFileSync(cli));
+});
+
+test('adapts Antigravity update_steps into ACP plan updates and normalizes ask_question when form elicitation is negotiated', async () => {
+  const mcp = await import(pathToFileURL(path.join(root, 'agy-mcp.js')));
+  assert.equal(mcp.clientSupportsElicitationForm({ clientCapabilities: { elicitation: { form: {} } } }), true);
+  assert.equal(mcp.clientSupportsElicitationForm({ clientCapabilities: { fs: { readTextFile: false } } }), false);
+
+  const seenSteps = new Map();
+  const firstSteps = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'steps-1',
+    name: 'update_steps',
+    title: 'Run update_steps',
+    status: 'in_progress',
+    rawInput: {
+      steps: [
+        { title: 'Inspect codebase', status: 'done' },
+        { title: 'Apply fix', status: 'in_progress' },
+        { title: 'Skip optional', status: 'skipped' },
+      ],
+    },
+  }, { elicitationForm: true, seenSteps });
+  assert.deepEqual(firstSteps, {
+    action: 'replace',
+    update: {
+      sessionUpdate: 'plan',
+      entries: [
+        { content: 'Inspect codebase', priority: 'medium', status: 'completed' },
+        { content: 'Apply fix', priority: 'medium', status: 'in_progress' },
+        { content: 'Skip optional', priority: 'medium', status: 'completed' },
+      ],
+    },
+  });
+
+  // Duplicate completed update for the same toolCallId is dropped instead of rendering a raw tool card.
+  const duplicateSteps = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'steps-1',
+    name: 'update_steps',
+    status: 'completed',
+    rawInput: {
+      steps: [
+        { title: 'Inspect codebase', status: 'done' },
+        { title: 'Apply fix', status: 'in_progress' },
+        { title: 'Skip optional', status: 'skipped' },
+      ],
+    },
+  }, { elicitationForm: true, seenSteps });
+  assert.deepEqual(duplicateSteps, { action: 'drop' });
+
+  // Failed tool_call_update is preserved even when rawInput is omitted or repeats the same steps.
+  const failedOmitted = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'steps-1',
+    status: 'failed',
+    rawOutput: 'error',
+  }, { elicitationForm: true, seenSteps });
+  assert.equal(failedOmitted, null);
+
+  mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'steps-2',
+    name: 'update_steps',
+    status: 'in_progress',
+    rawInput: { steps: [{ title: 'Step A', status: 'in_progress' }] },
+  }, { elicitationForm: true, seenSteps });
+  const failedRepeated = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'steps-2',
+    name: 'update_steps',
+    status: 'failed',
+    rawInput: { steps: [{ title: 'Step A', status: 'in_progress' }] },
+  }, { elicitationForm: true, seenSteps });
+  assert.equal(failedRepeated, null);
+
+  // Older hosts (elicitationForm: false) keep raw update_steps unchanged so existing progress rows do not disappear.
+  const legacySteps = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'steps-legacy',
+    name: 'update_steps',
+    status: 'in_progress',
+    rawInput: { steps: [{ title: 'Legacy step', status: 'in_progress' }] },
+  }, { elicitationForm: false, seenSteps });
+  assert.equal(legacySteps, null);
+
+  // ask_question is normalized to AskUserQuestion only when the client negotiated form elicitation.
+  const askWithForm = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'ask-1',
+    name: 'ask_question',
+    title: 'Run ask_question',
+    status: 'in_progress',
+  }, { elicitationForm: true, seenSteps });
+  assert.equal(askWithForm?.action, 'replace');
+  assert.equal(askWithForm?.update.name, 'AskUserQuestion');
+  assert.equal(askWithForm?.update.title, 'AskUserQuestion');
+
+  const askWithoutForm = mcp.adaptAgyNativeToolUpdate({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'ask-2',
+    name: 'ask_question',
+    title: 'Run ask_question',
+    status: 'in_progress',
+  }, { elicitationForm: false, seenSteps });
+  assert.equal(askWithoutForm, null);
+});
+
+describe('Antigravity remote-workspace steering', () => {
+  const remoteSteerHarness = (t, { version = '1.5.14', args = ['--cindy-remote-workspace'], mode = 'steer' } = {}) => {
+    const fixture = makeFixture(t);
+    const logFile = path.join(fixture.dir, 'remote-steer.log');
+    const script = `'use strict';
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args.length === 1 && args[0] === '--version') {
+  process.stdout.write('agy ${version}\\n');
+  process.exit(0);
+}
+const restricted = args.includes('--agent');
+if (restricted) fs.writeFileSync(${JSON.stringify(fixture.pidFile)}, String(process.pid), 'utf8');
+const send = (message) => process.stdout.write(JSON.stringify(Object.assign({ jsonrpc: '2.0' }, message)) + '\\n');
+let lines = '';
+let promptCount = 0;
+let pendingLoadId = null;
+let firstPromptId = null;
+let steer1Id = null;
+let steer2Id = null;
+process.stdin.on('data', (chunk) => {
+  lines += chunk.toString('utf8');
+  let index;
+  while ((index = lines.indexOf('\\n')) !== -1) {
+    const line = lines.slice(0, index);
+    lines = lines.slice(index + 1);
+    if (!line.trim()) continue;
+    const message = JSON.parse(line);
+    if (restricted) fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify(message) + '\\n');
+    if (message.method === 'initialize') {
+      const answer = () => send({
+        id: message.id,
+        result: {
+          protocolVersion: 1,
+          agentInfo: { name: 'Antigravity ACP Server', version: ${JSON.stringify(version)} },
+          agentCapabilities: { loadSession: true },
+          _meta: { retained: true },
+          authMethods: [],
+        },
+      });
+      if (restricted && ${JSON.stringify(mode)} === 'fail-open') {
+        setTimeout(() => {
+          fs.writeSync(1, JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: 'restricted init failed' } }) + '\\n');
+          process.exit(1);
+        }, 80);
+      } else if (restricted && ${JSON.stringify(mode)} === 'slow-open') {
+        setTimeout(answer, 80);
+      } else {
+        answer();
+      }
+    } else if (message.method === 'session/new' || message.method === 'session/resume' || message.method === 'session/load') {
+      if (restricted && ${JSON.stringify(mode)} === 'fail-session-open') {
+        send({
+          id: 'perm-stale',
+          method: 'session/request_permission',
+          params: {
+            sessionId: 'sess-known',
+            toolCall: {
+              sessionUpdate: 'tool_call', status: 'pending', toolCallId: 'mcp-stale-1',
+              name: 'call_mcp_tool', kind: 'execute', title: 'MCP Tool Bash',
+              rawInput: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+              args: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+            },
+            options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+          },
+        });
+        setTimeout(() => send({ id: message.id, error: { code: -32004, message: 'session not found' } }), 80);
+      } else if (restricted && ${JSON.stringify(mode)} === 'load-with-callback') {
+        pendingLoadId = message.id;
+        send({
+          id: 'perm-load',
+          method: 'session/request_permission',
+          params: {
+            sessionId: 'sess-r',
+            toolCall: {
+              sessionUpdate: 'tool_call', status: 'pending', toolCallId: 'mcp-load-1',
+              name: 'call_mcp_tool', kind: 'execute', title: 'MCP Tool Bash',
+              rawInput: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+              args: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+            },
+            options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+          },
+        });
+      } else {
+        send({ id: message.id, result: { sessionId: 'sess-r', configOptions: [] } });
+      }
+    } else if (message.method === undefined && message.id === 'perm-load' && pendingLoadId !== null) {
+      const loadId = pendingLoadId;
+      pendingLoadId = null;
+      send({ id: loadId, result: { configOptions: [] } });
+    } else if (message.method === 'session/prompt') {
+      promptCount += 1;
+      if (promptCount === 1) {
+        firstPromptId = message.id;
+        send({ method: 'session/update', params: { sessionId: 'sess-r', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'working' } } } });
+      } else if (promptCount === 2) {
+        steer1Id = message.id;
+        if (${JSON.stringify(mode)} === 'native-during-steer') {
+          send({ method: 'session/update', params: { sessionId: 'sess-r', update: { sessionUpdate: 'tool_call', toolCallId: 'native-steer', name: 'write_to_file', kind: 'edit', title: 'escape.txt', status: 'in_progress' } } });
+          return;
+        }
+        send({ id: firstPromptId, result: { stopReason: 'end_turn' } });
+        if (${JSON.stringify(mode)} === 'slow-open' || ${JSON.stringify(mode)} === 'load-with-callback') {
+          send({ id: steer1Id, result: { stopReason: 'end_turn', usage: { outputTokens: 11 } } });
+          return;
+        }
+        if (${JSON.stringify(mode)} === 'combined') {
+          send({ method: 'session/update', params: { sessionId: 'sess-r', update: { sessionUpdate: 'tool_call', toolCallId: 'c-steps',
+            name: 'update_steps', kind: 'edit', title: 'Run update_steps', status: 'in_progress',
+            rawInput: { steps: [{ title: 'Steered step', status: 'done' }] } } } });
+          send({ method: 'session/update', params: { sessionId: 'sess-r', update: { sessionUpdate: 'tool_call', toolCallId: 'c-ask',
+            name: 'ask_question', kind: 'execute', title: 'Run ask_question', status: 'in_progress' } } });
+          send({ id: steer1Id, result: { stopReason: 'end_turn', usage: { outputTokens: 13 } } });
+          return;
+        }
+        send({
+          id: 'perm-steer',
+          method: 'session/request_permission',
+          params: {
+            sessionId: 'sess-r',
+            toolCall: {
+              sessionUpdate: 'tool_call', status: 'pending', toolCallId: 'mcp-steer-1',
+              name: 'call_mcp_tool', kind: 'execute', title: 'MCP Tool Bash',
+              rawInput: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+              args: { ServerName: 'cindy_exec', ToolName: 'Bash', Arguments: { command: 'pwd' } },
+            },
+            options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+          },
+        });
+      } else if (promptCount === 3) {
+        steer2Id = message.id;
+        send({ id: steer1Id, result: { stopReason: 'end_turn' } });
+        send({ method: 'session/update', params: { sessionId: 'sess-r', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'done' } } } });
+        send({ id: steer2Id, result: { stopReason: 'end_turn', usage: { outputTokens: 9 } } });
+      }
+    }
+  }
+});
+process.stdin.on('end', () => process.stdout.write('', () => process.exit(0)));
+`;
+    fs.writeFileSync(path.join(fixture.dir, 'fake-agy.js'), script, 'utf8');
+    const bridge = startBridge(fixture.env, args);
+    t.after(() => bridge.child.kill());
+    const messages = () => bridge.stdout.text().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    const send = (message) => bridge.child.stdin.write(JSON.stringify(message) + '\n');
+    const reply = async (id, what) => {
+      await waitFor(() => messages().some((m) => m.id === id && !m.method), 8_000, what);
+      return messages().find((m) => m.id === id && !m.method);
+    };
+    const serverMessages = () => (fs.existsSync(logFile)
+      ? fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
+      : []);
+    const execServer = {
+      type: 'http', name: 'cindy_exec', url: 'http://example.test/mcp/cindy_exec', headers: [],
+    };
+    return { fixture, bridge, messages, send, reply, serverMessages, execServer };
+  };
+
+  test('advertises steering and merges concurrent prompts while normalizing MCP tools in remote and guest workspaces', async (t) => {
+    const { bridge, messages, send, reply, serverMessages, execServer } = remoteSteerHarness(t, {
+      args: ['--cindy-remote-workspace', '--cindy-guest-workspace'],
+    });
+    bridge.child.stdin.write(INITIALIZE);
+    const init = await reply(0, 'initialize answer');
+    assert.deepEqual(init.result.agentCapabilities.mcpCapabilities, { http: true });
+    assert.deepEqual(init.result._meta, { retained: true, steering: { supported: true } });
+
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    assert.deepEqual((await reply(1, 'session/new answer')).result, { sessionId: 'sess-r', configOptions: [] });
+
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'first' }] } });
+    await waitFor(() => messages().some((m) => m.method === 'session/update'), 8_000, 'first turn update');
+
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'steer 1' }] } });
+    assert.deepEqual((await reply(3, 'first steer ack')).result, { outcome: 'injected' });
+    await waitFor(() => messages().some((m) => m.method === 'session/request_permission'), 8_000, 'MCP permission during steer');
+    const perm = messages().find((m) => m.method === 'session/request_permission');
+    assert.deepEqual({ title: perm.params.toolCall.title, kind: perm.params.toolCall.kind, rawInput: perm.params.toolCall.rawInput },
+      { title: 'Bash', kind: 'execute', rawInput: { command: 'pwd' } });
+    assert.equal(messages().some((m) => m.id === 2 && !m.method), false, 'original prompt stays open after first prompt settles');
+
+    send({ jsonrpc: '2.0', id: 4, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'steer 2' }] } });
+    assert.deepEqual((await reply(4, 'second steer ack')).result, { outcome: 'injected' });
+    const finalTurn = await reply(2, 'merged final prompt reply');
+    assert.deepEqual(finalTurn.result, { stopReason: 'end_turn', usage: { outputTokens: 9 } });
+
+    // No running turn left: steering asks Cindy to send a regular prompt instead.
+    send({ jsonrpc: '2.0', id: 5, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'late' }] } });
+    assert.deepEqual((await reply(5, 'idle steer reply')).result, { outcome: 'promptRequired', reason: 'noRunningTurn' });
+
+    // Guest isolation still blocks session/list.
+    send({ jsonrpc: '2.0', id: 6, method: 'session/list', params: {} });
+    assert.equal((await reply(6, 'guest session/list refusal')).error.code, -32601);
+
+    const promptsSeen = serverMessages().filter((m) => m.method === 'session/prompt');
+    assert.equal(promptsSeen.length, 3, 'late steer was not forwarded as a prompt');
+    assert.deepEqual(promptsSeen.map((m) => m.params.prompt[0].text), ['first', 'steer 1', 'steer 2']);
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  test('does not advertise steering in remote-workspace mode on prerelease agy versions', async (t) => {
+    const { bridge, reply } = remoteSteerHarness(t, { version: '1.5.14-beta.1' });
+    bridge.child.stdin.write(INITIALIZE);
+    const init = await reply(0, 'initialize answer');
+    assert.deepEqual(init.result.agentCapabilities.mcpCapabilities, { http: true });
+    assert.deepEqual(init.result._meta, { retained: true });
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  test('tracks a prompt queued during the opening phase so steering still attaches to it', async (t) => {
+    const { bridge, send, reply, execServer } = remoteSteerHarness(t, { mode: 'slow-open' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    // Send session/prompt immediately while the restricted agent is still answering its own initialize.
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-first' }] } });
+    await reply(1, 'session/new answer');
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-steer' }] } });
+    assert.deepEqual((await reply(3, 'steer ack after queued prompt')).result, { outcome: 'injected' });
+    assert.deepEqual((await reply(2, 'merged prompt reply')).result, { stopReason: 'end_turn', usage: { outputTokens: 11 } });
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  test('ends the failed open terminally and settles queued requests when restricted initialize fails and exits', async (t) => {
+    const { fixture, bridge, send, reply, serverMessages, execServer } = remoteSteerHarness(t, { mode: 'fail-open' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    // Queue both a prompt and a steering request while the restricted agent is still answering initialize.
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-first' }] } });
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-steer' }] } });
+
+    const openErr = await reply(1, 'failed session/new answer');
+    assert.equal(openErr.error.code, -32000);
+    assert.equal(openErr.error.message, 'restricted init failed');
+    if (official) assert.deepEqual(openErr.error.data, { _meta: { cindy: { kind: 'auth-required' } } });
+    const queuedPromptErr = await reply(2, 'settled queued prompt');
+    assert.equal(queuedPromptErr.error.code, -32600);
+    const queuedSteerErr = await reply(3, 'settled queued steering');
+    assert.equal(queuedSteerErr.error.code, -32600);
+    assert.equal(queuedSteerErr.result, undefined);
+
+    const restrictedPid = readPid(fixture.pidFile);
+    assert.ok(restrictedPid, 'the restricted process had started');
+    await waitFor(() => !isAlive(restrictedPid), 4_000, 'failed restricted agy to exit');
+
+    // After a failed open (even when the child exited immediately), the connection stays terminal until closed:
+    // subsequent prompts, steering, and reopen attempts are all refused without spawning a second child.
+    send({ jsonrpc: '2.0', id: 4, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    send({ jsonrpc: '2.0', id: 5, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'after-fail' }] } });
+    send({ jsonrpc: '2.0', id: 6, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'after-fail-steer' }] } });
+    assert.equal((await reply(4, 'post-failure reopen refusal')).error.code, -32600);
+    assert.equal((await reply(5, 'post-failure prompt refusal')).error.code, -32600);
+    const postSteer = await reply(6, 'post-failure steering refusal');
+    assert.equal(postSteer.error.code, -32600);
+    assert.equal(postSteer.result, undefined);
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.deepEqual(serverMessages().map((m) => m.method), ['initialize']);
+  });
+
+  test('settles queued requests and drops late permission replies when session open is rejected', async (t) => {
+    const { fixture, bridge, messages, send, reply, serverMessages, execServer } = remoteSteerHarness(t, { mode: 'fail-session-open' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/resume', params: { sessionId: 'sess-known', cwd: '/shadow/p', mcpServers: [execServer] } });
+    // Queue prompt and steering for the known sessionId while session/resume is still in flight.
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-known', prompt: [{ type: 'text', text: 'queued-first' }] } });
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-known', prompt: [{ type: 'text', text: 'queued-steer' }] } });
+
+    await waitFor(() => messages().some((m) => m.method === 'session/request_permission' && m.id === 'perm-stale'), 8_000, 'opening permission request');
+    const openErr = await reply(1, 'rejected session/resume answer');
+    assert.deepEqual(openErr.error, { code: -32004, message: 'session not found' });
+    const queuedPromptErr = await reply(2, 'settled queued prompt');
+    assert.equal(queuedPromptErr.error.code, -32600);
+    const queuedSteerErr = await reply(3, 'settled queued steering');
+    assert.equal(queuedSteerErr.error.code, -32600);
+    assert.equal(queuedSteerErr.result, undefined);
+
+    const restrictedPid = readPid(fixture.pidFile);
+    assert.ok(restrictedPid, 'the restricted process had started');
+    await waitFor(() => !isAlive(restrictedPid), 4_000, 'failed restricted agy to stop');
+
+    // A late permission reply from the failed open is dropped silently, and reopen on the failed connection is refused.
+    send({ jsonrpc: '2.0', id: 'perm-stale', result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
+    send({ jsonrpc: '2.0', id: 4, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    assert.equal((await reply(4, 'post-failure reopen refusal')).error.code, -32600);
+    assert.equal(messages().some((m) => m.id === 'perm-stale' && !m.method), false, 'late reply gets no bogus error');
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.deepEqual(serverMessages().map((m) => m.method), ['initialize', 'session/resume']);
+  });
+
+  test('forwards bidirectional replies during session open before replaying queued prompt and steering requests', async (t) => {
+    const { bridge, messages, send, reply, serverMessages, execServer } = remoteSteerHarness(t, { mode: 'load-with-callback' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/load', params: { sessionId: 'sess-r', cwd: '/shadow/p', mcpServers: [execServer] } });
+    // Queue prompt and steering while session/load is waiting on a bidirectional permission callback.
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-first' }] } });
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'queued-steer' }] } });
+
+    await waitFor(() => messages().some((m) => m.method === 'session/request_permission' && m.id === 'perm-load'), 8_000, 'opening permission request');
+    const perm = messages().find((m) => m.method === 'session/request_permission' && m.id === 'perm-load');
+    assert.deepEqual({ title: perm.params.toolCall.title, kind: perm.params.toolCall.kind, rawInput: perm.params.toolCall.rawInput },
+      { title: 'Bash', kind: 'execute', rawInput: { command: 'pwd' } });
+    assert.equal(messages().some((m) => (m.id === 1 || m.id === 3) && !m.method), false, 'queued requests wait for session/load to succeed');
+
+    // Reply to the child's callback while still in opening-session; it must pass straight through.
+    send({ jsonrpc: '2.0', id: 'perm-load', result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
+    assert.deepEqual((await reply(1, 'session/load answer')).result, { configOptions: [] });
+    assert.deepEqual((await reply(3, 'replayed steer ack')).result, { outcome: 'injected' });
+    assert.deepEqual((await reply(2, 'replayed merged prompt reply')).result, { stopReason: 'end_turn', usage: { outputTokens: 11 } });
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    assert.deepEqual(
+      serverMessages().map((m) => m.method ?? `reply:${m.id}`),
+      ['initialize', 'session/load', 'reply:perm-load', 'session/prompt', 'session/prompt'],
+    );
+  });
+
+  test('still abandons the remote-workspace task if agy invokes a local tool during a steered prompt', async (t) => {
+    const { bridge, messages, send, reply, execServer } = remoteSteerHarness(t, { mode: 'native-during-steer' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [execServer] } });
+    await reply(1, 'session/new answer');
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'first' }] } });
+    await waitFor(() => messages().some((m) => m.method === 'session/update'), 8_000, 'first turn update');
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'write locally' }] } });
+    const closed = await Promise.race([bridge.closed, new Promise((resolve) => setTimeout(() => resolve(null), 8_000))]);
+    assert.ok(closed, 'the entry ended the task');
+    assert.equal(closed.code, 78);
+    assert.match(bridge.stderr.text(), /its own tool "write_to_file"/);
+  });
+
+  if (official) test('combines MCP warm-up, same-turn steering, and native card adaptation in one remote-workspace session', async (t) => {
+    const authHeader = `Bearer ${randomUUID()}`;
+    const warmedSessions = new Set();
+    const mcp = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => setTimeout(() => {
+        if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
+        const message = body ? JSON.parse(body) : {};
+        const sid = req.headers['mcp-session-id'];
+        if (req.method === 'GET') return res.writeHead(405).end();
+        if (req.method === 'DELETE') {
+          warmedSessions.delete(sid);
+          return res.writeHead(200).end();
+        }
+        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+        if (!sid) {
+          const id = `warm-${warmedSessions.size}`;
+          warmedSessions.add(id);
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
+          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
+        }
+        if (message.id === undefined) return res.writeHead(202).end();
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [{ name: 'Bash', inputSchema: { type: 'object' } }] } }));
+      }, 60));
+    });
+    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
+    t.after(() => mcp.close());
+
+    const { bridge, messages, send, reply, serverMessages } = remoteSteerHarness(t, { mode: 'combined' });
+    send({
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: { elicitation: { form: {} } } },
+    });
+    const init = await reply(0, 'initialize answer');
+    assert.deepEqual(init.result.agentCapabilities.mcpCapabilities, { http: true });
+    assert.deepEqual(init.result._meta, { retained: true, steering: { supported: true } });
+
+    const exec = {
+      type: 'http',
+      name: 'cindy_exec',
+      url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
+      headers: [{ name: 'Authorization', value: authHeader }],
+    };
+    send({ jsonrpc: '2.0', id: 1, method: 'session/new', params: { cwd: '/shadow/p', mcpServers: [exec] } });
+    await reply(1, 'session/new answer');
+    const openMsg = serverMessages().find((m) => m.method === 'session/new');
+    assert.equal(warmedSessions.size, 1, 'MCP warm-up completed before session/new reached agy');
+    assert.match(openMsg.params.mcpServers[0].url, /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{32}\/0$/);
+
+    send({ jsonrpc: '2.0', id: 2, method: 'session/prompt', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'start' }] } });
+    await waitFor(() => messages().some((m) => m.method === 'session/update'), 8_000, 'first turn update');
+    send({ jsonrpc: '2.0', id: 3, method: '_session/steering', params: { sessionId: 'sess-r', prompt: [{ type: 'text', text: 'steer with cards' }] } });
+    assert.deepEqual((await reply(3, 'steer ack')).result, { outcome: 'injected' });
+    assert.deepEqual((await reply(2, 'merged prompt reply')).result, { stopReason: 'end_turn', usage: { outputTokens: 13 } });
+
+    const updates = messages().filter((m) => m.method === 'session/update').map((m) => m.params.update);
+    assert.deepEqual(updates.slice(1), [
+      { sessionUpdate: 'plan', entries: [{ content: 'Steered step', priority: 'medium', status: 'completed' }] },
+      { sessionUpdate: 'tool_call', toolCallId: 'c-ask', name: 'AskUserQuestion', kind: 'execute', title: 'AskUserQuestion', status: 'in_progress' },
+    ]);
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+  });
+
+  // Why: if MCP warm-up succeeded before session/resume was rejected (agy never consumed the warmed session),
+  // failOpen must delete that unhanded upstream session once and closing the bridge must not delete it again.
+  if (official) test('deletes unhanded warmed MCP sessions once when remote session open fails', async (t) => {
+    const authHeader = `Bearer ${randomUUID()}`;
+    const activeSessions = new Set();
+    const deletedSessions = [];
+    const mcp = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        if (req.headers.authorization !== authHeader) return res.writeHead(401).end();
+        const sid = req.headers['mcp-session-id'];
+        if (req.method === 'GET') return res.writeHead(405).end();
+        if (req.method === 'DELETE') {
+          deletedSessions.push(sid);
+          activeSessions.delete(sid);
+          return res.writeHead(200).end();
+        }
+        const message = body ? JSON.parse(body) : {};
+        if (!sid && message.method !== 'initialize') return res.writeHead(400).end();
+        if (!sid) {
+          const id = `warm-fail-${activeSessions.size}`;
+          activeSessions.add(id);
+          res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': id });
+          return res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: {}, serverInfo: { name: 'cindy_exec', version: '1' } } }));
+        }
+        if (message.id === undefined) return res.writeHead(202).end();
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [{ name: 'Bash', inputSchema: { type: 'object' } }] } }));
+      });
+    });
+    await new Promise((resolve) => mcp.listen(0, '127.0.0.1', resolve));
+    t.after(() => mcp.close());
+
+    const { bridge, send, reply } = remoteSteerHarness(t, { mode: 'fail-session-open' });
+    bridge.child.stdin.write(INITIALIZE);
+    await reply(0, 'initialize answer');
+    const exec = {
+      type: 'http',
+      name: 'cindy_exec',
+      url: `http://127.0.0.1:${mcp.address().port}/mcp/cindy_exec`,
+      headers: [{ name: 'Authorization', value: authHeader }],
+    };
+    send({ jsonrpc: '2.0', id: 1, method: 'session/resume', params: { sessionId: 'sess-known', cwd: '/shadow/p', mcpServers: [exec] } });
+    const openErr = await reply(1, 'rejected session/resume answer');
+    assert.equal(openErr.error.code, -32004);
+    await waitFor(() => deletedSessions.length === 1, 4_000, 'unhanded warmed MCP session deleted on failOpen');
+    assert.equal(activeSessions.size, 0, 'warmed upstream session was closed');
+
+    bridge.child.stdin.end();
+    assert.equal((await bridge.closed).code, 0);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(deletedSessions.length, 1, 'closing the bridge did not send a duplicate DELETE');
+  });
 });

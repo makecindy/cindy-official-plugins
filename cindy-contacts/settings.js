@@ -11,19 +11,24 @@
       sync: '设备同步', syncEnable: '与我的其他电脑同步通讯录', syncNow: '立即同步',
       syncHint: '在同一 Cindy 账号的电脑上分别开启，两台电脑同时在线时自动同步。离线修改会保留，重连后合并；删除也会同步。加密传输，不消耗 AI 额度。',
       syncUnsupported: '当前 Cindy 尚不支持插件设备同步，本地通讯录可继续使用。',
-      syncState: { off: '未开启', waiting: '等待其他电脑连接', syncing: '正在同步…', synced: '已与在线电脑同步', error: '同步暂未完成', unsupported: '需要支持插件同步的 Cindy 版本' },
+      syncState: { offline: '本机未连接设备服务', confirming: '等待对方确认最新资料', partial: '部分电脑已同步', off: '未开启', waiting: '等待其他电脑连接', syncing: '正在同步…', synced: '已与在线电脑同步', error: '同步暂未完成', unsupported: '需要支持插件同步的 Cindy 版本' },
       syncLast: (w) => `上次确认同步：${w}`,
       syncConflict: '两台电脑上的联系人合并发生冲突。请先撤销其中一次合并，再重新同步；本机资料已保留。',
       syncVersion: '同步版本不兼容。请更新两台电脑上的通讯录插件后重试；本机资料已保留。',
+      syncInvalid: '同步记录无法读取。请保留本机通讯录，检查插件更新后再试。', syncLimit: '通讯录超过单次同步上限，本机资料已保留。',
       syncError: '这次没同步完，Cindy 会自动接着同步，本机资料都在。',
       syncPeerOff: '另一台电脑还没开启通讯录同步。', syncProgress: (p) => `正在同步 ${p}%…`,
 
-      auto: '每天自动整理',
-      autoBtn: '打开自动化页设置', autoAgain: '重新打开自动化页',
-      autoHint: '会打开 Cindy 的自动化页，名称和要做的事已经填好；在那里选模型、确认频率后点保存。保存后每天整理一次，每次都会用到 AI 额度。',
-      autoOpened: '已打开自动化页：选好模型后点保存，自动整理就开始了。',
-      autoLast: (w) => `上次整理：${w}`, autoNever: '还没有整理过。',
-      autoStop: '要停用或改频率、换模型：在自动化页编辑或暂停「整理通讯录」。',
+      auto: '自动整理主机', noHost: '尚未选择主机', thisHost: '本机是整理主机', otherHost: n => `整理主机：${n}`,
+      unknownName: '另一台电脑', choose: '将这台电脑设为主机', clearHost: '取消主机',
+      chooseHint: '选择哪台电脑自动整理通讯录。其他电脑只同步，主机暂停或离线时会等它恢复。',
+      localOnly: '本机只同步', localIdle: '本机不自动整理，设备同步未开启', roleLoading: '正在读取主机设置…', offlineRole: '暂时无法确认主机。请检查 Cindy 账号和网络连接。',
+      servicePending: '当前账号服务尚未提供自动整理主机。', updateRole: '请更新 Cindy 后选择自动整理主机。', retry: '重新读取', conflict: '主机选择已变化，或原主机正在整理。请核对后再试。',
+      savedActive: '本机保留了整理任务，只有设为主机后才会运行。',
+      localState: { active: '本机自动化已启用', paused: '本机自动化已暂停', expired: '本机自动化已到期', none: '本机还没有整理自动化' },
+      autoBtn: '设置整理自动化', autoHint: '在主机的 Cindy 桌面端选择模型和频率并保存。如果轻量检查确认无需整理，就不使用 AI 额度。',
+      autoOpened: '已在主机桌面打开自动化页，保存后生效。', autoStop: '在 Cindy「自动化」中可以管理已有的整理任务。',
+      autoLast: (w) => `本机上次整理：${w}`,
       days: '第一次读最近', daysOpt: (d) => `${d} 天`,
       daysHint: '只影响第一次整理。想要更早的，可以在人物页「往来」里往前补。',
       sources: '读哪些来源',
@@ -41,19 +46,24 @@
       sync: 'Device sync', syncEnable: 'Sync contacts with my other computers', syncNow: 'Sync now',
       syncHint: 'Enable on each computer using the same Cindy account. Changes merge when both computers are online, including offline edits and deletions. Encrypted transfer; no AI quota used.',
       syncUnsupported: 'This Cindy version does not support plugin device sync. Local contacts remain available.',
-      syncState: { off: 'Off', waiting: 'Waiting for another computer', syncing: 'Syncing…', synced: 'Synced with online computers', error: 'Sync not completed', unsupported: 'A Cindy version supporting plugin sync is required' },
+      syncState: { offline: 'This computer is offline', confirming: 'Waiting for confirmation', partial: 'Some computers are up to date', off: 'Off', waiting: 'Waiting for another computer', syncing: 'Syncing…', synced: 'Synced with online computers', error: 'Sync not completed', unsupported: 'A Cindy version supporting plugin sync is required' },
       syncLast: (w) => `Last confirmed sync: ${w}`,
       syncConflict: 'Conflicting contact merges on two computers. Undo one merge, then sync again. Local data is preserved.',
       syncVersion: 'Sync versions are incompatible. Update the Contacts plugin on both computers, then retry. Local data is preserved.',
+      syncInvalid: 'Could not read the sync record. Keep the local contacts and check for a plugin update.', syncLimit: 'The address book exceeds the transfer limit. Local contacts are preserved.',
       syncError: 'This sync did not finish. Cindy keeps trying on its own; your local contacts are safe.',
       syncPeerOff: 'Contacts sync is not turned on on the other computer yet.', syncProgress: (p) => `Syncing ${p}%…`,
 
-      auto: 'Daily tidy-up',
-      autoBtn: 'Set up in Automations', autoAgain: 'Open Automations again',
-      autoHint: 'Opens Cindy’s Automations page with the name and instructions filled in. Pick a model, check the schedule and save. It then tidies up once a day; each run uses AI quota.',
-      autoOpened: 'Automations is open: pick a model and save to start.',
-      autoLast: (w) => `Last tidy-up: ${w}`, autoNever: 'Not tidied up yet.',
-      autoStop: 'To pause it or change the schedule or model, edit “Tidy up contacts” on the Automations page.',
+      auto: 'Tidy-up host', noHost: 'No computer selected', thisHost: 'This computer is the tidy-up host', otherHost: n => `Tidy-up host: ${n}`,
+      unknownName: 'Another computer', choose: 'Use this computer', clearHost: 'Clear selection',
+      chooseHint: 'Choose one computer to tidy up contacts. The others only sync, even when the host is paused or offline.',
+      localOnly: 'This computer only syncs', localIdle: 'Automatic tidy-up and device sync are off on this computer', roleLoading: 'Checking the selected computer…', offlineRole: 'Could not confirm the host. Check your Cindy account and network connection.',
+      servicePending: 'Your account service does not support tidy-up hosts yet.', updateRole: 'Update Cindy to choose a tidy-up host.', retry: 'Check again', conflict: 'The selection changed or the previous computer is tidying up. Check the current selection and try again.',
+      savedActive: 'The saved tidy-up will run only if you choose this computer as the host.',
+      localState: { active: 'Local automation enabled', paused: 'Local automation paused', expired: 'Local automation expired', none: 'No local tidy-up automation' },
+      autoBtn: 'Set up tidy-up', autoHint: 'On the host computer, choose a model and frequency in Automations, then save. When the quick check confirms there is nothing to tidy, it uses no AI quota.',
+      autoOpened: 'Automations is open on the host computer. Save to enable the schedule.', autoStop: 'Manage the existing tidy-up in Cindy Automations.',
+      autoLast: (w) => `Last tidy-up on this computer: ${w}`,
       days: 'First run reads', daysOpt: (d) => `${d} days`,
       daysHint: 'Only affects the first tidy-up. Go further back from a person’s Exchanges tab.',
       sources: 'Sources',
@@ -111,7 +121,7 @@
     else p.reject(Object.assign(new Error(m.error?.message || 'failed'), { code: m.error?.code }));
   };
 
-  const S = { meta: null, opened: false, error: '' };
+  const S = { meta: null, role: null, choosing: false, opened: false, roleError: '', error: '' };
 
   function when(iso) {
     const d = new Date(iso);
@@ -130,15 +140,27 @@
       `<div class="seg">${values.map((v) => `<button type="button" data-set="${key}" data-value="${esc(v)}" aria-pressed="${st[key] === v}">${esc(label(v))}</button>`).join('')}</div>`;
     let h = '';
     h += `<div class="item"><div class="label">${esc(T.auto)}</div><div class="body">`;
-    if (m.schedule) {
-      h += `<button class="pill" type="button" id="openAuto">${esc(m.automationRequested ? T.autoAgain : T.autoBtn)}</button>`;
-      h += `<p class="hint">${esc(S.opened ? T.autoOpened : T.autoHint)}</p>`;
-      const last = m.maintenance && m.maintenance.lastRunAt;
-      h += `<p class="status">${esc(last ? T.autoLast(when(last)) : T.autoNever)}</p>`;
-      if (m.automationRequested) h += `<p class="hint">${esc(T.autoStop)}</p>`;
+    const role = S.role;
+    if (role?.available) {
+      const title = role.isPrimary ? T.thisHost : role.selected ? T.otherHost(role.deviceName || T.unknownName) : T.noHost;
+      h += `<p class="status">${esc(title)}</p><p class="hint">${esc(T.chooseHint)}</p>`;
+      if (role.isPrimary) {
+        h += `<p class="status">${esc(T.localState[role.localSchedule])}</p>`;
+        if (role.localSchedule === 'none' && m.schedule) {
+          h += `<button class="pill" type="button" id="openAuto">${esc(T.autoBtn)}</button><p class="hint">${esc(S.opened ? T.autoOpened : T.autoHint)}</p>`;
+        } else if (role.localSchedule !== 'none') h += `<p class="hint">${esc(T.autoStop)}</p>`;
+      } else {
+        if (role.selected) h += `<p class="status">${esc(m.deviceSync?.enabled ? T.localOnly : T.localIdle)}</p>`;
+        if (role.localSchedule !== 'none') h += `<p class="hint">${esc(role.localSchedule === 'active' ? T.savedActive : T.localState[role.localSchedule])}</p>`;
+      }
+      h += `<button class="pill${role.isPrimary ? ' secondary' : ''}" type="button" id="chooseHost"${S.choosing ? ' disabled' : ''}>${esc(role.isPrimary ? T.clearHost : T.choose)}</button>`;
     } else {
-      h += `<p class="hint">${esc(T.noSchedule)}</p>`;
+      const old = ['UNSUPPORTED_CAPABILITY', 'INVALID_PARAMS', 'INVALID_REQUEST'].includes(role?.code);
+      h += `<p class="hint">${esc(!role ? T.roleLoading : old ? T.updateRole : role.code === 'AUTOMATION_SERVICE_PENDING' ? T.servicePending : T.offlineRole)}</p>`;
+      if (role) h += `<button class="pill" type="button" id="refreshHost">${esc(T.retry)}</button>`;
     }
+    if (S.roleError) h += `<p role="alert" class="err">${esc(S.roleError)}</p>`;
+    if (m.maintenance?.lastRunAt) h += `<p class="hint">${esc(T.autoLast(when(m.maintenance.lastRunAt)))}</p>`;
     h += '</div></div>';
     const ds = m.deviceSync;
     h += `<div class="item"><div class="label">${esc(T.sync)}</div><div class="body">`;
@@ -148,8 +170,15 @@
         // 只说用户能看懂、需要知道的：真要用户处理的（合并冲突、版本、对方没开）单独说，其余插件自己重试，不把内部报错抛给用户。
         const p = ds.progress && ds.progress.total ? Math.floor((ds.progress.done / ds.progress.total) * 100) : null;
         const status = ds.phase === 'syncing' && p !== null ? T.syncProgress(p) : T.syncState[ds.phase] || T.syncState.waiting;
-        const errText = !ds.error ? '' : ds.error.code === 'SYNC_MERGE_CONFLICT' ? T.syncConflict : ds.error.code === 'SYNC_VERSION' ? T.syncVersion : ds.error.code === 'SYNC_PEER_DISABLED' ? T.syncPeerOff : T.syncError;
-        h += `<button class="pill" type="button" id="syncNow">${esc(T.syncNow)}</button><p class="status">${esc(status)}</p>${ds.lastAt ? `<p class="hint">${esc(T.syncLast(when(ds.lastAt)))}</p>` : ''}${errText ? `<p class="${errText === T.syncError ? 'hint' : 'err'}">${esc(errText)}</p>` : ''}`;
+        const errorText = error => !error ? '' : error.code === 'SYNC_MERGE_CONFLICT' ? T.syncConflict : error.code === 'SYNC_VERSION' ? T.syncVersion : error.code === 'SYNC_PEER_DISABLED' ? T.syncPeerOff : error.code === 'SYNC_LIMIT' ? T.syncLimit : error.code === 'SYNC_CORRUPT' ? T.syncInvalid : T.syncError;
+        h += `<button class="pill" type="button" id="syncNow"${ds.phase === 'syncing' ? ' disabled' : ''}>${esc(T.syncNow)}</button><p class="status">${esc(status)}</p>`;
+        for (const peer of ds.peers || []) {
+          if (!peer.phase) continue;
+          const detail = peer.phase === 'error' ? errorText(peer.error) : T.syncState[peer.phase];
+          h += `<p class="hint">${esc(peer.deviceName || peer.deviceId)} · ${esc(detail)}</p>`;
+        }
+        if (ds.phase === 'error' && !ds.peers?.some(peer => peer.error)) h += `<p class="hint">${esc(errorText(ds.error))}</p>`;
+        if (ds.lastAt) h += `<p class="hint">${esc(T.syncLast(when(ds.lastAt)))}</p>`;
       }
     } else h += `<p class="hint">${esc(T.syncUnsupported)}</p>`;
     h += '</div></div>';
@@ -166,15 +195,30 @@
     $('#root').innerHTML = h;
   }
 
+  let latestLoad = 0;
   async function load() {
+    const sequence = ++latestLoad;
     try {
-      S.meta = await rpc('state');
+      const meta = await rpc('state');
+      if (sequence !== latestLoad) return;
+      S.meta = meta;
       if (!S.meta.settings) setTimeout(load, 1000);
     } catch (e) {
+      if (sequence !== latestLoad) return;
       S.error = T.failed + e.message;
     }
     render();
   }
+
+  let roleRequest = 0;
+  async function refreshRole() {
+    const request = ++roleRequest;
+    const role = await rpc('automationStatus').catch(() => ({ available: false }));
+    if (request === roleRequest) { S.role = role; render(); }
+  }
+  window.addEventListener('focus', refreshRole);
+  setInterval(() => { if (!document.hidden && !S.choosing) refreshRole(); }, 60000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshRole(); });
 
   async function save(patch) {
     S.error = '';
@@ -194,11 +238,26 @@
       try { await rpc('deviceSync', {}); await load(); } catch (err) { S.error = T.failed + err.message; render(); }
       return;
     }
+    if (b.id === 'refreshHost') return refreshRole();
+    if (b.id === 'chooseHost' && S.role?.available && !S.choosing) {
+      S.choosing = true;
+      S.roleError = '';
+      const { revision, isPrimary } = S.role;
+      render();
+      try {
+        const result = await rpc('chooseAutomationHost', { revision, useThisDevice: !isPrimary });
+        if (!result.available && result.code !== 'CANCELLED') S.roleError = result.code === 'HOST_CHOICE_CHANGED' ? T.conflict : T.offlineRole;
+        S.opened = false;
+      } catch (_) { S.roleError = T.offlineRole; }
+      finally { S.choosing = false; await refreshRole(); }
+      return;
+    }
     if (b.id === 'openAuto') {
       b.disabled = true;
       try {
-        S.meta.automationRequested = await rpc('requestAutomation');
-        S.opened = true;
+        const result = await rpc('requestAutomation');
+        S.opened = !!result.opened;
+        await refreshRole();
         S.error = '';
       } catch (err) {
         S.error = T.failed + err.message;
@@ -230,5 +289,6 @@
     document.documentElement.lang = LOCALE;
     render();
     load();
+    refreshRole();
   })();
 })();

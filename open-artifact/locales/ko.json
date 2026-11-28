@@ -1,0 +1,16 @@
+{
+  "name": "Open Artifact",
+  "description": "작업 사이드바에서 Open Artifact 결과물을 만들고 편집하거나 댓글을 남깁니다.",
+  "whenToUse": "슬라이드, 디자인, 화이트보드, 스프레드시트, 대시보드, 문서 또는 애니메이션을 만들거나 편집할 때 사용합니다.",
+  "tools": {
+    "artifact": {
+      "description": "로컬 결과물을 만들거나 조회하고 업데이트하거나 엽니다. quickstart로 유형을 선택합니다."
+    },
+    "artifact_data": {
+      "description": "결과물의 데이터를 읽고 검색하거나 수정합니다."
+    },
+    "artifact_comments": {
+      "description": "댓글을 읽거나 답변하고 해결하거나 다시 엽니다. 새 댓글을 기다릴 수도 있습니다."
+    }
+  }
+}

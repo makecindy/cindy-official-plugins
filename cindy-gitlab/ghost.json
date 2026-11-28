@@ -2,10 +2,10 @@
   "schemaVersion": 3,
   "id": "cindy-gitlab",
   "name": "GitLab",
-  "description": "内置的 GitLab 服务插件:支持自建与多实例 GitLab——在主界面侧边栏「插件」→「GitLab」详情页添加实例地址与 Personal Access Token(api scope)即可读写 issue / MR / code review / 仓库 / CI / release / 搜索等 107 个操作(两段式目录)。token 由主机加密保管,只注入对应实例的 API 请求。",
-  "whenToUse": "只管 GitLab 实例(gitlab.com/公司/自建),github.com 的链接不归我、找 GitHub。需要查/建/改 GitLab issue 或 MR,提交/回复/发布 code review,合并或 rebase MR,查仓库/分支/commit/文件内容,查 CI pipeline 与 job 日志,管理 release / tag / 分支,搜索全实例内容,或下载仓库归档时找我(需先在主界面侧边栏「插件」→「GitLab」详情页添加实例与 token)。",
-  "version": "1.2.3",
-  "minCindyVersion": "0.1.64",
+  "description": "内置的 GitLab 服务插件:支持自建与多实例 GitLab——自动使用本机 glab 已登录的实例,也可在「插件」→「GitLab」详情页添加实例地址与 Personal Access Token(api scope,插件内添加的账号优先),即可读写 issue / MR / code review / 仓库 / CI / release / 搜索等 107 个操作。token 由主机保管,只注入对应实例的 API 请求。",
+  "whenToUse": "只管 GitLab 实例(gitlab.com/公司/自建),github.com 的链接不归我、找 GitHub。需要查/建/改 GitLab issue 或 MR,提交/回复/发布 code review,合并或 rebase MR,查仓库/分支/commit/文件内容,查 CI pipeline 与 job 日志,管理 release / tag / 分支,搜索全实例内容,或下载仓库归档时找我(自动使用本机 glab 登录,也可在「插件」→「GitLab」详情页添加实例与 token)。 准备发布或展示 MR 时用 mr_card，读取跟进偏好用 mr_follow_settings。",
+  "version": "1.4.0",
+  "minCindyVersion": "0.1.126",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -24,12 +24,82 @@
       {
         "key": "gitlab_conn",
         "label": "GitLab 实例",
-        "hint": "GitLab → User Settings → Access Tokens 生成 PAT(api scope)后,在下方添加实例地址与 token;仅支持 https 默认端口(443)的实例,http 或自定义端口暂不支持",
+        "source": "glab-cli",
+        "hint": "本机 glab 已登录的实例会自动使用;也可在下方单独添加实例地址与 PAT(api scope,插件里添加的账号优先)。仅支持 https 默认端口(443)",
         "inject": {
           "header": "PRIVATE-TOKEN",
           "format": "{value}"
         },
         "maxConnections": 8
+      }
+    ]
+  },
+  "routineEvents": {
+    "events": [
+      {
+        "type": "merge_request.opened",
+        "name": "MR 新建",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft", "actor", "fromSelf"]
+      },
+      {
+        "type": "merge_request.updated",
+        "name": "MR 有新提交或更新",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft", "changes"]
+      },
+      {
+        "type": "merge_request.comment",
+        "name": "MR 新评论",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft", "actor", "fromSelf", "noteId", "body"]
+      },
+      {
+        "type": "merge_request.approved",
+        "name": "MR 被批准",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft", "actor", "fromSelf", "noteId"]
+      },
+      {
+        "type": "merge_request.pipeline",
+        "name": "MR 流水线出结果(需指定 project)",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft", "pipelineId", "pipelineStatus"]
+      },
+      {
+        "type": "merge_request.merged",
+        "name": "MR 已合并",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft", "actor", "fromSelf"]
+      },
+      {
+        "type": "merge_request.closed",
+        "name": "MR 已关闭",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft", "actor", "fromSelf"]
+      },
+      {
+        "type": "merge_request.reopened",
+        "name": "MR 重新打开",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "sourceBranch", "targetBranch", "sha", "draft"]
+      },
+      {
+        "type": "issue.opened",
+        "name": "Issue 新建",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "actor", "fromSelf"]
+      },
+      {
+        "type": "issue.updated",
+        "name": "Issue 有更新",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "changes"]
+      },
+      {
+        "type": "issue.comment",
+        "name": "Issue 新评论",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "actor", "fromSelf", "noteId", "body"]
+      },
+      {
+        "type": "issue.closed",
+        "name": "Issue 已关闭",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels", "actor", "fromSelf"]
+      },
+      {
+        "type": "issue.reopened",
+        "name": "Issue 重新打开",
+        "fields": ["host", "project", "iid", "kind", "state", "url", "author", "authorIsSelf", "labels"]
       }
     ]
   },
@@ -70,8 +140,119 @@
             "description": "可选:把完整结果 JSON 写进会话工作目录的该相对路径(如 tmp/gl-result.json),只返回文件路径——结果大、要交给脚本处理时用。结果超 50KB 时即使不传也会自动落盘返回路径"
           }
         },
-        "required": ["name"]
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "mr_card",
+      "description": "在 Cindy 对话中展示 MR 卡片。发布前传 project_path、head、base，可附 commits 和 files。当前任务成功发布后传 published=true 和 mr，有原卡片时带上 card_id。开启发完自动跟进且 MR 为非草稿时，卡片在支持的宿主上直接启动跟进；用户明确只要求发布时传 following=false。仅查看已有 MR 时省略 published。若返回 follow_state，跟进由卡片管理，请勿另建任务。active 为运行中，paused 为已暂停，stopped 为已停止，failed 为启动失败，unverified 为状态待核实。旧宿主仅在未返回 follow_state 时按 todo 交接；另建任务前以 claim_follow=true 申请并确认 follow_claimed=true。existing_task 表示已有其他任务负责，卡片中的入口仅用于导航。renamed 和 following 只报告已核实完成的操作。后台轮次用 card_id 刷新，提醒时可用 to_latest。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "head": {
+            "type": "string",
+            "description": "改动所在的分支(询问卡片必填)"
+          },
+          "base": {
+            "type": "string",
+            "description": "要合入的分支,如 main"
+          },
+          "commits": {
+            "type": "integer",
+            "description": "head 相对 base 的提交数"
+          },
+          "files": {
+            "type": "array",
+            "description": "改动文件(最多 50 个),卡片只显示文件数;看具体改动用宿主的审查面板",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "additions": {
+                  "type": "integer"
+                },
+                "deletions": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          },
+          "files_total": {
+            "type": "integer",
+            "description": "改动文件总数(files 被截断时传)"
+          },
+          "card_id": {
+            "type": "string",
+            "description": "要更新的卡片:之前 mr_card 返回的 card_id"
+          },
+          "renamed": {
+            "type": "boolean",
+            "description": "已把当前任务改名为 MR 号和标题"
+          },
+          "following": {
+            "type": "boolean",
+            "description": "后台跟进已开启(true)或已停止(false)"
+          },
+          "to_latest": {
+            "type": "boolean",
+            "description": "把卡片挪到这次调用的位置(本轮回复末尾)显示,原位置的卡片隐去(旧版 Cindy 留一行提示);只在要提醒用户看卡片时传(可以合并、等用户决定、已合并或关闭)"
+          },
+          "claim_follow": {
+            "type": "boolean",
+            "description": "开始跟进前先传 true 申请在当前任务跟进。只有成功且 follow_claimed=true 才能创建定时任务；existing_task 表示其它任务正在跟进。following 仅报告已完成的开启或停止。"
+          },
+          "published": {
+            "type": "boolean",
+            "description": "仅当当前任务刚刚成功创建了该 MR 时传 true；查看已有 MR 时省略。"
+          },
+          "project_path": {
+            "type": "string",
+            "description": "GitLab 项目路径（支持多级分组），发布前必填"
+          },
+          "instance": {
+            "type": "string",
+            "description": "连接 ID 或域名，查看已有 MR 时可直接传完整 MR 链接"
+          },
+          "mr": {
+            "type": "string",
+            "description": "已创建的 MR 链接或编号"
+          }
+        }
+      }
+    },
+    {
+      "name": "mr_follow_settings",
+      "description": "只读获取与 MR 卡片共用的自动改名、自动跟进和跟进模型偏好。不显示卡片、不创建任务、不启动跟进；返回 settings，不代表跟进已经开启。IM 发 MR 后也用此入口读取偏好，再按 mr 流程创建并核验跟进。读取失败时设置未知，不当作关闭。",
+      "parameters": {
+        "type": "object",
+        "properties": {}
       }
     }
-  ]
+  ],
+  "card": {
+    "externalLinks": true
+  },
+  "agent": {
+    "hostTools": [
+      "scheduler"
+    ]
+  },
+  "sessionContext": true,
+  "releaseNotes": "新增 GitLab MR 与 Issue 自动化事件源（支持新建、更新、新评论、批准、流水线出结果、合并、关闭、重新打开等 13 种事件触发自动化），并支持自动复用本机 glab 已登录的实例（插件内添加的 PAT 优先）。新增 MR 卡片、跟进模型（支持插件引擎；当宿主或绑定任务不支持显式插件模型覆盖时自动沿用当前任务模型）、自动跟进、任务改名与合并后归档；MR 可以合并且当前账号有权限时，可在卡片内确认合并，确认后复查权限与提交。",
+  "skill": {
+    "items": [
+      {
+        "dir": "skills/mr",
+        "name": "mr",
+        "description": "Publish, display and follow GitLab merge requests using Cindy's GitLab plugin and the current task's MR card. Use for /mr, GitLab MR links and requests to prepare, open, follow, or stop following a merge request."
+      }
+    ]
+  }
 }

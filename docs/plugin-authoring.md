@@ -203,8 +203,13 @@ Establish stable/Beta release evidence before relying on the hidden card or sett
   including descriptions, icons, and bundled documentation. Shared packaged
   LICENSE/NOTICE/TRADEMARKS files affect every plugin. Root README files, this
   reference, and CI files are not bundled and do not trigger plugin migration.
-- Package changes require increasing the plugin's own `version`. After moving to
-  v3, do not claim support for clients that only understand v2. Server selects a
+- Routine official plugin updates may leave the source `ghost.json.version`
+  unchanged. On `main`, the [official packaging script](../.github/scripts/package-plugin.sh)
+  calculates and writes an increased patch version into the archive. Keep source
+  versions at or above `main` and set an explicit version for minor or major
+  releases. The Server uses the version inside the archive. The XD repository
+  uses its own [version check](https://github.com/xindong/cindy-xd-plugin/blob/8b3c37ce4b7f2bbf38fc80dce56bd82152088611/.github/scripts/check-plugin-release-version.sh).
+- After moving to v3, only claim support for clients that recognize v3. Server selects a
   compatible historical release using the package's minimum version, or hides
   the plugin if none exists. If the task explicitly requires new fixes for
   v2-only clients, the current repository gate does not support that path:
@@ -438,21 +443,12 @@ their presence in a guide does not establish stable support.
    packaging uncommitted work must use an explicit reviewed file list. Inspect
    every final archive for expected files, no outer plugin directory, and no
    credentials; verification evidence must apply to the submitted contents.
-4. Provide real runtime evidence for affected paths under the
-   [review contract](../.greptile/rules.md#运行验证与证据复用). For installation,
-   migration or tool behavior changes, exercise the relevant package in a Cindy
-   environment meeting its actual requirements, including failure paths and
-   retained capabilities. Record the tested package/source, Cindy version/channel,
-   scenarios, results and gaps. Identify development builds truthfully; they do
-   not establish compatibility with released clients without applicable evidence.
-   Reuse prior evidence only with an explanation of why the full diff from the
-   tested version to the current submission leaves those paths unaffected; an
-   older package's test is not a claim that the latest package was installed.
-   Authors or maintainers may supply evidence. The Agent performs authorized
-   operations when available; otherwise explicitly hand off unverified steps.
-   No fixed verification checkbox is required or read by CI. Green CI does not
-   collect runtime evidence, prove the minimum version correct, or compare
-   migration capabilities.
+4. Run the repository contract checks and the plugin's automated tests, and
+   record the commands/results in the PR description (see the
+   [review contract](../.greptile/rules.md)). Manual Cindy client testing is
+   encouraged for brand-new plugins or major host-capability integrations, but
+   is not a hard merge gate for routine updates — release QA happens on Global
+   Plugin Platform after merge.
 
 ## Interpreting documentation and comments
 
@@ -474,24 +470,27 @@ plugin packages, Host behavior, or CI restrictions.
 
 ### Current declarations and future synchronization
 
-The fields below reference [Host commit 8a90e65e36](https://github.com/makecindy/cindy/blob/8a90e65e36e139d060784dee5eab50295b085c7c/packages/plugin-protocol/src/manifest.ts)
-(`v0.1.145`) and its runtime references. They help locate capabilities;
+The fields below reference [Host commit a5029cae95](https://github.com/makecindy/cindy/blob/a5029cae95a0b1bf9578c554df5035fa8e95d6fc/packages/plugin-protocol/src/manifest.ts)
+(`v0.1.148`) and its runtime references. They help locate capabilities;
 availability still depends on the target Host.
 
 | Capability | Declaration |
 | --- | --- |
 | Tool approval and startup exposure | `tools[].approval` (`auto / each-call`), `tools[].exposure: "startup"` |
 | Tasks and companions | `agent.tasks / hiddenTasks / targets / delegation / observe / companions` |
-| Host tool groups | `agent.hostTools`. See the [Host tool reference](https://github.com/makecindy/cindy/blob/8a90e65e36e139d060784dee5eab50295b085c7c/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-host-tools.md) for supported groups and approval. |
+| Host tool groups | `agent.hostTools`. See the [Host tool reference](https://github.com/makecindy/cindy/blob/a5029cae95a0b1bf9578c554df5035fa8e95d6fc/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-host-tools.md) for supported groups and approval. |
 | Views | `mainView.open / side / multiple`, `taskView`, `taskView.remote: true` (requires `liveScreen: true`), `mobile` |
 | Configuration and prerequisites | `showTaskPreferences`, `setup.requires[].anyOf` |
 | Introductions and mail | `readme`, `mail`, `mailReader` |
 | Models and Routine events | `models.types`, `cindy.models` (`decisions`, `rerank`, `media_request`), `routineEvents.events`. Direct media requests use the Host's existing model action approval. |
-| Plugin task engines | Manifest v3 `harnesses` declares engines. Each `entry` points to `node.entries`, and `PUT /harnesses` reports runtime availability. The Host runs `acp`. See the [engine reference](https://github.com/makecindy/cindy/blob/8a90e65e36e139d060784dee5eab50295b085c7c/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-harnesses.md). |
-| Form dialogs | Manifest v3 `form: true` declares the form capability. The Host handles `form-request` and returns the user's response. See the [form reference](https://github.com/makecindy/cindy/blob/8a90e65e36e139d060784dee5eab50295b085c7c/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-form-dialog.md). |
+| Plugin task engines | Manifest v3 `harnesses` declares engines. Each `entry` points to `node.entries`, and `PUT /harnesses` reports runtime availability. The Host runs `acp`. See the [engine reference](https://github.com/makecindy/cindy/blob/a5029cae95a0b1bf9578c554df5035fa8e95d6fc/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-harnesses.md). |
+| Form dialogs | Manifest v3 `form: true` declares the form capability. The Host handles `form-request` and returns the user's response. See the [form reference](https://github.com/makecindy/cindy/blob/a5029cae95a0b1bf9578c554df5035fa8e95d6fc/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-form-dialog.md). |
 | Event subscriptions | `subscribe.topics` values `turn`, `session`, `message`, `task-state`, `tool-execution`, `native-recovery` |
 | Tool lifecycle hooks | `subscribe.hooks` values `will-tool-call`, `did-tool-result` |
 | Host preferences and UI | `agent.modelPreferences`, `mainView.preferredIcon`, `mcpApps.ui.resources[].hostFullscreenButton`, `mcpApps.ui.resources[].initialHeight`, `composer.header` contribution position |
+| File opening | Manifest v3 `fileOpener.extensions` declares file extensions and requires `node`. See the [file opening reference](https://github.com/makecindy/cindy/blob/a5029cae95a0b1bf9578c554df5035fa8e95d6fc/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-file-opener.md). |
+| Working directory menu and status bar | `mcpApps.host.contributions` supports `workdir.menu` and optional status bar button `fontSize: 12 / 13 / 14`. See the [Host UI reference](https://github.com/makecindy/cindy/blob/a5029cae95a0b1bf9578c554df5035fa8e95d6fc/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-host-ui.md). |
+| OAuth device code | `network.secrets[].oauth.deviceAuthorizationUrl` selects device-code login. Keep `authorizeUrl` for older Hosts. See the [network reference](https://github.com/makecindy/cindy/blob/a5029cae95a0b1bf9578c554df5035fa8e95d6fc/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-network.md). |
 | IM integration | `imEntrance` requires `agent.tasks` and `agent.targets` when enabled |
 | Local updates | `githubRelease` selects a GitHub.com `owner/repository` for a local plugin with `settingsHtml` |
 | Static system prompt | `systemPrompt` (v3, `scope: "selected-task"`) |
@@ -506,13 +505,17 @@ availability still depends on the target Host.
   discovery. Market installation reads the original package manifest. Server
   normalization omits the field, so repository release preflight does not
   recognize a change to this field alone as changed runtime content. See the
-  [tool reference](https://github.com/makecindy/cindy/blob/8a90e65e36e139d060784dee5eab50295b085c7c/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-tools.md).
+  [tool reference](https://github.com/makecindy/cindy/blob/a5029cae95a0b1bf9578c554df5035fa8e95d6fc/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-tools.md).
 - `mcpApps.ui.resources[].initialHeight` is an optional initial height hint in
   CSS pixels. The Host's new local package validator requires a finite number.
   Server uploads and the pinned official repository validator preserve the field.
   Market packages and installed snapshots use their existing read paths. The Host
   ignores an invalid hint when rendering the page and clamps a valid hint to
-  80–720 CSS pixels. See the [page declaration reference](https://github.com/makecindy/cindy/blob/8a90e65e36e139d060784dee5eab50295b085c7c/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-host-ui.md).
+  80–720 CSS pixels. See the [page declaration reference](https://github.com/makecindy/cindy/blob/a5029cae95a0b1bf9578c554df5035fa8e95d6fc/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-host-ui.md).
+
+- The Host uses `fileOpener` after existing installation approval. It offers only local files the user opens from Cindy and falls back to the system default app when the plugin does not handle a file. The Host's new local package validator requires a Node worker. Server uploads and the pinned validator pass through the field. The Host ignores invalid declarations when reading historical snapshots.
+- The Host mounts the working directory menu in local tasks. Older Hosts ignore the new position. Server uploads and the pinned validator preserve `mcpApps.host`. The Host uses the default status bar button font size when a supported value is missing.
+- The device authorization endpoint must use HTTPS and match a declared domain. It is mutually exclusive with `tokenBroker` and `brokerBounce`. Server publish normalization and the pinned official validator omit this field from the parsed result. Official packaging preserves it in the archive. Server same-version preflight therefore does not recognize a change to the device authorization endpoint alone as changed runtime content.
 
 The server reserves `cindy-org-*` for platform-managed common plugins. Official
 repository submissions cannot create plugins with that prefix. Existing plugin
@@ -520,13 +523,13 @@ identities continue to use their current IDs. See the [server publishing contrac
 
 Page resources remain under `mcpApps.ui`: `resources` and `tools` must not both be
 empty. A page opened only through a named entry may use empty `tools: {}`.
-Host v0.1.145 allows up to 48 top-level tools and 48 UI tool links, with up to 16
+Host v0.1.148 allows up to 48 top-level tools and 48 UI tool links, with up to 16
 page resources. The pinned official-repository validator still caps top-level tools at 16.
 
 The Host accepts exact HTTP(S)/WS(S) origins in `network.hosts`, including
 non-default ports. Domain patterns match HTTPS on the default port, and exact
 origins match scheme, host and port. The pinned repository validator still
-requires domain patterns. See the [Host network reference](https://github.com/makecindy/cindy/blob/8a90e65e36e139d060784dee5eab50295b085c7c/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-network.md)
+requires domain patterns. See the [Host network reference](https://github.com/makecindy/cindy/blob/a5029cae95a0b1bf9578c554df5035fa8e95d6fc/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-network.md)
 for runtime request and credential rules.
 
 Host resource languages include `zh-CN / zh-TW / en / ja / ko / es / fr / de / pt-PT / pt-BR`.

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { applyPatches, applyVendorFilePatches, sha256, validateArchiveEntries, verifyVendor, fileHashes } from '../.github/scripts/sync-maker-runtime.mjs';
 import { assemble } from '../taptap-maker/vendor/taptap-maker/skills/maker-ui-workflow/scripts/assemble-ui.mjs';
 
-const recipe = JSON.parse(readFileSync(new URL('../.github/maker-runtime/0.0.41.json', import.meta.url)));
+const recipe = JSON.parse(readFileSync(new URL('../.github/maker-runtime/0.0.42.json', import.meta.url)));
 const vendor = fileURLToPath(new URL('../taptap-maker/vendor/taptap-maker/', import.meta.url));
 
 test('reviewed upstream can be reconstructed and patched reproducibly', () => {
@@ -16,7 +16,7 @@ test('reviewed upstream can be reconstructed and patched reproducibly', () => {
   for (const patch of [...recipe.patches].reverse()) {
     for (const edit of [...patch.edits].reverse()) {
       if (!edit.after) {
-        const anchor = 'async function startMakerMcpServer() {\n  startMakerPackageUpdateCheck({ currentVersion: VERSION });\n';
+        const anchor = 'async function startMakerMcpServer() {\n  startMakerPackageUpdateCheck({ currentVersion: VERSION2 });\n';
         assert.equal(original.split(anchor).length - 1, 1);
         original = original.replace(anchor, anchor + edit.before);
       } else {
