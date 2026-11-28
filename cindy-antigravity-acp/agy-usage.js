@@ -6,6 +6,8 @@ const path = require('node:path');
 const { configFilePath, resolveAgy, spawnAgy, SESSION_SETTINGS, killTree } = require('./resolve-agy.js');
 const { accountDirProblem, hasVerifiedIsolatedSignIn } = require('./agy-account-dir.js');
 
+const { listModels, readModelSession, rememberModelSession } = require('./agy-models.js');
+
 const NAMED_PERIODS = { hourly: 60, daily: 1440, weekly: 10080 };
 const PERIOD_UNITS = {
   m: 1, min: 1, mins: 1, minute: 1, minutes: 1,
@@ -29,14 +31,33 @@ function windowMinutesOf(period) {
   return minutes >= 1 && minutes <= MAX_WINDOW_MINUTES ? minutes : undefined;
 }
 
+// agy names quota pools by family while ACP supplies the selectable IDs for this account.
+const GEMINI_IDS = /^gemini-/i;
+const THIRD_PARTY_IDS = /^(?:claude|gpt)-/i;
+
+function familyForGroup(name) {
+  if (/^gemini(?: models)?$/i.test(name)) return GEMINI_IDS;
+  if (/^claude(?: and |\/)gpt(?: models)?$/i.test(name)) return THIRD_PARTY_IDS;
+}
+
 /** agy's /usage command is answered by the CLI itself, outside a model turn. */
-function usageFromReport(report) {
+function usageFromReport(report, catalog) {
   if (report?.status !== 'SUCCESS' || report.command?.name !== 'usage' || report.num_turns !== 0) return null;
   const groups = report.command.data?.groups;
   if (!Array.isArray(groups)) return null;
   const windows = [];
   for (const group of groups) {
     if (typeof group?.name !== 'string' || !Array.isArray(group.buckets)) continue;
+    const family = familyForGroup(group.name.trim());
+    const models = [];
+    if (family && catalog) {
+      for (const model of catalog) {
+        const declared = familyForGroup(model.group || '');
+        if ((declared ? declared === family : family.test(model.id)) && !/[\x00-\x1f\x7f-\x9f]/.test(model.id)) {
+          models.push(model.id);
+        }
+      }
+    }
     for (const bucket of group.buckets) {
       const fraction = bucket?.remaining_fraction;
       if (bucket?.disabled || typeof fraction !== 'number' || !Number.isFinite(fraction) || fraction < 0 || fraction > 1) continue;
@@ -47,6 +68,7 @@ function usageFromReport(report) {
       const resetsAt = Date.parse(bucket.reset_time);
       const windowMinutes = windowMinutesOf(period);
       windows.push({ label, remainingPercent: Math.round(fraction * 10000) / 100,
+        ...(models.length ? { models } : {}),
         ...(Number.isFinite(resetsAt) && resetsAt > 0 ? { resetsAt } : {}),
         ...(windowMinutes ? { windowMinutes } : {}) });
       if (windows.length === 24) break;
@@ -69,13 +91,14 @@ async function readUsage(options) {
   if (accountDir && (accountDirProblem(accountDir, options) || !hasVerifiedIsolatedSignIn(accountDir, options))) return null;
   const executable = resolveAgy(options);
   if (!executable) return null;
-  // Keep stdin noninteractive. On Windows this alone does not prevent browser OAuth.
-  const child = spawnAgy(executable, ['--settings', SESSION_SETTINGS, '--output-format', 'json', '--print', '/usage'], {
+  const launchOptions = {
     ...options,
     env: usageEnvironment(options),
     ...(accountDir ? { accountDir, accountHome: true } : {}),
     stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  };
+  const deadline = Date.now() + 12000;
+  const child = spawnAgy(executable, ['--settings', SESSION_SETTINGS, '--output-format', 'json', '--print', '/usage'], launchOptions);
   try { child.stdin.end(); } catch { /* already closed */ }
   const chunks = [];
   let length = 0;
@@ -97,7 +120,29 @@ async function readUsage(options) {
         if (/Authentication required/i.test(stderrTail)) stop();
       });
     });
-    return code === 0 && length <= 128 * 1024 ? usageFromReport(JSON.parse(Buffer.concat(chunks).toString('utf8'))) : null;
+    if (code !== 0 || length > 128 * 1024) return null;
+    const report = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    const usage = usageFromReport(report);
+    if (!usage || !report.command.data.groups.some(group => typeof group?.name === 'string' && familyForGroup(group.name.trim()))) return usage;
+
+    // Reuse the account's dedicated model-list session without switching models to probe efforts.
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return usage;
+    let catalogTimer;
+    try {
+      const catalog = await listModels({ sessionId: readModelSession(options) }, {
+        ...options,
+        env: launchOptions.env,
+        catalogOnly: true,
+        onSpawn: probe => { catalogTimer = setTimeout(() => killTree(probe, 'SIGKILL'), remaining); },
+      });
+      if (catalog.sessionId) rememberModelSession(catalog.sessionId, options);
+      return usageFromReport(report, catalog.models);
+    } catch {
+      return usage;
+    } finally {
+      clearTimeout(catalogTimer);
+    }
   } finally {
     clearTimeout(timer);
     process.removeListener('exit', stop);

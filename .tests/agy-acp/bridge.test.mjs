@@ -56,7 +56,7 @@ if (args.at(-1) === '/usage') {
   if (process.env.FAKE_AGY_LAUNCHFILE) {
     fs.writeFileSync(process.env.FAKE_AGY_LAUNCHFILE, process.env.AGY_CLI_DISABLE_AUTO_UPDATE ?? '');
   }
-  const groups = [{ name: 'Test', buckets: [{ window: 'weekly', remaining_fraction: 0.5 }] }];
+  const groups = JSON.parse(process.env.FAKE_USAGE_GROUPS || 'null') ?? [{ name: 'Test', buckets: [{ window: 'weekly', remaining_fraction: 0.5 }] }];
   process.stdout.write(JSON.stringify({ status: 'SUCCESS', num_turns: 0, command: { name: 'usage', data: { groups } } }));
   process.exit(0);
 }
@@ -288,7 +288,7 @@ if (STATE) {
       } else if (method === 'session/new') {
         if (!signedIn()) authRequired(id);
         else sendAfterGate(process.env.FAKE_AGY_MODEL_GATE, { id, result: { sessionId: 'fake-session', configOptions: [{ id: 'model', category: 'model', type: 'select', currentValue: 'fake-model',
-          options: [{ value: 'fake-model', name: 'Fake ' + (process.env.FAKE_AGY_VERSION || '0.2.2') }] }] } });
+          options: process.env.FAKE_MODEL_CATALOG ? JSON.parse(process.env.FAKE_MODEL_CATALOG) : [{ value: 'fake-model', name: 'Fake ' + (process.env.FAKE_AGY_VERSION || '0.2.2') }] }] } });
       } else {
         send({ id, result: {} });
       }
@@ -3199,6 +3199,34 @@ test('usage polling returns quota and skips CLI self-update on Windows', async (
   const { result } = await worker.call({ jsonrpc: '2.0', id: 1, method: 'usage' });
   assert.deepEqual(result.windows, [{ label: 'Test · weekly', remainingPercent: 50, ...(official ? { windowMinutes: 10080 } : {}) }]);
   assert.equal(fs.readFileSync(launchFile, 'utf8'), isWin ? 'true' : 'false');
+});
+
+if (official) test('usage polling scopes both quota periods to the account’s advertised model IDs', async t => {
+  const buckets = (weekly, short) => [
+    { window: 'weekly', remaining_fraction: weekly }, { window: '5h', remaining_fraction: short },
+  ];
+  const groups = [
+    { name: 'Gemini Models', buckets: buckets(0.84, 0.88) },
+    { name: 'Claude and GPT models', buckets: buckets(0, 0.5) },
+    { name: 'Shared', buckets: buckets(1, 1) },
+  ];
+  const gemini = ['gemini-4-carbon', 'gemini-4-neon'];
+  const thirdParty = ['claude-future', 'gpt-future', 'experimental'];
+  const options = [...gemini, ...thirdParty.slice(0, 2), 'unknown', ...gemini].map(id => ({ value: id, name: id }));
+  options.push({ name: 'Claude and GPT models', options: [{ value: 'experimental', name: 'Preview' }] });
+  const fixture = makeFixture(t);
+  const state = path.join(fixture.dir, 'state');
+  fs.writeFileSync(state, 'signed-in');
+  for (const catalog of [JSON.stringify(options), '[]']) {
+    const worker = startWorker({ ...fixture.env, FAKE_AGY_STATE: state,
+      FAKE_USAGE_GROUPS: JSON.stringify(groups), FAKE_MODEL_CATALOG: catalog });
+    t.after(() => worker.close());
+    const { result } = await worker.call({ jsonrpc: '2.0', id: 1, method: 'usage' });
+    const scopes = result.windows.map(window => window.models);
+    assert.deepEqual(scopes, catalog === '[]' ? Array(6).fill(undefined)
+      : [gemini, gemini, thirdParty, thirdParty, undefined, undefined]);
+    assert.deepEqual(result.windows.map(window => window.remainingPercent), [84, 88, 0, 50, 100, 100]);
+  }
 });
 
 if (official) test('quota failures back off across worker restarts and a successful probe resets the delay', async t => {

@@ -220,7 +220,7 @@ async function listModels(params, options) {
     const models = modelsFromConfigOptions(result.configOptions);
     const modelOption = findModelOption(result.configOptions);
     const current = modelOption && typeof modelOption.currentValue === 'string' ? modelOption.currentValue : null;
-    for (const model of models) {
+    for (const model of options?.catalogOnly ? [] : models) {
       let options = model.id === current ? result.configOptions : null;
       if (!options && sessionId && modelOption) {
         // Switching the probe session's model is the only way ACP shows another model's levels.
