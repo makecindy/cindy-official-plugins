@@ -149,3 +149,97 @@ test('a stalled response body times out and releases the connection request', as
   const rejected = assert.rejects(h.fetchJSON('http://127.0.0.1:18810','/health','session',undefined,5000), /BRIDGE_REQUEST_FAILED/);
   await h.flush(); await h.advance(5000); await rejected;
 });
+
+test('ws-v1 connects via ticketed WebSocket, answers host pings, and wakes immediately on job_available', async () => {
+  const noop = { addListener() {} }, requests = [], sockets = [];
+  const chrome = {
+    runtime: { id: 'fixture', getManifest: () => ({ version: installedVersion }), getURL: () => 'chrome-extension://fixture/', onStartup: noop, onInstalled: noop, onMessage: noop },
+    storage: { local: { get: async () => ({ clientId: 'fixture-client' }), set: async () => {} }, session: { get: async () => ({}), set: async () => {} } },
+    tabs: { onRemoved: noop, onActivated: noop }, alarms: { create() {}, onAlarm: noop },
+    action: { setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {} },
+  };
+  class FakeWebSocket {
+    static OPEN = 1;
+    static CLOSED = 3;
+    constructor(url) {
+      this.url = url;
+      this.readyState = 0;
+      this.sent = [];
+      sockets.push(this);
+      queueMicrotask(() => {
+        if (this.readyState !== 0) return;
+        this.readyState = FakeWebSocket.OPEN;
+        this.onopen?.();
+      });
+    }
+    send(data) {
+      const msg = JSON.parse(data);
+      this.sent.push(msg);
+      if (msg.type === 'auth' && msg.ticket === 'ws-ticket-1') {
+        queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ type: 'auth_ok' }) }));
+      }
+    }
+    emit(msg) { this.onmessage?.({ data: JSON.stringify(msg) }); }
+    close(code = 1000) { this.readyState = FakeWebSocket.CLOSED; this.onclose?.({ code }); }
+  }
+  let queuedJob = null, handled = [], stopped = false;
+  const timers = new Set();
+  const trackTimeout = (fn, ms) => {
+    if (stopped) return 0;
+    const id = setTimeout(() => { timers.delete(id); if (!stopped) fn(); }, ms);
+    timers.add(id);
+    return id;
+  };
+  const trackClear = id => { timers.delete(id); clearTimeout(id); };
+  const context = {
+    chrome, WebSocket: FakeWebSocket, MyBrowserNetwork: { create: () => ({}) }, MyBrowserPolicy: { normalizePolicy: x => x },
+    navigator: { userAgent: 'Chrome' }, URL, AbortController, setTimeout: trackTimeout, clearTimeout: trackClear, Date, crypto: globalThis.crypto,
+    fetch: async (url) => {
+      if (stopped) throw Error('STOPPED');
+      const parsed = new URL(url);
+      const path = parsed.pathname + parsed.search;
+      requests.push(path);
+      if (parsed.pathname === '/health') return { ok: true, json: async () => ({ plugin: 'my-browser', protocol: 3, extensionId: 'fixture', version, session: 'ws-session', capabilities: ['learning-v1', 'learning-auth-v2', 'ws-v1'] }) };
+      if (parsed.pathname === '/ws/ticket') return { ok: true, json: async () => ({ ok: true, ticket: 'ws-ticket-1' }) };
+      if (path === '/poll?nowait=1') { const job = queuedJob; queuedJob = null; return { ok: true, json: async () => ({ job }) }; }
+      if (parsed.pathname === '/ack' || parsed.pathname === '/result') return { ok: true, json: async () => ({ ok: true }) };
+      return { ok: true, json: async () => ({ ok: true }) };
+    },
+  };
+  vm.runInNewContext(source.replace(/\nchain\(\);\s*$/, '') + `
+    handle = async job => { handled.push(job.id); return { ok: true }; };
+    globalThis.wsTest = { chain, heartbeat, closeBridgeSocket, stop: () => { clearTimeout(heartbeatTimer); closeBridgeSocket(); } };`, context);
+  context.handled = handled;
+
+  try {
+    void context.wsTest.chain();
+    for (let i = 0; i < 40; i++) await new Promise(r => setImmediate(r));
+
+    assert.equal(sockets.length, 1);
+    assert.equal(sockets[0].url, 'ws://127.0.0.1:18810/ws');
+    assert.deepEqual(sockets[0].sent[0], { type: 'auth', clientId: 'fixture-client', session: 'ws-session', ticket: 'ws-ticket-1' });
+    assert.ok(requests.includes('/ws/ticket'));
+    assert.ok(requests.includes('/poll?nowait=1'));
+    assert.equal(requests.includes('/poll'), false, 'ws-v1 avoids 20s idle HTTP long-polls');
+
+    // Host-driven ping receives immediate pong; heartbeat skips redundant /health while WS is fresh.
+    const healthBefore = requests.filter(r => r === '/health').length;
+    sockets[0].emit({ type: 'ping', ts: 12345 });
+    assert.deepEqual(sockets[0].sent.at(-1), { type: 'pong', ts: 12345 });
+    await context.wsTest.heartbeat();
+    assert.equal(requests.filter(r => r === '/health').length, healthBefore);
+
+    // Host pushes job_available → extension pulls via /poll?nowait=1 and executes immediately.
+    queuedJob = { id: 'ws-job-1', action: 'tabs', payload: {} };
+    sockets[0].emit({ type: 'job_available' });
+    for (let i = 0; i < 40; i++) await new Promise(r => setImmediate(r));
+    assert.deepEqual(handled, ['ws-job-1']);
+    assert.equal(requests.filter(r => r === '/ack').length, 1);
+    assert.equal(requests.filter(r => r === '/result').length, 1);
+  } finally {
+    stopped = true;
+    context.wsTest.stop();
+    for (const id of timers) clearTimeout(id);
+    timers.clear();
+  }
+});

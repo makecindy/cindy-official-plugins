@@ -62,11 +62,35 @@ async function remember() { await sessionStore.set({ownedTabs:[...owned]}); }
 // Pages the agent opens live in one separate window of the user's browser, created without focus, so
 // the user's own windows never gain tabs, switch tabs or lose focus. Remembered for the session.
 let agentWindowId = null;
+let keepAliveTabId = null;
 // Cindy's window must survive an extension reload or update (session storage does not), but window and
 // group ids are reused after the browser restarts, so they are forgotten when the browser starts.
 const agentStore = chrome.storage.local;
-chrome.runtime.onStartup?.addListener(() => { agentWindowId = null; agentGroupId = null; agentTabs = null; quietlyForget(); });
-function quietlyForget() { agentStore.remove?.(['agentWindow','agentGroup','agentTabs'])?.catch?.(() => {}); }
+chrome.runtime.onStartup?.addListener(() => { agentWindowId = null; agentGroupId = null; agentTabs = null; keepAliveTabId = null; quietlyForget(); });
+function quietlyForget() { agentStore.remove?.(['agentWindow','agentGroup','agentTabs','agentKeepAliveTab'])?.catch?.(() => {}); }
+async function loadKeepAliveTab() {
+  if (keepAliveTabId == null) keepAliveTabId = (await agentStore.get?.('agentKeepAliveTab'))?.agentKeepAliveTab ?? null;
+  return keepAliveTabId;
+}
+async function setKeepAliveTab(id) {
+  keepAliveTabId = id ?? null;
+  if (id == null) await agentStore.remove?.('agentKeepAliveTab')?.catch?.(() => {});
+  else await agentStore.set?.({agentKeepAliveTab:id})?.catch?.(() => {});
+}
+async function removeTabSafely(tab) {
+  const allTabs = await chrome.tabs.query({windowType:'normal'}).catch(() => chrome.tabs.query({}));
+  const others = (allTabs || []).filter(t => t.id !== tab.id);
+  if (others.length === 0) {
+    // Closing the last browser tab on macOS drops Chrome to 0 windows and lets
+    // DestroyProfileOnBrowserClose unload the Profile, killing the extension and wiping
+    // session cookies; on Windows/Linux it exits the browser. Keep a blank placeholder tab
+    // in the same window so the window and session survive, and retire it on the next open.
+    const createOpts = {url:'about:blank',active:false,...(tab.windowId != null ? {windowId:tab.windowId} : {})};
+    const placeholder = await chrome.tabs.create(createOpts);
+    if (placeholder?.id != null) await setKeepAliveTab(placeholder.id);
+  }
+  await chrome.tabs.remove(tab.id);
+}
 async function agentWindow() {
   if (agentWindowId == null) agentWindowId = (await agentStore.get('agentWindow')).agentWindow ?? null;
   if (agentWindowId != null) {
@@ -95,6 +119,15 @@ async function openInAgentWindow(url) {
     tab = created.tabs?.[0] || (await chrome.tabs.query({windowId:created.id}))[0];
   }
   await groupAgentTab(tab);
+  // Retire our untouched blank keep-alive placeholder once a real tab exists in the same window.
+  const placeholderId = await loadKeepAliveTab();
+  if (placeholderId != null && placeholderId !== tab?.id) {
+    const placeholder = await chrome.tabs.get(placeholderId).catch(() => null);
+    await setKeepAliveTab(null);
+    if (placeholder && placeholder.windowId === tab?.windowId && (placeholder.url === 'about:blank' || placeholder.pendingUrl === 'about:blank')) {
+      await chrome.tabs.remove(placeholderId).catch(() => {});
+    }
+  }
   return tab;
 }
 const PAGE_ACCESS = {allowLocal:true};
@@ -598,6 +631,7 @@ async function fetchJSON(base,path,session,body,timeout = 5000,version = wireVer
   })(),timeout,Error('BRIDGE_REQUEST_FAILED'));
   } finally { controller.abort(); }
 }
+const wsCapable = new Set();
 function discover() {
   if(discovery)return discovery;
   discovery=discoverBridge().finally(()=>{discovery=null;});
@@ -606,6 +640,7 @@ function discover() {
 async function discoverBridge() {
   await withDeadline(restore,3000,Error('STORAGE_TIMEOUT'));
   if (bridge) return bridge;
+  wsCapable.clear();
   let auth=null;
   let diagnostic;
   // Preserve the original ports first. Probe bounded batches so a silent firewall
@@ -632,12 +667,14 @@ async function discoverBridge() {
         if(r.pairing_required){diagnostic='PAIRING_REQUIRED';return null;}
         if(typeof r.session!=='string'||!r.session)return null;
         const learning=r.capabilities?.includes('learning-v1')===true&&r.capabilities?.includes('learning-auth-v2')===true;
+        if(r.capabilities?.includes('ws-v1')===true)wsCapable.add(base+'|'+r.session);
         return {base,port,version,session:r.session,learning,auth};
       }catch{return null;}
     }));
     const found=candidates.find(Boolean);
-    if(found){wireVersion=found.version;bridge={base:found.base,session:found.session,learning:found.learning};await connection({connected:true,port:found.port});return bridge;}
+    if(found){wireVersion=found.version;const ws=wsCapable.has(found.base+'|'+found.session);wsCapable.clear();bridge={base:found.base,session:found.session,learning:found.learning,ws};await connection({connected:true,port:found.port});return bridge;}
   }
+  wsCapable.clear();
   await connection({connected:false,error:diagnostic||'CINDY_DISCONNECTED'});
   return null;
 }
@@ -662,7 +699,7 @@ async function closeOwned(url) {
   if (tab) {
     // Keep protected tabs counted. Deleting only the ledger entry made the old three-tab limit illusory.
     if (!rec.created || rec.claimed || tab.active || tab.url !== rec.actualUrl) return false;
-    try {await chrome.tabs.remove(rec.id);} catch {return false;}
+    try {await removeTabSafely(tab);} catch {return false;}
   }
   owned.delete(url); await remember(); return true;
 }
@@ -673,7 +710,7 @@ async function cleanup() {
     else await closeOwned(url);
   }
 }
-chrome.tabs.onRemoved.addListener(id => { restore.then(() => release(id)); if (agentTabs?.delete(id)) saveAgentTabs().catch(() => {}); });
+chrome.tabs.onRemoved.addListener(id => { restore.then(() => release(id)); if (id === keepAliveTabId) void setKeepAliveTab(null); if (agentTabs?.delete(id)) saveAgentTabs().catch(() => {}); });
 chrome.tabs.onActivated.addListener(({tabId,windowId}) => { restore.then(async () => {
   // Switching tabs inside Cindy's own window is the agent's doing, not the user claiming a page.
   if (windowId != null && windowId === agentWindowId) return;
@@ -1166,7 +1203,7 @@ async function tabAction(job,tab,policy) {
     return {ok:true,execution:'executed',tabId:tab.id,handoff:true};
   }
   if (job.action === 'close') {
-    await chrome.tabs.remove(tab.id); await release(tab.id);
+    await removeTabSafely(tab); await release(tab.id);
     return {ok:true,execution:'executed',tabId:tab.id};
   }
   if (job.action === 'resize') {
@@ -1472,6 +1509,141 @@ async function handle(job,policy,target) {
     return {...fail(e.message in messages ? e.message : 'CHROME_OPERATION_FAILED',messages[e.message] || 'Browser access failed. Inspect the existing page and extension permissions; do not automatically open a replacement.',failureState()),...(e.message==='ADDRESS_UNVERIFIED' ? {reason:e.reason || 'UNKNOWN'} : {}),...(e.message==='PAGE_LOAD_TIMEOUT'?{tabId:e.tabId,status:e.tabStatus}:{}),retryable:false};
   }
 }
+// Persistent WebSocket keepalive + instant job wakeup (ws-v1 capability).
+// Host-driven pings every 15s reset Chrome MV3's 30s service-worker idle timer even under
+// background timer throttling; older hosts without ws-v1 continue using HTTP /poll + /health.
+let bridgeSocket = null;
+let bridgeSocketTarget = null;
+let bridgeSocketReady = false;
+let bridgeSocketConnecting = null;
+let wsJobPending = false;
+let wsWakeResolve = null;
+let lastWsActivity = 0;
+
+function wakeJobLoop() {
+  wsJobPending = true;
+  const resolve = wsWakeResolve;
+  wsWakeResolve = null;
+  resolve?.();
+}
+
+function closeBridgeSocket() {
+  const sock = bridgeSocket;
+  bridgeSocket = null;
+  bridgeSocketTarget = null;
+  bridgeSocketReady = false;
+  if (sock) {
+    try { sock.onopen = sock.onmessage = sock.onerror = sock.onclose = null; sock.close(); } catch {}
+  }
+  const resolve = wsWakeResolve;
+  wsWakeResolve = null;
+  resolve?.();
+}
+
+function isBridgeSocketOpen(target) {
+  return Boolean(
+    bridgeSocketReady &&
+    bridgeSocketTarget === target &&
+    bridgeSocket &&
+    bridgeSocket.readyState === WebSocket.OPEN,
+  );
+}
+
+async function ensureBridgeSocket(target) {
+  if (!target?.ws || typeof WebSocket !== 'function') return false;
+  if (isBridgeSocketOpen(target)) return true;
+  if (bridgeSocketConnecting && bridgeSocketTarget === target) return bridgeSocketConnecting;
+  closeBridgeSocket();
+  bridgeSocketTarget = target;
+  const connect = (async () => {
+    const ticketReply = await fetchJSON(target.base,'/ws/ticket',target.session,{},4000);
+    if (bridge !== target || typeof ticketReply?.ticket !== 'string' || !ticketReply.ticket) return false;
+    const wsUrl = target.base.replace(/^http:/,'ws:')+'/ws';
+    let ws;
+    try { ws = new WebSocket(wsUrl); } catch { return false; }
+    bridgeSocket = ws;
+    const authenticated = await withDeadline(new Promise(resolve => {
+      let settled = false;
+      const done = ok => { if (settled) return; settled = true; resolve(ok); };
+      ws.onopen = () => {
+        try { ws.send(JSON.stringify({type:'auth',clientId,session:target.session,ticket:ticketReply.ticket})); }
+        catch { done(false); }
+      };
+      ws.onmessage = event => {
+        let msg;
+        try { msg = JSON.parse(typeof event?.data === 'string' ? event.data : String(event?.data ?? '')); }
+        catch { return; }
+        if (!msg || typeof msg !== 'object') return;
+        lastWsActivity = Date.now();
+        if (!settled) {
+          if (msg.type === 'auth_ok') {
+            bridgeSocketReady = true;
+            done(true);
+          } else {
+            done(false);
+          }
+          return;
+        }
+        if (msg.type === 'ping') {
+          try { ws.send(JSON.stringify({type:'pong',ts:msg.ts})); } catch {}
+        } else if (msg.type === 'job_available') {
+          wakeJobLoop();
+        }
+      };
+      ws.onerror = () => { done(false); };
+      ws.onclose = ev => {
+        const wasCurrent = bridgeSocket === ws;
+        if (wasCurrent) {
+          bridgeSocket = null;
+          bridgeSocketTarget = null;
+          bridgeSocketReady = false;
+        }
+        if ((ev?.code === 4403 || ev?.code === 4409) && bridge === target) {
+          bridge = null;
+        }
+        done(false);
+        if (wasCurrent) {
+          const wake = wsWakeResolve;
+          wsWakeResolve = null;
+          wake?.();
+        }
+      };
+    }),4500,Error('WS_AUTH_TIMEOUT')).catch(() => false);
+    if (!authenticated) {
+      if (bridgeSocket === ws) closeBridgeSocket();
+      else { try { ws.close(); } catch {} }
+      return false;
+    }
+    return isBridgeSocketOpen(target);
+  })().finally(() => {
+    if (bridgeSocketConnecting === connect) bridgeSocketConnecting = null;
+  });
+  bridgeSocketConnecting = connect;
+  return connect;
+}
+
+function waitForWsJob(target,timeoutMs = 20000) {
+  if (wsJobPending) { wsJobPending = false; return Promise.resolve('job'); }
+  if (!isBridgeSocketOpen(target)) return Promise.resolve('closed');
+  return new Promise(resolve => {
+    let done = false;
+    const finish = reason => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (wsWakeResolve === onWake) wsWakeResolve = null;
+      resolve(reason);
+    };
+    const onWake = () => {
+      const hadJob = wsJobPending;
+      wsJobPending = false;
+      finish(hadJob ? 'job' : 'closed');
+    };
+    wsWakeResolve = onWake;
+    const timer = setTimeout(() => finish('idle'),timeoutMs);
+  });
+}
+
 // Separate liveness from page jobs: a valid 60s wait must not expire the host's
 // 35s lease. /health is supported by older hosts too and never takes a page job.
 let heartbeatTimer;
@@ -1486,6 +1658,12 @@ async function heartbeat() {
     // bootId and plain fetch alone do not do that while the browser is idle.
     await withDeadline(sessionStore.get('cindyBrowserBoot'),2000,Error('STORAGE_TIMEOUT'));
     if (target) {
+      if (isBridgeSocketOpen(target) && Date.now() - lastWsActivity < 25000) {
+        return;
+      }
+      if (isBridgeSocketOpen(target)) {
+        try { bridgeSocket.send(JSON.stringify({type:'ping',ts:Date.now()})); } catch {}
+      }
       const status = await fetchJSON(target.base,'/health',target.session,undefined,5000);
       if (status.plugin !== 'my-browser' || status.extensionId !== chrome.runtime.id ||
           status.protocol !== 3 || status.session !== target.session) throw Error('SESSION_CHANGED');
@@ -1493,7 +1671,7 @@ async function heartbeat() {
   } catch {
     // Keep the target captured by an already acknowledged job. Reconnect only
     // the next poll; never resend that job to a new bridge or session.
-    if (target && bridge === target) bridge = null;
+    if (target && bridge === target) { bridge = null; closeBridgeSocket(); }
   } finally {
     heartbeatPending = false;
     heartbeatTimer = setTimeout(heartbeat,10000);
@@ -1514,9 +1692,25 @@ async function chain() {
       let target;
       try {
         target = await discover();
-        if (!target) { cleanupInBackground(); await sleep(3000); continue; }
-        const {job} = await fetchJSON(target.base,'/poll',target.session,undefined,25000);
-        if (!job) { cleanupInBackground(); continue; }
+        if (!target) { closeBridgeSocket(); cleanupInBackground(); await sleep(3000); continue; }
+        let wsReady = false;
+        if (target.ws) {
+          try { wsReady = await ensureBridgeSocket(target); }
+          catch (e) { if (e?.message === 'SESSION_CHANGED') throw e; wsReady = false; }
+        }
+        let job = null;
+        if (wsReady) {
+          ({job} = await fetchJSON(target.base,'/poll?nowait=1',target.session,undefined,5000));
+          if (!job) {
+            cleanupInBackground();
+            const signal = await waitForWsJob(target,20000);
+            if (signal === 'job') ({job} = await fetchJSON(target.base,'/poll?nowait=1',target.session,undefined,5000));
+            if (!job) continue;
+          }
+        } else {
+          ({job} = await fetchJSON(target.base,'/poll',target.session,undefined,25000));
+          if (!job) { cleanupInBackground(); continue; }
+        }
         pageJobActive = true;
         for (const rec of owned.values()) {
           if (rec.id === job.payload?.tabId || rec.actualUrl === job.payload?.url) rec.used = Date.now();
@@ -1531,7 +1725,7 @@ async function chain() {
         await fetchJSON(target.base,'/result',target.session,{id:job.id,result});
       } catch {
         // Never retry the browser operation after losing its response.
-        bridge = null; await connection({connected:false,message:'Connection interrupted. Check any in-progress action before retrying.'});
+        bridge = null; closeBridgeSocket(); await connection({connected:false,message:'Connection interrupted. Check any in-progress action before retrying.'});
         await sleep(1500);
       } finally { pageJobActive = false; }
     }
@@ -1667,7 +1861,7 @@ async function learningRequest(message,sender) {
     }
     throw Error('TIMEOUT');
   } catch(error) {
-    if(['SESSION_CHANGED','BRIDGE_REQUEST_FAILED'].includes(error.message)&&bridge===target){bridge=null;await connection({connected:false});}
+    if(['SESSION_CHANGED','BRIDGE_REQUEST_FAILED'].includes(error.message)&&bridge===target){bridge=null;closeBridgeSocket();await connection({connected:false});}
     if(target)await learningFetch(target,'/learning/cancel',{id},()=>Promise.resolve(),Date.now()+5000).catch(()=>{});
     throw error;
   } finally {learningCalls.delete(id);}

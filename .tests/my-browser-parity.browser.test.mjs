@@ -537,3 +537,38 @@ test('real Chrome: connection survives a long job and remains usable afterwards'
     assert.equal((await act('snapshot', { tabId: opened.tabId, url: 'http://parity.test/', maxChars: 1000 })).ok, true);
   } finally { await close(); }
 });
+
+test('real Chrome: closing the last tab preserves the browser window, session cookies, and extension', enabled, async () => {
+  const { act, worker, bridge, close } = await launch(false);
+  try {
+    // Open Cindy's tab that sets a session cookie (visit=1, no Expires/Max-Age), then close the user tab so
+    // Cindy's tab is the sole remaining tab in Chrome.
+    const opened = await act('open', { url: 'http://parity.test/tall' });
+    assert.equal(opened.ok, true, JSON.stringify(opened));
+    await worker.evaluate(async keepId => {
+      for (const t of await chrome.tabs.query({})) {
+        if (t.id !== keepId) await chrome.tabs.remove(t.id).catch(() => {});
+      }
+    }, opened.tabId);
+    const beforeCount = await worker.evaluate(async () => (await chrome.tabs.query({})).length);
+    assert.equal(beforeCount, 1);
+
+    // Closing the sole tab keeps a blank placeholder tab so Chrome does not exit / unload the Profile.
+    const closed = await act('close', { tabId: opened.tabId, url: 'http://parity.test/tall' });
+    assert.equal(closed.ok, true, JSON.stringify(closed));
+    assert.equal((await bridge.request('status')).extension_connected, true);
+    const afterClose = await worker.evaluate(async () => (await chrome.tabs.query({})).map(t => ({ id: t.id, url: t.url })));
+    assert.equal(afterClose.length, 1);
+    assert.equal(afterClose[0].url, 'about:blank');
+
+    // Next open retires the untouched about:blank placeholder and still has the session cookie intact.
+    const reopened = await act('open', { url: 'http://parity.test/two' });
+    assert.equal(reopened.ok, true, JSON.stringify(reopened));
+    const afterReopen = await worker.evaluate(async () => (await chrome.tabs.query({})).map(t => ({ id: t.id, url: t.url })));
+    assert.equal(afterReopen.length, 1);
+    assert.equal(afterReopen[0].id, reopened.tabId);
+    const cookie = await act('evaluate', { tabId: reopened.tabId, url: 'http://parity.test/two', fn: '() => document.cookie' });
+    assert.equal(cookie.ok, true, JSON.stringify(cookie));
+    assert.match(String(cookie.result || ''), /visit=1/, 'session cookie survives closing the last tab');
+  } finally { await close(); }
+});

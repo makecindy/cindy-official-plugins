@@ -11,9 +11,9 @@ function harness(documentReason=()=>'NAVIGATION_UNOBSERVED') {
   const tabs=new Map(),data={};let clock=0,next=1,creates=0,activate,removed;
   const state={redirect:false,loading:false,removeFails:false,domReady:false,completeAt:Infinity};
   const chrome={action:{onClicked:{addListener(){}}},runtime:{getURL:()=> 'chrome-extension://fixture/',getManifest:()=>({version:'0.3.1'}),onStartup:{addListener(){}},onInstalled:{addListener(){}},onMessage:{addListener(){}}},
-    storage:{local:{get:async()=>({clientId:'fixture'}),set:async()=>{}},session:{get:async key=>({[key]:structuredClone(data[key])}),set:async value=>Object.assign(data,structuredClone(value))}},
+    storage:{local:{get:async key=>typeof key==='string'?{[key]:data['local:'+key]}:{clientId:'fixture'},set:async v=>{for(const [k,val] of Object.entries(v))data['local:'+k]=val;},remove:async keys=>{for(const k of [].concat(keys))delete data['local:'+k];}},session:{get:async key=>({[key]:structuredClone(data[key])}),set:async value=>Object.assign(data,structuredClone(value))}},
     tabs:{get:async id=>{if(!tabs.has(id))throw new Error('No tab');if(clock>=state.completeAt)tabs.get(id).status='complete';return {...tabs.get(id)};},query:async()=>[...tabs.values()].map(t=>({...t})),
-      create:async({url})=>{creates++;const t={id:next++,url:state.redirect?'https://example.test/redirected':url,status:state.loading?'loading':'complete',active:false};tabs.set(t.id,t);return {...t};},
+      create:async({url,windowId})=>{creates++;const t={id:next++,windowId:windowId??500,url:state.redirect?'https://example.test/redirected':url,status:state.loading?'loading':'complete',active:false};tabs.set(t.id,t);return {...t};},
       remove:async id=>{if(state.removeFails)throw new Error('Browser refused');tabs.delete(id);removed(id);},
       onActivated:{addListener(fn){activate=fn;}},onRemoved:{addListener(fn){removed=fn;}}},alarms:{create(){},onAlarm:{addListener(){}}},
     // Agent pages open in Cindy's own background window (one window, created on first need).
@@ -22,7 +22,7 @@ function harness(documentReason=()=>'NAVIGATION_UNOBSERVED') {
     Date:class extends Date{static now(){return clock;}},setTimeout(fn,ms){clock+=ms;queueMicrotask(fn);return 0;},clearTimeout(){}};
   // Disable only the network bootstrap; execute the actual production tab manager, not a copied implementation.
   vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,'')+'\nglobalThis.tabTest={ensureTab,owned,cleanup,handle,videoIdentity,setJob:value=>{pageJobActive=value;}};',context);
-  return {cleanup:context.tabTest.cleanup,renew:()=>{for(const rec of context.tabTest.owned.values())rec.used=clock;},setJob:context.tabTest.setJob,advance:ms=>{clock+=ms;},deferGet:()=>{const original=chrome.tabs.get;let release;chrome.tabs.get=async id=>{const tab=await original(id);await new Promise(r=>{release=r;});return tab;};return ()=>release();},list:args=>context.tabTest.handle({action:'tabs',payload:args},P.defaults(),{}),handle:url=>context.tabTest.handle({action:'text',payload:{url}},P.defaults(),{base:'http://fixture',session:'fixture'}),state,tabs,data,creates:()=>creates,videoIdentity:context.tabTest.videoIdentity,read:url=>context.tabTest.ensureTab(url,P.normalizePolicy({read:{block:[]},interact:{allow:[],block:[]}}), 'text'),focus:async id=>{activate({tabId:id});await Promise.resolve();await Promise.resolve();}};
+  return {cleanup:context.tabTest.cleanup,renew:()=>{for(const rec of context.tabTest.owned.values())rec.used=clock;},setJob:context.tabTest.setJob,advance:ms=>{clock+=ms;},deferGet:()=>{const original=chrome.tabs.get;let release;chrome.tabs.get=async id=>{const tab=await original(id);await new Promise(r=>{release=r;});return tab;};return ()=>release();},list:args=>context.tabTest.handle({action:'tabs',payload:args},P.defaults(),{}),handle:url=>context.tabTest.handle({action:'text',payload:{url}},P.defaults(),{base:'http://fixture',session:'fixture'}),run:(action,payload)=>context.tabTest.handle({action,payload},P.defaults(),{base:'http://fixture',session:'fixture'}),state,tabs,data,creates:()=>creates,videoIdentity:context.tabTest.videoIdentity,read:url=>context.tabTest.ensureTab(url,P.normalizePolicy({read:{block:[]},interact:{allow:[],block:[]}}), 'text'),focus:async id=>{activate({tabId:id});await Promise.resolve();await Promise.resolve();}};
 }
 test('redirected load timeout retains one tab across repeated reads and later readiness',async()=>{
   const h=harness();h.state.redirect=true;h.state.loading=true;
@@ -122,4 +122,44 @@ for (const changed of ['job', 'renewed']) test('idle cleanup rechecks '+changed+
   if (changed === 'job') h.setJob(true); else h.renew();
   release(); await pending;
   assert.equal(h.tabs.size, 1, 'a tab used by a new job is not closed by stale cleanup');
+});
+
+// Regression: closing the last remaining browser tab dropped macOS Chrome to 0 windows,
+// triggering DestroyProfileOnBrowserClose (killing the extension mid-job and wiping session cookies).
+test('closing the last tab keeps a blank placeholder window and retires it on the next open', async () => {
+  const h = harness();
+  const opened = await h.run('open', { url: 'https://example.test/console' });
+  assert.equal(opened.ok, true);
+  assert.equal(h.tabs.size, 1);
+
+  const closed = await h.run('close', { url: 'https://example.test/console', tabId: opened.tabId });
+  assert.equal(closed.ok, true);
+  assert.equal(h.tabs.has(opened.tabId), false, 'target tab is removed');
+  assert.equal(h.tabs.size, 1, 'one placeholder tab remains so Chrome keeps its window/Profile');
+  const [placeholder] = [...h.tabs.values()];
+  assert.equal(placeholder.url, 'about:blank');
+  assert.equal((await h.list({})).tabs.length, 0, 'about:blank placeholder stays hidden from tabs');
+
+  // Opening a new page in Cindy window retires the untouched about:blank placeholder.
+  const next = await h.run('open', { url: 'https://example.test/next' });
+  assert.equal(next.ok, true);
+  assert.equal(h.tabs.has(placeholder.id), false, 'untouched placeholder is cleaned up on next open');
+  assert.equal(h.tabs.size, 1);
+
+  // When another normal tab exists, close removes the target directly without any placeholder.
+  const second = await h.run('open', { url: 'https://example.test/second' });
+  assert.equal(h.tabs.size, 2);
+  const closedSecond = await h.run('close', { url: 'https://example.test/second', tabId: second.tabId });
+  assert.equal(closedSecond.ok, true);
+  assert.equal(h.tabs.size, 1);
+  assert.equal([...h.tabs.values()][0].id, next.tabId);
+});
+
+test('idle cleanup keeps a placeholder tab instead of closing the last browser window', async () => {
+  const h = harness();
+  await h.read('https://example.test/idle-only');
+  h.advance(600001);
+  await h.cleanup();
+  assert.equal(h.tabs.size, 1);
+  assert.equal([...h.tabs.values()][0].url, 'about:blank');
 });

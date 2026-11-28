@@ -641,6 +641,13 @@ Pages Cindy opens now carry a `[Cindy]` title prefix by default, without extra p
 
 Verified with the real content script in isolated headless Chrome, in light and dark modes: repeated ownership messages, dynamic and missing titles, simulated versus real input, late messages after takeover, disposal, and the settings entry. Extension transport is a fixture; this is not installed-Cindy or live-site verification.
 
+## 0.4.73 WebSocket keepalive and last-tab window guard (host package 0.4.96)
+
+- **WebSocket keepalive and instant job wakeup (`ws-v1`):** When the Cindy host advertises `ws-v1` in `/health` capabilities, the extension requests a one-time handshake ticket from `/ws/ticket` on its authenticated session and opens a loopback WebSocket (`ws://127.0.0.1:<port>/ws`). Host-driven 15-second `ping`/`pong` frames keep Chrome MV3's 30-second service-worker idle timer reset without relying on throttled extension JS timers, and queued jobs push `job_available` immediately so the extension pulls via `/poll?nowait=1` while preserving the existing `/ack` → `/authorize` → `/result` lifecycle. Older hosts without `ws-v1` automatically stay on HTTP `/poll` + `/health`. No permission or wire-version (`0.4.13`) changes.
+- **Last-tab window guard:** Before `close` or the 10-minute idle tab cleanup removes the last remaining tab across normal browser windows, the extension opens a lightweight `about:blank` placeholder tab in the same window first so macOS Chrome does not drop to 0 windows and unload the Profile (killing the extension and clearing session cookies via `DestroyProfileOnBrowserClose`) and Windows/Linux Chrome does not exit. The untouched placeholder is automatically removed on the next `open` in Cindy's window.
+
+Verification: Node unit tests cover WebSocket ticket authentication, host-driven `ping`/`pong` keepalive, `job_available` wakeup, legacy HTTP fallback, and last-tab placeholder preservation/retirement; isolated Chromium tests verify the real MV3 extension against a fenced local bridge fixture without touching the user's browser.
+
 
 ## Chat with the current webpage
 

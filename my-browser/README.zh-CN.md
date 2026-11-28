@@ -638,6 +638,13 @@ Cindy 打开的网页默认在标题前显示 `[Cindy]`，无需额外授权。�
 
 已用隔离的无头 Chrome 运行真实内容脚本，覆盖浅色／深色、重复归属消息、动态及空标题、模拟与真实输入、接手后的迟到消息、脚本退出和设置入口。扩展通信使用夹具，尚未在已安装的 Cindy 或真实网站上验收。
 
+## 0.4.73 长连接保活与最后标签页保护（宿主插件包 0.4.96）
+
+- **WebSocket 长连接保活与即时唤醒（`ws-v1`）：** 当 Cindy 宿主在 `/health` 能力表中声明 `ws-v1` 时，扩展先通过已认证会话向 `/ws/ticket` 申请一次性握手票据，再建立本地回环 WebSocket（`ws://127.0.0.1:<port>/ws`）。宿主每 15 秒发送应用层 `ping` 并由扩展回 `pong`，由真实 WebSocket 流量持续重置 Chrome MV3 Service Worker 的 30 秒空闲计时器，避免后台定时器限流导致的“扩展休眠”假断线；宿主入队页面作业时经 WebSocket 推送 `job_available`，扩展通过 `/poll?nowait=1` 即时拉取并复用原有 `/ack` → `/authorize` → `/result` 生命周期。旧版宿主与未声明 `ws-v1` 的桥接自动回退原 HTTP `/poll` + `/health` 轮询，不改变签名线协议 `0.4.13`，不新增扩展权限。
+- **防关空浏览器最后一个窗口：** 执行 `close` 或 10 分钟闲置页签清理准备关闭浏览器中最后一个普通窗口的最后一个标签页时，先在同窗口保留一个 `about:blank` 占位页再移除目标页签，避免 macOS 上 Chrome 退回 0 窗口触发 `DestroyProfileOnBrowserClose` 卸载 Profile（杀掉扩展并清空当前会话 Cookie）或 Windows/Linux 上直接退出浏览器；下次在 Cindy 窗口打开新页面时自动清理未被用户改走的占位页。
+
+验证：新增节点单测覆盖 WebSocket 认证、宿主 `ping/pong` 保活、`job_available` 即时唤醒与旧宿主回退，以及关闭最后一个标签页时的占位保留与后续打开自动回收；同步在隔离 Chromium 中验证真实 MV3 扩展行为（使用受限本地夹具，不操作用户浏览器）。
+
 
 ## 网页侧边栏聊天
 
