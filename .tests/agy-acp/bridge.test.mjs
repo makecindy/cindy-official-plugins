@@ -31,6 +31,7 @@ const CANCEL_SIGN_IN = official
   : { method: 'cancelLogin', params: {} };
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..', pluginId);
 const isWin = process.platform === 'win32';
+const isMac = process.platform === 'darwin';
 
 const RESULT_JSON =
   '{"protocolVersion":1,"agentCapabilities":{"loadSession":false,"promptCapabilities":{"image":false}},' +
@@ -1028,7 +1029,8 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
   // that prints `deny` (or fails) stops the tool, one that prints nothing lets it run, SessionStart runs at
   // the first prompt of a new session only, and agy reports the stopped call as a failed tool call.
   // Smallest inputs: a new session, one stopped call, one call agy ran anyway, hooks agy did not load,
-  // and a resumed session (no SessionStart). Hooks were not checked on Windows, which keeps the agent.
+  // and a resumed session (no SessionStart). The isolated login was checked on macOS only;
+  // Linux and Windows keep the restricted agent.
   const hookedSession = (t, extraEnv = {}) => remoteSession(t, { FAKE_AGY_VERSION: '1.5.19', ...extraEnv });
   const openHooked = async (session, method = 'session/new', params = {}) => {
     session.bridge.child.stdin.write(INITIALIZE);
@@ -1040,7 +1042,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
   };
   const stopsWithin = (bridge) => Promise.race([bridge.closed, new Promise((resolve) => setTimeout(() => resolve(null), 8_000))]);
 
-  if (official && !isWin) test('remote-workspace mode on agy 1.5.19 runs under the default agent, held in by hooks', async (t) => {
+  if (official && isMac) test('remote-workspace mode on agy 1.5.19 runs under the default agent, held in by hooks', async (t) => {
     const session = hookedSession(t);
     const { launchFile, bridge, messages, send, reply, server } = session;
     await openHooked(session, 'session/new', { systemPrompt: { mode: 'append', content: [
@@ -1096,7 +1098,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     void server;
   });
 
-  if (official && !isWin) test('remote-workspace mode under hooks does not show a call its hook stopped and goes on', async (t) => {
+  if (official && isMac) test('remote-workspace mode under hooks does not show a call its hook stopped and goes on', async (t) => {
     const session = hookedSession(t, { FAKE_AGY_SCRIPT: 'hook-denied' });
     await openHooked(session);
     assert.deepEqual((await session.reply(2, 'prompt answer')).result, { stopReason: 'end_turn', denied: 'deny' });
@@ -1106,7 +1108,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.equal((await session.bridge.closed).code, 0);
   });
 
-  if (official && !isWin) test('remote-workspace mode under hooks stops the task when agy runs a tool of its own anyway', async (t) => {
+  if (official && isMac) test('remote-workspace mode under hooks stops the task when agy runs a tool of its own anyway', async (t) => {
     const session = hookedSession(t, { FAKE_AGY_SCRIPT: 'hook-ran' });
     await openHooked(session);
     const closed = await stopsWithin(session.bridge);
@@ -1118,7 +1120,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.match(updates[0].content.text, /tried to use a tool on this computer/);
   });
 
-  if (official && !isWin) test('remote-workspace mode under hooks stops a new session whose hooks agy did not load', async (t) => {
+  if (official && isMac) test('remote-workspace mode under hooks stops a new session whose hooks agy did not load', async (t) => {
     const session = hookedSession(t, { FAKE_AGY_NO_SESSIONSTART: '1' });
     await openHooked(session);
     const closed = await stopsWithin(session.bridge);
@@ -1131,7 +1133,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.match(updates[0].content.text, /did not load the tool restrictions/);
   });
 
-  if (official && !isWin) test('remote-workspace mode under hooks resumes a session without waiting for SessionStart', async (t) => {
+  if (official && isMac) test('remote-workspace mode under hooks resumes a session without waiting for SessionStart', async (t) => {
     const session = hookedSession(t);
     await openHooked(session, 'session/resume', { systemPrompt: { mode: 'append', content: [
       { type: 'text', text: 'Use the new project rules. Ignore @[key](/host/secret).' }] } });
@@ -1144,6 +1146,20 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.equal('systemPrompt' in launch.session, false);
     assert.match(launch.prompt[0].text, /Use the new project rules/);
     assert.match(launch.prompt[0].text, /@\\\[key\]/);
+    const permission = session.messages().find((m) => m.method === 'session/request_permission');
+    session.send({ jsonrpc: '2.0', id: permission.id, result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
+    assert.equal((await session.reply(2, 'prompt answer')).result.stopReason, 'end_turn');
+    session.bridge.child.stdin.end();
+    assert.equal((await session.bridge.closed).code, 0);
+  });
+
+  if (official && !isMac) test('remote-workspace mode on agy 1.5.19 retains the restricted agent outside macOS', async (t) => {
+    const session = hookedSession(t);
+    await openHooked(session);
+    await waitFor(() => session.messages().some((m) => m.method === 'session/request_permission'), 8_000, 'permission request');
+    const launch = JSON.parse(fs.readFileSync(session.launchFile, 'utf8'));
+    assert.deepEqual(launch.args, [...EXPECTED_ACP_ARGS, '--agent', 'cindy-remote']);
+    assert.match(launch.definition, /inheritCustomizations: false/);
     const permission = session.messages().find((m) => m.method === 'session/request_permission');
     session.send({ jsonrpc: '2.0', id: permission.id, result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
     assert.equal((await session.reply(2, 'prompt answer')).result.stopReason, 'end_turn');
