@@ -239,18 +239,51 @@ test('marking a published draft ready starts one schedule with the model configu
 });
 
 for (const nativeScheduler of [false, true]) {
-  test('mark ready keeps the publish-only choice and accepts manual follow (scheduler: ' + nativeScheduler + ')', async () => {
+  test('mark ready auto-follows even if published with following: false, and stays stopped after user stop (scheduler: ' + nativeScheduler + ')', async () => {
     const r = runtime(true, null, nativeScheduler);
     const view = await r.show({ mr: url, published: true, following: false });
     await r.click(view.anchor, 'pr:ready');
     assert.equal(r.mr.draft, false);
-    assert.equal(r.schedules.size, 0);
-    assert.equal(r.handoffs.length, 0);
-    await r.click(view.anchor, 'pr:follow');
     assert.equal(r.schedules.size, nativeScheduler ? 1 : 0);
     assert.equal(r.handoffs.length, nativeScheduler ? 0 : 1);
+
+    if (nativeScheduler) {
+      await r.click(view.anchor, 'pr:stop');
+      assert.equal(r.schedules.size, 0);
+      r.mr.draft = true;
+      await r.show({ card_id: view.card_id });
+      r.mr.draft = false;
+      const refreshed = await r.show({ card_id: view.card_id });
+      assert.equal(refreshed.follow_state, 'stopped');
+      assert.equal(r.schedules.size, 0);
+      r.mr.draft = true;
+      await r.show({ card_id: view.card_id });
+      await r.click(view.anchor, 'pr:ready');
+      assert.equal(r.mr.draft, false);
+      assert.equal(r.schedules.size, 0);
+    } else {
+      await r.show({ card_id: view.card_id, renamed: true, following: true });
+      await r.show({ card_id: view.card_id, following: false });
+      r.mr.draft = true;
+      await r.show({ card_id: view.card_id });
+      r.mr.draft = false;
+      const refreshed = await r.show({ card_id: view.card_id });
+      assert.equal(refreshed.todo, undefined);
+    }
   });
 }
+
+test('a draft published here auto-follows when refreshed as ready, while a viewed draft stays manual', async () => {
+  for (const published of [true, false]) {
+    const r = runtime(true);
+    const view = await r.show({ mr: url, ...(published ? { published: true } : {}) });
+    assert.equal(r.schedules.size, 0);
+    r.mr.draft = false;
+    const ready = await r.show({ card_id: view.card_id, following: false });
+    assert.equal(r.schedules.size, published ? 1 : 0, `published=${published}`);
+    assert.equal(ready.follow_state, published ? 'active' : undefined);
+  }
+});
 
 test('a follow click rechecks a previously opened MR that has since become a draft', async () => {
   const r = runtime();
@@ -272,29 +305,24 @@ test('reusing a publish card to view an existing MR leaves automatic actions idl
   }
 });
 
-for (const publishOnly of [false, true]) {
-  test('publication follow choice survives settings failure (publish only: ' + publishOnly + ')', async () => {
+for (const passFollowingFalse of [false, true]) {
+  test('publication auto-follow survives settings failure even when following: false is passed (followingFalse: ' + passFollowingFalse + ')', async () => {
     const r = runtime();
     const ask = await r.show({ project_path: 'group/sub/repo', instance: 'team', head: 'fix' });
     const args = { card_id: ask.card_id, mr: url, published: true };
     r.setSettingsReadable(false);
-    const published = await r.show(publishOnly ? { ...args, following: false } : args);
+    const published = await r.show(passFollowingFalse ? { ...args, following: false } : args);
     assert.equal(published.todo, undefined);
     assert.equal(r.schedules.size, 0);
-    // A repeated publication report may omit the opt-out, just like a later refresh.
     await r.show(args);
     r.setSettingsReadable(true);
     const recovered = await r.show({ card_id: ask.card_id });
-    assert.equal(recovered.follow_state, publishOnly ? undefined : 'active');
+    assert.equal(recovered.follow_state, 'active');
     assert.equal(recovered.todo?.length, 1);
-    assert.equal(r.schedules.size, publishOnly ? 0 : 1);
+    assert.equal(r.schedules.size, 1);
     const refreshed = await r.show({ card_id: ask.card_id, renamed: true });
     assert.equal(refreshed.todo, undefined);
-    assert.equal(r.schedules.size, publishOnly ? 0 : 1);
-    if (publishOnly) {
-      await r.click(ask.card_id, 'pr:follow');
-      assert.equal(r.schedules.size, 1);
-    }
+    assert.equal(r.schedules.size, 1);
   });
 }
 
