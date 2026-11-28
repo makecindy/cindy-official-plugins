@@ -142,6 +142,7 @@ jobs:
       issues: write
     steps:
       - name: Notify Dash about the failed Chrome publication
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.check.outputs.version }}
@@ -149,17 +150,26 @@ jobs:
           PACKAGE_RESULT: ${{ needs.package.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
         run: |
-          version=${VERSION:-版本未知}
+          version=${VERSION:-未知版本 ($GITHUB_SHA)}
           failed_stage=check
           [ "$PACKAGE_RESULT" = failure ] && failed_stage=package
           [ "$PUBLISH_RESULT" = failure ] && failed_stage=publish
-          gh issue create \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "[Chrome Web Store] Cindy $version 发布失败 · run $GITHUB_RUN_NUMBER" \
-            --body-file - <<EOF
-          @dashhuang，Cindy Chrome 扩展 $version 的商店发布流水线失败。
+          title="[Chrome Web Store] Cindy $version 发布失败 · $failed_stage"
+          issues="repos/$GITHUB_REPOSITORY/issues"
+          # Runs are serialized by chrome-webstore-production. Read the issues
+          # endpoint directly so retries do not depend on search indexing.
+          number=$(gh api --paginate "$issues?state=all&creator=github-actions%5Bbot%5D&per_page=100" |
+            jq -sr --arg title "$title" '[.[][] | select(.pull_request == null and .title == $title)][0].number // empty')
+          body=$(cat <<EOF
+          Cindy Chrome 扩展 $version 的商店发布流水线失败。
 
           失败阶段：$failed_stage
           检查结果：check=$CHECK_RESULT，package=$PACKAGE_RESULT，publish=$PUBLISH_RESULT
-          流水线：$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          最近一次失败：$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT
           EOF
+          )
+          if [[ -n "$number" ]]; then
+            gh api --silent --method PATCH "$issues/$number" -f state=open -f body="$body"
+          else
+            gh api --silent --method POST "$issues" -f title="$title" -f body="@dashhuang，$body"
+          fi

@@ -65,21 +65,18 @@ export function plan(status, version) {
   return {publish: true, reason: 'A newer extension version is ready'};
 }
 
-// Only publish validation warnings belong in public CI logs. Omit the generic
-// message, arbitrary detail payloads and metadata, which may describe accounts.
-function publishWarningSummary(details, privateValues) {
-  if (!Array.isArray(details)) return '';
-  const warnings = details.flatMap(detail => Array.isArray(detail?.warnings) ? detail.warnings : []);
-  const summaries = [];
-  for (const warning of warnings.slice(0, 5)) {
-    if (typeof warning?.reason !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/i.test(warning.reason)) continue;
-    let text = warning.reason;
-    if (typeof warning.description === 'string') text += ': ' + warning.description;
-    for (const value of privateValues) text = text.replaceAll(value, '[redacted]');
-    summaries.push(text.replace(/https?:\/\/\S+|\S+@\S+|\bBearer\s+\S+|\b(?:token|key|secret|password)\s*[:=]\s*\S+|[\w./+=-]{32,}/gi, '[redacted]')
-      .replace(/[\p{C}\p{Z}]+/gu, ' ').replaceAll('::', ': ').slice(0, 240));
+// Public diagnostics are selected locally. Store messages and warning reasons
+// may contain publisher data, including strings that resemble reason codes.
+function publishFailureSummary(error) {
+  const hasWarnings = Array.isArray(error?.details) &&
+    error.details.some(detail => Array.isArray(detail?.warnings) && detail.warnings.length > 0);
+  if (hasWarnings) return 'STORE_WARNING: Inspect submission warnings in the developer dashboard';
+  switch (error?.status) {
+    case 'INVALID_ARGUMENT': return 'INVALID_ARGUMENT: Check the submission fields';
+    case 'FAILED_PRECONDITION': return 'FAILED_PRECONDITION: Check the item state before submitting';
+    case 'OUT_OF_RANGE': return 'OUT_OF_RANGE: Check the submitted values';
+    default: return 'UNKNOWN: Inspect the developer dashboard for details';
   }
-  return summaries.length ? ' (' + summaries.join('; ') + ')' : '';
 }
 
 export function createClient({publisher, item, token, fetcher = fetch, sleep = ms => new Promise(resolve => setTimeout(resolve, ms))}) {
@@ -96,11 +93,8 @@ export function createClient({publisher, item, token, fetcher = fetch, sleep = m
       if (!response.ok) {
         failureDetail = `HTTP ${response.status}`;
         if (path.endsWith(':publish') && response.status === 400) {
-          const data = await response.json();
-          if (['INVALID_ARGUMENT', 'FAILED_PRECONDITION', 'OUT_OF_RANGE'].includes(data?.error?.status)) {
-            failureDetail += ' ' + data.error.status;
-          }
-          failureDetail += publishWarningSummary(data?.error?.details, [token, publisher, item]);
+          const data = await response.json().catch(() => null);
+          failureDetail += ' ' + publishFailureSummary(data?.error);
         }
         throw new Error('Request failed');
       }
@@ -122,7 +116,7 @@ export function createClient({publisher, item, token, fetcher = fetch, sleep = m
       await sleep(10_000);
       uploadState = (await status()).lastAsyncUploadState;
     }
-    if (uploadState !== 'SUCCEEDED') throw new Error(`Upload did not finish successfully (${uploadState}); review was not requested`);
+    if (uploadState !== 'SUCCEEDED') throw new Error('Upload did not finish successfully; review was not requested');
     const result = await request(`v2/${name}:publish`, 'POST', JSON.stringify({
       publishType: 'DEFAULT_PUBLISH', skipReview: false, blockOnWarnings: true,
     }));
