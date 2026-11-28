@@ -6286,7 +6286,7 @@ test('A1 decoupling hands off to an independent worktree PR task only for settin
 test('Scheme B auto-merge requires explicit human clicks, isolates per-repo scope, rolls back on sync failure, and invalidates on PR changes', async () => {
   const syncCalls = [];
   let failSync = false;
-  const { hostApi } = followScheduler();
+  const { hostApi, rows } = followScheduler();
   const baseNodeRequest = hostApi.node.request;
   hostApi.node.request = async (req) => {
     if (req.method === 'syncAutoMergePolicy') {
@@ -6297,13 +6297,23 @@ test('Scheme B auto-merge requires explicit human clicks, isolates per-repo scop
     return baseNodeRequest(req);
   };
 
-  const rt = mergeablePrRuntime({ hostApi });
+  const rt = mergeablePrRuntime({ hostApi, kv: { prCard: { autoFollow: true } } });
   rt.viewer.login = 'octocat';
-  const cardId = (await rt.tool({ repo: 'octo/repo', pr: 42 })).reply.result.card_id;
+  const cardId = (await rt.tool({ repo: 'octo/repo', pr: 42, published: true, following: false })).reply.result.card_id;
 
-  // 1) Default OFF: card shows pr:auto-merge-on (NOT active) and no sync calls yet.
-  assert.match(rt.lastCard(cardId).html, /data-ghost-action="pr:auto-merge-on"/);
+  // 1) Without verified follow-up, the card must not claim auto-merge is available.
+  assert.doesNotMatch(rt.lastCard(cardId).html, /data-ghost-action="pr:auto-merge-on"/);
+  assert.ok(visibleText(rt.lastCard(cardId).html).some((line) => line.includes(zhCopy.prAutoMergeNeedsFollow)));
+  await rt.click(cardId, 'pr:auto-merge-on');
   assert.equal(syncCalls.length, 0);
+  assert.equal(savedCard(rt, cardId).autoMerge, undefined);
+  await rt.click(cardId, 'prui:settings');
+  await rt.click(cardId, 'prset:repo-auto-merge');
+  assert.equal(syncCalls.length, 0);
+  assert.ok(visibleText(rt.lastCard(cardId).html).some((line) => line.includes(zhCopy.prAutoMergeNeedsFollow)));
+  await rt.click(cardId, 'pr:follow');
+  assert.equal(rows.size, 1);
+  assert.match(rt.lastCard(cardId).html, /data-ghost-action="pr:auto-merge-on"/);
 
   // 2) Missing userActionToken is rejected with zero sync calls.
   await rt.click(cardId, 'pr:auto-merge-on', { userActionToken: undefined });
@@ -6321,6 +6331,12 @@ test('Scheme B auto-merge requires explicit human clicks, isolates per-repo scop
   assert.match(rt.lastCard(cardId).html, /data-ghost-action="pr:auto-merge-off"/);
   assert.ok(visibleText(rt.lastCard(cardId).html).some((line) => line.includes(zhCopy.prAutoMergeActive)));
 
+  // A stopped schedule invalidates a stale card click without persisting policy.
+  rows.get('sch-1').status = 'paused';
+  await rt.click(cardId, 'pr:auto-merge-on');
+  assert.equal(syncCalls.length, 1);
+  rows.get('sch-1').status = 'active';
+
   // 4) Base branch change on refresh automatically invalidates per-PR authorization & clears policy file.
   rt.pr.baseRef.name = rt.pr.baseRefName = 'release';
   await rt.tool({ card_id: cardId });
@@ -6329,7 +6345,7 @@ test('Scheme B auto-merge requires explicit human clicks, isolates per-repo scop
   rt.pr.baseRef.name = rt.pr.baseRefName = 'main';
 
   // 5) Per-repo toggle requires userActionToken, rolls back on sync failure, and applies strictly to this exact repo.
-  await rt.click(cardId, 'prui:settings');
+  if (!savedCard(rt, cardId).settingsOpen) await rt.click(cardId, 'prui:settings');
   assert.match(rt.lastCard(cardId).html, /data-ghost-action="prset:repo-auto-merge" data-ghost-toggle="off"/);
   const syncCountBeforeNoToken = syncCalls.length;
   await rt.click(cardId, 'prset:repo-auto-merge', { userActionToken: undefined });

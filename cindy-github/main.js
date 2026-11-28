@@ -200,6 +200,7 @@ var MESSAGES = {
     prAutoMergeRepoActive: '本仓库已开启全绿自动合并',
     prAutoMergeFailed: '未能保存自动合并策略，请稍后再试',
     prAutoMergeActorUnknown: '无法确认当前 GitHub 账号或合并权限，未开启自动合并',
+    prAutoMergeNeedsFollow: '请先开启并确认 PR 后台跟进，再开启全绿自动合并',
     prTodoDecoupleFollow: '为 {url} 新建独立跟进任务（避免与当前任务串行阻塞）：用 cindy_helper 的 send_to_session（use_worktree: true，标题「{title}」）交接给独立任务建立并核实后台跟进（按 pr 技能第 4 节），完成后再刷新当前任务卡片使其显示只读状态与跳转入口',
     prArchiveTask: '归档任务',
     prTurnOn: '开启「{name}」',
@@ -381,6 +382,7 @@ var MESSAGES = {
     prAutoMergeRepoActive: 'Repo auto-merge when green is on',
     prAutoMergeFailed: 'Could not save the auto-merge policy. Try again later.',
     prAutoMergeActorUnknown: 'Could not verify your GitHub account or merge eligibility; auto-merge was not enabled.',
+    prAutoMergeNeedsFollow: 'Start and verify PR background follow-up before enabling auto-merge.',
     prTodoDecoupleFollow: 'Hand off follow-up for {url} to a dedicated PR task (to avoid serial queue blocking): call cindy_helper send_to_session (use_worktree: true, title "{title}") to set up and verify background follow-up per section 4 of the pr Skill, then refresh this source card so it displays the read-only status and task link',
     prArchiveTask: 'Archive task',
     prTurnOn: 'Turn on "{name}"',
@@ -562,6 +564,7 @@ var MESSAGES = {
     prAutoMergeRepoActive: 'リポジトリ自動マージ有効',
     prAutoMergeFailed: '自動マージ設定を保存できませんでした。しばらくしてから再試行してください',
     prAutoMergeActorUnknown: 'GitHub アカウントまたはマージ権限を確認できないため、自動マージを有効にしませんでした',
+    prAutoMergeNeedsFollow: '先に PR のバックグラウンドフォローを開始・確認してから自動マージを有効にしてください',
     prTodoDecoupleFollow: '{url} のフォローを専用タスクへ引き継ぐ（現在のセッションとの直列詰まりを防ぐため）：cindy_helper の send_to_session（use_worktree: true、タイトル「{title}」）で pr スキル第 4 節に沿ってフォローを作成・確認し、完了後にこの元カードを更新して読み取り専用リンクを表示する',
     prArchiveTask: 'タスクをアーカイブ',
     prTurnOn: '「{name}」をオン',
@@ -743,6 +746,7 @@ var MESSAGES = {
     prAutoMergeRepoActive: '저장소 자동 병합 켜짐',
     prAutoMergeFailed: '자동 병합 정책을 저장하지 못했습니다. 잠시 후 다시 시도하세요',
     prAutoMergeActorUnknown: '현재 GitHub 계정이나 병합 권한을 확인할 수 없어 자동 병합을 켜지 않았습니다',
+    prAutoMergeNeedsFollow: 'PR 백그라운드 추적을 시작하고 확인한 후 자동 병합을 켜세요',
     prTodoDecoupleFollow: '{url} 팔로우를 전용 PR 작업으로 인계하세요(현재 작업의 직렬 대기열 차단 방지): cindy_helper send_to_session(use_worktree: true, 제목 "{title}")으로 pr 스킬 4절에 따라 팔로우를 설정·확인한 뒤 이 원본 카드를 새로 고쳐 읽기 전용 상태와 작업 링크를 표시하세요',
     prArchiveTask: '작업 보관',
     prTurnOn: '"{name}" 켜기',
@@ -2852,6 +2856,21 @@ function prFollowActive(card) {
   return unverifiedLegacyFollow(card) || card.following === true || !!card.scheduleId || card.pending === 'follow' || card.pending === 'resume' || card.pending === 'stop';
 }
 
+function prAutoMergeHasFollow(card) {
+  return card.following === true && !!card.scheduleId && !boundFollowUnverified(card) && !card.pending;
+}
+
+async function verifiedAutoMergeFollow(card) {
+  if (!prAutoMergeHasFollow(card)) return false;
+  try {
+    var row = await prSchedule('schedule_get', { id: card.scheduleId });
+    if (!row || row.status !== 'active' || !ownedFollowSchedule(row, card)) return false;
+    return !!exactFollowHook(row, card, await cardFollowSkillEnv());
+  } catch (_) {
+    return false;
+  }
+}
+
 function prCardProtected(card) {
   return prFollowActive(card) || card.stage === 'publishing' || !!card.pending || !!card.scheduleAction || card.readyUncertain === true;
 }
@@ -4035,23 +4054,27 @@ function renderPrCard(card, settings) {
             prCtaButton('pr:merge-confirm:' + confirmation.revision, t('prMergeConfirm'));
         } else {
           if (isRepoAutoMergeEnabled(settings, card.repo)) {
-            left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(t('prAutoMergeRepoActive')) + '</div>';
+            left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(settings.autoFollow && prAutoMergeHasFollow(card) ? t('prAutoMergeRepoActive') : t('prAutoMergeNeedsFollow')) + '</div>';
           } else if (isCardAutoMergeEnabled(card)) {
-            left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(t('prAutoMergeActive')) + '</div>';
+            left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(prAutoMergeHasFollow(card) ? t('prAutoMergeActive') : t('prAutoMergeNeedsFollow')) + '</div>';
             actions += prQuietButton('pr:auto-merge-off', t('prAutoMergeOff'));
-          } else if (hasCardScheduler()) {
+          } else if (hasCardScheduler() && prAutoMergeHasFollow(card)) {
             actions += prQuietButton('pr:auto-merge-on', t('prAutoMergeOn'));
+          } else if (hasCardScheduler()) {
+            left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(t('prAutoMergeNeedsFollow')) + '</div>';
           }
           actions += prMergeButton(card, true);
         }
       } else if (prMayMergeWhenClean(card)) {
         if (isRepoAutoMergeEnabled(settings, card.repo)) {
-          left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(t('prAutoMergeRepoActive')) + '</div>';
+          left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(settings.autoFollow && prAutoMergeHasFollow(card) ? t('prAutoMergeRepoActive') : t('prAutoMergeNeedsFollow')) + '</div>';
         } else if (isCardAutoMergeEnabled(card)) {
-          left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(t('prAutoMergeActive')) + '</div>';
+          left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(prAutoMergeHasFollow(card) ? t('prAutoMergeActive') : t('prAutoMergeNeedsFollow')) + '</div>';
           actions += prQuietButton('pr:auto-merge-off', t('prAutoMergeOff'));
-        } else if (hasCardScheduler()) {
+        } else if (hasCardScheduler() && prAutoMergeHasFollow(card)) {
           actions += prQuietButton('pr:auto-merge-on', t('prAutoMergeOn'));
+        } else if (hasCardScheduler()) {
+          left += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(t('prAutoMergeNeedsFollow')) + '</div>';
         }
         actions += prMergeButton(card, false);
       }
@@ -5897,6 +5920,8 @@ async function prCardAction(msg) {
             card.note = t('prSettingFailed');
           }
         }
+      } else if (!settings.autoFollow || !(await verifiedAutoMergeFollow(card))) {
+        card.note = t('prAutoMergeNeedsFollow');
       } else {
         var repoActor = (card.pr && card.pr.mergeActorLogin) || await fetchViewerLogin().catch(function () { return null; });
         if (!repoActor) {
@@ -5932,6 +5957,8 @@ async function prCardAction(msg) {
       } else {
         delete card.autoMerge;
       }
+    } else if (!(await verifiedAutoMergeFollow(card))) {
+      card.note = t('prAutoMergeNeedsFollow');
     } else {
       await readPrMergeStatus(card);
       var prActor = (card.pr && card.pr.mergeActorLogin) || await fetchViewerLogin().catch(function () { return null; });

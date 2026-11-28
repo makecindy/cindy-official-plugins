@@ -123,8 +123,8 @@ export function isSnapshotEligibleForAutoMerge(snap, settle) {
   }
   if (typeof threads.rawUnresolvedCount === 'number' && threads.rawUnresolvedCount > 0) return false;
   if (!SHA_RE.test(String(snap.latestCommitOid || ''))) return false;
-  if (snap.mergeable !== 'MERGEABLE' || snap.mergeStateStatus !== 'CLEAN') return false;
-  if (snap.mergeQueue) return false;
+  if (snap.mergeable !== true || snap.mergeStateStatus !== 'CLEAN') return false;
+  if (!snap.mergeQueue || snap.mergeQueue.status !== 'NONE') return false;
   if (Array.isArray(snap.blockers) && snap.blockers.length > 0) return false;
   return true;
 }

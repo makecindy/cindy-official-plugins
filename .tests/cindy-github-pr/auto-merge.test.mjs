@@ -40,9 +40,9 @@ function makeReadySnapshot(overrides = {}) {
     latestCommitOid: SHA_A,
     updatedAt: '2026-11-28T00:00:00Z',
     createdAt: '2026-11-27T20:00:00Z',
-    mergeable: 'MERGEABLE',
+    mergeable: true,
     mergeStateStatus: 'CLEAN',
-    mergeQueue: null,
+    mergeQueue: { status: 'NONE', blockers: [] },
     verdict: 'READY',
     blockers: [],
     gate: { truncated: false, requiredChecksUnavailable: false },
@@ -125,6 +125,8 @@ test('isSnapshotEligibleForAutoMerge fails closed on every incomplete or unready
   assert.equal(isSnapshotEligibleForAutoMerge(makeReadySnapshot({ checksSummary: { ...makeReadySnapshot().checksSummary, pending: 1 } }), { open: false }), false);
   assert.equal(isSnapshotEligibleForAutoMerge(makeReadySnapshot({ reviewThreads: { ...makeReadySnapshot().reviewThreads, outdatedUnresolvedCount: 1 } }), { open: false }), false);
   assert.equal(isSnapshotEligibleForAutoMerge(makeReadySnapshot({ mergeStateStatus: 'BLOCKED' }), { open: false }), false);
+  assert.equal(isSnapshotEligibleForAutoMerge(makeReadySnapshot({ mergeable: null }), { open: false }), false);
+  assert.equal(isSnapshotEligibleForAutoMerge(makeReadySnapshot({ mergeQueue: null }), { open: false }), false);
   assert.equal(isSnapshotEligibleForAutoMerge(makeReadySnapshot({ mergeQueue: { id: 'mq-1' } }), { open: false }), false);
 });
 
