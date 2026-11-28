@@ -88,6 +88,7 @@ const MAX_SERVERS = 64;
 /** Remote-workspace mode could not be established, or was broken by the agent; agy is not left running. */
 const REMOTE_WORKSPACE_EXIT_CODE = 78;
 const LAUNCH_DIR_PREFIX = 'cindy-agy-remote-';
+const LOG_DIR_PREFIX = 'cindy-agy-log-';
 /**
  * How long ending the task waits for the warmed MCP sessions agy did not take over to be ended: the
  * whole budget of the warm-up's close(). Cindy ends anything left when the remote run ends.
@@ -166,6 +167,19 @@ function removeLaunchDir(dir) {
   }
 }
 
+/** A private temp directory outside the agent's cwd holding agy's session log. */
+function prepareSessionLog(tmpRoot) {
+  const root = tmpRoot || os.tmpdir();
+  // Windows `.cmd` shims cannot safely quote these characters even inside double quotes.
+  if (process.platform === 'win32' && /["%!^&|<>\r\n]/.test(root)) return null;
+  try {
+    const dir = fs.mkdtempSync(path.join(root, LOG_DIR_PREFIX));
+    return { dir, file: path.join(dir, 'session.log') };
+  } catch {
+    return null;
+  }
+}
+
 /** Directories left by tasks that could not clean up. They hold one small file and no secret. */
 function removeStaleLaunchDirs(root, now = Date.now()) {
   let names;
@@ -175,7 +189,7 @@ function removeStaleLaunchDirs(root, now = Date.now()) {
     return;
   }
   for (const name of names) {
-    if (!name.startsWith(LAUNCH_DIR_PREFIX)) continue;
+    if (!name.startsWith(LAUNCH_DIR_PREFIX) && !name.startsWith(LOG_DIR_PREFIX)) continue;
     const dir = path.join(root, name);
     try {
       if (now - fs.statSync(dir).mtimeMs > STALE_LAUNCH_DIR_MS) fs.rmSync(dir, { recursive: true, force: true });
@@ -384,6 +398,7 @@ function startRemoteWorkspace(agyPath, host) {
     exitAfterStderr(`[agy-acp] Could not prepare the remote-workspace launch (${describe(error)}). Antigravity was not started.`, REMOTE_WORKSPACE_EXIT_CODE);
     return;
   }
+  const sessionLog = prepareSessionLog();
 
   /**
    * `handshake` → `ready` (initialize answered) → `opening` (session process starting) →
@@ -535,21 +550,25 @@ function startRemoteWorkspace(agyPath, host) {
     setTimeout(() => finish(stopCode), timings.signalGrace + 300).unref();
   };
 
-  const errorRelay = accountErrorRelay(Date.now, host.accountDir ? {
-    accountDir: host.accountDir,
-    onIsolationViolation: (violation) => {
-      try {
-        process.stderr.write(isolationViolationLine(violation));
-      } catch { /* ignore */ }
-      setImmediate(() => stop('SIGTERM'));
-    },
-  } : undefined);
+  const errorRelay = accountErrorRelay(Date.now, {
+    ...(sessionLog ? { taskLog: sessionLog.file } : {}),
+    ...(host.accountDir ? {
+      accountDir: host.accountDir,
+      onIsolationViolation: (violation) => {
+        try {
+          process.stderr.write(isolationViolationLine(violation));
+        } catch { /* ignore */ }
+        setImmediate(() => stop('SIGTERM'));
+      },
+    } : {}),
+  });
 
-  const launch = (args) => {
+  const launch = (args, launchOptions) => {
     const child = spawnAgy(agyPath, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: dir,
       ...(host.accountDir ? { accountDir: host.accountDir } : {}),
+      ...(launchOptions?.logFile ? { logFile: launchOptions.logFile } : {}),
     });
     child.stderr.pipe(process.stderr, { end: false });
     child.stdin.on('error', () => {
@@ -622,7 +641,7 @@ function startRemoteWorkspace(agyPath, host) {
         fullTools: fullToolsSupported(host.agyVersion),
         instructions: instructions.text,
       });
-      agent = launch([...acpArgs, '--agent', AGENT_NAME]);
+      agent = launch([...acpArgs, '--agent', AGENT_NAME], sessionLog ? { logFile: sessionLog.file } : undefined);
       // Started only once agy is: a launch that throws leaves no warm-up running. session/new waits for
       // it (see onAgentLine).
       warmup = warmMcpServers(servers, { log: (text) => process.stderr.write(`[agy-acp] ${text}\n`) });
@@ -878,6 +897,7 @@ function startRemoteWorkspace(agyPath, host) {
     releaseWarmup();
     for (const child of [probe, agent]) if (running(child)) killTree(child, 'SIGKILL');
     removeLaunchDir(dir);
+    if (sessionLog) removeLaunchDir(sessionLog.dir);
   });
 }
 

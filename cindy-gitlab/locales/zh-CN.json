@@ -10,7 +10,7 @@
       "description": "执行 list_tools 返回的具体 GitLab 操作，args 按其参数 schema 传入。项目级操作必须显式传 project_path，例如 group/subgroup/project；在 Git 仓库中可从 git remote get-url origin 推导。配置多个实例时通过 instance 指定连接 ID 或实例地址，省略则使用默认连接。响应默认剥除头像和 _links 字段；传 raw=true 获取原始 JSON。结果超过 50KB 时自动写入会话工作目录并只返回文件路径，out_file 可指定路径。下载仓库归档时必须在 ghost_call 顶层提供 save_dir；upload_project_file 需要把用户媒体放在顶层 attachments。"
     },
     "mr_card": {
-      "description": "在 Cindy 对话中展示 MR 卡片。发布前传 project_path、head、base，可附 commits 和 files。当前任务成功发布后传 published=true 和 mr，有原卡片时带上 card_id。开启发完自动跟进且 MR 为非草稿时，卡片在支持的宿主上直接启动跟进；用户明确只要求发布时传 following=false。仅查看已有 MR 时省略 published。若返回 follow_state，跟进由卡片管理，请勿另建任务。active 为运行中，paused 为已暂停，stopped 为已停止，failed 为启动失败，unverified 为状态待核实。旧宿主仅在未返回 follow_state 时按 todo 交接；另建任务前以 claim_follow=true 申请并确认 follow_claimed=true。existing_task 表示已有其他任务负责，卡片中的入口仅用于导航。renamed 和 following 只报告已核实完成的操作。后台轮次用 card_id 刷新，提醒时可用 to_latest。"
+      "description": "在 Cindy 对话中展示 MR 卡片。发布前传 project_path、head、base，可附 commits 和 files。当前任务成功发布后传 published=true 和 mr，有原卡片时带上 card_id。开启发完自动跟进且 MR 为非草稿时，发完出卡（含该卡片草稿转正式）由卡片直接启动跟进，following=false 不会关闭自动跟进。仅查看已有 MR 时省略 published。若返回 follow_state，跟进由卡片管理，请勿另建任务。active 为运行中，paused 为已暂停，stopped 为已停止，failed 为启动失败，unverified 为状态待核实。旧宿主仅在未返回 follow_state 时按 todo 交接；另建任务前以 claim_follow=true 申请并确认 follow_claimed=true。existing_task 表示已有其他任务负责，卡片中的入口仅用于导航。renamed 和 following 只报告已核实完成的操作。后台轮次用 card_id 刷新，提醒时可用 to_latest。"
     },
     "mr_follow_settings": {
       "description": "只读获取与 MR 卡片共用的自动改名、自动跟进和跟进模型偏好。不显示卡片、不创建任务、不启动跟进；返回 settings，不代表跟进已经开启。IM 发 MR 后也用此入口读取偏好，再按 mr 流程创建并核验跟进。读取失败时设置未知，不当作关闭。"

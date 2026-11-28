@@ -80,7 +80,7 @@ import { createHash } from 'node:crypto';
 import { BACKOFF_STEPS_MIN, baseMovedWait, checkOutcome, handledFailure, inspectWait, isSettledBaselineWait, makeWait, setsAside, waitAbsorbsBase, waitDueAt, waitFacts, waitIsDue, waitNotice } from './lib/follow-wait.mjs';
 import { mergeQueueFingerprint } from './lib/merge-queue.mjs';
 import { SETTLE_MAX_MS, TICK_MS, breaksSettle, expectedBots, isEmptyPass, isPendingTerminalBackoffRetry, pacingDue, resolvePrReviewerBots, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
-import { attemptAutoMerge, hasBlockedAutoMergeAttempt, isSnapshotEligibleForAutoMerge, matchAutoMergePolicy, readAutoMergePolicy, shouldBypassProbeForAutoMerge } from './lib/auto-merge.mjs';
+import { attemptAutoMerge, hasBlockedAutoMergeAttempt, isSnapshotEligibleForAutoMerge, matchAutoMergePolicy, readAutoMergePolicy, revokePrAutoMergePolicy, shouldBypassProbeForAutoMerge } from './lib/auto-merge.mjs';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1804,7 +1804,7 @@ async function gateMain(argv, ctx) {
       'currentFingerprint', 'fingerprintFields', 'lastChangeAt', 'inventoryFailures',
       'consecutiveSnapshotFailures', 'lastSnapshotFailureAt', 'snapshotFailureFingerprint',
       'snapshotFailureSummary', 'snapshotFailureBackoffUntil', 'snapshotWatchRetryAt',
-      'autoMergeAttempt'];
+      'autoMergeAttempt', 'autoMergeAttempts', 'autoMergeRevokePending'];
     // The 1.5.35 cache stored the failure reason only in lastResult.
     if (previous?.lastResult?.reason === 'snapshot-failed') facts.push('lastResult');
     // CI having existed is a PR fact, not an acknowledgement. Prefer the
@@ -1867,7 +1867,7 @@ async function gateMain(argv, ctx) {
   const triggered = args.triggered || (hookTrigger?.kind === 'watch') || newFollow || diagnostic;
   // Neither an idle tick nor an unchanged summary proves that a failed snapshot recovered.
   const recovering = previous?.consecutiveSnapshotFailures > 0;
-  const autoMergePolicy = diagnostic ? null : readAutoMergePolicy(args.stateDir);
+  let autoMergePolicy = diagnostic ? null : readAutoMergePolicy(args.stateDir);
   const autoMergeProbeBypass = shouldBypassProbeForAutoMerge(previous, autoMergePolicy, {
     repo: args.repo,
     number: args.number,
@@ -2004,13 +2004,35 @@ async function gateMain(argv, ctx) {
   // 旧版状态没有 headSeenAt:这个提交不知道何时推送的,不压。
   const settle = settleState({ snap, headSeenAt, expected: waitFor, now });
 
-  // 零队列直合(显式授权时才启用,默认关闭):在进目标会话队列前、经完整全绿与实时规则复核后直合远端 PR。
-  let autoMergeAttempt = previous?.autoMergeAttempt && typeof previous.autoMergeAttempt === 'object'
-    ? { ...previous.autoMergeAttempt }
-    : null;
-  if (autoMergeAttempt && snap.latestCommitOid && autoMergeAttempt.sha !== snap.latestCommitOid) {
-    autoMergeAttempt = null;
+  // 卡片可能一直排在繁忙来源会话后面。后台看见授权失效条件时，
+  // 先持久化待撤销标记，再清理策略；失败后即使 PR 恢复 READY 也必须继续清理。
+  let autoMergeRevokePending = previous?.autoMergeRevokePending ?? null;
+  if (!diagnostic && autoMergePolicy) {
+    const policyKey = `${args.repo.toLowerCase()}#${args.number}`;
+    const grant = autoMergePolicy.prs?.[policyKey];
+    const invalidGrant = grant && (
+      snap.state === 'CLOSED' || snap.state === 'MERGED' || snap.closed === true ||
+      snap.merged === true || snap.isDraft === true ||
+      (typeof snap.baseRefName === 'string' && snap.baseRefName !== grant.base)
+    );
+    if (!autoMergeRevokePending && invalidGrant) {
+      autoMergeRevokePending = { repo: args.repo, number: args.number, authorizedAt: grant.authorizedAt, base: grant.base };
+      persist(file, { ...(previous ?? {}), autoMergeRevokePending });
+    }
+    if (autoMergeRevokePending) {
+      ctx.revokePrPolicy(args.stateDir, autoMergeRevokePending);
+      autoMergeRevokePending = null;
+    }
+    // 用户可能在快照读取期间关闭授权；合并判定使用最新落盘策略。
+    autoMergePolicy = readAutoMergePolicy(args.stateDir);
   }
+  // 每个 SHA 的 pending/unknown/rejected 都要跨分支切换与调度重启保留。
+  const autoMergeAttempts = { ...(previous?.autoMergeAttempts ?? {}) };
+  if (previous?.autoMergeAttempt?.sha && !autoMergeAttempts[previous.autoMergeAttempt.sha]) {
+    autoMergeAttempts[previous.autoMergeAttempt.sha] = previous.autoMergeAttempt;
+  }
+  let autoMergeAttempt = autoMergeAttempts[snap.latestCommitOid] ?? null;
+  // 零队列直合(显式授权时才启用,默认关闭):在进目标会话队列前、经完整全绿与实时规则复核后直合远端 PR。
   let autoMergeDetail = null;
   let autoMergeForcePass = false;
   if (!diagnostic && autoMergePolicy && isSnapshotEligibleForAutoMerge(snap, settle)) {
@@ -2020,7 +2042,7 @@ async function gateMain(argv, ctx) {
       viewer: snap.viewer,
       baseRefName: snap.baseRefName,
     });
-    if (policyMatch && !hasBlockedAutoMergeAttempt({ autoMergeAttempt }, snap.latestCommitOid)) {
+    if (policyMatch && !hasBlockedAutoMergeAttempt({ autoMergeAttempts }, snap.latestCommitOid)) {
       const mergeRes = await ctx.runAutoMerge({
         repo: args.repo,
         number: args.number,
@@ -2029,7 +2051,8 @@ async function gateMain(argv, ctx) {
         now,
         persistBeforeWrite: (pendingMarker) => {
           autoMergeAttempt = pendingMarker;
-          persist(file, { ...(previous ?? {}), autoMergeAttempt: pendingMarker });
+          autoMergeAttempts[pendingMarker.sha] = pendingMarker;
+          persist(file, { ...(previous ?? {}), autoMergeAttempts });
         },
       });
       if (mergeRes.outcome === 'merged') {
@@ -2072,6 +2095,7 @@ async function gateMain(argv, ctx) {
         autoMergeDetail = `auto-merge outcome unknown (${mergeRes.reason}); check PR status manually, will not auto-retry this head`;
         autoMergeForcePass = true;
       }
+      if (autoMergeAttempt?.sha) autoMergeAttempts[autoMergeAttempt.sha] = autoMergeAttempt;
     }
   }
 
@@ -2166,7 +2190,8 @@ async function gateMain(argv, ctx) {
     // watch 只由 --ack / --defer 或「没有新事件」推进,放行时不推进
     watch: decision.nextWatch,
     ...(previous?.followStartId ? { followStartId: previous.followStartId } : {}),
-    ...(autoMergeAttempt ? { autoMergeAttempt } : {}),
+    ...(Object.keys(autoMergeAttempts).length ? { autoMergeAttempts } : {}),
+    ...(autoMergeRevokePending ? { autoMergeRevokePending } : {}),
     ...(decision.nextWait ? { wait: decision.nextWait } : {}),
     ...(decision.nextPendingWatch
       ? {
@@ -2329,6 +2354,7 @@ export async function runGate(argv, {
   runSnapshot: snapshotRunner = runSnapshot,
   runProbe: probeRunner = runProbe,
   runAutoMerge: autoMergeRunner = attemptAutoMerge,
+  revokePrPolicy: revokePrPolicyRunner = revokePrAutoMergePolicy,
   readTrigger = readHookTrigger,
   out = (text) => process.stdout.write(text),
   err = (text) => process.stderr.write(text),
@@ -2366,6 +2392,7 @@ export async function runGate(argv, {
       },
       runProbe: async (...a) => { const value = await probeRunner(...a); if (record) { try { record.probe = value.code === 0 ? JSON.parse(value.stdout) : null; } catch { record.probe = null; } } return value; },
       runAutoMerge: autoMergeRunner,
+      revokePrPolicy: revokePrPolicyRunner,
       readTrigger: async () => {
         const event = await readTrigger();
         if (event?.kind === 'diagnostic') {

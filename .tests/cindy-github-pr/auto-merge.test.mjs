@@ -11,9 +11,10 @@ import {
   isSnapshotEligibleForAutoMerge,
   matchAutoMergePolicy,
   readAutoMergePolicy,
+  revokePrAutoMergePolicy,
   verifyLivePrMergeTarget,
 } from '../../cindy-github/skills/pr/scripts/lib/auto-merge.mjs';
-import { runGate } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
+import { runGate, stateFilePath } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
 
 const require = createRequire(import.meta.url);
 const followNode = require('../../cindy-github/node/follow.cjs');
@@ -367,6 +368,101 @@ test('runGate executes zero-queue auto-merge only when explicitly authorized, ne
       err: () => {},
     });
     assert.equal(unknownCalls, 1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('draft revocation survives a failed clear and blocks an old grant after PR becomes ready again', async () => {
+  const dir = makeTempDir();
+  const snapshotPath = path.join(dir, 'fake-snap.mjs');
+  fs.writeFileSync(snapshotPath, '// placeholder\n');
+  try {
+    followNode.updateAutoMergePolicyFile(
+      { op: 'set-pr', repo: 'octo/repo', number: 122, actor: 'dash', base: 'main', authorizedAt: 1 }, dir,
+    );
+    let snap = makeReadySnapshot({ isDraft: true, verdict: 'DRAFT' });
+    let mergeCalls = 0;
+    const args = ['https://github.com/octo/repo/pull/122', '--snapshot', snapshotPath, '--state-dir', dir, '--no-pacing'];
+    const run = (revokePrPolicy) => runGate(args, {
+      now: () => 10_000,
+      runSnapshot: async () => ({ code: 0, stdout: JSON.stringify(snap), stderr: '' }),
+      runProbe: async () => ({ code: 0, stdout: '{}', stderr: '' }),
+      readTrigger: async () => null,
+      revokePrPolicy,
+      runAutoMerge: async () => { mergeCalls++; return { outcome: 'merged', sha: SHA_A, method: 'merge', scope: 'pr' }; },
+      out: () => {}, err: () => {},
+    });
+    assert.equal(await run(() => { throw new Error('disk full'); }), 1);
+    const state = JSON.parse(fs.readFileSync(stateFilePath(dir, 'octo/repo', 122), 'utf8'));
+    assert.equal(state.autoMergeRevokePending.authorizedAt, 1);
+    assert.ok(readAutoMergePolicy(dir).prs['octo/repo#122']);
+
+    snap = makeReadySnapshot();
+    assert.equal(await run(() => { throw new Error('still full'); }), 1);
+    assert.equal(mergeCalls, 0);
+    await run(revokePrAutoMergePolicy);
+    assert.equal(mergeCalls, 0);
+    assert.equal(readAutoMergePolicy(dir).prs['octo/repo#122'], undefined);
+
+    for (const invalid of [
+      makeReadySnapshot({ baseRefName: 'release' }),
+      makeReadySnapshot({ state: 'CLOSED', closed: true, verdict: 'CLOSED' }),
+    ]) {
+      followNode.updateAutoMergePolicyFile(
+        { op: 'set-pr', repo: 'octo/repo', number: 122, actor: 'dash', base: 'main', authorizedAt: Date.now() }, dir,
+      );
+      snap = invalid;
+      await run(revokePrAutoMergePolicy);
+      assert.equal(readAutoMergePolicy(dir).prs['octo/repo#122'], undefined);
+    }
+    assert.equal(mergeCalls, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('unknown auto-merge attempt stays blocked when head moves A to B and back to A', async () => {
+  const dir = makeTempDir();
+  const snapshotPath = path.join(dir, 'fake-snap.mjs');
+  fs.writeFileSync(snapshotPath, '// placeholder\n');
+  try {
+    followNode.updateAutoMergePolicyFile(
+      { op: 'set-repo', repo: 'octo/repo', actor: 'dash', authorizedAt: 1 }, dir,
+    );
+    let snap = makeReadySnapshot();
+    let calls = 0;
+    const args = ['https://github.com/octo/repo/pull/122', '--snapshot', snapshotPath, '--state-dir', dir, '--no-pacing'];
+    const run = () => runGate(args, {
+      now: () => 10_000 + calls * 1000,
+      runSnapshot: async () => ({ code: 0, stdout: JSON.stringify(snap), stderr: '' }),
+      runProbe: async () => ({ code: 0, stdout: '{}', stderr: '' }),
+      readTrigger: async () => null,
+      runAutoMerge: async ({ persistBeforeWrite }) => {
+        calls++;
+        persistBeforeWrite({ sha: snap.latestCommitOid, status: 'pending', at: 10_000 });
+        return { outcome: 'unknown', sha: snap.latestCommitOid, method: 'merge', scope: 'repo', reason: 'timeout' };
+      },
+      out: () => {}, err: () => {},
+    });
+    await run();
+    snap = makeReadySnapshot({ latestCommitOid: SHA_B });
+    await run();
+    snap = makeReadySnapshot();
+    await run();
+    assert.equal(calls, 2);
+    const state = JSON.parse(fs.readFileSync(stateFilePath(dir, 'octo/repo', 122), 'utf8'));
+    assert.equal(state.autoMergeAttempts[SHA_A].status, 'unknown');
+    assert.equal(state.autoMergeAttempts[SHA_B].status, 'unknown');
+    await runGate(args, {
+      now: () => 30_000,
+      runSnapshot: async () => ({ code: 0, stdout: JSON.stringify(snap), stderr: '' }),
+      runProbe: async () => ({ code: 0, stdout: '{}', stderr: '' }),
+      readTrigger: async () => ({ firstScheduleId: 'new-schedule' }),
+      runAutoMerge: async () => { calls++; },
+      out: () => {}, err: () => {},
+    });
+    assert.equal(calls, 2);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

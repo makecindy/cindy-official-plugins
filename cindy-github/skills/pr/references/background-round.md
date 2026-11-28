@@ -30,4 +30,4 @@ The plugin can identify the exact old generated `node "<skill-dir>/scripts/pr-he
 
 ## Draft and ready
 
-When the user asks in text to mark a draft ready, run `gh pr ready <PR_URL>`, refresh the card (`pr_card` with `card_id`, `repo`, `pr`) and apply its follow setting as after opening. When they ask to turn a PR back into a draft, run `gh pr ready --undo <PR_URL>`; if it was being followed, stop following as in `## Ending following` above, then refresh the card. (Foreground draft/ready requests do not run the full background-round steps above.)
+When the user asks in text to mark a draft ready, run `gh pr ready <PR_URL>` and refresh the card (`pr_card` with `card_id`, `repo`, `pr`): for a draft published in this task, the card applies its "Follow after opening" setting automatically (starting follow-up directly on supported hosts or returning the follow-up `todo` on older hosts). When they ask to turn a PR back into a draft, run `gh pr ready --undo <PR_URL>`; if it was being followed, stop following as in `## Ending following` above, then refresh the card. (Foreground draft/ready requests do not run the full background-round steps above.)

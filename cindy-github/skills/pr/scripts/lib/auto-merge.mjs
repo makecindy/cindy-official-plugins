@@ -15,6 +15,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -59,6 +60,28 @@ export function readAutoMergePolicy(stateDir) {
   } catch {
     return { version: 1, prs: {}, repos: {} };
   }
+}
+
+// Clear an exact grant after the gate has durably marked it for revocation.
+// A newer human click is a different grant and must not be erased by this one.
+export function revokePrAutoMergePolicy(stateDir, { repo, number, authorizedAt, base }) {
+  const key = `${String(repo).toLowerCase()}#${number}`;
+  const file = autoMergePolicyPath(stateDir);
+  const latest = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (!latest || typeof latest !== 'object' || !latest.prs || typeof latest.prs !== 'object') {
+    throw new Error('Invalid auto-merge policy while revoking PR grant');
+  }
+  const current = latest.prs[key];
+  if (!current || current.authorizedAt !== authorizedAt || current.base !== base) return false;
+  delete latest.prs[key];
+  const tmp = `${file}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+  try {
+    fs.writeFileSync(tmp, `${JSON.stringify(latest, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+    fs.renameSync(tmp, file);
+  } finally {
+    try { fs.unlinkSync(tmp); } catch { /* rename already removed it */ }
+  }
+  return true;
 }
 
 /**
@@ -134,7 +157,7 @@ export function isSnapshotEligibleForAutoMerge(snap, settle) {
  * Unknown, pending (crashed mid-write), rejected, or merged attempts NEVER auto-retry.
  */
 export function hasBlockedAutoMergeAttempt(previous, headSha) {
-  const attempt = previous?.autoMergeAttempt;
+  const attempt = previous?.autoMergeAttempts?.[headSha] ?? previous?.autoMergeAttempt;
   if (!attempt || typeof attempt !== 'object' || !headSha) return false;
   if (attempt.sha !== headSha) return false;
   return ['pending', 'unknown', 'rejected', 'merged'].includes(attempt.status);

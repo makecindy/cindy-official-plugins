@@ -12,6 +12,7 @@
  * ending into a classified JSON-RPC error so Cindy handles it like built-in models.
  */
 
+const fs = require('node:fs');
 const { isObject, isSessionOpen } = require('./agy-mcp.js');
 const { hasIsolatedStoreFile, isIsolationUnverified } = require('./agy-account-dir.js');
 
@@ -55,6 +56,76 @@ const CONTENT_SESSION_UPDATES = new Set([
   'plan_update',
   'user_message_chunk',
 ]);
+
+/**
+ * Updates that open a new model/tool step within the same prompt. After one of these,
+ * a standalone `\n⚠ <error>\n` chunk starts a fresh reply rather than continuing earlier text.
+ */
+const STEP_RESET_UPDATES = new Set([
+  'agent_thought_chunk',
+  'tool_call',
+  'tool_call_update',
+  'plan',
+  'plan_update',
+  'user_message_chunk',
+]);
+
+/** Caps how much of agy's private `--log-file` tail is inspected for a single prompt. */
+const MAX_TASK_LOG_DELTA_BYTES = 256 * 1024;
+/** glog line prefix written by agy (`I/W/E/FMMDD HH:MM:SS.uuuuuu pid file:line] ...`). */
+const AGY_GLOG_LINE_RE = /^[IWEF]\d{4} [\d:.]+\s+\d+ [^:\]\r\n]+:\d+\] /m;
+const AGY_ERROR_LOG_LINE_RE = /^E\d{4} [\d:.]+\s+\d+ ([^:\]\r\n]+:\d+)\] (.+)$/gm;
+const AGY_EXECUTOR_ERROR_RE = /\b(?:agent executor error|generating and executing|transport error|streamGenerateContent)\b/i;
+
+function readTaskLogSize(file) {
+  if (!file) return null;
+  try {
+    return fs.statSync(file).size;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Verifies a held terminal `⚠ <error>` chunk against bytes agy wrote to its private `--log-file`
+ * during this prompt:
+ *  - 'confirmed'   : an E-level glog line recorded this failure during the prompt;
+ *  - 'unconfirmed' : agy actively wrote glog entries during the prompt without a matching error;
+ *  - 'unavailable' : no active glog log for this prompt (fall back to wire step state).
+ */
+function confirmWarningInTaskLog(taskLog, startOffset, errorText, kind, now) {
+  if (!taskLog || typeof startOffset !== 'number') return 'unavailable';
+  let fd;
+  try {
+    fd = fs.openSync(taskLog, 'r');
+    const size = fs.fstatSync(fd).size;
+    if (size <= startOffset) return 'unavailable';
+    const length = Math.min(size - startOffset, MAX_TASK_LOG_DELTA_BYTES);
+    const readFrom = size - length;
+    const buf = Buffer.alloc(length);
+    const bytesRead = fs.readSync(fd, buf, 0, length, readFrom);
+    const slice = buf.toString('utf8', 0, bytesRead);
+    if (!AGY_GLOG_LINE_RE.test(slice)) return 'unavailable';
+    AGY_ERROR_LOG_LINE_RE.lastIndex = 0;
+    let match;
+    while ((match = AGY_ERROR_LOG_LINE_RE.exec(slice)) !== null) {
+      const source = match[1];
+      const body = match[2];
+      if (body.includes(errorText)) return 'confirmed';
+      if (source.startsWith('errorreport.go:') || AGY_EXECUTOR_ERROR_RE.test(body)) {
+        const logged = classifyAccountErrorInfo({ text: body, now });
+        if (logged && logged.kind === kind) return 'confirmed';
+      }
+    }
+    return 'unconfirmed';
+  } catch {
+    return 'unavailable';
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* ignore */ }
+    }
+  }
+}
 
 function parseRelativeResetMs(text, now) {
   if (typeof text !== 'string' || !text) return undefined;
@@ -174,6 +245,7 @@ function isolationViolationLine(violation) {
 function accountErrorRelay(nowFn = Date.now, options) {
   const accountDir = options && typeof options.accountDir === 'string' && options.accountDir ? options.accountDir : null;
   const onIsolationViolation = options && typeof options.onIsolationViolation === 'function' ? options.onIsolationViolation : null;
+  const taskLog = options && typeof options.taskLog === 'string' && options.taskLog ? options.taskLog : null;
   const pending = new Map();
 
   function activePrompt(sessionId) {
@@ -182,9 +254,20 @@ function accountErrorRelay(nowFn = Date.now, options) {
     }
   }
 
+  function hasActiveTaskLog() {
+    return taskLog !== null && readTaskLogSize(taskLog) > 0;
+  }
+
   return {
     request(message) {
       if (!isObject(message) || message.id === undefined) return;
+      if (message.method === '_session/steering') {
+        const sessionId = typeof message.params?.sessionId === 'string' ? message.params.sessionId : undefined;
+        const prompt = sessionId && activePrompt(sessionId);
+        // Steering opens a new user turn inside the active prompt; a warning afterwards starts fresh.
+        if (prompt && !prompt.warning) prompt.stepHadText = false;
+        return;
+      }
       const sessionOpen = isSessionOpen(message.method);
       if (sessionOpen || message.method === 'session/prompt') {
         if (pending.size >= MAX_TRACKED_REQUESTS) {
@@ -196,8 +279,15 @@ function accountErrorRelay(nowFn = Date.now, options) {
           : undefined;
         // Notifications only identify the session. Overlapping prompts cannot attribute a text warning.
         const previous = sessionId && activePrompt(sessionId);
-        if (previous) previous.canInferWarning = false;
-        pending.set(message.id, { sessionId, sessionOpen, canInferWarning: !previous, warning: null });
+        if (previous) previous.overlapping = true;
+        pending.set(message.id, {
+          sessionId,
+          sessionOpen,
+          overlapping: Boolean(previous),
+          stepHadText: false,
+          warning: null,
+          logOffset: message.method === 'session/prompt' ? readTaskLogSize(taskLog) : null,
+        });
       }
     },
 
@@ -211,32 +301,44 @@ function accountErrorRelay(nowFn = Date.now, options) {
       const prompt = activePrompt(sessionId);
       if (!prompt || !CONTENT_SESSION_UPDATES.has(update.sessionUpdate)) return null;
 
+      let flushed = null;
       if (prompt.warning) {
         // More content makes the held chunk part of the visible reply, even if the next chunk is also a warning.
-        const { rawMessage } = prompt.warning;
+        flushed = [prompt.warning.rawMessage];
         prompt.warning = null;
-        prompt.canInferWarning = false;
-        return { hold: false, flush: [rawMessage] };
+        prompt.stepHadText = true;
       }
 
-      if (update.sessionUpdate !== 'agent_message_chunk' || !prompt.canInferWarning) return null;
+      if (STEP_RESET_UPDATES.has(update.sessionUpdate)) {
+        // A tool call, plan, thought, or steer starts a new step; a later standalone warning is not continuing prior prose.
+        prompt.stepHadText = false;
+        return flushed ? { hold: false, flush: flushed } : null;
+      }
+
+      if (update.sessionUpdate !== 'agent_message_chunk') {
+        return flushed ? { hold: false, flush: flushed } : null;
+      }
+
       const content = update.content;
       if (content?.type === 'text' && typeof content.text === 'string') {
-        if (!content.text.trim()) return null;
-        // ACP puts this CLI fallback on the same channel as model text. Never interpret a quotation
-        // inside an existing answer as an account signal. Explicit RPC errors are handled separately.
-        const match = WARNING_CHUNK_RE.exec(content.text);
-        if (match) {
-          const errorText = match[1];
-          const info = classifyAccountErrorInfo({ text: errorText, now: nowFn() });
-          if (info) {
-            prompt.warning = { rawMessage: message, errorText, info };
-            return { hold: true };
+        if (!content.text.trim()) return flushed ? { hold: false, flush: flushed } : null;
+        // ACP puts this CLI fallback on the same channel as model text. Hold a candidate warning
+        // until the prompt settles (verified against agy's session log when available, otherwise only
+        // when no prose preceded it in the current step). Explicit RPC errors are handled separately.
+        if (!prompt.overlapping && (!prompt.stepHadText || hasActiveTaskLog())) {
+          const match = WARNING_CHUNK_RE.exec(content.text);
+          if (match) {
+            const errorText = match[1];
+            const info = classifyAccountErrorInfo({ text: errorText, now: nowFn() });
+            if (info) {
+              prompt.warning = { rawMessage: message, errorText, info, hadPriorText: prompt.stepHadText };
+              return flushed ? { hold: true, flush: flushed } : { hold: true };
+            }
           }
         }
       }
-      prompt.canInferWarning = false;
-      return null;
+      prompt.stepHadText = true;
+      return flushed ? { hold: false, flush: flushed } : null;
     },
 
     response(message, flush) {
@@ -244,7 +346,7 @@ function accountErrorRelay(nowFn = Date.now, options) {
       const tracked = pending.get(message.id);
       if (!tracked) return message;
       pending.delete(message.id);
-      const held = tracked.canInferWarning ? tracked.warning : null;
+      const held = !tracked.overlapping ? tracked.warning : null;
       if (!held && tracked.warning) flush?.(tracked.warning.rawMessage);
 
       if (tracked.sessionOpen && accountDir && message.error === undefined && isObject(message.result)) {
@@ -270,29 +372,47 @@ function accountErrorRelay(nowFn = Date.now, options) {
 
       if (isObject(message.error)) {
         const classified = classifyAccountErrorResponse(message, nowFn());
-        if (classified !== message || !held) return classified;
-        if (message.error.data !== undefined && !isObject(message.error.data)) return message;
-        if (isObject(message.error.data) && message.error.data._meta !== undefined && !isObject(message.error.data._meta)) {
+        if (classified !== message || !held) {
+          if (held && held.hadPriorText) flush?.(held.rawMessage);
+          return classified;
+        }
+        if (message.error.data !== undefined && !isObject(message.error.data)) {
+          if (held.hadPriorText) flush?.(held.rawMessage);
           return message;
         }
-        if (isObject(message.error.data?._meta) && message.error.data._meta.cindy !== undefined) return message;
-        return attachCindyMeta(message, held.info);
+        if (isObject(message.error.data) && message.error.data._meta !== undefined && !isObject(message.error.data._meta)) {
+          if (held.hadPriorText) flush?.(held.rawMessage);
+          return message;
+        }
+        if (isObject(message.error.data?._meta) && message.error.data._meta.cindy !== undefined) {
+          if (held.hadPriorText) flush?.(held.rawMessage);
+          return message;
+        }
+        const logVerdict = confirmWarningInTaskLog(taskLog, tracked.logOffset, held.errorText, held.info.kind, nowFn());
+        if (logVerdict === 'confirmed' || (logVerdict === 'unavailable' && !held.hadPriorText)) {
+          return attachCindyMeta(message, held.info);
+        }
+        flush?.(held.rawMessage);
+        return message;
       }
 
       if (held && message.result?.stopReason === 'end_turn') {
-        return {
-          jsonrpc: '2.0',
-          id: message.id,
-          error: {
-            code: held.info.kind === 'auth-required' ? -32000 : -32603,
-            message: held.errorText,
-            data: {
-              _meta: {
-                cindy: held.info,
+        const logVerdict = confirmWarningInTaskLog(taskLog, tracked.logOffset, held.errorText, held.info.kind, nowFn());
+        if (logVerdict === 'confirmed' || (logVerdict === 'unavailable' && !held.hadPriorText)) {
+          return {
+            jsonrpc: '2.0',
+            id: message.id,
+            error: {
+              code: held.info.kind === 'auth-required' ? -32000 : -32603,
+              message: held.errorText,
+              data: {
+                _meta: {
+                  cindy: held.info,
+                },
               },
             },
-          },
-        };
+          };
+        }
       }
 
       if (held) flush?.(held.rawMessage);

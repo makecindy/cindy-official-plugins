@@ -149,15 +149,18 @@ function run(agyPath, options) {
     process.stdout,
     child,
     () => stop('SIGTERM'),
-    accountErrorRelay(Date.now, options && options.accountDir ? {
-      accountDir: options.accountDir,
-      onIsolationViolation: (violation) => {
-        try {
-          process.stderr.write(isolationViolationLine(violation));
-        } catch { /* ignore */ }
-        setImmediate(() => stop('SIGTERM'));
-      },
-    } : undefined),
+    accountErrorRelay(Date.now, {
+      ...(verification ? { taskLog: verification.taskLog } : {}),
+      ...(options && options.accountDir ? {
+        accountDir: options.accountDir,
+        onIsolationViolation: (violation) => {
+          try {
+            process.stderr.write(isolationViolationLine(violation));
+          } catch { /* ignore */ }
+          setImmediate(() => stop('SIGTERM'));
+        },
+      } : {}),
+    }),
     verification,
   );
   child.stdin.on('error', () => {

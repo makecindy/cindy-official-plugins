@@ -67,6 +67,9 @@ if (args.length === 1 && args[0] === '--version') {
   process.stdout.write('agy ' + (process.env.FAKE_AGY_VERSION || '0.2.2') + '\\n');
   process.exit(0);
 }
+// Every launch must pass the constant ACP args (including no paid credits and no telemetry). The
+// plugin's own verification, sign-in check, or error relay may add \`--log-file <file>\` at the start.
+if (args[0] === '--log-file' && require('node:path').isAbsolute(args[1]) && require('node:path').basename(args[1]) === 'session.log') args.splice(0, 2);
 // Remote-workspace mode: the session process runs under the restricted agent of its working directory.
 const REMOTE_ARGS = ${JSON.stringify(JSON.stringify([...EXPECTED_ACP_ARGS, '--agent', 'cindy-remote']))};
 if (JSON.stringify(args) === REMOTE_ARGS) {
@@ -180,8 +183,7 @@ if (JSON.stringify(args) === REMOTE_ARGS) {
   return;
 }
 // Every launch must pass the constant ACP args (including no paid credits and no telemetry). The
-// plugin's own verification or sign-in check may add \`--log-file <file>\` at the start or end.
-if (args[0] === '--log-file' && require('node:path').isAbsolute(args[1]) && require('node:path').basename(args[1]) === 'session.log') args.splice(0, 2);
+// plugin's own sign-in check may add \`--log-file <file>\` at the end.
 const logFileAt = args.indexOf('--log-file');
 const acpArgs = logFileAt !== -1 && logFileAt === args.length - 2 && require('node:path').isAbsolute(args[logFileAt + 1]) ? args.slice(0, logFileAt) : args;
 if (JSON.stringify(acpArgs) !== ${JSON.stringify(JSON.stringify(EXPECTED_ACP_ARGS))}) {
