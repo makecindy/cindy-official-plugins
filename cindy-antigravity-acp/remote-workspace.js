@@ -569,7 +569,6 @@ function startRemoteWorkspace(agyPath, host) {
   const seenSteps = new Map();
   const seenSafeTools = new Set();
   let serverNames = [];
-  const steering = createSteeringRelay();
   /** The session runs under the default agent and the hooks (instead of the restricted agent). */
   let hooked = false;
   let resumeInstructions = '';
@@ -618,30 +617,32 @@ function startRemoteWorkspace(agyPath, host) {
   const forwardClientLine = (line, parsed) => {
     const message = parsed === undefined ? parseLine(line) : parsed;
     if (message) {
-      if (message.method === 'session/prompt') promptSent = true;
-      if (message.method === 'session/prompt' && resumeInstructions) {
-        const params = isObject(message.params) ? message.params : {};
-        const prompt = Array.isArray(params.prompt) ? params.prompt : [];
-        const instructions = resumeInstructions.replace(/@\[/g, '@\\[');
-        resumeInstructions = '';
-        const amended = { ...message, params: { ...params, prompt: [
-          { type: 'text', text: `Additional instructions for this resumed task:\n${instructions}\n` }, ...prompt,
-        ] } };
-        errorRelay.request(amended);
-        const handled = steering.handleClientMessage(amended);
-        if (handled) {
-          if (handled.toClient) toClient(handled.toClient);
-          if (handled.toAgent) toAgent(handled.toAgent);
-        } else toAgent(amended);
-        return;
-      }
-      errorRelay.request(message);
       const handled = steering.handleClientMessage(message);
       if (handled) {
-        if (handled.toClient) toClient(handled.toClient);
-        if (handled.toAgent) toAgent(handled.toAgent);
-        return;
+        if (handled.toClient) {
+          for (const item of handled.toClient) toClient(item);
+        }
+        if (handled.toAgent) {
+          for (const item of handled.toAgent) toAgent(item);
+        }
+        if (!handled.forward) return;
       }
+      if (message.method === 'session/prompt') {
+        promptSent = true;
+        if (resumeInstructions) {
+          const params = isObject(message.params) ? message.params : {};
+          const prompt = Array.isArray(params.prompt) ? params.prompt : [];
+          const instructions = resumeInstructions.replace(/@\[/g, '@\\[');
+          resumeInstructions = '';
+          const amended = { ...message, params: { ...params, prompt: [
+            { type: 'text', text: `Additional instructions for this resumed task:\n${instructions}\n` }, ...prompt,
+          ] } };
+          errorRelay.request(amended);
+          toAgent(amended);
+          return;
+        }
+      }
+      errorRelay.request(message);
     }
     toAgentLine(line);
   };
@@ -729,6 +730,7 @@ function startRemoteWorkspace(agyPath, host) {
       },
     } : {}),
   });
+  const steering = createSteeringRelay(errorRelay.steeringDispatched);
 
   const launch = (args, launchOptions) => {
     const isolate = !host.accountDir && hooksSupported(host.agyVersion);
@@ -948,9 +950,12 @@ function startRemoteWorkspace(agyPath, host) {
     if (message.method === undefined && message.id !== undefined) {
       const flushHeld = (item) => toClient(item, agent.stdout);
       const handled = steering.handleAgentResponse(message);
-      if (handled.action === 'drop') return;
-      if (handled.action === 'reply') {
-        toClient(errorRelay.response(handled.message, flushHeld), agent.stdout);
+      if (handled.action === 'handled') {
+        for (const item of handled.toClient) toClient(item, agent.stdout);
+        for (const item of handled.toAgent) toAgent(item);
+        if (handled.turnResponse) {
+          toClient(errorRelay.response(handled.turnResponse, flushHeld), agent.stdout);
+        }
         return;
       }
       const classified = errorRelay.response(message, flushHeld);
@@ -985,6 +990,7 @@ function startRemoteWorkspace(agyPath, host) {
       return;
     }
     if (!params || (!isPermission && !isToolUpdate)) {
+      if (message.method && message.id !== undefined) steering.handleAgentRequest(message);
       if (update) {
         const action = errorRelay.notification(message);
         if (action) {
@@ -1019,6 +1025,7 @@ function startRemoteWorkspace(agyPath, host) {
       );
       return;
     }
+    if (isPermission) steering.handleAgentRequest(message);
     let outgoing = message;
     let adapted = null;
     if (verdict.type === 'mcp') {
@@ -1061,6 +1068,7 @@ function startRemoteWorkspace(agyPath, host) {
     }
     if (phase === 'opening' || phase === 'warming' || phase === 'opening-session') {
       if (message && message.method === undefined && message.id !== undefined) {
+        steering.handleClientMessage(message);
         toAgentLine(line);
         return;
       }

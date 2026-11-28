@@ -262,14 +262,19 @@ function accountErrorRelay(nowFn = Date.now, options) {
     return taskLog !== null && readTaskLogSize(taskLog) > 0;
   }
 
+  function steeringDispatched(sessionId) {
+    const prompt = sessionId && activePrompt(sessionId);
+    // Steering opens a new user turn inside the active prompt; a warning afterwards starts fresh.
+    if (prompt && !prompt.warning) prompt.stepHadText = false;
+  }
+
   return {
+    steeringDispatched,
+
     request(message) {
       if (!isObject(message) || message.id === undefined) return;
       if (message.method === '_session/steering') {
-        const sessionId = typeof message.params?.sessionId === 'string' ? message.params.sessionId : undefined;
-        const prompt = sessionId && activePrompt(sessionId);
-        // Steering opens a new user turn inside the active prompt; a warning afterwards starts fresh.
-        if (prompt && !prompt.warning) prompt.stepHadText = false;
+        steeringDispatched(message.params?.sessionId);
         return;
       }
       const sessionOpen = isSessionOpen(message.method);
