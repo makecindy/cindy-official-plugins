@@ -14,6 +14,7 @@ import './cindy-github-pr/preflight.test.mjs';
 import './cindy-github-pr/pacing.test.mjs';
 import './cindy-github-pr/trace.test.mjs';
 import './cindy-github-pr/snapshot.test.mjs';
+import './cindy-github-pr/auto-merge.test.mjs';
 
 const githubSource = readFileSync(
   new URL('../cindy-github/main.js', import.meta.url),
@@ -102,7 +103,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.agent, { hostTools: ['scheduler'] });
   assert.equal(manifest.node.entry, 'node/follow.cjs');
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.54');
+  assert.equal(manifest.version, '1.5.55');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -4107,9 +4108,7 @@ test('viewing an existing red PR does not start following; explicitly clicking h
 
 test('publication applies auto-follow even if following: false is passed, while viewing stays read-only', async () => {
   for (const [args, enabled, expected] of [
-    [{}, true, 0],
-    [{ published: true }, false, 0],
-    [{ published: true, following: false }, true, 1],
+    [{}, true, 0], [{ published: true }, false, 0], [{ published: true, following: false }, true, 1],
     [{ published: true }, true, 1],
   ]) {
     const { hostApi, rows } = followScheduler();
@@ -6568,4 +6567,184 @@ test('start adopts a same-session paused schedule and fails closed when a foreig
     assert.match(opened.reply.result.note, /无法确认 PR 卡片所属任务/, label);
     assert.equal(calls.includes('schedule_create'), false, label);
   }
+});
+
+test('A1 decoupling hands off to an independent worktree PR task only for setting, goal_active, or multi_pr_session', async () => {
+  // 1) Ordinary single-PR session keeps default in-session native follow-up (no follow_handoff).
+  {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true, autoRename: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    assert.equal(opened.reply.result.follow_handoff, undefined);
+    assert.equal(opened.reply.result.follow_state, 'active');
+    assert.equal(rows.size, 1);
+    assert.equal(calls.filter((c) => c === 'schedule_create').length, 1);
+    // Single schedule_list before creation (plus post-create verification list) — no duplicate pre-check.
+    assert.equal(calls.filter((c) => c === 'schedule_list').length, 2);
+  }
+
+  // 2) Setting "independentFollow" ON (toggled via prset:independent) decouples & skips source rename and schedule_create.
+  {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true, autoRename: true } } });
+    const ask = await rt.tool({ repo: 'octo/repo', head: 'feat/decouple' });
+    await rt.click(ask.callId, 'prui:settings');
+    await rt.click(ask.callId, 'prset:independent');
+    assert.equal(rt.kv.prCard.independentFollow, true);
+    const opened = await rt.tool({ card_id: ask.callId, pr: 42, published: true });
+    assert.deepEqual(opened.reply.result.follow_handoff, {
+      recommended: true,
+      reason: 'setting',
+      pr_url: 'https://github.com/octo/repo/pull/42',
+      repo: 'octo/repo',
+      pr_number: 42,
+      title: '#42 Built-in PR skill',
+    });
+    assert.equal(opened.reply.result.settings.independent_follow, true);
+    assert.equal(opened.reply.result.todo.length, 1);
+    assert.match(opened.reply.result.todo[0], /独立跟进任务.*use_worktree: true/);
+    assert.equal(calls.includes('schedule_create'), false);
+    assert.equal(rows.size, 0);
+  }
+
+  // 3) Host-injected session_context.goal_active=true automatically decouples without changing default user settings.
+  {
+    const { hostApi, calls, rows } = followScheduler();
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true, autoRename: true } } });
+    const opened = await rt.tool({
+      repo: 'octo/repo', pr: 42, published: true,
+      session_context: { session_id: 's1', goal_active: true },
+    });
+    assert.equal(opened.reply.result.follow_handoff.recommended, true);
+    assert.equal(opened.reply.result.follow_handoff.reason, 'goal_active');
+    assert.equal(opened.reply.result.todo.length, 1);
+    assert.match(opened.reply.result.todo[0], /独立跟进任务.*use_worktree: true/);
+    assert.equal(calls.includes('schedule_create'), false);
+    assert.equal(rows.size, 0);
+  }
+
+  // 4) Same session already holding another active PR schedule decouples with reason='multi_pr_session'
+  // even if the agent mistakenly passed following: false at publish time.
+  {
+    const { hostApi, calls, rows } = followScheduler();
+    rows.set('sch-other', taskSchedule('sch-other', 's1', {
+      command: 'node "/approved skills/agent-skills/skills/_root__cindy-github--pr/scripts/pr-node.cjs" pr-heartbeat-gate.mjs https://github.com/octo/repo/pull/10',
+      timeoutMs: 180000,
+    }));
+    rows.get('sch-other').prTrigger = { url: 'https://github.com/octo/repo/pull/10', change: 'any' };
+    const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true, autoRename: true } } });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, following: false });
+    assert.equal(opened.reply.result.follow_handoff.recommended, true);
+    assert.equal(opened.reply.result.follow_handoff.reason, 'multi_pr_session');
+    assert.equal(opened.reply.result.follow_handoff.active_session_pr_schedules, 1);
+    assert.equal(calls.filter((c) => c === 'schedule_list').length, 1);
+    assert.equal(calls.includes('schedule_create'), false);
+  }
+});
+
+test('Scheme B auto-merge requires explicit human clicks, isolates per-repo scope, rolls back on sync failure, and invalidates on PR changes', async () => {
+  const syncCalls = [];
+  let failSync = false;
+  const { hostApi, rows } = followScheduler();
+  const baseNodeRequest = hostApi.node.request;
+  hostApi.node.request = async (req) => {
+    if (req.method === 'syncAutoMergePolicy') {
+      syncCalls.push(req.params);
+      if (failSync) return { ok: false, error: 'disk full' };
+      return { ok: true, result: { ok: true } };
+    }
+    return baseNodeRequest(req);
+  };
+
+  const rt = mergeablePrRuntime({ hostApi, kv: { prCard: { autoFollow: true } } });
+  rt.viewer.login = 'octocat';
+  // Start with a viewed (unfollowed) card; clicking pr:follow below starts verified follow-up.
+  const cardId = (await rt.tool({ repo: 'octo/repo', pr: 42 })).reply.result.card_id;
+  // Mark publishedHere so clicking pr:follow starts a native schedule directly on this card.
+  const viewedSaved = savedCard(rt, cardId);
+  viewedSaved.publishedHere = true;
+  rt.files.set(`pr-cards/${cardId}.json`, JSON.stringify(viewedSaved));
+
+  // 1) Without verified follow-up, the card must not claim auto-merge is available.
+  assert.doesNotMatch(rt.lastCard(cardId).html, /data-ghost-action="pr:auto-merge-on"/);
+  assert.ok(visibleText(rt.lastCard(cardId).html).some((line) => line.includes(zhCopy.prAutoMergeNeedsFollow)));
+  await rt.click(cardId, 'pr:auto-merge-on');
+  assert.equal(syncCalls.length, 0);
+  assert.equal(savedCard(rt, cardId).autoMerge, undefined);
+  await rt.click(cardId, 'prui:settings');
+  await rt.click(cardId, 'prset:repo-auto-merge');
+  assert.equal(syncCalls.length, 0);
+  assert.ok(visibleText(rt.lastCard(cardId).html).some((line) => line.includes(zhCopy.prAutoMergeNeedsFollow)));
+  await rt.click(cardId, 'pr:follow');
+  assert.equal(rows.size, 1);
+  assert.match(rt.lastCard(cardId).html, /data-ghost-action="pr:auto-merge-on"/);
+
+  // 2) Missing userActionToken is rejected with zero sync calls.
+  await rt.click(cardId, 'pr:auto-merge-on', { userActionToken: undefined });
+  assert.equal(syncCalls.length, 0);
+  assert.equal(savedCard(rt, cardId).autoMerge, undefined);
+
+  // 3) Explicit human click enables per-PR auto-merge and syncs policy.
+  await rt.click(cardId, 'pr:auto-merge-on');
+  assert.equal(syncCalls.length, 1);
+  assert.equal(syncCalls[0].op, 'set-pr');
+  assert.equal(syncCalls[0].repo, 'octo/repo');
+  assert.equal(syncCalls[0].number, 42);
+  assert.equal(syncCalls[0].actor, 'octocat');
+  assert.equal(syncCalls[0].base, 'main');
+  assert.match(rt.lastCard(cardId).html, /data-ghost-action="pr:auto-merge-off"/);
+  assert.ok(visibleText(rt.lastCard(cardId).html).some((line) => line.includes(zhCopy.prAutoMergeActive)));
+
+  // A stopped schedule invalidates a stale card click without persisting policy.
+  rows.get('sch-1').status = 'paused';
+  await rt.click(cardId, 'pr:auto-merge-on');
+  assert.equal(syncCalls.length, 1);
+  rows.get('sch-1').status = 'active';
+
+  // 4) Failed policy clear keeps a pending revocation; later refresh retries even if base returns.
+  rt.pr.baseRef.name = rt.pr.baseRefName = 'release';
+  failSync = true;
+  await rt.tool({ card_id: cardId });
+  assert.equal(savedCard(rt, cardId).autoMerge.revokePending, true);
+  assert.doesNotMatch(rt.lastCard(cardId).html, /data-ghost-action="pr:auto-merge-off"/);
+  rt.pr.baseRef.name = rt.pr.baseRefName = 'main';
+  failSync = false;
+  await rt.tool({ card_id: cardId });
+  assert.equal(savedCard(rt, cardId).autoMerge, undefined);
+  assert.equal(syncCalls.at(-1).op, 'clear-pr');
+
+  // 5) Per-repo toggle requires userActionToken, rolls back on sync failure, and applies strictly to this exact repo.
+  if (!savedCard(rt, cardId).settingsOpen) await rt.click(cardId, 'prui:settings');
+  assert.match(rt.lastCard(cardId).html, /data-ghost-action="prset:repo-auto-merge" data-ghost-toggle="off"/);
+  const syncCountBeforeNoToken = syncCalls.length;
+  await rt.click(cardId, 'prset:repo-auto-merge', { userActionToken: undefined });
+  assert.equal(syncCalls.length, syncCountBeforeNoToken);
+  assert.match(rt.lastCard(cardId).html, /data-ghost-action="prset:repo-auto-merge" data-ghost-toggle="off"/);
+
+  failSync = true;
+  await rt.click(cardId, 'prset:repo-auto-merge');
+  assert.match(rt.lastCard(cardId).html, /data-ghost-action="prset:repo-auto-merge" data-ghost-toggle="off"/);
+  assert.ok(visibleText(rt.lastCard(cardId).html).some((line) => line.includes(zhCopy.prAutoMergeFailed)));
+
+  failSync = false;
+  await rt.click(cardId, 'prset:repo-auto-merge');
+  assert.equal(syncCalls.at(-1).op, 'set-repo');
+  assert.equal(syncCalls.at(-1).repo, 'octo/repo');
+  assert.equal(syncCalls.at(-1).actor, 'octocat');
+  assert.match(rt.lastCard(cardId).html, /data-ghost-action="prset:repo-auto-merge" data-ghost-toggle="on"/);
+  assert.ok(visibleText(rt.lastCard(cardId).html).some((line) => line.includes(zhCopy.prAutoMergeRepoActive)));
+
+  // Another repo sharing a KV with octo/repo enabled MUST NOT inherit octo/repo's auto-merge setting!
+  const otherRt = createPrRuntime({
+    github: prGraphql({ owner: 'other', repo: 'proj', number: 9 }),
+    hostApi,
+    kv: { prCard: { autoMergeRepos: { 'octo/repo': { enabled: true, actor: 'octocat', authorizedAt: 1 } } } },
+  });
+  const otherCard = await otherRt.tool({ repo: 'other/proj', pr: 9 });
+  assert.equal(visibleText(otherRt.lastCard(otherCard.callId).html).some((line) => line.includes(zhCopy.prAutoMergeRepoActive)), false);
+
+  // Toggling off reads persisted enabled state from KV and clears the repo policy.
+  await rt.click(cardId, 'prset:repo-auto-merge');
+  assert.equal(syncCalls.at(-1).op, 'clear-repo');
+  assert.match(rt.lastCard(cardId).html, /data-ghost-action="prset:repo-auto-merge" data-ghost-toggle="off"/);
 });
