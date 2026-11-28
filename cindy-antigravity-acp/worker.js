@@ -47,6 +47,7 @@ const { accountDirProblem, hasVerifiedIsolatedSignIn } = require('./agy-account-
 const { detectAgy, readCustomAgyConfig, runVersion, validateCustomPath, writeCustomAgyPath } = require('./resolve-agy.js');
 const { listModels, readModelSession, rememberModelSession } = require('./agy-models.js');
 const account = require('./agy-account.js');
+const { readUsage, defaultUsageCoolingDown, recordDefaultUsage, resetDefaultUsage } = require('./agy-usage.js');
 
 const HARNESS_ID = 'agy';
 /** Cindy waits 26 s for accountStatus; answer "unknown" before that rather than not at all. */
@@ -104,8 +105,10 @@ let customPathPending = 0;
 let modelSourceRevision = 0;
 let customPathQueue = Promise.resolve();
 let activeLoginPromise = null;
+let activeLoginKey = null;
 
 function clearAccountCaches() {
+  resetDefaultUsage();
   usageReads.clear();
   accountStatusReads.clear();
   rememberedPlans.clear();
@@ -140,8 +143,9 @@ async function applyCustomPath(params) {
 function runAccountLogin(accountDir, timeoutMs) {
   const key = accountDir || '';
   if (customPathPending > 0) return Promise.resolve({ ok: false, error: 'busy' });
-  usageReads.delete(key);
   if (activeLoginPromise) return Promise.resolve({ ok: false, error: 'busy' });
+  activeLoginKey = key;
+  usageReads.delete(key);
   const options = {
     ...(accountDir ? { accountDir } : {}),
     ...(timeoutMs ? { timeoutMs } : {}),
@@ -154,11 +158,15 @@ function runAccountLogin(accountDir, timeoutMs) {
         rememberedPlans.set(key, result.tier.name.trim());
       }
       if (accountDir) signedInAccountDirs.add(accountDir);
+      else resetDefaultUsage();
       reply({ jsonrpc: '2.0', method: 'account-ready', params: {} });
     }
     return result;
   }).finally(() => {
-    if (activeLoginPromise === run) activeLoginPromise = null;
+    if (activeLoginPromise === run) {
+      activeLoginKey = null;
+      activeLoginPromise = null;
+    }
     // A status read that started before the sign-in finished may describe the old state.
     accountStatusReads.delete(key);
     usageReads.delete(key);
@@ -185,13 +193,23 @@ const handlers = {
     const target = targetAccountOf(params, false);
     if (!target) return null;
     const { key, accountDir } = target;
+    if (activeLoginKey === key || (!accountDir && defaultUsageCoolingDown())) return null;
     let read = usageReads.get(key);
     if (!read) {
-      read = require('./agy-usage.js').readUsage(accountDir ? { accountDir } : undefined)
-        .then((result) => (usageReads.get(key) === read ? result : null), () => null)
-        .finally(() => {
-          if (usageReads.get(key) === read) usageReads.delete(key);
-        });
+      read = (async () => {
+        if (!accountDir) {
+          // The provider page can request status and usage concurrently. Share its silent ACP
+          // check and leave time for the 12-second /usage within the host's request deadline.
+          const status = await withDeadline(handlers.accountStatus(params), 10000, null);
+          if (status?.state !== 'signed-in' || usageReads.get(key) !== read) return null;
+        }
+        const result = await readUsage(accountDir ? { accountDir } : undefined).catch(() => null);
+        if (usageReads.get(key) !== read) return null;
+        if (!accountDir) recordDefaultUsage(result);
+        return result;
+      })().finally(() => {
+        if (usageReads.get(key) === read) usageReads.delete(key);
+      });
       usageReads.set(key, read);
     }
     return read;

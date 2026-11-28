@@ -169,12 +169,16 @@ function normalizeCode(value) {
   return typeof value === 'string' ? value.trim().toUpperCase() : '';
 }
 
+function isSignInRequired(error) {
+  return !!error && (error.code === -32000 || AUTH_TEXT.test(error.message || ''));
+}
+
 function classifyAccountErrorInfo({ code, data, text, now }) {
   const reason = isObject(data) ? normalizeCode(data.reason) : '';
   const status = isObject(data) ? normalizeCode(data.status) : '';
   const message = typeof text === 'string' ? text : '';
 
-  if (code === -32000 || reason === 'AUTH_REQUIRED' || status === 'UNAUTHENTICATED' || AUTH_TEXT.test(message)) {
+  if (isSignInRequired({ code, message }) || reason === 'AUTH_REQUIRED' || status === 'UNAUTHENTICATED') {
     return { kind: 'auth-required' };
   }
   if (
@@ -421,4 +425,4 @@ function accountErrorRelay(nowFn = Date.now, options) {
   };
 }
 
-module.exports = { accountErrorRelay, classifyAccountErrorResponse, isolationViolationLine };
+module.exports = { isSignInRequired, accountErrorRelay, classifyAccountErrorResponse, isolationViolationLine };

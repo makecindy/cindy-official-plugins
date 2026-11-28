@@ -69,6 +69,16 @@ function readToken() {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
 }
 
+function afterGate(file, finish) {
+  if (!file || !fs.existsSync(file)) return finish();
+  fs.writeFileSync(file + '.entered', '');
+  const timer = setInterval(() => {
+    if (fs.existsSync(file)) return;
+    clearInterval(timer);
+    finish();
+  }, 10);
+}
+
 if (args.at(-1) === '/usage') {
   // Record stdin closed check and env for assertions.
   const tok = readToken();
@@ -80,6 +90,10 @@ if (args.at(-1) === '/usage') {
       tokenPath: tokenPath(),
       email: tok && tok.id_token_email,
     }) + '\\n');
+  }
+  if (process.env.FAKE_USAGE_FAILURE && fs.existsSync(process.env.FAKE_USAGE_FAILURE)) {
+    afterGate(process.env.FAKE_USAGE_GATE, () => process.exit(1));
+    return;
   }
   if (!tok) {
     process.stderr.write('Authentication required. Please visit the URL to log in:\\n');
@@ -153,12 +167,16 @@ process.stdin.on('data', (chunk) => {
         fs.mkdirSync(decoyDir, { recursive: true, mode: 0o700 });
         fs.writeFileSync(path.join(decoyDir, 'decoy-state'), 'non-empty', { mode: 0o600 });
       }
-      send({ id, result: { _meta: { antigravity: { tier: { name: spec.tier } } } } });
+      afterGate(process.env.FAKE_AUTH_GATE, () => send({ id, result: { _meta: { antigravity: { tier: { name: spec.tier } } } } }));
     } else if (method === 'logout') {
       const file = tokenPath();
       if (file) fs.rmSync(file, { force: true });
       send({ id, result: {} });
     } else if (method === 'session/list' || method === 'session/resume') {
+      if (process.env.FAKE_DEFAULT_STATUS_ERROR && !geminiDir) {
+        send({ id, error: { code: -32603, message: 'OAuth service unavailable' } });
+        continue;
+      }
       if (process.env.FAKE_ISOLATION_PROBE_ERROR === '1' && geminiDir
         && path.basename(path.dirname(geminiDir)).startsWith('cindy-agy-iso-')) {
         // The plugin's empty-directory isolation check cannot reach a verdict.
@@ -436,6 +454,57 @@ describe('agy-account-errors classification', () => {
 });
 
 describe('multi-account worker, ACP entry, remote workspace, and main.js', () => {
+  test('default usage skips print on signed-out or unknown status, including concurrent provider reads', async t => {
+    for (const unknown of [false, true]) {
+      const fx = makeMultiFixture(t, unknown ? { FAKE_DEFAULT_STATUS_ERROR: '1' } : {});
+      const worker = startWorker(fx.env);
+      try {
+        for (let i = 0; i < 2; i++) {
+          const [usage, status] = await Promise.all([worker.call('usage', {}), worker.call('accountStatus', {})]);
+          assert.equal(usage.result, null);
+          assert.deepEqual(status.result, unknown ? null : { state: 'signed-out' });
+        }
+        assert.equal(fs.readFileSync(fx.launchLog, 'utf8').trim().split('\n').length, 2);
+        assert.equal(fs.existsSync(fx.usageLog), false);
+      } finally { await worker.close(); }
+    }
+  });
+
+  test('login clears a saved default cooldown and a late pre-login failure cannot recreate it', async t => {
+    const fx = makeMultiFixture(t);
+    const failure = path.join(fx.dir, 'fail-usage');
+    const usageGate = path.join(fx.dir, 'hold-usage');
+    const authGate = path.join(fx.dir, 'hold-auth');
+    const worker = startWorker({ ...fx.env, FAKE_USAGE_FAILURE: failure, FAKE_USAGE_GATE: usageGate, FAKE_AUTH_GATE: authGate });
+    t.after(() => worker.close());
+    const poll = () => worker.call('usage', {});
+    const login = () => worker.call('accountLogin', { harnessId: 'agy', methodId: 'oauth-personal' });
+    fs.writeFileSync(fx.defaultTokenFile, JSON.stringify({ id_token_email: 'default@example.test' }));
+    fs.writeFileSync(failure, '');
+    assert.equal((await poll()).result, null);
+    fs.rmSync(failure);
+    assert.equal((await poll()).result, null, 'cooldown before sign-in');
+    assert.equal((await login()).result.ok, true);
+    assert.ok((await poll()).result.windows.length);
+
+    fs.writeFileSync(failure, '');
+    fs.writeFileSync(usageGate, '');
+    const stale = poll();
+    await waitFor(() => fs.existsSync(usageGate + '.entered'));
+    fs.writeFileSync(authGate, '');
+    const signingIn = login();
+    await waitFor(() => fs.existsSync(authGate + '.entered'));
+    const launches = fs.readFileSync(fx.usageLog, 'utf8');
+    assert.equal((await poll()).result, null);
+    assert.equal(fs.readFileSync(fx.usageLog, 'utf8'), launches);
+    fs.rmSync(authGate);
+    assert.equal((await signingIn).result.ok, true);
+    fs.rmSync(failure);
+    fs.rmSync(usageGate);
+    assert.equal((await stale).result, null);
+    assert.ok((await poll()).result.windows.length, 'next refresh starts immediately');
+  });
+
   test('worker signs in two isolated accounts independently, deduplicates same email via fingerprint, and reads per-account usage', async (t) => {
     const fx = makeMultiFixture(t);
     const acct1 = path.join(fx.dir, 'acct 1');
@@ -497,6 +566,7 @@ describe('multi-account worker, ACP entry, remote workspace, and main.js', () =>
     const u1 = (await worker.call('usage', { harnessId: 'agy', accountDir: acct1 })).result;
     const u2 = (await worker.call('usage', { harnessId: 'agy', accountDir: acct2 })).result;
     assert.equal(uDefault, null);
+    assert.deepEqual(fs.readFileSync(fx.usageLog, 'utf8').trim().split('\n').map(line => JSON.parse(line).home), [acct1, acct2]);
     assert.equal(u1.windows[0].remainingPercent, 90);
     assert.equal(u2.windows[0].remainingPercent, 25);
 

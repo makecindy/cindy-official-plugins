@@ -14,9 +14,7 @@ const STOP_GRACE_MS = 3_000;
 const MAX_TEXT = 200;
 
 /** ACP's auth_required error (-32000), or an agent message saying sign-in is needed. */
-function isSignInRequired(error) {
-  return Boolean(error) && (error.code === -32000 || /auth|sign.?in|log.?in/i.test(String(error.message || '')));
-}
+const { isSignInRequired } = require('./agy-account-errors.js');
 
 function text(value, max) {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : undefined;

@@ -1,6 +1,9 @@
 'use strict';
 
-const { resolveAgy, spawnAgy, SESSION_SETTINGS, killTree } = require('./resolve-agy.js');
+const { randomUUID } = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const { configFilePath, resolveAgy, spawnAgy, SESSION_SETTINGS, killTree } = require('./resolve-agy.js');
 const { accountDirProblem, hasVerifiedIsolatedSignIn } = require('./agy-account-dir.js');
 
 const NAMED_PERIODS = { hourly: 60, daily: 1440, weekly: 10080 };
@@ -66,7 +69,7 @@ async function readUsage(options) {
   if (accountDir && (accountDirProblem(accountDir, options) || !hasVerifiedIsolatedSignIn(accountDir, options))) return null;
   const executable = resolveAgy(options);
   if (!executable) return null;
-  // A closed stdin pipe signals a non-interactive environment so agy never opens a browser if signed out.
+  // Keep stdin noninteractive. On Windows this alone does not prevent browser OAuth.
   const child = spawnAgy(executable, ['--settings', SESSION_SETTINGS, '--output-format', 'json', '--print', '/usage'], {
     ...options,
     env: usageEnvironment(options),
@@ -101,4 +104,58 @@ async function readUsage(options) {
   }
 }
 
-module.exports = { usageEnvironment, readUsage, usageFromReport, windowMinutesOf };
+// The on-demand worker may be recycled before the next poll. Store only the
+// failure delay and its expiry, never the account or its usage report.
+const MIN_RETRY_MS = 60_000;
+const MAX_RETRY_MS = 15 * 60_000;
+function retryFile() {
+  const config = configFilePath();
+  return config && path.join(path.dirname(config), 'usage-retry.json');
+}
+
+function loadRetry() {
+  try {
+    const file = retryFile();
+    if (!file || fs.statSync(file).size > 256) return null;
+    const { delay, until } = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (Number.isSafeInteger(delay) && delay >= MIN_RETRY_MS && delay <= MAX_RETRY_MS &&
+        Number.isSafeInteger(until) && until <= Date.now() + MAX_RETRY_MS) return { delay, until };
+  } catch { /* Missing or invalid state starts a new retry sequence. */ }
+  return null;
+}
+
+let retry = loadRetry();
+function setRetry(next) {
+  if (!next && !retry) return;
+  retry = next;
+  const file = retryFile();
+  if (!file) return;
+  try {
+    if (!next) {
+      fs.rmSync(file, { force: true });
+      return;
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    const tmp = file + '.' + randomUUID() + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(next), { mode: 0o600, flag: 'wx' });
+    try { fs.renameSync(tmp, file); }
+    finally { fs.rmSync(tmp, { force: true }); }
+  } catch { /* Keep the in-memory cooldown if local storage is unavailable. */ }
+}
+
+function defaultUsageCoolingDown() {
+  return retry && Date.now() < retry.until;
+}
+
+function recordDefaultUsage(result) {
+  if (result) setRetry(null);
+  else {
+    const delay = Math.min(MAX_RETRY_MS, retry ? retry.delay * 2 : MIN_RETRY_MS);
+    setRetry({ delay, until: Date.now() + delay });
+  }
+}
+
+function resetDefaultUsage() { setRetry(null); }
+
+module.exports = { usageEnvironment, readUsage, usageFromReport, windowMinutesOf,
+  defaultUsageCoolingDown, recordDefaultUsage, resetDefaultUsage };

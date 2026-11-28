@@ -3132,11 +3132,75 @@ process.stdin.on('end', () => process.exit(0));
 test('usage polling returns quota and skips CLI self-update on Windows', async (t) => {
   const fixture = makeFixture(t, { extraEnv: { AGY_CLI_DISABLE_AUTO_UPDATE: 'false' } });
   const launchFile = path.join(fixture.dir, 'usage-launch.txt');
-  const worker = startWorker({ ...fixture.env, FAKE_AGY_LAUNCHFILE: launchFile });
+  const state = path.join(fixture.dir, 'state');
+  fs.writeFileSync(state, 'signed-in');
+  const worker = startWorker({ ...fixture.env, FAKE_AGY_LAUNCHFILE: launchFile, FAKE_AGY_STATE: state });
   t.after(() => worker.close());
   const { result } = await worker.call({ jsonrpc: '2.0', id: 1, method: 'usage' });
   assert.deepEqual(result.windows, [{ label: 'Test · weekly', remainingPercent: 50, ...(official ? { windowMinutes: 10080 } : {}) }]);
   assert.equal(fs.readFileSync(launchFile, 'utf8'), isWin ? 'true' : 'false');
+});
+
+if (official) test('quota failures back off across worker restarts and a successful probe resets the delay', async t => {
+  const { dir, env } = makeFixture(t);
+  const clock = path.join(dir, 'clock');
+  const launches = path.join(dir, 'launches');
+  const outcome = path.join(dir, 'outcome');
+  const preload = path.join(dir, 'worker-clock.cjs');
+  fs.writeFileSync(preload, `
+    Date.now = () => Number(require('node:fs').readFileSync(process.env.TEST_CLOCK, 'utf8'));
+  `);
+  // A real child records each launch. Like agy it requires non-terminal input
+  // for a silent read. In timeout mode it stays alive until the worker kills it.
+  const script = path.join(dir, 'fake-agy.js');
+  fs.writeFileSync(script, `
+    const io = require('node:fs');
+    if (process.argv.includes('/usage')) {
+      io.appendFileSync(process.env.TEST_LAUNCHES, Date.now() + '\\n');
+      if (io.fstatSync(0).isCharacterDevice() || io.readFileSync(0).length) process.exit(2);
+      const outcome = io.readFileSync(process.env.TEST_OUTCOME, 'utf8');
+      if (outcome === 'exit') process.exit(3);
+      if (outcome === 'timeout') { setInterval(() => {}, 1000); return; }
+    }
+    ${FAKE_AGY_SOURCE}
+  `);
+  let now = 1_800_000_000_000;
+  const state = path.join(dir, 'state');
+  fs.writeFileSync(state, 'signed-in');
+  const workerEnv = { ...env, FAKE_AGY_STATE: state, TEST_CLOCK: clock, TEST_LAUNCHES: launches, TEST_OUTCOME: outcome,
+    NODE_OPTIONS: '--require "' + preload.split(path.sep).join('/') + '"' };
+  fs.writeFileSync(clock, String(now));
+  let worker = startWorker(workerEnv);
+  t.after(() => worker.close());
+  let id = 0;
+  const poll = () => worker.call({ jsonrpc: '2.0', id: ++id, method: 'usage' }).then(reply => reply.result);
+  const advance = ms => { now += ms; fs.writeFileSync(clock, String(now)); };
+  const started = [];
+  for (const [index, minutes] of [1, 2, 4, 8, 15, 15].entries()) {
+    fs.writeFileSync(outcome, index === 0 ? 'timeout' : 'exit');
+    started.push(now);
+    assert.deepEqual(await Promise.all([poll(), poll()]), [null, null]);
+    if (index === 0) {
+      await worker.close();
+      worker = startWorker(workerEnv);
+    }
+    for (let elapsed = 30_000; elapsed < minutes * 60_000; elapsed += 30_000) {
+      advance(30_000);
+      assert.equal(await poll(), null);
+    }
+    advance(30_000);
+  }
+  fs.writeFileSync(outcome, 'success');
+  started.push(now);
+  assert.equal((await poll()).windows[0].remainingPercent, 50);
+  fs.writeFileSync(outcome, 'exit');
+  started.push(now);
+  assert.equal(await poll(), null);
+  advance(60_000);
+  fs.writeFileSync(outcome, 'success');
+  started.push(now);
+  assert.equal((await poll()).windows[0].remainingPercent, 50);
+  assert.deepEqual(fs.readFileSync(launches, 'utf8').trim().split('\n').map(Number), started);
 });
 
 test('native /usage preserves exhausted groups and ignores model turns and disabled buckets', async () => {
