@@ -5,7 +5,7 @@
  *   GET /secrets           → [{ key, saved, tail? }](只有状态 + 尾 4 位指纹,永远没有值)
  *   PUT /secrets/<key>     → { value } 单向入库(主机 OS 级加密保管)
  *   DELETE /secrets/<key>  → 清除
- * 各凭证(Brave / Tavily / DeepSeek)同构:行结构与文案由 settings.html 的 data-* 驱动,
+ * 各凭证(Brave / Tavily / DeepSeek / AnySearch / TinyFish)同构:行结构与文案由 settings.html 的 data-* 驱动,
  * 本脚本按 .secret 容器统一接线。收单不存值:保存成功后清空输入框、点亮
  * 「已保存」;明文读不回来,想换 key 直接粘贴新值覆盖。
  */
@@ -19,7 +19,7 @@
 var MESSAGES = {
   'zh-CN': {
     cindyAiTitle: '默认使用 Cindy AI 搜索',
-    cindyAiHint: '也可关闭并使用自己的 Brave / Tavily / DeepSeek Key。配置 Tavily Key 后，即使保持 Cindy AI 搜索也会独立启用经用户明确确认的公开网页正文读取。',
+    cindyAiHint: '也可关闭并使用自己的 Brave / Tavily / DeepSeek / AnySearch / TinyFish Key。配置 Tavily Key 后，即使保持 Cindy AI 搜索也会独立启用经用户明确确认的公开网页正文读取。',
     cindyAiAria: '使用 Cindy AI 搜索',
     byoTitle: '自备搜索渠道',
     byoHint: '关闭 Cindy AI 搜索后使用。',
@@ -30,9 +30,13 @@ var MESSAGES = {
     consoleLink: '前往控制台获取 ↗',
     tavilyPageHint: '用于 Tavily 搜索和经用户确认的公开网页正文读取；即使保持 Cindy AI 搜索也可单独使用正文读取。',
     deepSeekHint: '查询最多 128 个 Unicode 字符。搜索按成功请求计费，使用你的 DeepSeek 账户余额。',
+    anySearchHint: '使用你自己的 AnySearch Key；免费额度以 AnySearch 账户为准，搜索只返回摘要。',
+    tinyFishHint: '使用你自己的 TinyFish Key；搜索消耗账户每日免费额度，只返回摘要。',
     emptyPhBrave: '粘贴 BSA 开头的 key',
     emptyPhTavily: '粘贴 tvly- 开头的 key',
     emptyPhDeepSeek: '粘贴 DeepSeek API Key',
+    emptyPhAnySearch: '粘贴 as_sk_ 开头的 key',
+    emptyPhTinyFish: '粘贴 TinyFish API Key',
     emptyPhDefault: '粘贴 key',
     savedWithTail: '{fingerprint};粘贴新值可覆盖',
     savedNoTail: '已保存;粘贴新值可覆盖',
@@ -49,7 +53,7 @@ var MESSAGES = {
   },
   en: {
     cindyAiTitle: 'Use Cindy AI search by default',
-    cindyAiHint: 'Or turn it off and use your own Brave / Tavily / DeepSeek key. A configured Tavily key also enables reading any explicitly confirmed public page, even while Cindy AI search stays on.',
+    cindyAiHint: 'Or turn it off and use your own Brave / Tavily / DeepSeek / AnySearch / TinyFish key. A configured Tavily key also enables reading any explicitly confirmed public page, even while Cindy AI search stays on.',
     cindyAiAria: 'Use Cindy AI search',
     byoTitle: 'Your own search provider',
     byoHint: 'Used when Cindy AI search is off.',
@@ -60,9 +64,13 @@ var MESSAGES = {
     consoleLink: 'Get it from the console ↗',
     tavilyPageHint: 'Used for Tavily search and for reading explicitly confirmed public pages; page reading works independently even while Cindy AI search stays on.',
     deepSeekHint: 'Queries are limited to 128 Unicode characters. Searches are billed per successful request against your DeepSeek account balance.',
+    anySearchHint: 'Uses your own AnySearch key. Free quota follows your AnySearch account, and results are summaries only.',
+    tinyFishHint: 'Uses your own TinyFish key. Search draws on the account daily free allowance and returns summaries only.',
     emptyPhBrave: 'Paste a key starting with BSA',
     emptyPhTavily: 'Paste a key starting with tvly-',
     emptyPhDeepSeek: 'Paste DeepSeek API Key',
+    emptyPhAnySearch: 'Paste a key starting with as_sk_',
+    emptyPhTinyFish: 'Paste TinyFish API Key',
     emptyPhDefault: 'Paste key',
     savedWithTail: '{fingerprint}; paste a new value to replace',
     savedNoTail: 'Saved; paste a new value to replace',
@@ -79,7 +87,7 @@ var MESSAGES = {
   },
   ja: {
     cindyAiTitle: '既定で Cindy AI 検索を使用',
-    cindyAiHint: 'オフにして、自分の Brave / Tavily / DeepSeek キーを使うこともできます。Tavily キーを設定すると、Cindy AI 検索をオンのままにしていても、ユーザーが明示的に確認した公開ページの本文読み取りが有効になります。',
+    cindyAiHint: 'オフにして、自分の Brave / Tavily / DeepSeek / AnySearch / TinyFish キーを使うこともできます。Tavily キーを設定すると、Cindy AI 検索をオンのままにしていても、ユーザーが明示的に確認した公開ページの本文読み取りが有効になります。',
     cindyAiAria: 'Cindy AI 検索を使用',
     byoTitle: '自分で用意する検索プロバイダー',
     byoHint: 'Cindy AI 検索をオフにしたときに使用します。',
@@ -90,9 +98,13 @@ var MESSAGES = {
     consoleLink: 'コンソールで取得 ↗',
     tavilyPageHint: 'Tavily 検索と、ユーザーが明示的に確認した公開ページの本文読み取りに使います。本文読み取りは Cindy AI 検索をオンのままにしていても単独で利用できます。',
     deepSeekHint: 'クエリは最大 128 文字（Unicode 文字単位）です。検索は成功したリクエストごとに課金され、DeepSeek アカウントの残高から支払われます。',
+    anySearchHint: '自分の AnySearch キーを使用します。無料枠は AnySearch アカウントに準じ、検索結果は要約のみです。',
+    tinyFishHint: '自分の TinyFish キーを使用します。検索はアカウントの日次無料枠を消費し、結果は要約のみです。',
     emptyPhBrave: 'BSA で始まるキーを貼り付け',
     emptyPhTavily: 'tvly- で始まるキーを貼り付け',
     emptyPhDeepSeek: 'DeepSeek API キーを貼り付け',
+    emptyPhAnySearch: 'as_sk_ で始まるキーを貼り付け',
+    emptyPhTinyFish: 'TinyFish API キーを貼り付け',
     emptyPhDefault: 'キーを貼り付け',
     savedWithTail: '{fingerprint}; 新しい値を貼り付けると上書きされます',
     savedNoTail: '保存済み; 新しい値を貼り付けると上書きされます',
@@ -109,7 +121,7 @@ var MESSAGES = {
   },
   ko: {
     cindyAiTitle: '기본으로 Cindy AI 검색 사용',
-    cindyAiHint: '끄고 자신의 Brave / Tavily / DeepSeek 키를 사용할 수도 있습니다. Tavily 키를 설정하면 Cindy AI 검색을 켠 상태로 두더라도 사용자가 명시적으로 확인한 공개 페이지의 본문 읽기가 별도로 활성화됩니다.',
+    cindyAiHint: '끄고 자신의 Brave / Tavily / DeepSeek / AnySearch / TinyFish 키를 사용할 수도 있습니다. Tavily 키를 설정하면 Cindy AI 검색을 켠 상태로 두더라도 사용자가 명시적으로 확인한 공개 페이지의 본문 읽기가 별도로 활성화됩니다.',
     cindyAiAria: 'Cindy AI 검색 사용',
     byoTitle: '직접 준비한 검색 공급자',
     byoHint: 'Cindy AI 검색을 끄면 사용됩니다.',
@@ -120,9 +132,13 @@ var MESSAGES = {
     consoleLink: '콘솔에서 발급받기 ↗',
     tavilyPageHint: 'Tavily 검색과 사용자가 명시적으로 확인한 공개 페이지 본문 읽기에 사용됩니다. 본문 읽기는 Cindy AI 검색을 켠 상태로 두더라도 별도로 사용할 수 있습니다.',
     deepSeekHint: '검색어는 Unicode 문자 기준 최대 128자입니다. 검색은 성공한 요청마다 과금되며 DeepSeek 계정 잔액에서 차감됩니다.',
+    anySearchHint: '자신의 AnySearch 키를 사용합니다. 무료 할당량은 AnySearch 계정 기준이며 검색 결과는 요약만 제공됩니다.',
+    tinyFishHint: '자신의 TinyFish 키를 사용합니다. 검색은 계정의 일일 무료 할당량을 사용하며 결과는 요약만 제공됩니다.',
     emptyPhBrave: 'BSA로 시작하는 키 붙여넣기',
     emptyPhTavily: 'tvly-로 시작하는 키 붙여넣기',
     emptyPhDeepSeek: 'DeepSeek API 키 붙여넣기',
+    emptyPhAnySearch: 'as_sk_로 시작하는 키 붙여넣기',
+    emptyPhTinyFish: 'TinyFish API 키 붙여넣기',
     emptyPhDefault: '키 붙여넣기',
     savedWithTail: '{fingerprint}; 새 값을 붙여넣으면 덮어씁니다',
     savedNoTail: '저장됨; 새 값을 붙여넣으면 덮어씁니다',
