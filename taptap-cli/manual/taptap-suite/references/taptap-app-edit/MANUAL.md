@@ -61,7 +61,9 @@
 
 **CRITICAL — 写入前必须 read-before-write:读取真实字段、可见性、必填项、版本状态和最新 `expected`,再构造变更。**
 
-**CRITICAL — 审核、发布、撤审、撤定时、立即上线和重置草稿等高影响动作,必须先 dry-run 或等待用户明确确认。哪些请求不算提审意图,以共享执行规范「提审意图门禁」的唯一词表为准(`ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/shared-execution.md"})`);三步契约流程细节见 `app-edit/references/app-edit-audit-and-history.md`。**
+**CRITICAL — 先判断用户是在准备上线,还是明确要求提交游戏资料审核。准备度查询用 `app analyze-status` 和资料、版本、包体、资质的只读查询。提审复核、机审预检和提交都需要明确的提审意图,即使复核和预检本身是只读。详细词表和步骤见 [提审意图门禁](taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md#提审意图门禁)。**
+
+**CRITICAL — 审核、发布、撤审、撤定时、立即上线和重置草稿等高影响动作,必须先 dry-run 或等待用户明确确认。**
 
 **CRITICAL — 创意工坊升级必须由用户明确确认目标游戏、版本及“升级后无法转回关卡”;dry-run、`yes:true` 或隐私声明确认均不能替代升级确认。常规隐私配置优先交接开发者后台;有限“不处理个人信息”声明仅在用户明确选择且能力支持时办理。**
 
@@ -80,19 +82,19 @@
 | 用户意图 | 首选调用 / 流程 |
 | --- | --- |
 | 创意工坊升级 | 查询条件 → 开发者后台或受限声明办理 → 回流核验 → 单独确认升级 → 提交并读回 |
-| "还差什么 / 能不能提审" | 读取模块、包体、版本、资质和历史审核后生成分层风险清单(读 skill analysis 与 review risk checklist) |
-| 查字段、选项、图片/视频规格 | `call_tool(name:"app get-app-module", args:{dev_id, app_id, data:{module_id:"<module_id>"}})` |
+| "想正式上线 / 还差什么 / 能不能提审" | `call_tool(name:"app analyze-status", args:{developer_id, app_id})` → 按需查询模块、包体、版本、资质和历史审核 → 报告准备度和下一步(读 skill analysis 与 review risk checklist) |
+| 查字段、选项、图片/视频规格 | `call_tool(name:"app get-module", args:{dev_id, app_id, data:{module_id:"<module_id>"}})` |
 | 为 H5 开启 PC 分发(`platform-status`、`region_flag_pc`) | 读模块 → 保留全部现有平台并追加 `PC_OFFICIAL` → 写后立即重读 → 仅当 `region_flag_pc` 已实际返回且 `options` 含 `4` 时才按最新 `expected` 写入;H5 不得使用 `windows` 槽 |
 | 改文字、图片、视频等普通字段 | 读模块详情,带最新 `expected` 调 `app save-changes` |
 | 切换或清空主包体 / Windows 包体 | 确认可编辑草稿 → 必要时 `app create-draft` → 重新 `app list-packages` → `app select-package` / `app clear-package` |
 | 按 Spark version_code 绑定资料页主包体 | `app list-packages` → `app +bind-spark-version` dry-run → 确认后 apply |
-| 提交审核并设置上线方式 | skill analysis → platform-status →(关卡 / TapTap 制造先签 SCE 协议)→ 三步提审:prepare-review-snapshot → precheck-app-review → 确认 → submit-app-review |
+| 提交审核并设置上线方式 | 核对资料风险、分发状态和适用协议 → 复核 → 预检 → 展示结果和上线安排并单独确认 → 提交并读回 |
 | 撤审、撤定时、改时间、重置草稿 | 先确认 version 状态,再预览和确认 |
 | 定时已到但版本仍待上线 | 确认 `status="scheduled"` 且 `release_time <= now`,再确认后 `app publish-scheduled-release` |
 | 从文案文件提取字段、识别图片用途、规划新版资料 | Agent 生成候选,读当前值并确认后写入 |
 | 当前缺少图片素材 | 先询问本地素材;确认没有后询问是否生成候选,转 materials 手册 |
 | 上传本地目录、zip 或多种图片/视频/包体 | 转 materials 手册,上传后再回来写字段或绑定槽位 |
-| 查上一版拒审原因或发版记录 | `app list-app-versions` / `app get-app-version` |
+| 查上一版拒审原因或发版记录 | `app list-versions` / `app get-version` |
 | 包体库、线上包、自测二维码 | 转 packages 手册 |
 | 资质缺口和资质增量审核 | 转 qualification 手册 |
 
@@ -109,13 +111,12 @@
 - 所有包体统一分两条独立执行路径:**包体管理与自测**先用 `get-available-package-types` 取可用类型,再按类型调对应 `list-*` 查包体库与状态,自测二维码直接调 `call_tool(name:"test-qr-code", args:{dev_id, app_id, data:{package_id} | data:{version_code}, output})`,一条命令完成取地址与出图;该路径只读,不提供资料页 `expected`,也不执行绑定。**资料页包体槽位绑定**先确认可编辑草稿(无草稿时核对 `app create-draft` 前置条件并在已有编辑授权内创建,创建后丢弃旧快照重新 `app list-packages`),再按「包体槽位」契约执行(同次 `status=ready` 候选、目标 `available=true`、原样 `expected`、稳定 key dry-run → `yes:true`、写后读回;422 不原样重试且不加 `force:true` 绕过;409 先核对快照与草稿再重读,禁止自动覆盖)。Spark 使用专用 `app +bind-spark-version` 编排相同门禁。两条路径冲突时停止写入并报告 scope / 权限问题;上传成功不等于资料页包体槽位已绑定。
 - TapTap 制造 / Spark 包体必须先在 TapTap 制造创建或更新;官方入口为 `https://maker.taptap.cn/`,面向用户时按共享规范单独一行输出。CLI 不上传或更新 Spark 包,只能把已存在且 ready 的版本绑定到资料页主槽位。
 - 任意图片或视频上传成功后,先完成目标资料字段回填并重新读取;包体上传成功后必须重新读取候选和槽位,用户确认后才能绑定,不能把"上传成功"解释成"已绑定"或"可以提交审核"。
-- 提审意图必须单独确认:泛化准备请求和"正式上线"目标只能触发准备状态检查或提审选项提示;只有用户明确表达"提交审核 / 提审"后才可调用 `app prepare-review-snapshot`,默认展示预审结果后确认提交;用户明确要求跳过预检或继续提交时允许 `app submit-app-review`,最终由服务端校验。
-- 提审固定三步:`app prepare-review-snapshot`(read)→ `app precheck-app-review`(read)→ 用户最终确认后 `app submit-app-review`(write,`yes:true` + 稳定幂等键)。`release_schedule` 只在第 2、3 步传递且必须完全相同(第 1 步不接受);上线方式只支持立即上线或精确定时,模糊季度/档期必须追问具体时间或改为立即上线。任一步 `version_id` 与第一步不一致时回到第一步重读,禁止沿用旧快照。
+- 准备度查询用 `app analyze-status` 和资料、版本、包体、资质的只读查询。只有用户明确说出"提交审核"或"提审"后,才进入 `app prepare-review-snapshot` → `app precheck-review` → 单独最终确认 → `app submit-review`(write,`yes:true` + 稳定幂等键)。用户明确要求跳过预检并提交,或了解风险后明确选择继续提交时,按授权执行,由提交接口做最终校验。`release_schedule` 只在第 2、3 步传递且必须完全相同(第 1 步不接受);上线方式只支持立即上线或精确定时,模糊季度/档期必须追问具体时间或改为立即上线。任一步 `version_id` 与第一步不一致时回到第一步重读,禁止沿用旧快照。
 - 普通游戏提审前按 qualification 手册读取 assessment,开发者认证与豁免以其中的资格结论为准;资格 blocked/unknown 时说明影响与风险,不自行新增客户端硬门禁,最终由正式提交校验。关卡游戏是否豁免以服务端当次返回为准。
-- 预检 HTTP 200 不等于业务前置条件通过;有阻断原因或风险提示时按服务端结果展示,不在客户端增加认证门禁。正式提交明确拒绝时说明服务端原因,不自动重复提交或换幂等键重放;结果未知时先读回版本状态,禁止盲目重试。仅本次 `blockers` 明确为空时说"阻塞项:无";`preaudit_status === "passed"` 且无阻断时说明"提交状态:可提交审核",`rejected` 时同时说明内容风险,`preaudit_status === "unavailable"`(机审暂时不可用、本次没审成)说明"本次预检没得出结论,可稍后重试预检,也可直接提交",不得说成内容未通过或要求改资料。不得原样输出 `Blocker`、`preaudit_passed=true` 等机器字段;完整组合见 audit and history 手册(`ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md"})`);复核返回风险数据不可用且要求确认时展示 warning,`yes:true` 不代表已核对。
-- `precheck-app-review` 不再返回 `required_consents`。SCE《创意工坊内容授权协议》改由 `analyze-app-status` 提前暴露:关卡 / TapTap 制造游戏未签署时返回 `SCE_AGREEMENT_REQUIRED` blocker,体检阶段就展示协议名称与 url,用户明确同意后调 `app agree-sce-agreement`,再重查确认 blocker 消失;`yes:true` 不代表协议同意。
+- 预检按顶层 `ok` 判断是否执行成功,再分别核对 `preaudit_status`、`blockers` 和 `warnings`;只有本次 `blockers` 明确为空时才说"阻塞项:无",`preaudit_status === "unavailable"`(机审暂时不可用、本次没审成)说明"本次预检没得出结论,可稍后重试预检,也可直接提交",不得说成内容未通过或要求改资料。不得原样输出 `Blocker`、`preaudit_passed=true` 等机器字段;完整口径见 audit and history 手册(`ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md"})`)。复核返回风险数据不可用且要求确认时展示 warning,`yes:true` 不代表已核对。
+- SCE《创意工坊内容授权协议》由 `analyze-app-status` 提前暴露:关卡 / TapTap 制造游戏未签署时返回 `SCE_AGREEMENT_REQUIRED` blocker,体检阶段就展示协议名称与 url,用户明确同意后调 `app agree-sce-agreement`,再重查确认 blocker 消失;`yes:true` 不代表协议同意。
 - 发布前逐项说明可见 `region_flag_*` 的真实状态。统一说明:"发布版本不会自动改变分发入口状态。当前仍是'敬请期待'的入口,发布后也会保持'敬请期待';如需开放下载或游玩,请在提审前先调整对应分发状态,随本次版本一起审核生效。"
-- 生命周期动作先用 `app list-app-versions` / `app get-app-version` 读取当前状态;业务事件以 `get-app-version` 的 `last_event`(或 `logs[].event`)为准,`schedule_cancelled` 不是审核驳回。定时版本通常由平台自动发布;若 `status="scheduled"` 且 `release_time <= 当前时间` 仍未上线,可在展示影响并取得明确确认后调用 `app publish-scheduled-release`,成功后重新读取版本与分发状态。人工确认后状态漂移必须重新读取。
+- 生命周期动作先用 `app list-versions` / `app get-version` 读取当前状态;业务事件以 `get-version` 的 `last_event`(或 `logs[].event`)为准,`schedule_cancelled` 不是审核驳回。定时版本通常由平台自动发布;若 `status="scheduled"` 且 `release_time <= 当前时间` 仍未上线,可在展示影响并取得明确确认后调用 `app publish-scheduled-release`,成功后重新读取版本与分发状态。人工确认后状态漂移必须重新读取。
 - 后续检查必须以当前读取结果或写后读回证据为准:此前建议的上传、回填或补充动作,如果没有对应的成功结果和当前状态证据,仍必须列为未完成。创建成功后、资料或素材写后读回后、正式提审前,主动提示用户按规范完善素材(口径同第一部分"创建后素材提醒");确实缺少图片素材时先询问是否有可用的本地素材或真实游戏截图,确认没有后再询问是否需要生成本地候选图,并转 materials 手册,不得为缺失的游戏截图生成虚构画面。游戏资料或版本审核通过不等于素材审核通过,也不等于已经具备首页推荐资格;素材缺口逐项输出口径、本地候选绝对路径和官方规则引用方式见 execution rules 第 9 节。
 - 面向用户报告旧值/新值、保存结果、版本状态、风险和下一步;不默认输出完整 raw JSON 或 schema。
 - 若当前 `status` 表示审核中或等待定时上线,用户动作默认是等待并按 `release_time`/审核结果检查,不要让用户重复上传、重复创建或重复提交。
@@ -137,4 +138,4 @@
 
 ## 不在本手册范围
 
-- 包体库和自测转 packages 手册;测试计划转 test-plan 手册;上架资质转 qualification 手册;图片素材库和本地模型生图转 materials 手册。厂商成员权限仍不在当前 CLI 范围。
+- 包体库和自测转 packages 手册;测试计划转 test-plan 手册;上架资质转 qualification 手册;图片素材库和本地模型生图转 materials 手册;厂商成员与权限转 member 手册。

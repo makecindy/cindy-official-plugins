@@ -1,7 +1,5 @@
 # 上传帖子视频
 
-本文件是 `taptap-community-management` 的「上传帖子视频」场景细节。场景路由、CRITICAL 规则和输出边界以 [community-management 手册](taptap-suite/references/taptap-community-management/MANUAL.md) 为准。
-
 ## 这条路径是什么
 
 `community-management +upload-video <video>` 接收一个本地视频,完成上传与登记,返回发帖可用的 `videoId`。调用方只负责给文件,不需要自己处理上传凭证、分片或二次登记。
@@ -20,7 +18,9 @@ call_tool(name:"community-management +upload-video", args:{
   yes:true})
 ```
 
-`_positional` 里的本地路径必须相对会话工作目录;大文件用 `_timeout_seconds`(最大 870)放宽超时。写调用缺 `dry_run` / `yes` 会被插件拒绝(`CONFIRM_REQUIRED`)。
+`dry_run: true` 在本地预检文件并列出执行计划,不发送上传或登记请求。用户确认后,以相同文件、scope 和幂等意图将 `dry_run` 换成 `yes`;真实上传缺少 `yes` 时返回 `confirmation_required`(exit 10)。`_positional` 里的本地路径必须相对会话工作目录;大文件用 `_timeout_seconds`(最大 870)放宽超时。
+
+CLI 启动时可能联网刷新命令目录。预览中的 `networkRequests` 是确认执行后预计用于上传和登记的请求数。
 
 ## 和另外两条视频链路的区别
 
@@ -63,7 +63,7 @@ call_tool(name:"community-management +upload-video", args:{
 
 ## 拿到 `videoId` 之后
 
-`videoId` 只是发帖句柄,怎么落地见 [publish post](taptap-suite/references/taptap-community-management/references/publish-post.md)。引用时注意类型不同:
+仅上传时交付 `videoId` 和已核实的处理状态。任务还包含撰写或发布帖子时,再读 [发帖流程](taptap-suite/references/taptap-community-management/references/publish-post.md) 并按下表引用。
 
 | 用途 | 字段 | 类型 |
 | --- | --- | --- |
@@ -74,7 +74,7 @@ call_tool(name:"community-management +upload-video", args:{
 ## 限制与重试
 
 - 本地规则:扩展名 `.mp4` / `.mov`,最大 5 GB,路径必须在当前工作目录内。不满足时在本地就失败,不会发出请求。
-- 同一文件、同一 App、同一账号重复执行会复用同一次上传意图;显式传 `idempotency_key` 可以固定这次意图,续跑时沿用同一个 key。
+- 省略 `idempotency_key` 时,CLI 按文件内容和调用 scope 派生 key。显式传 key 时,同一意图续跑沿用原值。
 - 上传成功但登记失败时,命令会给出**已存储的对象句柄、文件名和原幂等键**。只用这三样调用 `complete-community-moment-video-upload` 补登记,不要重跑整条命令——重跑会重新传输整个文件:
 
   ```text

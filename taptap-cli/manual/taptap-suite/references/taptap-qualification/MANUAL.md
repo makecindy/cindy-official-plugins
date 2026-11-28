@@ -2,24 +2,25 @@
 
 本手册用于查询游戏上架资质、补充非敏感材料和办理资质审核。资料版本的提审与发布由 app-edit 手册负责。命令行示例按 taptap-suite 手册的映射表转成 call_tool 调用。
 
-**CRITICAL — 使用 `qualification get-qualification-assessment` 读取资质要求、状态、材料摘要和确认标识。`read_state=partial/unknown` 或材料域返回 `read_error` 时,保留已查明的结果并列出无法确认项;不能凭游戏类型或经验补全结论。**
+**CRITICAL — 使用 `qualification get-assessment` 读取资质要求、状态、材料摘要和确认标识。`read_state=partial/unknown` 或材料域返回 `read_error` 时,保留已查明的结果并列出无法确认项;不能凭游戏类型或经验补全结论。**
 
 **CRITICAL — 敏感资质只转开发者后台页面填写。命中敏感资质类型或敏感字段时,不通过 CLI 直写,也不声称已保存。**
 
-**资质审核路径 — H5、Spark、Tap 小游戏的隐私与 ICP,以及 Tap 小游戏的防沉迷走专用材料流程;按服务端返回的办理域执行;小游戏隐私草稿可在开发者后台填写后由 CLI 接续独立提审/撤回,备案可读进度,具体能力先读 schema,见 [全类型交接接续](taptap-suite/references/taptap-qualification/references/material-handoff-resume.md)。纯 H5 / Spark 的防沉迷不因此转后台,是否必交与能否保存、提审分别读取需求和动作条件。创意工坊升级中的“不处理个人信息”例外:按 app-edit 手册的 level upgrade 明确确认并提交独立隐私审核,复杂情况仍转开发者后台,不能用 `qualification save-qualification-draft` 代替。其余增量审核用 `qualification submit-qualification` / `withdraw-qualification`,不走整版审核。**
+**资质审核路径 — H5、Spark、Tap 小游戏的隐私与 ICP,以及 Tap 小游戏的防沉迷走专用材料流程;按服务端返回的办理域执行;小游戏隐私草稿可在开发者后台填写后由 CLI 接续独立提审/撤回,备案可读进度,具体能力先读 schema,见 [全类型交接接续](taptap-suite/references/taptap-qualification/references/material-handoff-resume.md)。纯 H5 / Spark 的防沉迷不因此转后台,是否必交与能否保存、提审分别读取需求和动作条件。创意工坊升级中的“不处理个人信息”例外:按 app-edit 手册的 level upgrade 明确确认并提交独立隐私审核,复杂情况仍转开发者后台,不能用 `qualification save-draft` 代替。其余增量审核用 `qualification submit-qualification` / `withdraw-qualification`,不走整版审核。**
 
 **CRITICAL — 从 `assessment.requirements` 读取完整清单,包含适龄。`required` 项以 `effective_approved` 判断当前资质是否有效:false 列为待完成,null 或缺失列为无法确认;`status` 单独说明本次申请的审核进度。存在未知事实、包体冲突或无法确认的提交资格时,不能总结为齐全。CLI 与插件手册不自行计算业务规则。**
 
-**CRITICAL — 先读取已保存的业务事实,只询问缺失或冲突内容。缺失值不能按 false 处理,只读分析不自动保存。用户确认修改后,通过 `app_features` 保存并重新分析;服务端报告包体冲突时,展示实际类型与声明,指引用户在开发者后台核对。**
+**CRITICAL — 每次评估按[包体联网检测](taptap-suite/references/taptap-qualification/references/qualification-analysis.md#包体联网检测)主动核对扫描与联网声明。只询问未知、冲突或需纠正的事实。包体冲突时展示绑定与声明,引导后台核对。确认后只保存对应字段并回读。**
 
 ## 快速决策
 
 | 用户意图 | 首选调用 / 流程 |
 | --- | --- |
 | 缺 `developerId` / `appId` | 转 identity 手册查候选,不猜 ID |
-| 查询还缺哪些资质、能否满足预约/测试/上线目标 | 先走 app-edit 手册的 `app analyze-app-status`(资料问题),再 `qualification get-qualification-assessment`(完整材料与分域状态) |
-| 用户纠正联网、内购、AI、IP 等事实 | 先读取已保存事实,确认变更后用 schema 支持的 `app_features` 保存并重算 |
-| 保存版号、备案、隐私、AI、软著等非敏感材料 | `qualification save-qualification-draft`,用本次 assessment 的 snapshot 作 expected_snapshot,先 dry_run |
+| 查询还缺哪些资质、能否满足预约/测试/上线目标 | 先走 app-edit 手册的 `app analyze-app-status`(资料问题),再 `qualification get-assessment`(完整材料与分域状态) |
+| 试算或纠正文字剧情模拟、联网、内购 | 只问影响时试算;确认要改时保存并回读该值及材料必需原因 |
+| 设置发布目标、核对 Windows 试玩或免费测试条件 | 按预约、测试、正式上线目标核对;明确要求保存时更新目标 |
+| 保存版号、备案、隐私、AI、软著等非敏感材料 | `qualification save-draft`,用本次 assessment 的 snapshot 作 expected_snapshot,先 dry_run |
 | 工具要求人工填写或涉及主体/证件/联系人 | 停止 CLI 写入并交接开发者后台资质页 |
 | 适龄保存、提审、撤回 | schema 支持时使用独立 age-grade 命令;命令不支持时由用户在开发者后台办理,完成后 CLI 查询确认 |
 | 提交资质增量审核 | `qualification submit-qualification`,先 dry_run |
@@ -33,17 +34,17 @@
 call_tool(name:"app list-packages", args:{developer_id:"<developerId>", app_id:"<appId>"})
 
 # 读取完整资质评估(只接受 scope,不接受资质事实输入)
-call_tool(name:"qualification get-qualification-assessment", args:{developer_id:"<developerId>", app_id:"<appId>"})
+call_tool(name:"qualification get-assessment", args:{developer_id:"<developerId>", app_id:"<appId>"})
 
 # 保存非敏感材料草稿(先预览;expected_snapshot 用本次 assessment 的 snapshot)
-call_tool(name:"qualification save-qualification-draft", args:{
+call_tool(name:"qualification save-draft", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{ qualification:{ qualification_type:"<type>", ... }, expected_snapshot:"<snapshot>" },
   idempotency_key:"<draft-key>", dry_run:true })
 
 # 读取当前 schema(按需逐个确认)
-call_tool(name:"schema", args:{_positional:["qualification","get-qualification-assessment"]})
-call_tool(name:"schema", args:{_positional:["qualification","save-qualification-draft"]})
+call_tool(name:"schema", args:{_positional:["qualification","get-assessment"]})
+call_tool(name:"schema", args:{_positional:["qualification","save-draft"]})
 ```
 
 适龄使用独立命令,先读 schema 再调用;命令不可用时转开发者后台,不通过普通资料字段写入:
