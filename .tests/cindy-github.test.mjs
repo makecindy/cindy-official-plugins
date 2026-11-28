@@ -2443,13 +2443,27 @@ test('a rejected handoff releases the reservation but an unknown handoff retains
 });
 
 test('a stop report cannot reapply deferred post-publication auto-follow settings', async () => {
-  const runtime = createPrRuntime({ github: prGraphql(), kv: { prCard: { autoFollow: true } } });
+  const options = { github: prGraphql(), kv: { prCard: { autoFollow: true } }, kvFails: true };
+  const runtime = createPrRuntime(options);
   const ask = await runtime.tool({ repo: 'octo/repo', head: 'feature' });
-  const stopped = await runtime.tool({ card_id: ask.callId, pr: 42, following: false, claim_follow: true });
+  await runtime.tool({ card_id: ask.callId, pr: 42 });
+  await runtime.tool({ card_id: ask.callId, following: true });
+  options.kvFails = false;
+  const stopped = await runtime.tool({ card_id: ask.callId, following: false, claim_follow: true });
   assert.equal(stopped.reply.result.follow_claimed, false);
   assert.equal(stopped.reply.result.todo, undefined);
   const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
   assert.equal(other.reply.result.follow_claimed, true);
+});
+
+test('publishing from an ask card still applies auto-follow even when following: false is passed', async () => {
+  const runtime = createPrRuntime({ github: prGraphql(), kv: { prCard: { autoFollow: true } } });
+  const ask = await runtime.tool({ repo: 'octo/repo', head: 'feature' });
+  const opened = await runtime.tool({ card_id: ask.callId, pr: 42, following: false });
+  assert.equal(opened.reply.result.todo.length, 1);
+  assert.match(opened.reply.result.todo[0], /https:\/\/github\.com\/octo\/repo\/pull\/42/);
+  const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(other.reply.result.disposition, 'existing_task');
 });
 
 test('a task with its own legacy duplicate follow record can still stop it while another task is active', async () => {
@@ -4092,9 +4106,9 @@ test('viewing an existing red PR does not start following; explicitly clicking h
   assert.equal(other.reply.result.disposition, 'existing_task');
 });
 
-test('publication without an ask card is distinct from viewing a PR or declining follow-up', async () => {
+test('publication applies auto-follow even if following: false is passed, while viewing stays read-only', async () => {
   for (const [args, enabled, expected] of [
-    [{}, true, 0], [{ published: true }, false, 0], [{ published: true, following: false }, true, 0],
+    [{}, true, 0], [{ published: true }, false, 0], [{ published: true, following: false }, true, 1],
     [{ published: true }, true, 1],
   ]) {
     const { hostApi, rows } = followScheduler();
@@ -4115,18 +4129,18 @@ test('a dispatcher keeps its ask card when publication follow-up belongs in a de
   assert.equal(rows.size, 0);
 });
 
-test('first publish pr_card respects following: false and binds schedule to the dedicated task after source settings check', async () => {
-  // Scenario 1: publish-only / explicitly stopped — first publish call passes following: false
+test('first publish pr_card does not let following: false suppress auto-follow and binds schedule to the dedicated task after source settings check', async () => {
+  // Scenario 1: even if the agent passes following: false on first publish, saved auto_follow still starts follow-up
   {
     const { hostApi, rows, calls } = followScheduler();
     const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
     const first = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, following: false });
-    assert.equal(first.reply.result.follow_state, undefined);
-    assert.equal(rows.size, 0);
-    assert.equal(calls.includes('schedule_create'), false);
+    assert.equal(first.reply.result.follow_state, 'active');
+    assert.equal(rows.size, 1);
+    assert.equal(calls.filter((c) => c === 'schedule_create').length, 1);
     const refresh = await rt.tool({ card_id: first.callId });
-    assert.equal(refresh.reply.result.follow_state, undefined);
-    assert.equal(rows.size, 0);
+    assert.equal(refresh.reply.result.follow_state, 'active');
+    assert.equal(rows.size, 1);
   }
 
   // Scenario 2: group chat / unrelated source task reads pr_follow_settings first,
@@ -4158,7 +4172,7 @@ test('first publish pr_card respects following: false and binds schedule to the 
   }
 });
 
-test('ordinary refresh preserves publish-time following: false after settings become readable again', async () => {
+test('ordinary refresh starts auto-follow after settings recover even if initial publish passed following: false', async () => {
   for (const withScheduler of [true, false]) {
     const scheduler = withScheduler ? followScheduler() : null;
     const options = {
@@ -4177,11 +4191,17 @@ test('ordinary refresh preserves publish-time following: false after settings be
     options.kvFails = false;
     const refreshed = await rt.tool({ card_id: first.callId });
     assert.equal(refreshed.reply.ok, true);
-    assert.equal(refreshed.reply.result.follow_state, undefined);
-    assert.deepEqual(refreshed.reply.result.todo, [fill(zhCopy.prTodoRename, { title: '#42 Built-in PR skill' })]);
     if (scheduler) {
-      assert.equal(scheduler.rows.size, 0);
-      assert.equal(scheduler.calls.includes('schedule_create'), false);
+      assert.equal(refreshed.reply.result.follow_state, 'active');
+      assert.deepEqual(refreshed.reply.result.todo, [fill(zhCopy.prTodoRename, { title: '#42 Built-in PR skill' })]);
+      assert.equal(scheduler.rows.size, 1);
+      assert.equal(scheduler.calls.filter((c) => c === 'schedule_create').length, 1);
+    } else {
+      assert.equal(refreshed.reply.result.follow_state, undefined);
+      assert.deepEqual(refreshed.reply.result.todo, [
+        fill(zhCopy.prTodoRename, { title: '#42 Built-in PR skill' }),
+        fill(zhCopy.prTodoFollow, { url: 'https://github.com/octo/repo/pull/42' }),
+      ]);
     }
   }
 });
@@ -6032,9 +6052,9 @@ test('source task heals a stale pre-upgrade peer card and switches to read-only 
     const { hostApi, calls, rows } = followScheduler({ skillDir, platform: 'darwin' });
     const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true } } });
 
-    // Source task opened the PR with following: false (later stuck on prOwnershipUnknown),
+    // Source task displayed a dispatcher card (later stuck on prOwnershipUnknown),
     // while the dedicated task's card was left with a pre-upgrade single-quote hook error.
-    const orig = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, following: false, session_context: { session_id: 's-orig' } });
+    const orig = await rt.tool({ repo: 'octo/repo', pr: 42, published: false, session_context: { session_id: 's-orig' } });
     const follow = await rt.tool({ repo: 'octo/repo', pr: 42, following: true, session_context: { session_id: 's-follow' } });
 
     const origKey = `pr-cards/${orig.callId}.json`;
@@ -6265,7 +6285,8 @@ test('A1 decoupling hands off to an independent worktree PR task only for settin
     assert.equal(rows.size, 0);
   }
 
-  // 4) Same session already holding another active PR schedule decouples with reason='multi_pr_session'.
+  // 4) Same session already holding another active PR schedule decouples with reason='multi_pr_session'
+  // even if the agent mistakenly passed following: false at publish time.
   {
     const { hostApi, calls, rows } = followScheduler();
     rows.set('sch-other', taskSchedule('sch-other', 's1', {
@@ -6274,7 +6295,7 @@ test('A1 decoupling hands off to an independent worktree PR task only for settin
     }));
     rows.get('sch-other').prTrigger = { url: 'https://github.com/octo/repo/pull/10', change: 'any' };
     const rt = createPrRuntime({ github: prGraphql(), hostApi, kv: { prCard: { autoFollow: true, autoRename: true } } });
-    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true });
+    const opened = await rt.tool({ repo: 'octo/repo', pr: 42, published: true, following: false });
     assert.equal(opened.reply.result.follow_handoff.recommended, true);
     assert.equal(opened.reply.result.follow_handoff.reason, 'multi_pr_session');
     assert.equal(opened.reply.result.follow_handoff.active_session_pr_schedules, 1);
@@ -6299,7 +6320,12 @@ test('Scheme B auto-merge requires explicit human clicks, isolates per-repo scop
 
   const rt = mergeablePrRuntime({ hostApi, kv: { prCard: { autoFollow: true } } });
   rt.viewer.login = 'octocat';
-  const cardId = (await rt.tool({ repo: 'octo/repo', pr: 42, published: true, following: false })).reply.result.card_id;
+  // Start with a viewed (unfollowed) card; clicking pr:follow below starts verified follow-up.
+  const cardId = (await rt.tool({ repo: 'octo/repo', pr: 42 })).reply.result.card_id;
+  // Mark publishedHere so clicking pr:follow starts a native schedule directly on this card.
+  const viewedSaved = savedCard(rt, cardId);
+  viewedSaved.publishedHere = true;
+  rt.files.set(`pr-cards/${cardId}.json`, JSON.stringify(viewedSaved));
 
   // 1) Without verified follow-up, the card must not claim auto-merge is available.
   assert.doesNotMatch(rt.lastCard(cardId).html, /data-ghost-action="pr:auto-merge-on"/);

@@ -104,7 +104,7 @@
     },
     {
       "name": "pr_card",
-      "description": "在 Cindy 对话中展示 PR 卡片。发布前传 repo、head、base，可附 commits 和 files。当前任务成功发布后传 published=true 和 pr，有原卡片时带上 card_id。开启发完自动跟进且 PR 为非草稿时，卡片在支持的宿主上直接启动跟进；若当前会话开启了独立跟进、正处于活跃 /goal 或已绑定其他活跃 PR 调度，卡片返回 follow_handoff 与 todo，请按 pr 技能交接给带隔离 worktree 的独立 PR 任务并在交接后刷新原卡片，勿将调度绑回当前繁忙会话或改名原会话。用户明确只要求发布时传 following=false。仅查看已有 PR 时省略 published。若返回 follow_state，跟进由卡片管理，请勿另建任务。active 为运行中，paused 为已暂停，stopped 为已停止，failed 为启动或核验失败，unverified 为状态待核实。若 unverified 同时返回 legacy_hook_repair，将其 schedule_id 和完整 command 原样告知用户，请用户在自动化设置中更换命令、保留原超时，勿自动改写。旧宿主仅在未返回 follow_state 时按 todo 交接；另建任务前以 claim_follow=true 申请并确认 follow_claimed=true。existing_task 表示已有其他任务负责，卡片中的入口仅用于导航。renamed 和 following 只报告已核实完成的操作。后台轮次用 card_id 刷新，提醒时可用 to_latest。 回执 follow_workflow 提供随包跟进说明和检查器的读取入口；ghost_manual 未声明手册时沿该入口读取，勿自编脚本。",
+      "description": "在 Cindy 对话中展示 PR 卡片。发布前传 repo、head、base，可附 commits 和 files。当前任务成功发布后传 published=true 和 pr，有原卡片时带上 card_id。开启发完自动跟进且 PR 为非草稿时，卡片在支持的宿主上直接启动跟进，following=false 不会关闭自动跟进或解耦交接；若当前会话开启了独立跟进、正处于活跃 /goal 或已绑定其他活跃 PR 调度，卡片返回 follow_handoff 与 todo，请按 pr 技能交接给带隔离 worktree 的独立 PR 任务并在交接后刷新原卡片，勿将调度绑回当前繁忙会话或改名原会话。仅查看已有 PR 时省略 published。若返回 follow_state，跟进由卡片管理，请勿另建任务。active 为运行中，paused 为已暂停，stopped 为已停止，failed 为启动或核验失败，unverified 为状态待核实。若 unverified 同时返回 legacy_hook_repair，将其 schedule_id 和完整 command 原样告知用户，请用户在自动化设置中更换命令、保留原超时，勿自动改写。旧宿主仅在未返回 follow_state 时按 todo 交接；另建任务前以 claim_follow=true 申请并确认 follow_claimed=true。existing_task 表示已有其他任务负责，卡片中的入口仅用于导航。renamed 和 following 只报告已核实完成的操作。后台轮次用 card_id 刷新，提醒时可用 to_latest。 回执 follow_workflow 提供随包跟进说明和检查器的读取入口；ghost_manual 未声明手册时沿该入口读取，勿自编脚本。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -163,7 +163,7 @@
           },
           "following": {
             "type": "boolean",
-            "description": "后台跟进已开启(true)或已停止(false)"
+            "description": "仅用于汇报已核实的跟进开启(true)或停止(false)；发 PR 时不传，不会屏蔽「发完自动跟进」或解耦交接"
           },
           "to_latest": {
             "type": "boolean",

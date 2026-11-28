@@ -5439,6 +5439,8 @@ async function prCardTool(args, callId, fromLegacyStop) {
     } catch (err) { return fail(t('prScheduleFailed', { detail: String(err.message || err) })); }
   }
   var deferFollowing = hasCardScheduler() && status && (legacyFollow || retryScheduleError);
+  var wasPendingStop = card.pending === 'stop';
+  var hadFollowedBefore = Boolean(card.followedEver || card.following);
   if (typeof a.following === 'boolean') {
     if (!a.following) {
       if (unverifiedLegacyFollow(card) || !deferFollowing) {
@@ -5462,7 +5464,8 @@ async function prCardTool(args, callId, fromLegacyStop) {
       }
     }
     card.scheduleAction = null;
-    card.followDeclined = !a.following;
+    if (a.following) card.followDeclined = false;
+    else if (wasPendingStop || hadFollowedBefore) card.followDeclined = true;
     if (card.pending === 'follow' || card.pending === 'resume' || card.pending === 'stop') card.pending = null;
   }
   card.legacyHookRepair = null;
@@ -5509,7 +5512,7 @@ async function prCardTool(args, callId, fromLegacyStop) {
   if (card.stage === 'open' && !card.settingsApplied && !settings.unreadable) {
     card.settingsApplied = true;
     card.publishedHere = true;
-    var wantsAutoFollow = !legacyFollow && settings.autoFollow && a.following !== false && !card.followDeclined && card.pending !== 'stop' && !card.following && !card.scheduleId && !card.pr.draft;
+    var wantsAutoFollow = !legacyFollow && settings.autoFollow && !card.followDeclined && !wasPendingStop && card.pending !== 'stop' && !card.following && !card.followedEver && !card.scheduleId && !card.pr.draft;
     var decoupleReason = null;
     var otherActivePrSchedules = 0;
     if (wantsAutoFollow && a.published === true) {
