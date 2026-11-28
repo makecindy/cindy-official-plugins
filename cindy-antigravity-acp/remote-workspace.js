@@ -43,8 +43,8 @@
  *    agy expands into the file at `path` in rule text, is made inert so it cannot pull a file of this
  *    computer into the conversation.
  *
- * From agy 1.5.19 on macOS with the default account, the session runs under agy's default agent, held in by
- * lifecycle hooks. Since agy 1.5.17 a session under a custom agent, its subagents included, uses up
+ * From agy 1.5.19 on macOS and Windows with the default account, the session runs under agy's default
+ * agent, held in by lifecycle hooks. Since agy 1.5.17 a session under a custom agent, its subagents included, uses up
  * the Gemini quota four times as fast as one under the default agent (google-antigravity/
  * antigravity-cli#1890: intended, not a regression). Measured with the real CLI on 2026-11-28 and
  * 2026-11-29: the same task took about a third of the quota under the default agent, although its
@@ -55,8 +55,11 @@
  *  - A hook that fails (non-zero exit, timeout, output that is not JSON) also stops the tool, but a
  *    hook that prints nothing lets it run. The hook therefore only prints a file of this launch
  *    whose content is fixed (`cat`, run in `.agents/`, where agy runs hooks); without the file
- *    `cat` fails and the tool is stopped. No program of the plugin runs: in Cindy this entry runs
- *    inside Cindy's own process, which cannot run a script, and the computer may have no Node.
+ *    `cat` fails and the tool is stopped. On Windows agy runs a hook with `cmd /c`, which has no
+ *    `cat` or `:`, so the commands there are `type` and `type nul >` (checked on Windows 11 with
+ *    agy 1.5.19: same output, exit code 1 for a missing file). No program of the plugin runs: in
+ *    Cindy this entry runs inside Cindy's own process, which cannot run a script, and the computer
+ *    may have no Node.
  *  - The hook's `matcher` is matched against the whole tool name. It is built to match every name
  *    except the tools of this task's MCP servers (`mcp_<server>_…`) and agy's own tools that touch
  *    no computer, so a tool agy adds later is stopped as well.
@@ -68,10 +71,17 @@
  *  - A resumed session loads the hooks of the directory its process starts in. New instructions
  *    on resume are prepended to its first prompt, since SessionStart does not fire on resume.
  *  - The default agent uses a private Gemini directory, so the host account's configured MCP
- *    servers and plugins are not loaded. The macOS keychain still authenticates this session.
+ *    servers and plugins are not loaded. The default account's sign-in is not in that directory:
+ *    the macOS keychain or the Windows Credential Manager still authenticates this session. (agy
+ *    started from an SSH session looks for a token file instead, finds none in the private
+ *    directory and asks to sign in; on Windows as on macOS this is a known limit.) Its
+ *    conversation history is linked in: a symbolic link on macOS, a junction on Windows (a
+ *    directory symbolic link needs administrator rights or Developer Mode there; removing the
+ *    launch directory removes the junction only, not the history it points to).
  * Not hidden in either mode: agy names the skills of its home directory (`~/.agents/skills`; for
  * the default account the user's own) to the model, with their descriptions. `skills.json` cannot
- * filter them, and another home directory breaks the default account's sign-in (macOS keychain).
+ * filter them, and another home directory breaks the default account's sign-in (macOS keychain,
+ * Windows Credential Manager).
  *
  * Nothing persistent changes: the definition or hooks live in a private directory of this one
  * launch, removed when the task ends. The user's Antigravity settings, sign-in and agents are untouched.
@@ -203,9 +213,33 @@ function fullToolsSupported(version) {
   return versionAtLeast(version, FULL_TOOLS_MIN_VERSION);
 }
 
-/** Whether the isolated default-agent mode has been checked on this platform. */
+/**
+ * Whether the isolated default-agent mode has been checked on this platform: its sign-in with an
+ * empty Gemini directory and its hook commands (macOS and Windows; Linux has not been checked).
+ */
 function hooksSupported(version, platform = process.platform) {
-  return platform === 'darwin' && versionAtLeast(version, HOOKS_MIN_VERSION);
+  return (platform === 'darwin' || platform === 'win32') && versionAtLeast(version, HOOKS_MIN_VERSION);
+}
+
+/**
+ * Whether a remote task runs under the default agent and the hooks: the default account only. An
+ * added account has its own Gemini directory, which the isolated mode would replace.
+ */
+function usesDefaultAgent(host, platform = process.platform) {
+  return !host.accountDir && hooksSupported(host.agyVersion, platform);
+}
+
+/** The arguments of the agy process that runs the session, after the constant ACP arguments. */
+function sessionArgs(acpArgs, dir, hooked) {
+  return hooked ? [...acpArgs, '--gemini-dir', path.join(dir, '.gemini')] : [...acpArgs, '--agent', AGENT_NAME];
+}
+
+/**
+ * How the private Gemini directory links agy's conversation history: Windows creates a directory
+ * symbolic link only with administrator rights or Developer Mode, a junction without either.
+ */
+function historyLinkType(platform = process.platform) {
+  return platform === 'win32' ? 'junction' : 'dir';
 }
 
 /** A private, otherwise empty directory agy runs in for this task; it holds the agent definition. */
@@ -414,22 +448,40 @@ function hookMatcher(serverNames) {
 }
 
 /**
+ * The hook commands: print a file, and (SessionStart) leave the marker. agy runs them with `sh -c`
+ * on macOS and `cmd /c` on Windows, in `.agents/`; a missing file fails the command either way.
+ */
+function hookCommands(platform = process.platform) {
+  if (platform === 'win32') {
+    return {
+      sessionStart: `type ${HOOK_START_FILE} && type nul > ${HOOK_MARKER_FILE}`,
+      preToolUse: `type ${HOOK_DENY_FILE}`,
+    };
+  }
+  return {
+    sessionStart: `cat ${HOOK_START_FILE} && : > ${HOOK_MARKER_FILE}`,
+    preToolUse: `cat ${HOOK_DENY_FILE}`,
+  };
+}
+
+/**
  * The hooks of a session under the default agent (see the top of this file): `PreToolUse` prints a
  * fixed `deny` for every tool `hookMatcher` names, `SessionStart` prints the instructions and leaves
  * the marker. Both only print files written here, from `.agents/`, where agy runs them.
  */
-function writeRemoteHooks(dir, serverNames, { instructions = '' } = {}) {
+function writeRemoteHooks(dir, serverNames, { instructions = '', platform = process.platform } = {}) {
   const agents = path.join(dir, '.agents');
   fs.mkdirSync(agents, { recursive: true });
   fs.writeFileSync(path.join(agents, HOOK_DENY_FILE), `${JSON.stringify({ decision: 'deny', reason: HOOK_DENY_REASON })}\n`, 'utf8');
   const text = remoteInstructions(serverNames, { subagentType: HOOKS_SUBAGENT_TYPE, instructions });
   fs.writeFileSync(path.join(agents, HOOK_START_FILE), `${JSON.stringify({ injectSteps: [{ systemMessage: { systemMessage: text } }] })}\n`, 'utf8');
+  const commands = hookCommands(platform);
   const hooks = {
     [HOOK_NAME]: {
-      SessionStart: [{ type: 'command', command: `cat ${HOOK_START_FILE} && : > ${HOOK_MARKER_FILE}`, timeout: HOOK_TIMEOUT_SECONDS }],
+      SessionStart: [{ type: 'command', command: commands.sessionStart, timeout: HOOK_TIMEOUT_SECONDS }],
       PreToolUse: [{
         matcher: hookMatcher(serverNames),
-        hooks: [{ type: 'command', command: `cat ${HOOK_DENY_FILE}`, timeout: HOOK_TIMEOUT_SECONDS }],
+        hooks: [{ type: 'command', command: commands.preToolUse, timeout: HOOK_TIMEOUT_SECONDS }],
       }],
     },
   };
@@ -731,7 +783,7 @@ function startRemoteWorkspace(agyPath, host) {
   });
 
   const launch = (args, launchOptions) => {
-    const isolate = !host.accountDir && hooksSupported(host.agyVersion);
+    const isolate = usesDefaultAgent(host);
     const geminiDir = path.join(dir, '.gemini');
     if (isolate) {
       // Keep conversation history available when Cindy resumes in a fresh launch directory.
@@ -743,7 +795,7 @@ function startRemoteWorkspace(agyPath, host) {
         const source = path.join(original, name);
         fs.mkdirSync(source, { recursive: true });
         const link = path.join(appData, name);
-        if (!fs.existsSync(link)) fs.symlinkSync(source, link, 'dir');
+        if (!fs.existsSync(link)) fs.symlinkSync(source, link, historyLinkType());
       }
     }
     const child = spawnAgy(agyPath, args, {
@@ -821,9 +873,9 @@ function startRemoteWorkspace(agyPath, host) {
     }
     try {
       const names = servers.map((server) => server.name);
-      // The empty Gemini directory was verified with the macOS keychain login. Other account
-      // storage and Linux have not been checked; they retain the restricted custom agent.
-      hooked = !host.accountDir && hooksSupported(host.agyVersion);
+      // The empty Gemini directory was verified with the macOS keychain and the Windows Credential
+      // Manager login. Added accounts and Linux have not been checked; they retain the restricted custom agent.
+      hooked = usesDefaultAgent(host);
       if (hooked) {
         const marker = writeRemoteHooks(dir, names, { instructions: instructions.text });
         // Only a new session runs `SessionStart`; a resumed one already has the instructions.
@@ -832,8 +884,7 @@ function startRemoteWorkspace(agyPath, host) {
       } else {
         writeAgentDefinition(dir, names, { fullTools: fullToolsSupported(host.agyVersion), instructions: instructions.text });
       }
-      const hookArgs = hooked ? [...acpArgs, '--gemini-dir', path.join(dir, '.gemini')] : [...acpArgs, '--agent', AGENT_NAME];
-      agent = launch(hookArgs, sessionLog ? { logFile: sessionLog.file } : undefined);
+      agent = launch(sessionArgs(acpArgs, dir, hooked), sessionLog ? { logFile: sessionLog.file } : undefined);
       // Started only once agy is: a launch that throws leaves no warm-up running. session/new waits for
       // it (see onAgentLine).
       warmup = warmMcpServers(servers, { log: (text) => process.stderr.write(`[agy-acp] ${text}\n`) });
@@ -1137,12 +1188,17 @@ module.exports = {
   completeInitializeResult,
   everythingExcept,
   fullToolsSupported,
+  historyLinkType,
+  hookCommands,
   hookMatcher,
   hooksSupported,
   inspectToolCall,
   isGuestWorkspaceLaunch,
   isRemoteWorkspaceLaunch,
+  sessionArgs,
   startRemoteWorkspace,
   usableServers,
+  usesDefaultAgent,
   versionSupported,
+  writeRemoteHooks,
 };

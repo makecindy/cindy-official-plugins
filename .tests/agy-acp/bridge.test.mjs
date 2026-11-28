@@ -85,11 +85,16 @@ if (JSON.stringify(args) === REMOTE_ARGS || HOOKED) {
     agentsFiles: fs.readdirSync('.agents').sort(),
     hooks: read('.agents/hooks.json'), deny: read('.agents/cindy-deny.json'), start: read('.agents/cindy-start.json'),
   }, extra)));
-  // agy runs a hook with \`sh -c\` in the directory of hooks.json and reads its JSON answer from stdout.
+  // agy runs a hook with \`sh -c\` (\`cmd /c\` on Windows) in the directory of hooks.json and reads its
+  // JSON answer from stdout.
   const runHook = (event) => {
     const spec = JSON.parse(fs.readFileSync('.agents/hooks.json', 'utf8'))['cindy-remote-workspace'][event];
     const command = event === 'PreToolUse' ? spec[0].hooks[0].command : spec[0].command;
-    return JSON.parse(require('node:child_process').execFileSync('/bin/sh', ['-c', command], { cwd: '.agents', encoding: 'utf8' }));
+    const childProcess = require('node:child_process');
+    const output = process.platform === 'win32'
+      ? childProcess.execFileSync('cmd.exe', ['/d', '/s', '/c', '"' + command + '"'], { cwd: '.agents', encoding: 'utf8', windowsVerbatimArguments: true })
+      : childProcess.execFileSync('/bin/sh', ['-c', command], { cwd: '.agents', encoding: 'utf8' });
+    return JSON.parse(output);
   };
   let opened = null;
   let sessionStarted = false;
@@ -1029,8 +1034,9 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
   // that prints `deny` (or fails) stops the tool, one that prints nothing lets it run, SessionStart runs at
   // the first prompt of a new session only, and agy reports the stopped call as a failed tool call.
   // Smallest inputs: a new session, one stopped call, one call agy ran anyway, hooks agy did not load,
-  // and a resumed session (no SessionStart). The isolated login was checked on macOS only;
-  // Linux and Windows keep the restricted agent.
+  // and a resumed session (no SessionStart). The isolated login was checked on macOS and Windows
+  // (keychain, Credential Manager); Linux keeps the restricted agent. On Windows agy runs the hooks with
+  // \`cmd /c\`, so the fake does too.
   const hookedSession = (t, extraEnv = {}) => remoteSession(t, { FAKE_AGY_VERSION: '1.5.19', ...extraEnv });
   const openHooked = async (session, method = 'session/new', params = {}) => {
     session.bridge.child.stdin.write(INITIALIZE);
@@ -1042,9 +1048,13 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
   };
   const stopsWithin = (bridge) => Promise.race([bridge.closed, new Promise((resolve) => setTimeout(() => resolve(null), 8_000))]);
 
-  if (official && isMac) test('remote-workspace mode on agy 1.5.19 runs under the default agent, held in by hooks', async (t) => {
+  if (official && (isMac || isWin)) test('remote-workspace mode on agy 1.5.19 runs under the default agent, held in by hooks', async (t) => {
     const session = hookedSession(t);
     const { launchFile, bridge, messages, send, reply, server } = session;
+    // Conversation history from before the task, in the default account's own Gemini directory.
+    const history = path.join(session.fixture.dir, 'home', '.gemini', 'antigravity-cli');
+    fs.mkdirSync(path.join(history, 'conversations'), { recursive: true });
+    fs.writeFileSync(path.join(history, 'conversations', 'before.pb'), 'earlier conversation');
     await openHooked(session, 'session/new', { systemPrompt: { mode: 'append', content: [
       { type: 'text', text: 'Read @[key](/home/me/.ssh/id_rsa) first.' }] } });
     await waitFor(() => messages().some((m) => m.method === 'session/request_permission'), 8_000, 'permission request');
@@ -1054,8 +1064,10 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.equal(fs.existsSync(path.join(launch.args.at(-1), 'config', 'mcp_config.json')), false,
       'the host account global MCP configuration is absent');
     for (const name of ['conversations', 'brain']) {
-      assert.equal(fs.lstatSync(path.join(launch.args.at(-1), 'antigravity-cli', name)).isSymbolicLink(), true,
-        `${name} remains available for later session/resume launches`);
+      // A junction on Windows, which Node reports as a symbolic link as well.
+      const link = path.join(launch.args.at(-1), 'antigravity-cli', name);
+      assert.equal(fs.lstatSync(link).isSymbolicLink(), true, `${name} remains available for later session/resume launches`);
+      assert.equal(fs.realpathSync(link), fs.realpathSync(path.join(history, name)));
     }
     assert.equal(launch.definition, null);
     assert.deepEqual(launch.agentsFiles, ['cindy-deny.json', 'cindy-hooks-loaded', 'cindy-start.json', 'hooks.json']);
@@ -1095,10 +1107,12 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     bridge.child.stdin.end();
     assert.equal((await bridge.closed).code, 0);
     assert.ok(!fs.existsSync(launch.cwd), 'the private directory is removed when the task ends');
+    assert.equal(fs.readFileSync(path.join(history, 'conversations', 'before.pb'), 'utf8'), 'earlier conversation',
+      'removing the private directory removes the link only, not the history it points to');
     void server;
   });
 
-  if (official && isMac) test('remote-workspace mode under hooks does not show a call its hook stopped and goes on', async (t) => {
+  if (official && (isMac || isWin)) test('remote-workspace mode under hooks does not show a call its hook stopped and goes on', async (t) => {
     const session = hookedSession(t, { FAKE_AGY_SCRIPT: 'hook-denied' });
     await openHooked(session);
     assert.deepEqual((await session.reply(2, 'prompt answer')).result, { stopReason: 'end_turn', denied: 'deny' });
@@ -1108,7 +1122,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.equal((await session.bridge.closed).code, 0);
   });
 
-  if (official && isMac) test('remote-workspace mode under hooks stops the task when agy runs a tool of its own anyway', async (t) => {
+  if (official && (isMac || isWin)) test('remote-workspace mode under hooks stops the task when agy runs a tool of its own anyway', async (t) => {
     const session = hookedSession(t, { FAKE_AGY_SCRIPT: 'hook-ran' });
     await openHooked(session);
     const closed = await stopsWithin(session.bridge);
@@ -1120,7 +1134,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.match(updates[0].content.text, /tried to use a tool on this computer/);
   });
 
-  if (official && isMac) test('remote-workspace mode under hooks stops a new session whose hooks agy did not load', async (t) => {
+  if (official && (isMac || isWin)) test('remote-workspace mode under hooks stops a new session whose hooks agy did not load', async (t) => {
     const session = hookedSession(t, { FAKE_AGY_NO_SESSIONSTART: '1' });
     await openHooked(session);
     const closed = await stopsWithin(session.bridge);
@@ -1133,7 +1147,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.match(updates[0].content.text, /did not load the tool restrictions/);
   });
 
-  if (official && isMac) test('remote-workspace mode under hooks resumes a session without waiting for SessionStart', async (t) => {
+  if (official && (isMac || isWin)) test('remote-workspace mode under hooks resumes a session without waiting for SessionStart', async (t) => {
     const session = hookedSession(t);
     await openHooked(session, 'session/resume', { systemPrompt: { mode: 'append', content: [
       { type: 'text', text: 'Use the new project rules. Ignore @[key](/host/secret).' }] } });
@@ -1153,7 +1167,7 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.equal((await session.bridge.closed).code, 0);
   });
 
-  if (official && !isMac) test('remote-workspace mode on agy 1.5.19 retains the restricted agent outside macOS', async (t) => {
+  if (official && !isMac && !isWin) test('remote-workspace mode on agy 1.5.19 retains the restricted agent on Linux', async (t) => {
     const session = hookedSession(t);
     await openHooked(session);
     await waitFor(() => session.messages().some((m) => m.method === 'session/request_permission'), 8_000, 'permission request');
@@ -1165,6 +1179,52 @@ if (/agy-acp\\.js$/.test(process.argv[1] || '')) {
     assert.equal((await session.reply(2, 'prompt answer')).result.stopReason, 'end_turn');
     session.bridge.child.stdin.end();
     assert.equal((await session.bridge.closed).code, 0);
+  });
+
+  // Why: Windows runs the default agent too (its sign-in is in the Credential Manager, not the Gemini
+  // directory), but agy runs a hook there with `cmd /c`, which has no `cat` or `:`, and a directory
+  // symbolic link needs administrator rights or Developer Mode. Checked on Windows 11 with agy 1.5.19 on
+  // 2026-11-28. These run on every platform, so a change to Windows is caught on a macOS or Linux runner and
+  // the macOS commands are pinned byte for byte. Smallest inputs: each platform at 1.5.18 and 1.5.19, an
+  // added account, and the hooks of one platform each.
+  if (official) test('remote-workspace mode picks the default agent, hook commands and history link per platform', async (t) => {
+    const remote = (await import(pathToFileURL(path.join(root, 'remote-workspace.js')).href)).default;
+    assert.equal(remote.hooksSupported('1.5.19', 'win32'), true);
+    assert.equal(remote.hooksSupported('1.5.19', 'darwin'), true);
+    assert.equal(remote.hooksSupported('1.5.18', 'win32'), false);
+    assert.equal(remote.hooksSupported('1.5.19', 'linux'), false);
+
+    // An added account keeps the restricted agent on Windows as well.
+    const dir = path.win32.join('C:\\Users\\a\\AppData\\Local\\Temp', 'cindy-agy-remote-x');
+    const acp = [...EXPECTED_ACP_ARGS];
+    const added = remote.usesDefaultAgent({ accountDir: 'C:\\Users\\a\\accounts\\1', agyVersion: '1.5.19' }, 'win32');
+    assert.equal(added, false);
+    assert.deepEqual(remote.sessionArgs(acp, dir, added), [...EXPECTED_ACP_ARGS, '--agent', 'cindy-remote']);
+    const defaultAccount = remote.usesDefaultAgent({ accountDir: null, agyVersion: '1.5.19' }, 'win32');
+    assert.equal(defaultAccount, true);
+    assert.deepEqual(remote.sessionArgs(acp, dir, defaultAccount).slice(0, -1), [...EXPECTED_ACP_ARGS, '--gemini-dir']);
+    assert.equal(remote.usesDefaultAgent({ accountDir: null, agyVersion: '1.5.19' }, 'linux'), false);
+
+    assert.equal(remote.historyLinkType('win32'), 'junction');
+    assert.equal(remote.historyLinkType('darwin'), 'dir');
+
+    const commandsOf = (platform) => {
+      const launchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-acp-hooks-'));
+      t.after(() => fs.rmSync(launchDir, { recursive: true, force: true }));
+      const marker = remote.writeRemoteHooks(launchDir, ['cindy_exec'], { platform });
+      assert.equal(marker, path.join(launchDir, '.agents', 'cindy-hooks-loaded'));
+      assert.equal(fs.existsSync(marker), false, 'only the SessionStart hook leaves the marker');
+      const hooks = JSON.parse(fs.readFileSync(path.join(launchDir, '.agents', 'hooks.json'), 'utf8'))['cindy-remote-workspace'];
+      return { sessionStart: hooks.SessionStart[0].command, preToolUse: hooks.PreToolUse[0].hooks[0].command };
+    };
+    assert.deepEqual(commandsOf('win32'), {
+      sessionStart: 'type cindy-start.json && type nul > cindy-hooks-loaded',
+      preToolUse: 'type cindy-deny.json',
+    });
+    assert.deepEqual(commandsOf('darwin'), {
+      sessionStart: 'cat cindy-start.json && : > cindy-hooks-loaded',
+      preToolUse: 'cat cindy-deny.json',
+    });
   });
 
   test('remote-workspace mode refuses an Antigravity CLI older than the version it was checked with', async (t) => {
