@@ -708,10 +708,24 @@ test('risk comes from the CLI, so second-level commands are not gated as writes'
     callTool('app made-up-command', { cli_path: fakeCli, args: {} }),
   ]);
   assert.equal(read.result.ok, true, 'a read subcommand runs without a confirmation round');
-  assert.equal(resume.result.errorCode, 'CONFIRM_REQUIRED', 'task +resume is a write');
+  assert.equal(resume.result.ok, true, 'task +resume continues an already-authorized upload');
   assert.equal(bind.result.errorCode, 'CONFIRM_REQUIRED', 'binding a Spark version is a write');
   assert.equal(submit.result.errorCode, 'CONFIRM_REQUIRED', 'review submission is high-risk-write');
   assert.equal(unknown.result.errorCode, 'UNKNOWN_TOOL', 'a command the CLI does not have is rejected');
+});
+
+test('task resume continues an authorized upload but stays closed in a read-only session', async () => {
+  // Package-task resumes reject --yes/--dry-run, so the ordinary confirmation
+  // gate would make every interrupted H5 or mini-game upload impossible to
+  // recover. The resume is a continuation of the upload the user already
+  // approved; the read-only session is still a hard stop.
+  const [resume, readOnly] = await callWorker([
+    callTool('task', { cli_path: fakeCli, args: { _positional: ['+resume', 'task-1'] } }),
+    callTool('task', { cli_path: fakeCli, read_only: true, args: { _positional: ['+resume', 'task-1'] } }),
+  ]);
+  assert.equal(resume.result.ok, true, 'resume must reach the CLI without confirmation flags');
+  assert.deepEqual(resume.result.data.envelope.data.echo, ['task', '+resume', 'task-1']);
+  assert.equal(readOnly.result.errorCode, 'SESSION_READ_ONLY');
 });
 
 test('the orchestrated login is documented as an exception to the write gate', () => {
@@ -899,8 +913,8 @@ test('forum data statistics route through the data manual, not the post manual',
   );
   assert.match(
     routing,
-    /回复数[\s\S]*taptap-community-management/,
-    'business routing must keep reply content on community-management',
+    /全论坛回复新增量[\s\S]*moment\.stat\.comments/,
+    'business routing must keep per-post reply totals on community-management',
   );
 
   // The reference has to stay on the plugin path: call_tool, not a shell call.

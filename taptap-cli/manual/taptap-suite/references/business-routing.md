@@ -15,7 +15,7 @@
 - **物料上传 ≠ 资料写入或包体绑定**：目录/zip 或多种本地物料走 `taptap-materials` 盘点和逐项上传；图片和视频再交给 `taptap-app-edit` 写入字段，包体先交给 `taptap-package-management` 查询状态，绑定由 `taptap-app-edit` 按包体槽位契约确认式完成
 - **敏感资质页面填写 ≠ CLI 已执行**：资质工具要求人工填写时，只给完整开发者后台链接并等待用户完成；不要调用前端卡片工具或声称已代填
 - **数据表现只读**：用户问下载量、PV、转化、订单、评分统计等经营数据时走 `taptap-dashboard-stats`；不要把数据查询结果当作资料字段或版本状态写回
-- **论坛数据统计 ≠ 论坛帖子/回复内容**：论坛访问量、活跃用户、内容发布/删除/移动、回复数、论坛关注与内容总数等统计走 `taptap-dashboard-stats` 的 `get-forum-stats`；论坛帖子正文、一级回复与子回复走 `taptap-community-management`。回复数与回复内容不是同一接口、同一口径，不能互相替代
+- **论坛数据统计 ≠ 论坛帖子/回复内容**：论坛访问量、活跃用户、内容发布/删除/移动、按时间区间的全论坛回复新增量、论坛关注与内容总数等统计走 `taptap-dashboard-stats` 的 `get-forum-stats`；某个帖子当前的回复总数（`moment.stat.comments`）、一级回复与子回复内容走 `taptap-community-management`。回复新增量与回复内容不是同一接口、同一口径，不能互相替代
 - **活动与公告 ≠ 签到/推送**：详情页与 PC 库上的展示条目（公告、反馈、活动、征稿、置顶、排期、上下线、失效检查）走 `taptap-whats-new`；签到活动的奖励、集卡、兑换码与提审走 `taptap-game-sign`，站内推送给关注用户走 `taptap-official-message-push`。系统同步类型（签到/礼包/新版本/抽奖）不能通过 `taptap-whats-new` 创建，只能调整排期、置顶和上下线
 - **评分统计 ≠ 评价正文**：评分/评价的统计指标、趋势和分布走 `taptap-dashboard-stats`；单条评价的正文、配图、作者和回复走 `taptap-player-feedback`。两者口径不同，不能用对方的数据替代；用户说「好评」时必须先区分是统计口径还是列表筛选口径
 - **预约里程碑 ≠ 签到**：预约里程碑按游戏预约人数配置阶梯奖励（档位、奖励图、提审/撤回）走 `taptap-reserve-milestone`；签到按玩家累计签到天数配置奖励、集卡与兑换码走 `taptap-game-sign`。两者奖励对象、人数口径和配置字段不同，不能互相套用问卷或库存设置
